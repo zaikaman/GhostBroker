@@ -52,19 +52,19 @@
 
 **Purpose**: Build shared primitives that every user story depends on. No user story implementation should begin until this phase is complete.
 
-- [ ] T027 Create backend environment loader with required variable validation in `backend/src/config/env.ts`
-- [ ] T028 Create backend typed error model with public redaction messages in `backend/src/errors/public-error.ts`
-- [ ] T029 Create backend request correlation middleware in `backend/src/middleware/correlation-id.ts`
-- [ ] T030 Create backend JSON body, CORS, and security middleware registration in `backend/src/app.ts`
-- [ ] T031 Create backend HTTP server entry point with graceful shutdown in `backend/src/server.ts`
-- [ ] T032 Create backend health route returning backend, Supabase, WebSocket, and T3 status buckets in `backend/src/api/health.routes.ts`
-- [ ] T033 Create backend Supabase service client wrapper in `backend/src/services/supabase-client.ts`
-- [ ] T034 Create backend structured logger that redacts forbidden order fields in `backend/src/logging/logger.ts`
-- [ ] T035 Create backend forbidden-field scanner utility for privacy tests in `backend/src/privacy/forbidden-fields.ts`
-- [ ] T036 Create backend telemetry event type definitions in `backend/src/websocket/telemetry-event.ts`
-- [ ] T037 Create backend telemetry redactor allowlist in `backend/src/websocket/redact-event.ts`
-- [ ] T038 Create backend telemetry bus abstraction in `backend/src/services/telemetry-bus.ts`
-- [ ] T039 Create backend WebSocket telemetry server shell in `backend/src/websocket/telemetry-server.ts`
+- [X] T027 Create backend environment loader with required variable validation in `backend/src/config/env.ts`
+- [X] T028 Create backend typed error model with public redaction messages in `backend/src/errors/public-error.ts`
+- [X] T029 Create backend request correlation middleware in `backend/src/middleware/correlation-id.ts`
+- [X] T030 Create backend JSON body, CORS, and security middleware registration in `backend/src/app.ts`
+- [X] T031 Create backend HTTP server entry point with graceful shutdown in `backend/src/server.ts`
+- [X] T032 Create backend health route returning backend, Supabase, WebSocket, and T3 status buckets in `backend/src/api/health.routes.ts`
+- [X] T033 Create backend Supabase service client wrapper in `backend/src/services/supabase-client.ts`
+- [X] T034 Create backend structured logger that redacts forbidden order fields in `backend/src/logging/logger.ts`
+- [X] T035 Create backend forbidden-field scanner utility for privacy tests in `backend/src/privacy/forbidden-fields.ts`
+- [X] T036 Create backend telemetry event type definitions in `backend/src/websocket/telemetry-event.ts`
+- [X] T037 Create backend telemetry redactor allowlist in `backend/src/websocket/redact-event.ts`
+- [X] T038 Create backend telemetry bus abstraction in `backend/src/services/telemetry-bus.ts`
+- [X] T039 Create backend WebSocket telemetry server shell in `backend/src/websocket/telemetry-server.ts`
 - [ ] T040 Create frontend design token stylesheet with dashboard color, spacing, typography, and state tokens in `frontend/src/styles/theme.css`
 - [ ] T041 Create frontend dashboard layout stylesheet with responsive grid rules in `frontend/src/styles/dashboard.css`
 - [ ] T042 Create frontend API client with typed redacted error handling in `frontend/src/services/api-client.ts`
@@ -72,12 +72,12 @@
 - [ ] T044 Create frontend route shell in `frontend/src/app/routes.tsx`
 - [ ] T045 Create frontend app entry with CSS imports and dashboard route in `frontend/src/app/App.tsx`
 - [ ] T046 Create frontend main bootstrap file in `frontend/src/main.tsx`
-- [ ] T047 Create T3 enclave public exports for runner, auth, keys, matching, and settlement modules in `t3-enclave/src/index.ts`
-- [ ] T048 Create production T3 network client interface and ADK-backed implementation in `t3-enclave/src/sandbox/t3n-client.ts`
-- [ ] T049 Create production T3 token balance interface and sandbox-backed implementation in `t3-enclave/src/sandbox/token-balance.ts`
-- [ ] T050 Create T3 runner factory interface with dependency injection in `t3-enclave/src/runner/create-runner.ts`
-- [ ] T051 Create T3 runner lifecycle state model in `t3-enclave/src/runner/lifecycle.ts`
-- [ ] T052 Create foundational privacy tests for backend logger and telemetry redaction in `backend/src/tests/unit/privacy-redaction.test.ts`
+- [X] T047 Create T3 enclave public exports for runner, auth, keys, matching, and settlement modules in `t3-enclave/src/index.ts`
+- [X] T048 Create production T3 network client interface and ADK-backed implementation in `t3-enclave/src/sandbox/t3n-client.ts`
+- [X] T049 Create production T3 token balance interface and sandbox-backed implementation in `t3-enclave/src/sandbox/token-balance.ts`
+- [X] T050 Create T3 runner factory interface with dependency injection in `t3-enclave/src/runner/create-runner.ts`
+- [X] T051 Create T3 runner lifecycle state model in `t3-enclave/src/runner/lifecycle.ts`
+- [X] T052 Create foundational privacy tests for backend logger and telemetry redaction in `backend/src/tests/unit/privacy-redaction.test.ts`
 
 **Checkpoint**: Backend can start with health and redacted telemetry primitives, frontend can render an empty shell, and T3 enclave exposes typed production adapters.
 
