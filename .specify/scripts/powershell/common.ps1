@@ -151,6 +151,18 @@ function Test-FeatureBranch {
 
     $raw = $Branch
     $Branch = Get-SpecKitEffectiveBranchName $raw
+
+    # This project intentionally works from main rather than feature branches.
+    # Allow main/master only when an explicit feature directory has already been
+    # selected, so commands resolve through .specify/feature.json or the
+    # SPECIFY_FEATURE_DIRECTORY override instead of guessing from the branch.
+    if ($Branch -in @('main', 'master')) {
+        $repoRoot = Get-RepoRoot
+        $featureJson = Join-Path $repoRoot '.specify/feature.json'
+        if ($env:SPECIFY_FEATURE_DIRECTORY -or (Test-Path -LiteralPath $featureJson -PathType Leaf)) {
+            return $true
+        }
+    }
     
     # Accept sequential prefix (3+ digits) but exclude malformed timestamps
     # Malformed: 7-or-8 digit date + 6-digit time with no trailing slug (e.g. "2026031-143022" or "20260319-143022")
