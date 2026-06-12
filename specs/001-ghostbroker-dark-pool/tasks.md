@@ -95,8 +95,8 @@
 - [ ] T054 [P] [US1] Add contract tests for `POST /api/agents/admit` success and redacted rejection responses in `backend/src/tests/contracts/agents-admit.contract.test.ts`
 - [ ] T055 [P] [US1] Add integration test for institution onboarding and T3 DID assignment in `backend/src/tests/integration/institution-onboarding.test.ts`
 - [ ] T056 [P] [US1] Add integration test for valid, expired, revoked, and over-scoped agent admission in `backend/src/tests/integration/agent-admission.test.ts`
-- [ ] T057 [P] [US1] Add T3 DID registry unit tests in `t3-enclave/src/tests/auth-did-registry.test.ts`
-- [ ] T058 [P] [US1] Add Agent Auth adapter unit tests for authority success and rejection cases in `t3-enclave/src/tests/auth-agent-client.test.ts`
+- [ ] T057 [P] [US1] Add T3 tenant DID session and identity resolution tests in `t3-enclave/src/tests/auth-did-registry.test.ts`
+- [ ] T058 [P] [US1] Add T3 agent delegation adapter tests for dashboard-provisioned grants, programmatic grant verification when available, and fail-closed rejection cases in `t3-enclave/src/tests/auth-agent-client.test.ts`
 - [ ] T059 [P] [US1] Add authority claims unit tests for asset, side, size, price, time, and settlement scope checks in `t3-enclave/src/tests/auth-authority-claims.test.ts`
 - [ ] T060 [P] [US1] Add frontend dashboard accessibility test for secure status landmarks in `frontend/src/test/dashboard-accessibility.test.tsx`
 - [ ] T061 [P] [US1] Add frontend privacy test proving onboarding screens do not contain active order language in `frontend/src/test/privacy-redaction.test.tsx`
@@ -111,12 +111,12 @@
 - [ ] T067 [P] [US1] Create production operator authentication middleware with institution scoping in `backend/src/auth/operator-auth.ts`
 - [ ] T068 [P] [US1] Create agent authorization facade that delegates to T3 enclave in `backend/src/auth/agent-authz.ts`
 - [ ] T069 [US1] Implement institution service for creating profiles and resolving T3 tenant DID references in `backend/src/services/institution.service.ts`
-- [ ] T070 [US1] Implement agent service for admission, revocation checks, and authority reference generation in `backend/src/services/agent.service.ts`
+- [ ] T070 [US1] Implement agent service for admission, revocation checks, dashboard-provisioned grant references, and authority reference generation in `backend/src/services/agent.service.ts`
 - [ ] T071 [US1] Implement institution routes for `POST /api/institutions` in `backend/src/api/institutions.routes.ts`
 - [ ] T072 [US1] Implement agent admission route for `POST /api/agents/admit` in `backend/src/api/agents.routes.ts`
 - [ ] T073 [US1] Register institution and agent routes in `backend/src/app.ts`
-- [ ] T074 [US1] Implement T3 DID lookup and tenant registration adapter in `t3-enclave/src/auth/did-registry.ts`
-- [ ] T075 [US1] Implement Agent Auth SDK wrapper with SDK-instability boundary in `t3-enclave/src/auth/agent-auth-client.ts`
+- [ ] T074 [US1] Implement T3 tenant DID lookup and tenant registration adapter using ADK session identity, without relying on the coming-soon `did-registry` Host API, in `t3-enclave/src/auth/did-registry.ts`
+- [ ] T075 [US1] Implement T3 agent delegation adapter that verifies dashboard-provisioned grants, uses a real programmatic delegation API only if Terminal 3 exposes one, and fails closed when grant verification is unavailable in `t3-enclave/src/auth/agent-auth-client.ts`
 - [ ] T076 [US1] Implement authority claim parser and policy hash verifier in `t3-enclave/src/auth/authority-claims.ts`
 - [ ] T077 [US1] Implement agent loop admission lifecycle for verified and rejected agents in `t3-enclave/src/runner/agent-loop.ts`
 - [ ] T078 [P] [US1] Create secure metric card component for connection status values in `frontend/src/components/SecureMetric.tsx`

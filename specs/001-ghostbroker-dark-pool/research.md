@@ -14,15 +14,16 @@
 
 ## Terminal 3 Identity and Authority
 
-**Decision**: Represent institutions and agents with T3 DIDs and isolate Agent Auth SDK usage behind `t3-enclave/src/auth/agent-auth-client.ts`.
+**Decision**: Represent institutions and agents with T3 DIDs and isolate dashboard-provisioned agent delegation verification behind `t3-enclave/src/auth/agent-auth-client.ts`. Use a programmatic delegation SDK/API only if Terminal 3 exposes a real production surface.
 
-**Rationale**: T3N documentation describes DIDs as universal identifiers for humans and agents, tied to authentication methods, permissions, data, and TEE contracts. The Agent Auth host capability is listed as coming soon in current public docs, so an adapter boundary is required.
+**Rationale**: T3N documentation describes DIDs as universal identifiers for humans and agents, tied to authentication methods, permissions, data, and TEE contracts. The docs also describe dashboard-based AI agent delegation by Agent DID, authorized TEE contract, optional functions, and optional allowed hosts. Separately, the contract-level `agent-auth` Host API interface is listed as coming soon in current public docs, so an adapter boundary and fail-closed grant verification are required.
 
 **Alternatives considered**: Building a project-specific authority system without Terminal 3 identity was rejected because it would bypass the explicit agent identity and authority requirement.
 
 **Sources**:
 
 - https://docs.terminal3.io/t3n/how-t3n-works/did
+- https://docs.terminal3.io/t3n/data-owner-guide/delegate-access
 - https://docs.terminal3.io/t3n/how-t3n-works/host-api
 
 ## Confidential Matching Boundary

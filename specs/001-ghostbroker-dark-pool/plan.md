@@ -10,7 +10,7 @@ GhostBroker will be implemented as a TypeScript multi-project web platform for i
 ## Technical Context
 
 **Language/Version**: TypeScript on Node.js 20 LTS for frontend, backend, and T3 integration  
-**Primary Dependencies**: React, Vite, Express, ws or Socket.IO, Supabase client, PostgreSQL migrations, Terminal 3 ADK, Terminal 3 Agent Auth SDK adapter, Vitest, React Testing Library, Playwright  
+**Primary Dependencies**: React, Vite, Express, ws or Socket.IO, Supabase client, PostgreSQL migrations, Terminal 3 ADK, Terminal 3 dashboard-provisioned agent delegation verification adapter, Vitest, React Testing Library, Playwright  
 **Storage**: Supabase PostgreSQL for institutions, completed trade history, encrypted receipt metadata, audit references, and non-sensitive operational state  
 **Testing**: Vitest for unit/integration tests, React Testing Library for dashboard behavior and accessibility, Supertest for REST contracts, WebSocket integration tests, Playwright for dashboard privacy checks  
 **Target Platform**: Vercel frontend, Heroku backend, Supabase managed PostgreSQL, Terminal 3 T3N sandbox for tenant identity, token-metered TEE execution, and confidential contract execution  
@@ -252,17 +252,17 @@ create table audit_receipts (
 
 ## Terminal 3 Integration Layer
 
-`t3-enclave/` owns all ADK and Agent Auth SDK calls.
+`t3-enclave/` owns all ADK calls and all agent delegation verification logic.
 
 1. **Runner instantiation**: `create-runner.ts` creates a Terminal 3 ADK client using backend-provided environment values, validates network configuration, opens the authenticated encrypted session, and returns a runner object consumed by `agent-loop.ts`.
-2. **Tenant identity**: during onboarding, `did-registry.ts` uses the ADK tenant client to claim or fetch the institution tenant DID and records the DID in `institutions.t3_tenant_did`.
-3. **Agent identity and authority**: `agent-auth-client.ts` wraps the Agent Auth SDK. It registers agent identity, binds the agent DID to institution-scoped authority claims, and exposes `assertAuthority(agentDid, requestedAction, policyHash)` for backend and agent-loop use.
+2. **Tenant identity**: during onboarding, `did-registry.ts` uses ADK session identity and tenant client flows to claim or fetch the institution tenant DID and records the DID in `institutions.t3_tenant_did`; it must not rely on the coming-soon `did-registry` Host API.
+3. **Agent identity and authority**: `agent-auth-client.ts` verifies dashboard-provisioned agent grants, uses a real programmatic delegation API only if Terminal 3 exposes one, and exposes `assertAuthority(agentDid, requestedAction, policyHash)` for backend and agent-loop use. If the grant cannot be verified, the adapter fails closed.
 4. **Key generation**: `key-generation.ts` creates per-institution envelope keys for receipt encryption metadata, while private execution secrets are written to Terminal 3 tenant private maps through `sealed-secret-maps.ts`.
 5. **T3 private maps**: `sealed-secret-maps.ts` creates tenant maps such as `secrets`, `contract-config`, and `authority-claims` with explicit readers and writers for the matching or settlement contract only.
 6. **T3 token sandbox**: `token-balance.ts` checks the DID token balance before contract registration and execution, records metering failures as private operational events, and applies bounded retries for non-committed write conflicts.
 7. **TEE contract execution**: `match-contract-client.ts` publishes or references the matching contract, submits encrypted intent payloads, and receives only encrypted or opaque match outcomes. Backend receives `intent_handle`, `execution_ref`, and state labels, not order parameters.
 8. **Settlement flow**: `settlement-command.ts` converts successful match outcomes into a settlement instruction, verifies authority has not been revoked, and returns a completed settlement reference for backend persistence.
-9. **SDK instability boundary**: Terminal 3 docs identify `agent-auth` host capability as coming soon, so all Agent Auth calls stay behind `agent-auth-client.ts`; if the SDK surface changes, only this adapter and its tests should change.
+9. **Delegation boundary**: Terminal 3 docs describe dashboard-based AI agent delegation, while the contract-level `agent-auth` Host API interface is marked as coming soon. All programmatic agent delegation and authority checks stay behind `agent-auth-client.ts`; if the SDK/API surface changes or requires dashboard setup, only this adapter and its tests should change.
 
 ## Telemetry & State Strategy
 

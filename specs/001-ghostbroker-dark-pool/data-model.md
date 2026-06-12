@@ -115,7 +115,7 @@ Opaque runtime concept managed by `t3-enclave/`.
 
 ### AgentAuthority
 
-Authority claims are managed by Terminal 3 identity and Agent Auth SDK integration. Supabase may store non-sensitive references such as DID, status, and policy hash, but detailed authority claims are verified through `t3-enclave/`.
+Authority claims are managed through Terminal 3 identity and delegated agent grants. Current docs show dashboard-provisioned AI agent delegation; programmatic grant management must be used only if Terminal 3 exposes a real SDK/API. Supabase may store non-sensitive references such as DID, status, grant reference, and policy hash, but detailed authority verification is performed through `t3-enclave/` and must fail closed when grant verification is unavailable.
 
 ## State Transitions
 

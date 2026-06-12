@@ -2,7 +2,7 @@
 
 **Date reviewed**: 2026-06-12  
 **Context**: GhostBroker planning and task generation for a production-grade institutional dark pool using Terminal 3 ADK, T3N, TEE contracts, DID identity, private tenant maps, token-metered execution, and delegated agent authority.  
-**Purpose**: Capture onboarding bugs, contradictions, and documentation gaps found while reviewing Terminal 3 ADK/T3N docs so implementation does not accidentally rely on assumptions, mocks, or incomplete SDK behavior.
+**Purpose**: Capture onboarding bugs, contradictions, and documentation gaps found while reviewing Terminal 3 ADK/T3N docs so implementation does not accidentally rely on assumptions, unavailable SDK behavior, or non-production substitutes.
 
 ## Sources Reviewed
 
@@ -22,7 +22,7 @@
 
 The ADK documentation is enough to design the broad integration boundary: TypeScript/JavaScript SDK, tenant onboarding, DID identity, tenant KV maps, private map ACLs, TEE contract publishing/execution, WIT-based capabilities, and token-metered operations.
 
-It is not yet enough to implement GhostBroker's agent onboarding and delegated trading authority without a guarded integration boundary. The largest risk is that `agent-auth`, `did-registry`, signing, user-profile, outbox, and related Host API capabilities are documented as `Coming soon`, while the product requirements need production-grade agent identity and authority enforcement before trading. This requires a production adapter around Terminal 3 SDK calls, explicit environment gating, and direct vendor confirmation before implementation begins.
+It is not yet enough to implement GhostBroker's agent onboarding and delegated trading authority without a guarded integration boundary. The docs do describe dashboard-based delegation to AI agents, but the Host API table marks the `agent-auth` host interface, `did-registry`, signing, user-profile, outbox, and related contract capabilities as `Coming soon` or otherwise unavailable to ordinary contracts. GhostBroker needs production-grade agent identity and authority enforcement before trading, so implementation should use a production adapter around Terminal 3 SDK calls, explicit environment gating, and direct vendor confirmation before launch.
 
 ## Severity Legend
 
@@ -33,31 +33,33 @@ It is not yet enough to implement GhostBroker's agent onboarding and delegated t
 
 ## Findings
 
-### T3-ONB-001: Agent Auth Is Required by GhostBroker but Listed as Coming Soon
+### T3-ONB-001: Dashboard Agent Delegation Exists, but the `agent-auth` Host API Is Listed as Coming Soon
 
 **Severity**: P0  
 **Category**: Onboarding blocker / authority model  
-**Affected docs**: Host API, ADK overview, Common Errors  
+**Affected docs**: Host API, Delegate Access, Delegate Access to AI Agents, ADK overview, Common Errors  
 
 **What I found**
 
-GhostBroker requires autonomous agents to prove identity and authority before submitting hidden trading intent. The Host API page lists `agent-auth` as the capability for updating which TEE contracts and functions an agent may invoke, but marks it as `Coming soon`. The same Host API table also marks related onboarding/security capabilities as coming soon, including `did-registry`, `signing`, `outbox`, `vp`, `user-profile`, and `user-removal`.
+GhostBroker requires autonomous agents to prove identity and authority before submitting hidden trading intent. The docs include a data-owner guide for delegating access to AI agents through the T3N Dashboard: a user enters an Agent DID, selects an authorized TEE contract, optionally selects functions, and optionally configures allowed hosts. That means agent delegation is documented as a product flow.
 
-The Common Errors page references an `agent_auth` grant in the outbound HTTP authorization error text. That suggests an agent authorization concept exists in the system design, but the public docs do not provide a stable production API for using it.
+Separately, the Host API page lists a contract host interface named `agent-auth` for updating which TEE contracts and functions an agent is authorized to invoke, and marks that interface as `Coming soon`. The same Host API table marks related contract capabilities as coming soon, including `did-registry`, `signing`, `outbox`, `vp`, `user-profile`, and `user-removal`.
+
+The Common Errors page references an `agent_auth` grant in the outbound HTTP authorization error text. That confirms the authorization concept exists, but the reviewed public docs do not show a stable programmatic SDK/API flow equivalent to the dashboard delegation flow.
 
 **Why this matters for GhostBroker**
 
-Agent authority is not optional. If Terminal 3 Agent Auth is not available as a production SDK/API surface, GhostBroker cannot safely admit agents, restrict trade scope, revoke authority, or prove authorization before hidden intent submission.
+Agent authority is not optional. If dashboard-only delegation is the only generally available path today, GhostBroker needs confirmation on whether production code can programmatically register agents, bind authority scopes, verify those scopes, and revoke them. If that programmatic surface is not available, onboarding cannot be fully automated in a production-ready way.
 
 **Impact**
 
-- Blocks production implementation of agent admission unless Terminal 3 provides private/partner SDK details.
+- Blocks fully automated production implementation of agent admission unless Terminal 3 provides a documented SDK/API path or confirms the dashboard flow is the intended onboarding path.
 - Increases risk of building an incompatible adapter if the SDK surface changes.
 - Makes it impossible to fully specify failure modes for revoked, expired, or over-scoped agent authority from public docs alone.
 
 **Recommended fix for docs**
 
-- Add a dedicated Agent Auth SDK onboarding page with:
+- Add a dedicated programmatic agent delegation onboarding page with:
   - current availability status
   - install package name
   - required environment variables
@@ -71,9 +73,9 @@ Agent authority is not optional. If Terminal 3 Agent Auth is not available as a 
 
 **Recommended implementation action**
 
-- Keep all Agent Auth calls isolated behind `t3-enclave/src/auth/agent-auth-client.ts`.
+- Keep all programmatic agent delegation and authority checks isolated behind `t3-enclave/src/auth/agent-auth-client.ts`.
 - Do not implement local fake authority semantics.
-- Add a build-time or startup check that fails if required Agent Auth SDK methods are unavailable.
+- Add a build-time or startup check that fails if required programmatic delegation methods are unavailable or if dashboard-only setup is required.
 - Require Terminal 3 confirmation before production deployment.
 
 **Verification**
@@ -636,7 +638,7 @@ Logging active order parameters, matching inputs, or decrypted settlement values
 
 These guardrails should be treated as non-negotiable until Terminal 3 fills the relevant documentation gaps or confirms private integration details.
 
-1. **No local fake Agent Auth**: Do not simulate authority in production code. If Agent Auth SDK is unavailable, fail setup clearly.
+1. **No local fake Agent Auth**: Do not simulate authority in production code. If programmatic agent delegation is unavailable and dashboard setup is required, fail setup clearly and document the manual prerequisite.
 2. **Adapter boundary only**: All Terminal 3 calls must remain under `t3-enclave/`.
 3. **Explicit private map ACLs**: Always set readers and writers; never rely on defaults.
 4. **No raw error passthrough**: Map Terminal 3 errors into internal typed categories and redacted dashboard messages.
@@ -649,9 +651,9 @@ These guardrails should be treated as non-negotiable until Terminal 3 fills the 
 
 ## Questions to Resolve With Terminal 3 Before Implementation
 
-1. Is the Agent Auth SDK currently available for production or sandbox use?
-2. What package name and version should be used for ADK and Agent Auth?
-3. What exact APIs register an agent DID and bind delegated authority to contract/function/action scope?
+1. Is programmatic agent delegation currently available for production or sandbox use, or is the T3N Dashboard the only supported setup path?
+2. What package name and version should be used for ADK and any agent delegation/authority client APIs?
+3. What exact APIs, if any, register an agent DID and bind delegated authority to contract/function/action scope?
 4. How does authority revocation propagate to in-flight or queued TEE contract calls?
 5. Is `did-registry` externally available, partner-only, or system-only today?
 6. Which Host API capabilities are available to external developers in the sandbox today?
@@ -672,8 +674,8 @@ These guardrails should be treated as non-negotiable until Terminal 3 fills the 
 - Add `t3-enclave/src/keys/map-name.ts` with branded types for map tail vs canonical map name.
 - Add integration tests for real sandbox token preflight and map ACL verification.
 - Add a vendor-confirmation checklist before any production deployment milestone.
-- Add CI checks to reject forbidden fields in logs, fixtures, screenshots, snapshots, and WebSocket events.
+- Add CI checks to reject forbidden fields in logs, test data builders, screenshots, snapshots, and WebSocket events.
 
 ## Bottom Line
 
-Terminal 3 ADK/T3N documentation gives enough confidence to design GhostBroker around T3 as a confidential execution layer, but not enough to directly implement production agent onboarding without further confirmation. The most important blocker is the documented `Coming soon` status for `agent-auth` and adjacent identity/permission capabilities. GhostBroker should proceed with a strict `t3-enclave/` adapter boundary, production startup capability checks, and no fake authority or local mock substitute.
+Terminal 3 ADK/T3N documentation gives enough confidence to design GhostBroker around T3 as a confidential execution layer, but not enough to directly implement fully automated production agent onboarding without further confirmation. The docs show dashboard-based AI agent delegation, while the contract-level `agent-auth` Host API interface and adjacent identity/permission capabilities are marked `Coming soon`. GhostBroker should proceed with a strict `t3-enclave/` adapter boundary, production startup capability checks, and no fake authority or local mock substitute.

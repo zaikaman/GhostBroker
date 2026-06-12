@@ -37,7 +37,8 @@ RECEIPT_KEY_VERSION=
 T3_NETWORK_URL=
 T3_SANDBOX_TOKEN_ACCOUNT=
 T3_ADK_ENV=
-T3_AUTH_SDK_ENV=
+T3_AGENT_DELEGATION_MODE=dashboard
+T3_AGENT_GRANT_VERIFICATION_REQUIRED=true
 T3_PRIVATE_MAP_PREFIX=
 ```
 
@@ -101,6 +102,7 @@ npm run sandbox:check
 Validation:
 
 - Tenant DID can be resolved.
+- Agent DID has a verified T3N Dashboard grant or a confirmed programmatic delegation grant.
 - Agent DID can be admitted or rejected.
 - Private maps are created with explicit readers and writers.
 - T3 token balance is checked before contract registration and execution.
@@ -111,13 +113,13 @@ Validation:
 1. Deploy `frontend/` to Vercel with `VITE_API_BASE_URL` and `VITE_WS_TELEMETRY_URL`.
 2. Deploy `backend/` to Heroku with Supabase and T3 environment variables.
 3. Run Supabase migrations before enabling production traffic.
-4. Validate WebSocket telemetry in production with a synthetic institution and test agent.
+4. Validate WebSocket telemetry in production with a sandbox institution and sandbox agent configured through real T3N delegation.
 
 ## Privacy Acceptance Checks
 
 Before marking the milestone complete:
 
-- Search REST fixtures, WebSocket fixtures, frontend snapshots, and logs for disallowed fields.
+- Search REST contract test data, WebSocket contract test data, frontend snapshots, and logs for disallowed fields.
 - Run Playwright privacy workflow for a non-participating institution.
 - Confirm completed trade history excludes unrelated institution trades.
 - Confirm receipt reads are scoped to authorized trade participants.
