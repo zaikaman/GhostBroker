@@ -1,0 +1,24 @@
+{
+  "name": "ghostbroker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Institutional dark pool platform with isolated frontend, backend, and Terminal 3 enclave workspaces.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "packageManager": "npm@10.0.0",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "t3-enclave"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:watch": "npm run test:watch --workspaces --if-present"
+  }
+}
