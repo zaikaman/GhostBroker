@@ -5,7 +5,7 @@
   "description": "Institutional dark pool platform with isolated frontend, backend, and Terminal 3 enclave workspaces.",
   "type": "module",
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=20.19.0",
     "npm": ">=10.0.0"
   },
   "packageManager": "npm@10.0.0",

@@ -19,14 +19,14 @@
 
 - [X] T001 Create root npm workspace manifest with `frontend`, `backend`, and `t3-enclave` workspaces in `package.json`
 - [X] T002 Create root TypeScript shared compiler settings in `tsconfig.base.json`
-- [ ] T003 Create root test workspace configuration in `vitest.workspace.ts`
-- [ ] T004 Create root lint configuration for strict TypeScript and React in `eslint.config.js`
-- [ ] T005 Create root formatting configuration in `.prettierrc.json`
-- [ ] T006 Create root ignore rules for Node, build, coverage, env, and local Supabase artifacts in `.gitignore`
-- [ ] T007 Create frontend package manifest with React, Vite, TypeScript, Vitest, React Testing Library, and Playwright scripts in `frontend/package.json`
-- [ ] T008 Create frontend Vite configuration in `frontend/vite.config.ts`
-- [ ] T009 Create frontend TypeScript app configuration in `frontend/tsconfig.json`
-- [ ] T010 Create frontend test setup for jest-dom matchers in `frontend/src/test/setup.ts`
+- [X] T003 Create root test workspace configuration in `vitest.workspace.ts`
+- [X] T004 Create root lint configuration for strict TypeScript and React in `eslint.config.js`
+- [X] T005 Create root formatting configuration in `.prettierrc.json`
+- [X] T006 Create root ignore rules for Node, build, coverage, env, and local Supabase artifacts in `.gitignore`
+- [X] T007 Create frontend package manifest with React, Vite, TypeScript, Vitest, React Testing Library, and Playwright scripts in `frontend/package.json`
+- [X] T008 Create frontend Vite configuration in `frontend/vite.config.ts`
+- [X] T009 Create frontend TypeScript app configuration in `frontend/tsconfig.json`
+- [X] T010 Create frontend test setup for jest-dom matchers in `frontend/src/test/setup.ts`
 - [ ] T011 Create frontend HTML entry point in `frontend/index.html`
 - [ ] T012 Create backend package manifest with Express, WebSocket, Supabase, Supertest, and Vitest scripts in `backend/package.json`
 - [ ] T013 Create backend TypeScript configuration in `backend/tsconfig.json`
