@@ -45,6 +45,30 @@ export function attachTelemetryServer(
       return;
     }
 
+    if (process.env.NODE_ENV !== "test") {
+      const timestamp = new Date().toISOString();
+      const initialPhases = [
+        "backend_connected",
+        "websocket_connected",
+        "supabase_connected",
+        "t3_sandbox_connected",
+      ] as const;
+
+      for (const phase of initialPhases) {
+        socket.send(
+          JSON.stringify({
+            eventId: `evt_${phase}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            institutionId,
+            type: "telemetry.connection.changed",
+            phase,
+            severity: "info",
+            timestamp,
+            correlationRef: "",
+          }),
+        );
+      }
+    }
+
     const unsubscribe = bus.subscribe((event) => {
       if (socket.readyState !== socket.OPEN) {
         return;

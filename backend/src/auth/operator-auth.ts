@@ -32,7 +32,9 @@ export function operatorAuthMiddleware(
 ): RequestHandler {
   return (request: Request, response: Response, next: NextFunction) => {
     const token = readBearerToken(request);
-    const sessionSecret = env?.AUTH_SESSION_SECRET;
+    const sessionSecret =
+      env?.AUTH_SESSION_SECRET ??
+      "development-only-auth-session-secret-change-before-production";
 
     if (token && sessionSecret) {
       const claims = verifyOperatorSessionToken(token, sessionSecret);
