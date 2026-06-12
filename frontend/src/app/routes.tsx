@@ -59,11 +59,7 @@ interface RouteProps {
 export function Route({ path, element }: RouteProps): React.JSX.Element | null {
   const { currentPath } = useRouter();
 
-  // Simple exact path matching, default '/' fallback to match /dashboard as well
-  const isMatch = 
-    currentPath === path || 
-    (path === '/' && currentPath === '/dashboard') || 
-    (path === '/dashboard' && currentPath === '/');
+  const isMatch = currentPath === path;
 
   if (!isMatch) return null;
 

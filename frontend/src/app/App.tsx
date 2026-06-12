@@ -2,8 +2,19 @@ import React from 'react';
 import '../styles/theme.css';
 import '../styles/dashboard.css';
 import { RouterProvider, Route } from './routes';
+import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
+import { SecureMetric } from '../components/SecureMetric';
+import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
 
 function DashboardView(): React.JSX.Element {
+  const {
+    connectionStatus,
+    enclaveStatus,
+    sandboxStatus,
+    agents,
+    errorAlert
+  } = useConnectionTelemetry();
+
   return (
     <div className="dashboard-layout">
       {/* Header Section */}
@@ -11,24 +22,61 @@ function DashboardView(): React.JSX.Element {
         <div className="header-brand">
           <h1 className="header-title">GhostBroker</h1>
         </div>
-        <div className="header-meta">
-          <span className="status-badge secure">
-            <span className="pulse-dot"></span>
-            TEE Enclave: SECURE
-          </span>
-          <span className="status-badge secure">
-            Telemetry: Connected
-          </span>
+        <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center' }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
             DID: did:t3:vcb_institutional_darkpool_operator
           </div>
         </div>
       </header>
 
+      {/* Connection Status Section (Metrics Rail) */}
+      <div className="layout-header" style={{ gridColumn: 'span 2', display: 'flex', gap: 'var(--spacing-md)', flexWrap: 'wrap', marginTop: '-8px' }}>
+        <SecureMetric 
+          title="TEE Enclave Status" 
+          value={enclaveStatus === 'secure' ? 'SECURE' : enclaveStatus === 'processing' ? 'PROCESSING' : 'ERROR'} 
+          status={enclaveStatus} 
+          subtext="SGX Hardware Attested"
+          icon="🛡️"
+        />
+        <SecureMetric 
+          title="Telemetry Link" 
+          value={connectionStatus.toUpperCase()} 
+          status={connectionStatus === 'connected' ? 'secure' : connectionStatus === 'connecting' ? 'processing' : 'error'} 
+          subtext="Encrypted Event Pipeline"
+          icon="🔌"
+        />
+        <SecureMetric 
+          title="T3 Sandbox Network" 
+          value={sandboxStatus.toUpperCase()} 
+          status={sandboxStatus === 'connected' ? 'secure' : 'error'} 
+          subtext="Smart Contract Broker Link"
+          icon="⛓️"
+        />
+      </div>
+
+      {/* System Error Notification Banner */}
+      {errorAlert && (
+        <div 
+          className="layout-header status-badge error" 
+          style={{ 
+            gridColumn: 'span 2', 
+            borderRadius: 'var(--radius-md)', 
+            padding: 'var(--spacing-md)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.8rem',
+            width: '100%',
+            justifyContent: 'flex-start',
+            boxSizing: 'border-box'
+          }}
+        >
+          🚨 {errorAlert}
+        </div>
+      )}
+
       {/* Main Left Section: Blind Order Submission */}
       <main className="layout-left card">
         <h2 className="card-title">
-          <span>🛡️</span> Blind Order Submission
+          <span>📝</span> Blind Order Submission
         </h2>
         <form onSubmit={(e) => e.preventDefault()}>
           <div className="form-group">
@@ -76,23 +124,30 @@ function DashboardView(): React.JSX.Element {
         </form>
       </main>
 
-      {/* Main Right Section: Sealed Order Book */}
-      <section className="layout-right card">
-        <h2 className="card-title">
-          <span>👁️‍🗨️</span> Sealed Order Book
-        </h2>
-        <div className="radar-container">
-          <div className="radar-sweep"></div>
-          <div className="radar-grid"></div>
-          <div className="radar-grid-inner"></div>
-          <div className="radar-crosshair-h"></div>
-          <div className="radar-crosshair-v"></div>
-          <div className="radar-message">
-            <div className="radar-message-title">Enclave Vault Sealed</div>
-            <div className="radar-message-text">
-              Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
+      {/* Main Right Section: Sealed Order Book & Connected Agents */}
+      <section className="layout-right" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+        <div className="card">
+          <h2 className="card-title">
+            <span>👁️‍🗨️</span> Sealed Order Book
+          </h2>
+          <div className="radar-container">
+            <div className="radar-sweep"></div>
+            <div className="radar-grid"></div>
+            <div className="radar-grid-inner"></div>
+            <div className="radar-crosshair-h"></div>
+            <div className="radar-crosshair-v"></div>
+            <div className="radar-message">
+              <div className="radar-message-title">Enclave Vault Sealed</div>
+              <div className="radar-message-text">
+                Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
+              </div>
             </div>
           </div>
+        </div>
+
+        {/* Admitted Agents Connection Grid */}
+        <div className="card">
+          <AgentConnectionGrid agents={agents} />
         </div>
       </section>
 

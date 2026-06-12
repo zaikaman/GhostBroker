@@ -34,6 +34,8 @@ export interface TelemetryEvent {
   severity: 'info' | 'warning' | 'error';
   timestamp: string;
   correlationRef?: string;
+  agentId?: string;
+  receiptRef?: string;
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';

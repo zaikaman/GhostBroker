@@ -98,8 +98,8 @@
 - [X] T057 [P] [US1] Add T3 tenant DID session and identity resolution tests in `t3-enclave/src/tests/auth-did-registry.test.ts`
 - [X] T058 [P] [US1] Add T3 agent delegation adapter tests for dashboard-provisioned grants, programmatic grant verification when available, and fail-closed rejection cases in `t3-enclave/src/tests/auth-agent-client.test.ts`
 - [X] T059 [P] [US1] Add authority claims unit tests for asset, side, size, price, time, and settlement scope checks in `t3-enclave/src/tests/auth-authority-claims.test.ts`
-- [ ] T060 [P] [US1] Add frontend dashboard accessibility test for secure status landmarks in `frontend/src/test/dashboard-accessibility.test.tsx`
-- [ ] T061 [P] [US1] Add frontend privacy test proving onboarding screens do not contain active order language in `frontend/src/test/privacy-redaction.test.tsx`
+- [X] T060 [P] [US1] Add frontend dashboard accessibility test for secure status landmarks in `frontend/src/test/dashboard-accessibility.test.tsx`
+- [X] T061 [P] [US1] Add frontend privacy test proving onboarding screens do not contain active order language in `frontend/src/test/privacy-redaction.test.tsx`
 
 ### Implementation for User Story 1
 
@@ -119,13 +119,13 @@
 - [X] T075 [US1] Implement T3 agent delegation adapter that verifies dashboard-provisioned grants, uses a real programmatic delegation API only if Terminal 3 exposes one, and fails closed when grant verification is unavailable in `t3-enclave/src/auth/agent-auth-client.ts`
 - [X] T076 [US1] Implement authority claim parser and policy hash verifier in `t3-enclave/src/auth/authority-claims.ts`
 - [X] T077 [US1] Implement agent loop admission lifecycle for verified and rejected agents in `t3-enclave/src/runner/agent-loop.ts`
-- [ ] T078 [P] [US1] Create secure metric card component for connection status values in `frontend/src/components/SecureMetric.tsx`
-- [ ] T079 [P] [US1] Create agent connection grid component with no order fields in `frontend/src/components/AgentConnectionGrid.tsx`
-- [ ] T080 [P] [US1] Create telemetry hook for agent connection and admission events in `frontend/src/hooks/useConnectionTelemetry.ts`
-- [ ] T081 [US1] Create dashboard shell that renders secure connectivity cards in `frontend/src/app/App.tsx`
+- [X] T078 [P] [US1] Create secure metric card component for connection status values in `frontend/src/components/SecureMetric.tsx`
+- [X] T079 [P] [US1] Create agent connection grid component with no order fields in `frontend/src/components/AgentConnectionGrid.tsx`
+- [X] T080 [P] [US1] Create telemetry hook for agent connection and admission events in `frontend/src/hooks/useConnectionTelemetry.ts`
+- [X] T081 [US1] Create dashboard shell that renders secure connectivity cards in `frontend/src/app/App.tsx`
 - [X] T082 [US1] Add US1 isolated test database seed builders for institutions and agent admission in `backend/src/tests/data/us1-seed-builders.ts`
 - [X] T083 [US1] Verify US1 tests fail before implementation and pass after implementation using `backend/package.json`
-- [ ] T084 [US1] Verify US1 frontend tests fail before implementation and pass after implementation using `frontend/package.json`
+- [X] T084 [US1] Verify US1 frontend tests fail before implementation and pass after implementation using `frontend/package.json`
 
 **Checkpoint**: User Story 1 is independently usable as an MVP for institution onboarding and agent admission.
 
