@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import '../styles/theme.css';
 import '../styles/dashboard.css';
 import { RouterProvider, Route } from './routes';
@@ -6,6 +6,10 @@ import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
 import { SecureMetric } from '../components/SecureMetric';
 import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
 import { ProcessingStatusRail } from '../components/ProcessingStatusRail';
+import { CompletedTradesTable } from '../components/CompletedTradesTable';
+import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
+import { useTradeHistory } from '../hooks/useTradeHistory';
+import { useReceipt } from '../hooks/useReceipt';
 
 function DashboardView(): React.JSX.Element {
   const {
@@ -16,6 +20,25 @@ function DashboardView(): React.JSX.Element {
     intents,
     errorAlert
   } = useConnectionTelemetry();
+
+  // Scoped trade history
+  const { trades, isLoading: isHistoryLoading } = useTradeHistory();
+
+  // Receipt drawer state
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+
+  const { receipt, isLoading: isReceiptLoading, error: receiptError } = useReceipt(selectedReceiptId);
+
+  const handleViewReceipt = (receiptId: string) => {
+    setSelectedReceiptId(receiptId);
+    setIsDrawerOpen(true);
+  };
+
+  const handleCloseDrawer = () => {
+    setIsDrawerOpen(false);
+    setSelectedReceiptId(null);
+  };
 
   return (
     <div className="dashboard-layout">
@@ -163,10 +186,22 @@ function DashboardView(): React.JSX.Element {
         <h2 className="card-title">
           <span>📜</span> Completed Trades & Audit History
         </h2>
-        <div className="table-container" style={{ padding: 'var(--spacing-lg)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-          Secure connection established. Waiting for completed trades...
-        </div>
+        <CompletedTradesTable
+          trades={trades}
+          isLoading={isHistoryLoading}
+          onViewReceipt={handleViewReceipt}
+        />
       </footer>
+
+      {/* Encrypted Audit Receipt Drawer */}
+      <EncryptedReceiptDrawer
+        receiptId={selectedReceiptId}
+        isOpen={isDrawerOpen}
+        onClose={handleCloseDrawer}
+        receipt={receipt}
+        isLoading={isReceiptLoading}
+        error={receiptError}
+      />
     </div>
   );
 }

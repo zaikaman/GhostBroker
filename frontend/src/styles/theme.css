@@ -55,6 +55,16 @@
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.15);
   --shadow-premium: 0 0 25px rgba(197, 168, 128, 0.05);
+
+  /* Status, Receipt, Table, and Drawer Token Variants */
+  --color-table-header: var(--color-input-bg);
+  --color-table-border: var(--color-border);
+  --color-table-hover: var(--color-surface-hover);
+  --color-drawer-overlay: rgba(11, 15, 25, 0.85);
+  --color-drawer-border: var(--color-border);
+  --color-receipt-bg: var(--color-input-bg);
+  --color-receipt-text: var(--color-success);
+  --focus-ring-color: rgba(197, 168, 128, 0.5);
 }
 
 /* Base resets & styles */

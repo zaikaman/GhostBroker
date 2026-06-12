@@ -24,14 +24,14 @@ export interface SettlementExecutionRequest {
     quantityCiphertext: string;
     executionPriceCiphertext: string;
   };
-  receipts: Array<{
+  receipts: {
     institutionId: string;
     receiptCiphertext: string;
     receiptHash: string;
     keyVersion: string;
     t3AttestationRef: string;
     accessScope: "buyer" | "seller" | "regulatory_export";
-  }>;
+  }[];
 }
 
 export interface SettlementPersistenceResult {

@@ -90,6 +90,15 @@ export class ApiClientError extends Error {
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
 
+const getOperatorHeaders = (): Record<string, string> => {
+  const institutionId = localStorage.getItem('x-operator-institution-id') || '00000000-0000-4000-8000-000000000301';
+  const operatorId = localStorage.getItem('x-operator-id') || 'operator:unattributed';
+  return {
+    'x-operator-institution-id': institutionId,
+    'x-operator-id': operatorId,
+  };
+};
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let errorCode: RedactedErrorCode | 'request_failed' = 'request_failed';
@@ -124,6 +133,22 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 export const apiClient = {
+  setOperatorContext(institutionId: string, operatorId?: string): void {
+    localStorage.setItem('x-operator-institution-id', institutionId);
+    if (operatorId) {
+      localStorage.setItem('x-operator-id', operatorId);
+    } else {
+      localStorage.removeItem('x-operator-id');
+    }
+  },
+
+  getOperatorContext(): { institutionId: string; operatorId: string } {
+    return {
+      institutionId: localStorage.getItem('x-operator-institution-id') || '00000000-0000-4000-8000-000000000301',
+      operatorId: localStorage.getItem('x-operator-id') || 'operator:unattributed',
+    };
+  },
+
   async getHealth(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE_URL}/api/health`, {
       headers: {
@@ -151,6 +176,7 @@ export const apiClient = {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        ...getOperatorHeaders(),
       },
       body: JSON.stringify(req),
     });
@@ -163,6 +189,7 @@ export const apiClient = {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        ...getOperatorHeaders(),
       },
       body: JSON.stringify(req),
     });
@@ -177,6 +204,7 @@ export const apiClient = {
     const res = await fetch(url.toString(), {
       headers: {
         'Accept': 'application/json',
+        ...getOperatorHeaders(),
       },
     });
     return handleResponse<{ items: CompletedTrade[] }>(res);
@@ -186,6 +214,7 @@ export const apiClient = {
     const res = await fetch(`${API_BASE_URL}/api/receipts/${receiptId}`, {
       headers: {
         'Accept': 'application/json',
+        ...getOperatorHeaders(),
       },
     });
     return handleResponse<AuditReceipt>(res);

@@ -216,3 +216,19 @@ Expected behavior:
 - `GET /api/trades/completed` returns only authenticated-institution completed history with encrypted trade fields.
 - `GET /api/receipts/{receiptId}` returns encrypted receipt data only for the receipt owner and records an access audit timestamp.
 - Settlement telemetry emits only `settlement_pending`, `settlement_finalized`, `receipt_available`, and redacted failure buckets.
+
+## US4 Dashboard Validation
+
+After US4 implementation, validate the operator dashboard integration:
+
+```powershell
+npm run test --workspace @ghostbroker/frontend
+```
+
+Expected behavior:
+- All frontend unit and accessibility tests pass.
+- Completed trade history is fetched using operator context headers.
+- Ciphertext fields for Asset, Quantity, and Price are rendered truncated (e.g. `t3cipher.as...sealed` or `...phertext`) to ensure zero-visibility of active values.
+- Clicking "View Receipt" displays the encrypted audit receipt details inside the slide-out drawer, showing key version, attestation references, and verification proof.
+- Unrelated institutions are denied receipt access with a safe redacted error display.
+

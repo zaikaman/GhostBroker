@@ -3,13 +3,20 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { TelemetryBus } from "../services/telemetry-bus.js";
 
 function getInstitutionId(request: IncomingMessage): string | undefined {
-  const header = request.headers["x-institution-id"];
+  const header =
+    request.headers["x-operator-institution-id"] ?? request.headers["x-institution-id"];
 
   if (Array.isArray(header)) {
-    return header[0];
+    return header[0]?.trim();
   }
 
-  return header;
+  return header?.trim();
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+    value,
+  );
 }
 
 export function attachTelemetryServer(
@@ -23,6 +30,11 @@ export function attachTelemetryServer(
 
   websocketServer.on("connection", (socket: WebSocket, request) => {
     const institutionId = getInstitutionId(request);
+
+    if (!institutionId || !isUuid(institutionId)) {
+      socket.close(1008, "authorization_failed");
+      return;
+    }
 
     const unsubscribe = bus.subscribe((event) => {
       if (socket.readyState !== socket.OPEN) {

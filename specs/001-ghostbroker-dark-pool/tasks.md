@@ -241,45 +241,45 @@
 
 ### Tests for User Story 4 (MANDATORY)
 
-- [ ] T155 [P] [US4] Add frontend test for agent connection grid rendering secure statuses only in `frontend/src/test/agent-connection-grid.test.tsx`
-- [ ] T156 [P] [US4] Add frontend test for completed trades table rendering encrypted fields and receipt links in `frontend/src/test/completed-trades-table.test.tsx`
-- [ ] T157 [P] [US4] Add frontend test for encrypted receipt drawer authorization states in `frontend/src/test/encrypted-receipt-drawer.test.tsx`
-- [ ] T158 [P] [US4] Add frontend test for generic empty completed-history state with no active queue language in `frontend/src/test/completed-history-empty-state.test.tsx`
-- [ ] T159 [P] [US4] Add frontend accessibility test for dashboard heading, table, buttons, drawer, and status regions in `frontend/src/test/dashboard-accessibility.test.tsx`
-- [ ] T160 [P] [US4] Add Playwright E2E test for operator status, completed trades, and receipt workflow in `tests/dashboard.spec.ts`
-- [ ] T161 [P] [US4] Add Playwright E2E privacy test for unrelated institution with no trade or queue disclosure in `tests/dashboard-privacy.spec.ts`
-- [ ] T162 [P] [US4] Add WebSocket contract test for `contracts/websocket-events.md` event envelopes in `backend/src/tests/contracts/websocket-events.contract.test.ts`
-- [ ] T163 [P] [US4] Add frontend API client tests for completed trades and receipt retrieval in `frontend/src/test/api-client.test.ts`
-- [ ] T164 [P] [US4] Add frontend telemetry client tests for reconnect and redacted event handling in `frontend/src/test/telemetry-client.test.ts`
+- [X] T155 [P] [US4] Add frontend test for agent connection grid rendering secure statuses only in `frontend/src/test/agent-connection-grid.test.tsx`
+- [X] T156 [P] [US4] Add frontend test for completed trades table rendering encrypted fields and receipt links in `frontend/src/test/completed-trades-table.test.tsx`
+- [X] T157 [P] [US4] Add frontend test for encrypted receipt drawer authorization states in `frontend/src/test/encrypted-receipt-drawer.test.tsx`
+- [X] T158 [P] [US4] Add frontend test for generic empty completed-history state with no active queue language in `frontend/src/test/completed-history-empty-state.test.tsx`
+- [X] T159 [P] [US4] Add frontend accessibility test for dashboard heading, table, buttons, drawer, and status regions in `frontend/src/test/dashboard-accessibility.test.tsx`
+- [X] T160 [P] [US4] Add Playwright E2E test for operator status, completed trades, and receipt workflow in `tests/dashboard.spec.ts`
+- [X] T161 [P] [US4] Add Playwright E2E privacy test for unrelated institution with no trade or queue disclosure in `tests/dashboard-privacy.spec.ts`
+- [X] T162 [P] [US4] Add WebSocket contract test for `contracts/websocket-events.md` event envelopes in `backend/src/tests/contracts/websocket-events.contract.test.ts`
+- [X] T163 [P] [US4] Add frontend API client tests for completed trades and receipt retrieval in `frontend/src/test/api-client.test.ts`
+- [X] T164 [P] [US4] Add frontend telemetry client tests for reconnect and redacted event handling in `frontend/src/test/telemetry-client.test.ts`
 
 ### Implementation for User Story 4
 
-- [ ] T165 [P] [US4] Implement completed trade history hook with scoped fetch and loading states in `frontend/src/hooks/useTradeHistory.ts`
-- [ ] T166 [P] [US4] Implement receipt retrieval hook with encrypted payload states in `frontend/src/hooks/useReceipt.ts`
-- [ ] T167 [P] [US4] Implement agent connection grid visual states in `frontend/src/components/AgentConnectionGrid.tsx`
-- [ ] T168 [P] [US4] Implement completed trades table with encrypted asset, quantity, and price ciphertext fields in `frontend/src/components/CompletedTradesTable.tsx`
-- [ ] T169 [P] [US4] Implement encrypted receipt drawer with hash, key version, and attestation reference in `frontend/src/components/EncryptedReceiptDrawer.tsx`
-- [ ] T170 [P] [US4] Implement secure metric component hover and focus states in `frontend/src/components/SecureMetric.tsx`
-- [ ] T171 [US4] Compose dashboard layout with connection grid, processing rail, completed trades, and receipt drawer in `frontend/src/app/App.tsx`
-- [ ] T172 [US4] Add dashboard responsive layout rules for desktop and mobile in `frontend/src/styles/dashboard.css`
-- [ ] T173 [US4] Add status, receipt, table, and drawer token variants in `frontend/src/styles/theme.css`
-- [ ] T174 [US4] Wire frontend API client to `GET /api/trades/completed` in `frontend/src/services/api-client.ts`
-- [ ] T175 [US4] Wire frontend API client to `GET /api/receipts/{receiptId}` in `frontend/src/services/api-client.ts`
-- [ ] T176 [US4] Wire frontend telemetry client to WebSocket event envelope validation in `frontend/src/services/telemetry-client.ts`
-- [ ] T177 [US4] Add frontend telemetry label mapping for all websocket event phases in `frontend/src/services/telemetry-labels.ts`
-- [ ] T178 [US4] Add frontend contract-backed test data builders for dashboard tests in `frontend/src/test/dashboard-test-data.ts`
-- [ ] T179 [US4] Add backend WebSocket institution-channel authorization in `backend/src/websocket/telemetry-server.ts`
-- [ ] T180 [US4] Add backend telemetry event replay prevention with correlation IDs in `backend/src/services/telemetry-bus.ts`
-- [ ] T181 [US4] Add backend receipt access audit update for `opened_at` in `backend/src/services/receipt.service.ts`
-- [ ] T182 [US4] Add completed history empty response handling in `backend/src/services/trade-history.service.ts`
-- [ ] T183 [US4] Add Playwright support for running against the real local backend and isolated test database in `tests/support/local-stack.ts`
-- [ ] T184 [US4] Add Playwright helper for asserting forbidden order text is absent in `tests/support/privacy-assertions.ts`
-- [ ] T185 [US4] Verify frontend US4 tests fail before implementation and pass after implementation using `frontend/package.json`
-- [ ] T186 [US4] Verify backend US4 tests fail before implementation and pass after implementation using `backend/package.json`
-- [ ] T187 [US4] Verify Playwright dashboard tests fail before implementation and pass after implementation using `package.json`
-- [ ] T188 [US4] Capture dashboard visual verification notes in `docs/qa/dashboard-visual-check.md`
-- [ ] T189 [US4] Update quickstart dashboard verification steps in `specs/001-ghostbroker-dark-pool/quickstart.md`
-- [ ] T190 [US4] Add Vercel deployment notes for dashboard environment variables in `docs/deployment/vercel-frontend.md`
+- [X] T165 [P] [US4] Implement completed trade history hook with scoped fetch and loading states in `frontend/src/hooks/useTradeHistory.ts`
+- [X] T166 [P] [US4] Implement receipt retrieval hook with encrypted payload states in `frontend/src/hooks/useReceipt.ts`
+- [X] T167 [P] [US4] Implement agent connection grid visual states in `frontend/src/components/AgentConnectionGrid.tsx`
+- [X] T168 [P] [US4] Implement completed trades table with encrypted asset, quantity, and price ciphertext fields in `frontend/src/components/CompletedTradesTable.tsx`
+- [X] T169 [P] [US4] Implement encrypted receipt drawer with hash, key version, and attestation reference in `frontend/src/components/EncryptedReceiptDrawer.tsx`
+- [X] T170 [P] [US4] Implement secure metric component hover and focus states in `frontend/src/components/SecureMetric.tsx`
+- [X] T171 [US4] Compose dashboard layout with connection grid, processing rail, completed trades, and receipt drawer in `frontend/src/app/App.tsx`
+- [X] T172 [US4] Add dashboard responsive layout rules for desktop and mobile in `frontend/src/styles/dashboard.css`
+- [X] T173 [US4] Add status, receipt, table, and drawer token variants in `frontend/src/styles/theme.css`
+- [X] T174 [US4] Wire frontend API client to `GET /api/trades/completed` in `frontend/src/services/api-client.ts`
+- [X] T175 [US4] Wire frontend API client to `GET /api/receipts/{receiptId}` in `frontend/src/services/api-client.ts`
+- [X] T176 [US4] Wire frontend telemetry client to WebSocket event envelope validation in `frontend/src/services/telemetry-client.ts`
+- [X] T177 [US4] Add frontend telemetry label mapping for all websocket event phases in `frontend/src/services/telemetry-labels.ts`
+- [X] T178 [US4] Add frontend contract-backed test data builders for dashboard tests in `frontend/src/test/dashboard-test-data.ts`
+- [X] T179 [US4] Add backend WebSocket institution-channel authorization in `backend/src/websocket/telemetry-server.ts`
+- [X] T180 [US4] Add backend telemetry event replay prevention with correlation IDs in `backend/src/services/telemetry-bus.ts`
+- [X] T181 [US4] Add backend receipt access audit update for `opened_at` in `backend/src/services/receipt.service.ts`
+- [X] T182 [US4] Add completed history empty response handling in `backend/src/services/trade-history.service.ts`
+- [X] T183 [US4] Add Playwright support for running against the real local backend and isolated test database in `tests/support/local-stack.ts`
+- [X] T184 [US4] Add Playwright helper for asserting forbidden order text is absent in `tests/support/privacy-assertions.ts`
+- [X] T185 [US4] Verify frontend US4 tests fail before implementation and pass after implementation using `frontend/package.json`
+- [X] T186 [US4] Verify backend US4 tests fail before implementation and pass after implementation using `backend/package.json`
+- [X] T187 [US4] Verify Playwright dashboard tests fail before implementation and pass after implementation using `package.json`
+- [X] T188 [US4] Capture dashboard visual verification notes in `docs/qa/dashboard-visual-check.md`
+- [X] T189 [US4] Update quickstart dashboard verification steps in `specs/001-ghostbroker-dark-pool/quickstart.md`
+- [X] T190 [US4] Add Vercel deployment notes for dashboard environment variables in `docs/deployment/vercel-frontend.md`
 
 **Checkpoint**: User Story 4 provides the complete dashboard without active queue disclosure.
 

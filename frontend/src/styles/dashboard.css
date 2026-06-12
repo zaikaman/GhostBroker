@@ -438,3 +438,22 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/* Premium Focus and Accessibility States */
+.card:focus-visible {
+  border-color: var(--color-border-focus) !important;
+  box-shadow: 0 0 0 3px var(--focus-ring-color), var(--shadow-lg), var(--shadow-premium) !important;
+  outline: none;
+}
+
+.trade-row {
+  outline: none;
+  transition: background var(--transition-fast);
+}
+
+.trade-row:focus-visible {
+  background: var(--color-table-hover) !important;
+  outline: 2px solid var(--color-border-focus) !important;
+  outline-offset: -2px;
+}
+
