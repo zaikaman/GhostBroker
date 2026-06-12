@@ -88,10 +88,14 @@ export class TelemetryClient {
     this.updateStatus('connecting');
 
     try {
-      const socketUrl = this.token 
-        ? `${this.url}?token=${encodeURIComponent(this.token)}`
-        : this.url;
-        
+      // Derive the institution ID from localStorage (same source as REST API headers),
+      // falling back to the explicit token or the demo default.
+      const institutionId =
+        this.token ??
+        localStorage.getItem('x-operator-institution-id') ??
+        '00000000-0000-4000-8000-000000000301';
+
+      const socketUrl = `${this.url}?institutionId=${encodeURIComponent(institutionId)}`;
       this.ws = new WebSocket(socketUrl);
       this.registerSocketEvents();
     } catch (error) {
