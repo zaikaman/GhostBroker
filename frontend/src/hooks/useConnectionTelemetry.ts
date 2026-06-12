@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { telemetryClient } from '../services/telemetry-client';
-import type { TelemetryEvent, ConnectionStatus } from '../services/telemetry-client';
+import type { TelemetryEvent, ConnectionStatus, TelemetryPhase } from '../services/telemetry-client';
 
 export interface AgentState {
   agentDid: string;
@@ -10,11 +10,19 @@ export interface AgentState {
   timestamp: string;
 }
 
+export interface ProcessingIntent {
+  correlationRef: string;
+  agentDid: string;
+  phase: TelemetryPhase;
+  timestamp: string;
+}
+
 export interface ConnectionTelemetry {
   connectionStatus: ConnectionStatus;
   enclaveStatus: 'secure' | 'processing' | 'error';
   sandboxStatus: 'connected' | 'disconnected';
   agents: AgentState[];
+  intents: ProcessingIntent[];
   errorAlert: string | null;
 }
 
@@ -23,6 +31,7 @@ export function useConnectionTelemetry(token?: string): ConnectionTelemetry {
   const [enclaveStatus, setEnclaveStatus] = useState<'secure' | 'processing' | 'error'>('secure');
   const [sandboxStatus, setSandboxStatus] = useState<'connected' | 'disconnected'>('disconnected');
   const [agents, setAgents] = useState<AgentState[]>([]);
+  const [intents, setIntents] = useState<ProcessingIntent[]>([]);
   const [errorAlert, setErrorAlert] = useState<string | null>(null);
 
   useEffect(() => {
@@ -127,6 +136,42 @@ export function useConnectionTelemetry(token?: string): ConnectionTelemetry {
           }
         });
       }
+
+      // 3. Processing Events
+      if (type === 'telemetry.processing.changed') {
+        const intentRef = correlationRef || '';
+        if (intentRef) {
+          setIntents((prev) => {
+            // Remove from active rail if the intent completes or fails
+            if (
+              phase === 'settlement_finalized' ||
+              phase === 'settlement_failed' ||
+              phase === 'receipt_available'
+            ) {
+              return prev.filter((i) => i.correlationRef !== intentRef);
+            }
+
+            const exists = prev.some((i) => i.correlationRef === intentRef);
+            if (exists) {
+              return prev.map((i) =>
+                i.correlationRef === intentRef
+                  ? { ...i, phase, timestamp: event.timestamp, agentDid: agentId || i.agentDid }
+                  : i
+              );
+            } else {
+              return [
+                ...prev,
+                {
+                  correlationRef: intentRef,
+                  agentDid: agentId || '',
+                  phase,
+                  timestamp: event.timestamp,
+                },
+              ];
+            }
+          });
+        }
+      }
     });
 
     // Initiate connection to the telemetry server
@@ -145,6 +190,8 @@ export function useConnectionTelemetry(token?: string): ConnectionTelemetry {
     enclaveStatus,
     sandboxStatus,
     agents,
+    intents,
     errorAlert,
   };
 }
+export default useConnectionTelemetry;

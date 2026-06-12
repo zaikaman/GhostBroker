@@ -147,8 +147,8 @@
 - [X] T090 [P] [US2] Add T3 blind intent unit tests for encrypted payload to opaque handle conversion in `t3-enclave/src/tests/blinding.test.ts`
 - [X] T091 [P] [US2] Add T3 private map tests for explicit readers and writers in `t3-enclave/src/tests/sealed-secret-maps.test.ts`
 - [X] T092 [P] [US2] Add T3 key generation and key rotation tests in `t3-enclave/src/tests/key-generation.test.ts`
-- [ ] T093 [P] [US2] Add frontend telemetry rendering test for encrypted processing indicators only in `frontend/src/test/processing-status.test.tsx`
-- [ ] T094 [P] [US2] Add frontend privacy regression test blocking active queue, price, quantity, and counterparty labels in `frontend/src/test/privacy-redaction.test.tsx`
+- [X] T093 [P] [US2] Add frontend telemetry rendering test for encrypted processing indicators only in `frontend/src/test/processing-status.test.tsx`
+- [X] T094 [P] [US2] Add frontend privacy regression test blocking active queue, price, quantity, and counterparty labels in `frontend/src/test/privacy-redaction.test.tsx`
 
 ### Implementation for User Story 2
 
@@ -164,16 +164,16 @@
 - [X] T104 [US2] Add telemetry state publishing for `intent_received`, `intent_sealed`, and `encrypted_evaluation` in `backend/src/services/hidden-intent.service.ts`
 - [X] T105 [US2] Extend backend WebSocket redactor to block plaintext and forbidden trading fields in `backend/src/websocket/redact-event.ts`
 - [X] T106 [US2] Add backend log-scrubbing tests for hidden intent request handling in `backend/src/tests/unit/logger-hidden-intent.test.ts`
-- [ ] T107 [P] [US2] Create frontend processing status rail component in `frontend/src/components/ProcessingStatusRail.tsx`
-- [ ] T108 [P] [US2] Create frontend status label mapper for allowed telemetry phases in `frontend/src/services/telemetry-labels.ts`
-- [ ] T109 [US2] Extend frontend telemetry hook to consume encrypted processing phases in `frontend/src/hooks/useConnectionTelemetry.ts`
-- [ ] T110 [US2] Add processing status rail to the dashboard without queue counts in `frontend/src/app/App.tsx`
-- [ ] T111 [US2] Add generic empty state copy for encrypted processing in `frontend/src/components/ProcessingStatusRail.tsx`
+- [X] T107 [P] [US2] Create frontend processing status rail component in `frontend/src/components/ProcessingStatusRail.tsx`
+- [X] T108 [P] [US2] Create frontend status label mapper for allowed telemetry phases in `frontend/src/services/telemetry-labels.ts`
+- [X] T109 [US2] Extend frontend telemetry hook to consume encrypted processing phases in `frontend/src/hooks/useConnectionTelemetry.ts`
+- [X] T110 [US2] Add processing status rail to the dashboard without queue counts in `frontend/src/app/App.tsx`
+- [X] T111 [US2] Add generic empty state copy for encrypted processing in `frontend/src/components/ProcessingStatusRail.tsx`
 - [X] T112 [US2] Add US2 isolated encrypted-intent test data builders with no plaintext fields in `backend/src/tests/data/us2-encrypted-intent-builders.ts`
 - [X] T113 [US2] Add multi-institution privacy test data builders proving unrelated operators receive no queue signal in `backend/src/tests/data/multi-institution-builders.ts`
 - [X] T114 [US2] Verify backend US2 contract tests fail before implementation and pass after implementation using `backend/package.json`
 - [X] T115 [US2] Verify T3 enclave US2 tests fail before implementation and pass after implementation using `t3-enclave/package.json`
-- [ ] T116 [US2] Verify frontend US2 tests fail before implementation and pass after implementation using `frontend/package.json`
+- [X] T116 [US2] Verify frontend US2 tests fail before implementation and pass after implementation using `frontend/package.json`
 - [X] T117 [US2] Document hidden intent privacy boundary in `docs/privacy/hidden-intent-boundary.md`
 - [X] T118 [US2] Add forbidden field audit checklist for intent payloads in `docs/privacy/forbidden-fields.md`
 - [X] T119 [US2] Update quickstart validation steps for encrypted intent submission in `specs/001-ghostbroker-dark-pool/quickstart.md`

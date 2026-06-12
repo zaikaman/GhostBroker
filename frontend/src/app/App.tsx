@@ -5,6 +5,7 @@ import { RouterProvider, Route } from './routes';
 import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
 import { SecureMetric } from '../components/SecureMetric';
 import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
+import { ProcessingStatusRail } from '../components/ProcessingStatusRail';
 
 function DashboardView(): React.JSX.Element {
   const {
@@ -12,6 +13,7 @@ function DashboardView(): React.JSX.Element {
     enclaveStatus,
     sandboxStatus,
     agents,
+    intents,
     errorAlert
   } = useConnectionTelemetry();
 
@@ -143,6 +145,11 @@ function DashboardView(): React.JSX.Element {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Processing Status Rail */}
+        <div className="card">
+          <ProcessingStatusRail intents={intents} />
         </div>
 
         {/* Admitted Agents Connection Grid */}

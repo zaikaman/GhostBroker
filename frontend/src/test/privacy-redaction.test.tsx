@@ -11,6 +11,18 @@ describe('Frontend Privacy Redaction', () => {
     'order_count',
   ];
 
+  // Specific labels/indicators that leak active order queue details or peer identities
+  const PRIVACY_REGRESSION_LABELS = [
+    'queue depth',
+    'queue rank',
+    'queue size',
+    'queue count',
+    'counterparty',
+    'peer',
+    'bid price',
+    'ask price',
+  ];
+
   it('should not contain any forbidden active order leakage terms or text', () => {
     const { container } = render(<App />);
     const htmlContent = container.innerHTML.toLowerCase();
@@ -18,6 +30,15 @@ describe('Frontend Privacy Redaction', () => {
     // Verify no forbidden terms leak into the DOM
     FORBIDDEN_WORDS.forEach((word) => {
       expect(htmlContent).not.toContain(word.toLowerCase());
+    });
+  });
+
+  it('should block active queue, price, quantity, and counterparty labels in active areas', () => {
+    const { container } = render(<App />);
+    const htmlContent = container.innerHTML.toLowerCase();
+
+    PRIVACY_REGRESSION_LABELS.forEach((label) => {
+      expect(htmlContent).not.toContain(label.toLowerCase());
     });
   });
 
