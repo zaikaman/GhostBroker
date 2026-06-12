@@ -33,8 +33,8 @@ GhostBroker operates under a strict privacy model. The frontend serves as a secu
 
 The mockups below demonstrate the complete visual identity and layout of GhostBroker's core pages.
 
-### 1. Marketing Landing Page
-![1. Marketing Landing Page](./landing_page_1781273218782.png)
+### 1. 3D Marketing Landing Page
+![1. 3D Marketing Landing Page](./landing_page_1781277294528.png)
 
 ### 2. Auth Gateway / Wallet Login Screen
 ![2. Auth Gateway](./auth_gateway_page_1781273229422.png)
@@ -55,7 +55,7 @@ The mockups below demonstrate the complete visual identity and layout of GhostBr
 ### 1. Marketing Landing Page
 * **Purpose**: Entry landing page introducing the zero-knowledge institutional platform to new operators.
 * **Design & Layout**:
-  * Minimalist, heavy security layout.
+  * Premium 3D-centered layout displaying a floating dark glass and gold-accented secure hypercube representing the TEE enclave.
   * Sleek geometric network graphics with gold accents.
   * Hero header highlighting the zero-knowledge hardware-enforced nature of the dark pool.
   * Prominent **Launch Observatory** (solid gold CTA) and **Technical Specs** (outlined CTA).
