@@ -29,56 +29,67 @@ GhostBroker operates under a strict privacy model. The frontend serves as a secu
 
 ---
 
-## 🖼️ Page Mockups Showcase
+## 🖼️ Page Mockups Showcase (16:9 Ratio)
 
 The mockups below demonstrate the complete visual identity and layout of GhostBroker's core pages.
 
-### 1. Auth Gateway / Wallet Login Screen
-![1. Auth Gateway](./auth_gateway_page_1781272383073.png)
+### 1. Marketing Landing Page
+![1. Marketing Landing Page](./landing_page_1781273218782.png)
 
-### 2. Main Observatory Dashboard
-![2. Main Observatory Dashboard](./observatory_dashboard_1781272394952.png)
+### 2. Auth Gateway / Wallet Login Screen
+![2. Auth Gateway](./auth_gateway_page_1781273229422.png)
 
-### 3. Verifiable Receipt Drawer View
-![3. Verifiable Receipt Drawer View](./verifiable_receipt_drawer_1781272410552.png)
+### 3. Main Observatory Dashboard
+![3. Main Observatory Dashboard](./observatory_dashboard_1781273244522.png)
 
-### 4. Settings & Agent Policy Management
-![4. Settings & Agent Policy Management](./settings_management_page_1781272422832.png)
+### 4. Verifiable Receipt Drawer View
+![4. Verifiable Receipt Drawer View](./verifiable_receipt_drawer_1781273258913.png)
+
+### 5. Settings & Agent Policy Management
+![5. Settings & Agent Policy Management](./settings_management_page_1781273271333.png)
 
 ---
 
 ## 📖 Detailed Page Descriptions & Specs
 
-### 1. Auth Gateway (Connect Wallet / Login Screen)
-* **Purpose**: Cryptographic gateway to authorize institutional operators via Web3 wallets.
+### 1. Marketing Landing Page
+* **Purpose**: Entry landing page introducing the zero-knowledge institutional platform to new operators.
 * **Design & Layout**:
   * Minimalist, heavy security layout.
-  * Central auth card with gold-bronze borders.
-  * Prominent **Connect Web3 Wallet** CTA.
-  * Status messages indicating secure link verification and DID check statuses.
+  * Sleek geometric network graphics with gold accents.
+  * Hero header highlighting the zero-knowledge hardware-enforced nature of the dark pool.
+  * Prominent **Launch Observatory** (solid gold CTA) and **Technical Specs** (outlined CTA).
+  * Column grid displaying features: TEE Enclaves, Zero-Information Matching, and Secure Audit Trails.
 
-### 2. Main Observatory Dashboard
+### 2. Auth Gateway (Connect Wallet / Login Screen)
+* **Purpose**: Cryptographic gateway to authorize institutional operators via Web3 wallets.
+* **Design & Layout**:
+  * Centered authentication card with gold-bronze borders.
+  * Prominent **Connect Web3 Wallet** CTA.
+  * Status messages indicating secure link verification and TEE connection states.
+
+### 3. Main Observatory Dashboard
 * **Purpose**: Central monitoring dashboard displaying active telemetry and historical data.
 * **Design & Layout**:
   * **Top Header**: Brand name `GhostBroker`, global status (`TEE Enclave: SECURE`), and active operator's Institution DID.
-  * **A2A Mandate Banner**: Highlighted alert reminding humans that trading is fully autonomous (Agent-to-Agent) and humans are only observing.
+  * **A2A Mandate Banner**: Alert reminding operators that trading is fully autonomous and human intervention is blocked.
   * **Telemetry Cards**: High-visibility metric components for Enclave status, WebSocket connection, and Sandbox health.
-  * **Main Left (Sealed Order Book)**: A dark visual sweep representing the sealed order book queue inside the TEE. It features a radar/heartbeat indicator with clear branding stating that order details are zero-visibility.
+  * **Main Left (Sealed Order Book)**: Radar/heartbeat visualizer representing the cryptographically secured matching engine.
   * **Main Right (Telemetry Logs & Rail)**: 
     * *Live Agent Activity Stream*: Real-time scrolling telemetry feed.
     * *Processing Status Rail*: Opaque state indicators showing phase shifts (e.g., `Intent Sealed`, `Match Evaluating`).
     * *Admitted Agents Grid*: List of authorized agents currently executing on the institution's behalf.
-  * **Bottom Section (Completed Trades)**: Fully settled trade audit logs with fields for Asset, Side, Quantity, Price, and a "Verifiable Receipt" CTA.
+  * **Bottom Section (Completed Trades)**: Settled trade logs with fields for Asset, Side, Quantity, Price, and a "Verifiable Receipt" CTA.
 
-### 3. Verifiable Receipt Drawer (Proof Inspector)
+### 4. Verifiable Receipt Drawer (Proof Inspector)
 * **Purpose**: Slides out to audit a specific trade's cryptographic proof.
 * **Design & Layout**:
-  * Semi-transparent overlay with a clean right-side slide-out panel.
+  * Right-side slide-out panel overlaying the dimmed main dashboard view.
   * **Encrypted Payload Box**: Raw monospace ciphertext block representing the sealed audit receipt.
-  * **SGX Hardware Attestation Badge**: Verified checkmark sign-off and reference hash.
-  * **Action Center**: Decryption trigger (requiring hardware authority keys) and regulatory export actions (CSV/PDF).
+  * **SGX Hardware Attestation Badge**: Verified attestation reference and hardware signature status.
+  * **Action Center**: Decryption trigger and PDF/CSV regulatory export buttons.
 
-### 4. Settings & Agent Policy Management
+### 5. Settings & Agent Policy Management
 * **Route**: `/settings`
 * **Purpose**: Configure risk parameters, authorize autonomous trading agents, and rotate cryptographic keys.
 * **Design & Layout**:
