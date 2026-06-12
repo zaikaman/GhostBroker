@@ -159,12 +159,21 @@ export class TelemetryClient {
     };
 
     this.ws.onclose = (event) => {
-      console.log(`[TelemetryClient] WebSocket connection closed: code=${event.code}, reason=${event.reason}`);
+      if (this.isExplicitClosed) {
+        console.debug('[TelemetryClient] WebSocket disconnected (cleanup).');
+      } else {
+        console.log(`[TelemetryClient] WebSocket connection closed: code=${event.code}, reason=${event.reason}`);
+      }
       this.handleDisconnect();
     };
 
     this.ws.onerror = (err) => {
-      console.error('[TelemetryClient] WebSocket error occurred:', err);
+      if (this.isExplicitClosed) {
+        // StrictMode double-mount: connection was torn down before it established
+        console.debug('[TelemetryClient] WebSocket connection interrupted during cleanup.');
+        return;
+      }
+      console.warn('[TelemetryClient] WebSocket connection failed. Reconnecting with exponential backoff...', err);
       // Let onclose handle the recovery policy
     };
   }

@@ -8,6 +8,41 @@ function loadProcessEnvFile(source: NodeJS.ProcessEnv): void {
   process.loadEnvFile?.();
 }
 
+/** Convert empty-string, whitespace, carriage returns, and placeholder env vars to `undefined` so that `.optional()` fields pass validation. */
+function normalizeEnv(source: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  const result: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) {
+      result[key] = undefined;
+      continue;
+    }
+
+    // Clean carriage returns, newlines, and trim whitespace
+    let val = value.replace(/[\r\n]+/g, "").trim();
+
+    // Remove surrounding quotes if present
+    if (val.startsWith('"') && val.endsWith('"')) {
+      val = val.slice(1, -1).trim();
+    } else if (val.startsWith("'") && val.endsWith("'")) {
+      val = val.slice(1, -1).trim();
+    }
+
+    // Treat empty, "undefined", "null", or placeholder values as undefined
+    if (
+      val === "" ||
+      val.toLowerCase() === "undefined" ||
+      val.toLowerCase() === "null" ||
+      (val.includes("<") && val.includes(">")) ||
+      val.includes("YOUR_")
+    ) {
+      result[key] = undefined;
+    } else {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -40,12 +75,14 @@ export class EnvValidationError extends Error {
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): BackendEnv {
   loadProcessEnvFile(source);
 
-  const result = envSchema.safeParse(source);
+  const normalized = normalizeEnv(source);
+  const result = envSchema.safeParse(normalized);
 
   if (!result.success) {
     const issues = result.error.issues.map((issue) => {
       const path = issue.path.join(".") || "environment";
-      return `${path}: ${issue.message}`;
+      const invalidValue = normalized[path];
+      return `${path}: ${issue.message}${invalidValue !== undefined ? ` (received: ${JSON.stringify(invalidValue)})` : ''}`;
     });
 
     throw new EnvValidationError(issues);
