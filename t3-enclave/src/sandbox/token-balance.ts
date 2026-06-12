@@ -11,6 +11,11 @@ export interface TokenBalanceClient {
   assertMinimumBalance(account: string, minimumRequired: bigint): Promise<TokenBalance>;
 }
 
+export interface TokenPreflightResult {
+  status: "ready";
+  balance: TokenBalance;
+}
+
 interface TokenBalanceResponse {
   account: string;
   available: string;
@@ -69,4 +74,17 @@ export class SandboxTokenBalanceClient implements TokenBalanceClient {
 
     return checkedBalance;
   }
+}
+
+export async function assertT3TokenPreflight(
+  client: TokenBalanceClient,
+  account: string,
+  minimumRequired: bigint,
+): Promise<TokenPreflightResult> {
+  const balance = await client.assertMinimumBalance(account, minimumRequired);
+
+  return {
+    status: "ready",
+    balance,
+  };
 }

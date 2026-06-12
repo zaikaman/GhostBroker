@@ -40,6 +40,7 @@ export interface TelemetryEvent {
   receiptRef?: string;
 }
 
-export type TelemetryEventInput = Omit<TelemetryEvent, "timestamp"> & {
+export type TelemetryEventInput = Omit<TelemetryEvent, "eventId" | "timestamp"> & {
+  eventId?: string;
   timestamp?: string;
 };

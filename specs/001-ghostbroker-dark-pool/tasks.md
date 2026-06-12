@@ -139,44 +139,44 @@
 
 ### Tests for User Story 2 (MANDATORY)
 
-- [ ] T085 [P] [US2] Add contract tests for `POST /api/agents/intents` encrypted envelope acceptance in `backend/src/tests/contracts/agents-intents.contract.test.ts`
-- [ ] T086 [P] [US2] Add contract tests proving `POST /api/agents/intents` rejects plaintext asset, side, quantity, and price fields in `backend/src/tests/contracts/agents-intents-privacy.contract.test.ts`
-- [ ] T087 [P] [US2] Add integration test for authorized encrypted intent submission returning only an opaque handle in `backend/src/tests/integration/hidden-intent-submission.test.ts`
-- [ ] T088 [P] [US2] Add integration test for over-scoped intent rejection without hidden queue disclosure in `backend/src/tests/integration/hidden-intent-rejection.test.ts`
-- [ ] T089 [P] [US2] Add telemetry redaction test for `intent_received`, `intent_sealed`, and `encrypted_evaluation` events in `backend/src/tests/integration/telemetry-intent-redaction.test.ts`
-- [ ] T090 [P] [US2] Add T3 blind intent unit tests for encrypted payload to opaque handle conversion in `t3-enclave/src/tests/blinding.test.ts`
-- [ ] T091 [P] [US2] Add T3 private map tests for explicit readers and writers in `t3-enclave/src/tests/sealed-secret-maps.test.ts`
-- [ ] T092 [P] [US2] Add T3 key generation and key rotation tests in `t3-enclave/src/tests/key-generation.test.ts`
+- [X] T085 [P] [US2] Add contract tests for `POST /api/agents/intents` encrypted envelope acceptance in `backend/src/tests/contracts/agents-intents.contract.test.ts`
+- [X] T086 [P] [US2] Add contract tests proving `POST /api/agents/intents` rejects plaintext asset, side, quantity, and price fields in `backend/src/tests/contracts/agents-intents-privacy.contract.test.ts`
+- [X] T087 [P] [US2] Add integration test for authorized encrypted intent submission returning only an opaque handle in `backend/src/tests/integration/hidden-intent-submission.test.ts`
+- [X] T088 [P] [US2] Add integration test for over-scoped intent rejection without hidden queue disclosure in `backend/src/tests/integration/hidden-intent-rejection.test.ts`
+- [X] T089 [P] [US2] Add telemetry redaction test for `intent_received`, `intent_sealed`, and `encrypted_evaluation` events in `backend/src/tests/integration/telemetry-intent-redaction.test.ts`
+- [X] T090 [P] [US2] Add T3 blind intent unit tests for encrypted payload to opaque handle conversion in `t3-enclave/src/tests/blinding.test.ts`
+- [X] T091 [P] [US2] Add T3 private map tests for explicit readers and writers in `t3-enclave/src/tests/sealed-secret-maps.test.ts`
+- [X] T092 [P] [US2] Add T3 key generation and key rotation tests in `t3-enclave/src/tests/key-generation.test.ts`
 - [ ] T093 [P] [US2] Add frontend telemetry rendering test for encrypted processing indicators only in `frontend/src/test/processing-status.test.tsx`
 - [ ] T094 [P] [US2] Add frontend privacy regression test blocking active queue, price, quantity, and counterparty labels in `frontend/src/test/privacy-redaction.test.tsx`
 
 ### Implementation for User Story 2
 
-- [ ] T095 [P] [US2] Create hidden intent request and response types in `backend/src/models/hidden-intent.ts`
-- [ ] T096 [P] [US2] Create backend encrypted envelope validator that rejects plaintext trading fields in `backend/src/validation/encrypted-intent.schema.ts`
-- [ ] T097 [P] [US2] Create T3 key generation module for per-institution envelope metadata in `t3-enclave/src/keys/key-generation.ts`
-- [ ] T098 [P] [US2] Create T3 key rotation module with key version output in `t3-enclave/src/keys/key-rotation.ts`
-- [ ] T099 [P] [US2] Create T3 sealed secret map module for private tenant maps in `t3-enclave/src/keys/sealed-secret-maps.ts`
-- [ ] T100 [US2] Implement T3 blind intent transformation returning `intent_handle` only in `t3-enclave/src/matching/blind-intent.ts`
-- [ ] T101 [US2] Implement T3 token preflight check before hidden intent processing in `t3-enclave/src/sandbox/token-balance.ts`
-- [ ] T102 [US2] Implement backend hidden intent service that validates authority and calls T3 blinding in `backend/src/services/hidden-intent.service.ts`
-- [ ] T103 [US2] Implement `POST /api/agents/intents` route in `backend/src/api/agents.routes.ts`
-- [ ] T104 [US2] Add telemetry state publishing for `intent_received`, `intent_sealed`, and `encrypted_evaluation` in `backend/src/services/hidden-intent.service.ts`
-- [ ] T105 [US2] Extend backend WebSocket redactor to block plaintext and forbidden trading fields in `backend/src/websocket/redact-event.ts`
-- [ ] T106 [US2] Add backend log-scrubbing tests for hidden intent request handling in `backend/src/tests/unit/logger-hidden-intent.test.ts`
+- [X] T095 [P] [US2] Create hidden intent request and response types in `backend/src/models/hidden-intent.ts`
+- [X] T096 [P] [US2] Create backend encrypted envelope validator that rejects plaintext trading fields in `backend/src/validation/encrypted-intent.schema.ts`
+- [X] T097 [P] [US2] Create T3 key generation module for per-institution envelope metadata in `t3-enclave/src/keys/key-generation.ts`
+- [X] T098 [P] [US2] Create T3 key rotation module with key version output in `t3-enclave/src/keys/key-rotation.ts`
+- [X] T099 [P] [US2] Create T3 sealed secret map module for private tenant maps in `t3-enclave/src/keys/sealed-secret-maps.ts`
+- [X] T100 [US2] Implement T3 blind intent transformation returning `intent_handle` only in `t3-enclave/src/matching/blind-intent.ts`
+- [X] T101 [US2] Implement T3 token preflight check before hidden intent processing in `t3-enclave/src/sandbox/token-balance.ts`
+- [X] T102 [US2] Implement backend hidden intent service that validates authority and calls T3 blinding in `backend/src/services/hidden-intent.service.ts`
+- [X] T103 [US2] Implement `POST /api/agents/intents` route in `backend/src/api/agents.routes.ts`
+- [X] T104 [US2] Add telemetry state publishing for `intent_received`, `intent_sealed`, and `encrypted_evaluation` in `backend/src/services/hidden-intent.service.ts`
+- [X] T105 [US2] Extend backend WebSocket redactor to block plaintext and forbidden trading fields in `backend/src/websocket/redact-event.ts`
+- [X] T106 [US2] Add backend log-scrubbing tests for hidden intent request handling in `backend/src/tests/unit/logger-hidden-intent.test.ts`
 - [ ] T107 [P] [US2] Create frontend processing status rail component in `frontend/src/components/ProcessingStatusRail.tsx`
 - [ ] T108 [P] [US2] Create frontend status label mapper for allowed telemetry phases in `frontend/src/services/telemetry-labels.ts`
 - [ ] T109 [US2] Extend frontend telemetry hook to consume encrypted processing phases in `frontend/src/hooks/useConnectionTelemetry.ts`
 - [ ] T110 [US2] Add processing status rail to the dashboard without queue counts in `frontend/src/app/App.tsx`
 - [ ] T111 [US2] Add generic empty state copy for encrypted processing in `frontend/src/components/ProcessingStatusRail.tsx`
-- [ ] T112 [US2] Add US2 isolated encrypted-intent test data builders with no plaintext fields in `backend/src/tests/data/us2-encrypted-intent-builders.ts`
-- [ ] T113 [US2] Add multi-institution privacy test data builders proving unrelated operators receive no queue signal in `backend/src/tests/data/multi-institution-builders.ts`
-- [ ] T114 [US2] Verify backend US2 contract tests fail before implementation and pass after implementation using `backend/package.json`
-- [ ] T115 [US2] Verify T3 enclave US2 tests fail before implementation and pass after implementation using `t3-enclave/package.json`
+- [X] T112 [US2] Add US2 isolated encrypted-intent test data builders with no plaintext fields in `backend/src/tests/data/us2-encrypted-intent-builders.ts`
+- [X] T113 [US2] Add multi-institution privacy test data builders proving unrelated operators receive no queue signal in `backend/src/tests/data/multi-institution-builders.ts`
+- [X] T114 [US2] Verify backend US2 contract tests fail before implementation and pass after implementation using `backend/package.json`
+- [X] T115 [US2] Verify T3 enclave US2 tests fail before implementation and pass after implementation using `t3-enclave/package.json`
 - [ ] T116 [US2] Verify frontend US2 tests fail before implementation and pass after implementation using `frontend/package.json`
-- [ ] T117 [US2] Document hidden intent privacy boundary in `docs/privacy/hidden-intent-boundary.md`
-- [ ] T118 [US2] Add forbidden field audit checklist for intent payloads in `docs/privacy/forbidden-fields.md`
-- [ ] T119 [US2] Update quickstart validation steps for encrypted intent submission in `specs/001-ghostbroker-dark-pool/quickstart.md`
+- [X] T117 [US2] Document hidden intent privacy boundary in `docs/privacy/hidden-intent-boundary.md`
+- [X] T118 [US2] Add forbidden field audit checklist for intent payloads in `docs/privacy/forbidden-fields.md`
+- [X] T119 [US2] Update quickstart validation steps for encrypted intent submission in `specs/001-ghostbroker-dark-pool/quickstart.md`
 
 **Checkpoint**: User Story 2 accepts hidden intent through opaque encrypted envelopes and emits only redacted processing telemetry.
 

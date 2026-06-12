@@ -178,3 +178,21 @@ Before marking the US1 MVP complete:
 - Dashboard secure status screens render without active order language.
 
 Hidden intent submission, settlement, completed trade history, and receipt retrieval start in later task phases and are not part of the current MVP.
+
+## US2 Hidden Intent Validation
+
+After US2 implementation, validate encrypted intent submission locally:
+
+```powershell
+npm run test --workspace @ghostbroker/backend -- agents-intents
+npm run test --workspace @ghostbroker/backend -- hidden-intent
+npm run test --workspace @ghostbroker/t3-enclave -- blinding
+```
+
+Expected behavior:
+
+- `POST /api/agents/intents` accepts `institutionId`, `agentDid`, `authorityRef`, and `encryptedIntentEnvelope`.
+- Plaintext active trading fields such as `asset`, `side`, `quantity`, and `price` are rejected with `validation_failed`.
+- Successful responses contain only `intentHandle` and `state`.
+- Telemetry emits only `intent_received`, `intent_sealed`, and `encrypted_evaluation` with opaque correlation references.
+- T3 enclave tests prove encrypted envelopes are converted to opaque handles only.

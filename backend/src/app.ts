@@ -26,8 +26,15 @@ import {
 import { SupabaseAuthorityRevocationRepository } from "./services/authority-revocation.service.js";
 import { AgentService, type AgentAdmissionService } from "./services/agent.service.js";
 import {
+  HiddenIntentService,
+  type HiddenIntentSubmissionService,
+} from "./services/hidden-intent.service.js";
+import { telemetryBus } from "./services/telemetry-bus.js";
+import {
   AdkTenantDidRegistry,
   DashboardDelegationAgentAuthClient,
+  SandboxTokenBalanceClient,
+  T3BlindIntentClient,
   createAuthenticatedT3NetworkClient,
   type AuthenticatedT3NetworkClientOptions,
 } from "@ghostbroker/t3-enclave";
@@ -60,6 +67,7 @@ const publicErrorHandler: ErrorRequestHandler = (error, _request, response, _nex
 export interface BackendServices {
   institutionService: InstitutionManagementService;
   agentService: AgentAdmissionService;
+  hiddenIntentService?: HiddenIntentSubmissionService;
 }
 
 async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
@@ -84,15 +92,27 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
   const authorityRevocationRepository =
     new SupabaseAuthorityRevocationRepository(supabase as never);
 
+  const authorizationFacade = new T3AgentAuthorizationFacade(
+    new DashboardDelegationAgentAuthClient(t3NetworkClient),
+  );
   return {
     institutionService: new InstitutionService(
       institutionRepository,
       new AdkTenantDidRegistry(t3NetworkClient),
     ),
     agentService: new AgentService(
-      new T3AgentAuthorizationFacade(
-        new DashboardDelegationAgentAuthClient(t3NetworkClient),
-      ),
+      authorizationFacade,
+      authorityRevocationRepository,
+    ),
+    hiddenIntentService: new HiddenIntentService(
+      authorizationFacade,
+      new T3BlindIntentClient({
+        networkClient: t3NetworkClient,
+        tokenBalanceClient: new SandboxTokenBalanceClient(t3NetworkClient),
+        tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
+        minimumTokenBalance: 1n,
+      }),
+      telemetryBus,
       authorityRevocationRepository,
     ),
   };
@@ -111,7 +131,11 @@ export function createApp(
   app.use(correlationIdMiddleware());
   app.use("/api", createHealthRouter(env));
   app.use("/api", createInstitutionsRouter(services.institutionService));
-  app.use("/api", operatorAuthMiddleware(), createAgentsRouter(services.agentService));
+  app.use(
+    "/api",
+    operatorAuthMiddleware(),
+    createAgentsRouter(services.agentService, services.hiddenIntentService),
+  );
   app.use(publicErrorHandler);
 
   return app;
