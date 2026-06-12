@@ -27,7 +27,8 @@ import { AgentService, type AgentAdmissionService } from "./services/agent.servi
 import {
   AdkTenantDidRegistry,
   DashboardDelegationAgentAuthClient,
-  FetchT3NetworkClient,
+  createAuthenticatedT3NetworkClient,
+  type AuthenticatedT3NetworkClientOptions,
 } from "@ghostbroker/t3-enclave";
 
 function createCorsMiddleware(env: BackendEnv): RequestHandler {
@@ -60,12 +61,21 @@ export interface BackendServices {
   agentService: AgentAdmissionService;
 }
 
-function createDefaultServices(env: BackendEnv): BackendServices {
-  const t3NetworkClient = new FetchT3NetworkClient({
-    networkUrl: env.T3_NETWORK_URL,
-    tenantDid: env.T3_TENANT_DID,
-    walletPrivateKeyRef: env.T3_WALLET_PRIVATE_KEY_REF,
-  });
+async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
+  const t3Options: AuthenticatedT3NetworkClientOptions = {
+    apiKey: env.T3N_API_KEY,
+    environment: env.T3N_ENV,
+  };
+
+  if (env.T3_NETWORK_URL) {
+    t3Options.networkUrl = env.T3_NETWORK_URL;
+  }
+
+  if (env.T3_TENANT_DID) {
+    t3Options.expectedTenantDid = env.T3_TENANT_DID;
+  }
+
+  const t3NetworkClient = await createAuthenticatedT3NetworkClient(t3Options);
   const supabase = createSupabaseServiceClient(env);
   const institutionRepository = new SupabaseInstitutionRepository(
     supabase as never,
@@ -86,7 +96,7 @@ function createDefaultServices(env: BackendEnv): BackendServices {
 
 export function createApp(
   env: BackendEnv = loadEnv(),
-  services: BackendServices = createDefaultServices(env),
+  services: BackendServices,
 ): Express {
   const app = express();
 
@@ -101,4 +111,10 @@ export function createApp(
   app.use(publicErrorHandler);
 
   return app;
+}
+
+export async function createProductionApp(
+  env: BackendEnv = loadEnv(),
+): Promise<Express> {
+  return createApp(env, await createDefaultServices(env));
 }

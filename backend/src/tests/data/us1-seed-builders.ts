@@ -20,9 +20,10 @@ export function buildBackendTestEnv(): BackendEnv {
     DATABASE_URL: "https://database.invalid",
     SUPABASE_URL: "https://supabase.invalid",
     SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+    T3N_API_KEY: "0x0000000000000000000000000000000000000000000000000000000000000001",
+    T3N_ENV: "testnet",
     T3_NETWORK_URL: "https://t3.invalid",
     T3_TENANT_DID: "did:t3n:tenant:test",
-    T3_WALLET_PRIVATE_KEY_REF: "wallet-ref:test",
     T3_MATCH_CONTRACT_ID: "contract:test",
     RECEIPT_KEY_VERSION: "receipt-key:test",
   };

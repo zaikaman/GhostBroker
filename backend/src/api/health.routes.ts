@@ -35,7 +35,7 @@ export function buildHealthResponse(
     backend: "ok",
     supabase: serviceStatus(env.SUPABASE_URL),
     websocket: websocketReady ? "ok" : "unavailable",
-    t3: serviceStatus(env.T3_NETWORK_URL),
+    t3: serviceStatus(env.T3N_API_KEY),
   } satisfies HealthResponse["services"];
 
   return {

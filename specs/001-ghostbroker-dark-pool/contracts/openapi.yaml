@@ -178,7 +178,7 @@ components:
           type: string
         authorityProof:
           type: string
-          description: Opaque proof verified by the Terminal 3 Agent Auth integration.
+          description: JSON string containing a GhostBroker signed delegation proof. The proof wraps Terminal 3 delegation credential JCS bytes, user and agent signatures, nonce, request hash, and the requested action binding.
     AgentAdmission:
       type: object
       required: [agentDid, status, authorityRef]

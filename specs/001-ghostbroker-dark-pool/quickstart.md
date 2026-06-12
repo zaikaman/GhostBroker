@@ -4,42 +4,55 @@
 
 - Node.js 20 LTS
 - Supabase project and database URL
-- Heroku app for backend deployment
-- Vercel project for frontend deployment
 - Terminal 3 developer credentials, tenant DID access, T3N sandbox token balance, and ADK-compatible wallet or identity material
+
+Deployment targets such as Heroku and Vercel are not required to run the US1 MVP locally.
 
 ## Environment Variables
 
 ### Frontend
 
 ```text
-VITE_API_BASE_URL=
-VITE_WS_TELEMETRY_URL=
+VITE_API_BASE_URL=http://localhost:3001
+VITE_WS_TELEMETRY_URL=ws://localhost:3001/ws/telemetry
 ```
 
 ### Backend
 
 ```text
-PORT=
-DATABASE_URL=
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
+NODE_ENV=development
+PORT=3001
+LOG_LEVEL=info
+CORS_ALLOWED_ORIGINS=http://localhost:5173
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key>
+DATABASE_URL=postgresql://postgres:<password>@<host>:5432/postgres
+T3N_API_KEY=<developer-key-from-terminal3-claim-page>
+T3N_ENV=testnet
 T3_NETWORK_URL=
 T3_TENANT_DID=
-T3_WALLET_PRIVATE_KEY_REF=
 T3_MATCH_CONTRACT_ID=
 RECEIPT_KEY_VERSION=
 ```
 
+`DATABASE_URL` is optional for backend runtime. It is only needed by tooling that connects directly to Postgres, such as migration workflows or future database integration tests. The MVP API uses `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+
+`T3_MATCH_CONTRACT_ID` and `RECEIPT_KEY_VERSION` are optional until the hidden-intent, settlement, and receipt phases are implemented.
+
 ### T3 Enclave
 
 ```text
+T3N_API_KEY=<developer-key-from-terminal3-claim-page>
+T3N_ENV=testnet
 T3_NETWORK_URL=
-T3_SANDBOX_TOKEN_ACCOUNT=
-T3_ADK_ENV=
+T3_TENANT_DID=
+T3_SANDBOX_TOKEN_ACCOUNT=<sandbox-token-account-or-did>
+T3_MINIMUM_TOKEN_BALANCE=1
+T3_ADK_ENV=sandbox
+T3_AUTH_SDK_ENV=sandbox
 T3_AGENT_DELEGATION_MODE=dashboard
 T3_AGENT_GRANT_VERIFICATION_REQUIRED=true
-T3_PRIVATE_MAP_PREFIX=
+T3_PRIVATE_MAP_PREFIX=ghostbroker-dev
 ```
 
 ## Local Setup
@@ -50,17 +63,59 @@ npm run build --workspaces
 npm run test --workspaces
 ```
 
+## Terminal 3 Setup Required For GhostBroker
+
+Terminal 3 setup starts with the claim page. The current ADK docs say that claim flow returns a developer key, a unique opaque `did:t3n` ID, and test tokens linked to the key. The SDK setup uses `T3N_API_KEY` to derive the signing address, authenticate, and read the tenant DID back from the authenticated session. Do not invent or derive the tenant DID locally.
+
+For the US1 MVP you need:
+
+- Developer key: `T3N_API_KEY`.
+- SDK environment: `T3N_ENV=testnet` for sandbox work.
+- Optional node override: `T3_NETWORK_URL`; leave blank to use the SDK's selected environment URL.
+- Optional tenant guard: `T3_TENANT_DID`; when set, startup fails if the authenticated SDK session returns a different DID.
+- Test token balance: used by `npm run sandbox:check --workspace @ghostbroker/t3-enclave`.
+- A signed GhostBroker delegation proof for each agent admission request. The proof wraps Terminal 3 delegation credential JCS bytes, the user signature, the agent invocation signature, nonce, request hash, and a request binding for `institutionId`, `agentDid`, `requestedAction`, and `policyHash`.
+
+For hidden intent and settlement phases you will additionally need:
+
+- Rust and WASI Preview 2: `rustup target add wasm32-wasip2`.
+- `wasm-tools` for component inspection.
+- A Rust/WASM TEE contract with `wit/world.wit` imports limited to the capabilities GhostBroker needs.
+- Contract registration output: the numeric contract ID and stable tenant script name.
+- Tenant KV maps such as `secrets`, `authority-claims`, and contract config maps with explicit reader/writer ACLs that include the registered contract ID.
+- Agent/self grants scoped to the registered script, function names, and any required outbound hosts.
+
+The `POST /api/agents/admit` `authorityProof` field is a JSON string with this top-level shape:
+
+```json
+{
+  "version": "ghostbroker.delegation-proof/1",
+  "credentialJcs": "<base64url Terminal 3 delegation credential JCS bytes>",
+  "userSignature": "<base64url 65-byte EIP-191 user signature>",
+  "recoveredUserAddress": "0x...",
+  "agentSignature": "<base64url 64-byte agent invocation signature>",
+  "nonce": "<base64url 16-byte nonce>",
+  "requestHash": "<base64url sha256 canonical request binding>",
+  "request": {
+    "institutionId": "<uuid>",
+    "agentDid": "did:t3n:...",
+    "requestedAction": "agent.admit",
+    "policyHash": "<authority policy hash>"
+  }
+}
+```
+
+The delegation credential metadata must include `institution_id`, `agent_did`, and `policy_hash`. Startup and admission remain fail-closed if the proof cannot be verified.
+
 ## Database
 
 ```powershell
 supabase db push
 ```
 
-Expected migrations:
+Expected MVP migrations:
 
 - `database/migrations/001_create_institutions.sql`
-- `database/migrations/002_create_completed_trades.sql`
-- `database/migrations/003_create_audit_receipts.sql`
 
 ## Backend
 
@@ -87,8 +142,7 @@ npm run test
 Visual verification:
 
 - Dashboard shows secure connection indicators.
-- Dashboard shows completed trade history.
-- Dashboard opens encrypted receipts.
+- Dashboard shows backend, WebSocket, Supabase, T3 sandbox, and agent connectivity status.
 - Dashboard does not show active order queue, active order counts, asset quantities, bid prices, ask prices, queue rank, or counterparty interest.
 
 ## T3 Enclave
@@ -102,11 +156,9 @@ npm run sandbox:check
 Validation:
 
 - Tenant DID can be resolved.
-- Agent DID has a verified T3N Dashboard grant or a confirmed programmatic delegation grant.
+- Agent DID has a signed, scoped, time-bounded delegation proof.
 - Agent DID can be admitted or rejected.
-- Private maps are created with explicit readers and writers.
-- T3 token balance is checked before contract registration and execution.
-- Matching returns only opaque handles and encrypted outcomes.
+- T3 token balance can be checked against the configured sandbox account.
 
 ## Deployment
 
@@ -115,11 +167,13 @@ Validation:
 3. Run Supabase migrations before enabling production traffic.
 4. Validate WebSocket telemetry in production with a sandbox institution and sandbox agent configured through real T3N delegation.
 
-## Privacy Acceptance Checks
+## MVP Acceptance Checks
 
-Before marking the milestone complete:
+Before marking the US1 MVP complete:
 
-- Search REST contract test data, WebSocket contract test data, frontend snapshots, and logs for disallowed fields.
-- Run Playwright privacy workflow for a non-participating institution.
-- Confirm completed trade history excludes unrelated institution trades.
-- Confirm receipt reads are scoped to authorized trade participants.
+- `GET /api/health` returns backend, Supabase, WebSocket, and T3 status buckets.
+- `POST /api/institutions` creates an institution profile and stores the resolved T3 tenant DID.
+- `POST /api/agents/admit` admits a valid signed delegation proof and rejects expired, revoked, over-scoped, or tampered proofs.
+- Dashboard secure status screens render without active order language.
+
+Hidden intent submission, settlement, completed trade history, and receipt retrieval start in later task phases and are not part of the current MVP.

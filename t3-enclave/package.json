@@ -14,11 +14,14 @@
     "sandbox:check": "tsx src/sandbox/check.ts"
   },
   "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@terminal3/t3n-sdk": "^3.5.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
     "@vitest/coverage-v8": "^4.1.8",
+    "ethers": "^6.16.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

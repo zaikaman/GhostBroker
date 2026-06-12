@@ -1,4 +1,5 @@
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
+import { verifySignedDelegationProof } from "./delegation-credential.js";
 
 export type RequestedAgentAction = "agent.admit" | "intent.submit" | "settlement.execute";
 
@@ -55,6 +56,12 @@ export class DashboardDelegationAgentAuthClient
   public async verifyDelegation(
     request: AgentDelegationVerificationRequest,
   ): Promise<AgentDelegationVerificationResult> {
+    const signedProofResult = verifySignedDelegationProof(request);
+
+    if (signedProofResult.status === "verified") {
+      return signedProofResult;
+    }
+
     const response =
       await this.client.request<AgentDelegationVerificationResult>({
         method: "POST",

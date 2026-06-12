@@ -10,9 +10,9 @@
   },
   "packageManager": "npm@10.0.0",
   "workspaces": [
-    "frontend",
+    "t3-enclave",
     "backend",
-    "t3-enclave"
+    "frontend"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

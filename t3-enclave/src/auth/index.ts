@@ -6,4 +6,5 @@ export interface AgentAuthorityReference {
 
 export * from "./agent-auth-client.js";
 export * from "./authority-claims.js";
+export * from "./delegation-credential.js";
 export * from "./did-registry.js";

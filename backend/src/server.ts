@@ -1,12 +1,12 @@
 import { createServer } from "node:http";
-import { createApp } from "./app.js";
+import { createProductionApp } from "./app.js";
 import { loadEnv } from "./config/env.js";
 import { logger } from "./logging/logger.js";
 import { telemetryBus } from "./services/telemetry-bus.js";
 import { attachTelemetryServer } from "./websocket/telemetry-server.js";
 
 const env = loadEnv();
-const app = createApp(env);
+const app = await createProductionApp(env);
 const server = createServer(app);
 
 attachTelemetryServer(server, telemetryBus);
