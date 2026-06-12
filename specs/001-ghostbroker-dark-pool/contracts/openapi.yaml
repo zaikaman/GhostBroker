@@ -1,0 +1,269 @@
+openapi: 3.1.0
+info:
+  title: GhostBroker REST API
+  version: 0.1.0
+  description: REST contract for institutional metadata, agent admission, completed trade history, and encrypted receipts. Active hidden order parameters must not be returned by any endpoint.
+servers:
+  - url: https://ghostbroker-api.herokuapp.com
+paths:
+  /api/health:
+    get:
+      summary: Service health
+      responses:
+        "200":
+          description: Health state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/institutions:
+    post:
+      summary: Create institution profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInstitutionRequest"
+      responses:
+        "201":
+          description: Institution created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Institution"
+  /api/agents/admit:
+    post:
+      summary: Admit an autonomous agent after identity and authority verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdmitAgentRequest"
+      responses:
+        "200":
+          description: Agent admission result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentAdmission"
+        "403":
+          description: Agent rejected without active queue disclosure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedactedError"
+  /api/agents/intents:
+    post:
+      summary: Submit encrypted hidden trading intent
+      description: Accepts an encrypted intent envelope from an authorized agent. The API never accepts or returns plaintext asset, side, quantity, price, queue, or counterparty fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncryptedIntentRequest"
+      responses:
+        "202":
+          description: Intent sealed for confidential evaluation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntentAccepted"
+        "403":
+          description: Agent not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedactedError"
+  /api/trades/completed:
+    get:
+      summary: List completed trades for the authenticated institution
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Completed trades visible to the institution
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CompletedTrade"
+  /api/receipts/{receiptId}:
+    get:
+      summary: Retrieve encrypted receipt metadata and ciphertext
+      parameters:
+        - name: receiptId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Encrypted receipt for authorized institution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditReceipt"
+        "404":
+          description: Not found or not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedactedError"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, services]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unavailable]
+        services:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, degraded, unavailable]
+    CreateInstitutionRequest:
+      type: object
+      required: [legalName, displayName, settlementProfileRef]
+      properties:
+        legalName:
+          type: string
+        displayName:
+          type: string
+        settlementProfileRef:
+          type: string
+    Institution:
+      type: object
+      required: [id, legalName, displayName, status, t3TenantDid]
+      properties:
+        id:
+          type: string
+          format: uuid
+        legalName:
+          type: string
+        displayName:
+          type: string
+        status:
+          type: string
+          enum: [pending, active, suspended, closed]
+        t3TenantDid:
+          type: string
+    AdmitAgentRequest:
+      type: object
+      required: [institutionId, agentDid, authorityProof]
+      properties:
+        institutionId:
+          type: string
+          format: uuid
+        agentDid:
+          type: string
+        authorityProof:
+          type: string
+          description: Opaque proof verified by the Terminal 3 Agent Auth integration.
+    AgentAdmission:
+      type: object
+      required: [agentDid, status, authorityRef]
+      properties:
+        agentDid:
+          type: string
+        status:
+          type: string
+          enum: [admitted, rejected]
+        authorityRef:
+          type: string
+    EncryptedIntentRequest:
+      type: object
+      required: [institutionId, agentDid, encryptedIntentEnvelope, authorityRef]
+      properties:
+        institutionId:
+          type: string
+          format: uuid
+        agentDid:
+          type: string
+        encryptedIntentEnvelope:
+          type: string
+          description: Encrypted payload destined for T3 confidential evaluation.
+        authorityRef:
+          type: string
+    IntentAccepted:
+      type: object
+      required: [intentHandle, state]
+      properties:
+        intentHandle:
+          type: string
+        state:
+          type: string
+          enum: [intent_sealed]
+    CompletedTrade:
+      type: object
+      required: [id, tradeRef, settledAt, settlementStatus, receiptIds]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tradeRef:
+          type: string
+        assetCodeCiphertext:
+          type: string
+        quantityCiphertext:
+          type: string
+        executionPriceCiphertext:
+          type: string
+        settledAt:
+          type: string
+          format: date-time
+        settlementStatus:
+          type: string
+          enum: [settled, failed, reversed]
+        receiptIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    AuditReceipt:
+      type: object
+      required: [id, completedTradeId, receiptCiphertext, receiptHash, keyVersion, t3AttestationRef]
+      properties:
+        id:
+          type: string
+          format: uuid
+        completedTradeId:
+          type: string
+          format: uuid
+        receiptCiphertext:
+          type: string
+        receiptHash:
+          type: string
+        keyVersion:
+          type: string
+        t3AttestationRef:
+          type: string
+    RedactedError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [authorization_failed, validation_failed, service_unavailable, not_found]
+        message:
+          type: string
+          description: Generic error text with no active queue or order disclosure.
