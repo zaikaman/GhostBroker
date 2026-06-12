@@ -12,7 +12,8 @@
   "workspaces": [
     "t3-enclave",
     "backend",
-    "frontend"
+    "frontend",
+    "agent-client"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

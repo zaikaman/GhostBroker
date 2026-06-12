@@ -6,6 +6,7 @@ import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
 import { SecureMetric } from '../components/SecureMetric';
 import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
 import { ProcessingStatusRail } from '../components/ProcessingStatusRail';
+import { LiveAgentActivityStream } from '../components/LiveAgentActivityStream';
 import { CompletedTradesTable } from '../components/CompletedTradesTable';
 import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
 import { AuthGateway } from '../components/AuthGateway';
@@ -170,6 +171,16 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Live Agent Activity Stream */}
+        <div className="card">
+          <LiveAgentActivityStream
+            agents={agents}
+            intents={intents}
+            institutionName={session.institution.displayName}
+            institutionDid={session.institution.t3TenantDid}
+          />
         </div>
 
         {/* Processing Status Rail */}
