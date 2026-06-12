@@ -65,13 +65,13 @@
 - [X] T037 Create backend telemetry redactor allowlist in `backend/src/websocket/redact-event.ts`
 - [X] T038 Create backend telemetry bus abstraction in `backend/src/services/telemetry-bus.ts`
 - [X] T039 Create backend WebSocket telemetry server shell in `backend/src/websocket/telemetry-server.ts`
-- [ ] T040 Create frontend design token stylesheet with dashboard color, spacing, typography, and state tokens in `frontend/src/styles/theme.css`
-- [ ] T041 Create frontend dashboard layout stylesheet with responsive grid rules in `frontend/src/styles/dashboard.css`
-- [ ] T042 Create frontend API client with typed redacted error handling in `frontend/src/services/api-client.ts`
-- [ ] T043 Create frontend WebSocket telemetry client with reconnect policy in `frontend/src/services/telemetry-client.ts`
-- [ ] T044 Create frontend route shell in `frontend/src/app/routes.tsx`
-- [ ] T045 Create frontend app entry with CSS imports and dashboard route in `frontend/src/app/App.tsx`
-- [ ] T046 Create frontend main bootstrap file in `frontend/src/main.tsx`
+- [X] T040 Create frontend design token stylesheet with dashboard color, spacing, typography, and state tokens in `frontend/src/styles/theme.css`
+- [X] T041 Create frontend dashboard layout stylesheet with responsive grid rules in `frontend/src/styles/dashboard.css`
+- [X] T042 Create frontend API client with typed redacted error handling in `frontend/src/services/api-client.ts`
+- [X] T043 Create frontend WebSocket telemetry client with reconnect policy in `frontend/src/services/telemetry-client.ts`
+- [X] T044 Create frontend route shell in `frontend/src/app/routes.tsx`
+- [X] T045 Create frontend app entry with CSS imports and dashboard route in `frontend/src/app/App.tsx`
+- [X] T046 Create frontend main bootstrap file in `frontend/src/main.tsx`
 - [X] T047 Create T3 enclave public exports for runner, auth, keys, matching, and settlement modules in `t3-enclave/src/index.ts`
 - [X] T048 Create production T3 network client interface and ADK-backed implementation in `t3-enclave/src/sandbox/t3n-client.ts`
 - [X] T049 Create production T3 token balance interface and sandbox-backed implementation in `t3-enclave/src/sandbox/token-balance.ts`
