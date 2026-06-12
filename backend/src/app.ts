@@ -15,6 +15,8 @@ import { correlationIdMiddleware } from "./middleware/correlation-id.js";
 import { createHealthRouter } from "./api/health.routes.js";
 import { createInstitutionsRouter } from "./api/institutions.routes.js";
 import { createAgentsRouter } from "./api/agents.routes.js";
+import { createTradesRouter } from "./api/trades.routes.js";
+import { createReceiptsRouter } from "./api/receipts.routes.js";
 import { operatorAuthMiddleware } from "./auth/operator-auth.js";
 import { T3AgentAuthorizationFacade } from "./auth/agent-authz.js";
 import { createSupabaseServiceClient } from "./services/supabase-client.js";
@@ -29,11 +31,24 @@ import {
   HiddenIntentService,
   type HiddenIntentSubmissionService,
 } from "./services/hidden-intent.service.js";
+import {
+  SupabaseTradeHistoryRepository,
+  TradeHistoryService,
+} from "./services/trade-history.service.js";
+import {
+  ReceiptService,
+  SupabaseReceiptRepository,
+} from "./services/receipt.service.js";
+import {
+  SettlementService,
+  SupabaseSettlementRepository,
+} from "./services/settlement.service.js";
 import { telemetryBus } from "./services/telemetry-bus.js";
 import {
   AdkTenantDidRegistry,
   DashboardDelegationAgentAuthClient,
   SandboxTokenBalanceClient,
+  SettlementCommandBuilder,
   T3BlindIntentClient,
   createAuthenticatedT3NetworkClient,
   type AuthenticatedT3NetworkClientOptions,
@@ -68,6 +83,9 @@ export interface BackendServices {
   institutionService: InstitutionManagementService;
   agentService: AgentAdmissionService;
   hiddenIntentService?: HiddenIntentSubmissionService;
+  settlementService?: SettlementService;
+  tradeHistoryService?: TradeHistoryService;
+  receiptService?: ReceiptService;
 }
 
 async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
@@ -95,6 +113,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
   const authorizationFacade = new T3AgentAuthorizationFacade(
     new DashboardDelegationAgentAuthClient(t3NetworkClient),
   );
+  const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
   return {
     institutionService: new InstitutionService(
       institutionRepository,
@@ -108,13 +127,22 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       authorizationFacade,
       new T3BlindIntentClient({
         networkClient: t3NetworkClient,
-        tokenBalanceClient: new SandboxTokenBalanceClient(t3NetworkClient),
+        tokenBalanceClient,
         tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
         minimumTokenBalance: 1n,
       }),
       telemetryBus,
       authorityRevocationRepository,
     ),
+    settlementService: new SettlementService(
+      new SettlementCommandBuilder(authorizationFacade),
+      new SupabaseSettlementRepository(supabase as never),
+      telemetryBus,
+    ),
+    tradeHistoryService: new TradeHistoryService(
+      new SupabaseTradeHistoryRepository(supabase as never),
+    ),
+    receiptService: new ReceiptService(new SupabaseReceiptRepository(supabase as never)),
   };
 }
 
@@ -136,6 +164,20 @@ export function createApp(
     operatorAuthMiddleware(),
     createAgentsRouter(services.agentService, services.hiddenIntentService),
   );
+  if (services.tradeHistoryService) {
+    app.use(
+      "/api",
+      operatorAuthMiddleware(),
+      createTradesRouter(services.tradeHistoryService),
+    );
+  }
+  if (services.receiptService) {
+    app.use(
+      "/api",
+      operatorAuthMiddleware(),
+      createReceiptsRouter(services.receiptService),
+    );
+  }
   app.use(publicErrorHandler);
 
   return app;

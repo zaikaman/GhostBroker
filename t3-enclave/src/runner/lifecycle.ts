@@ -10,6 +10,7 @@ export interface RunnerLifecycleSnapshot {
   state: RunnerLifecycleState;
   updatedAt: string;
   failureReason?: string;
+  consensusRetryCount?: number;
 }
 
 export class RunnerLifecycle {
@@ -40,6 +41,34 @@ export class RunnerLifecycle {
     }
 
     this.snapshot = updated;
+    return this.current();
+  }
+
+  public recordConsensusConflict(
+    options: { maxRetries: number; now?: Date } = { maxRetries: 3 },
+  ): RunnerLifecycleSnapshot {
+    const retryCount = (this.snapshot.consensusRetryCount ?? 0) + 1;
+
+    if (retryCount > options.maxRetries) {
+      const transitionOptions: { now?: Date; failureReason?: string } = {
+        failureReason: "t3_consensus_conflict_retry_exhausted",
+      };
+
+      if (options.now) {
+        transitionOptions.now = options.now;
+      }
+
+      return this.transition("failed", {
+        ...transitionOptions,
+      });
+    }
+
+    this.snapshot = {
+      ...this.snapshot,
+      state: "ready",
+      updatedAt: (options.now ?? new Date()).toISOString(),
+      consensusRetryCount: retryCount,
+    };
     return this.current();
   }
 }

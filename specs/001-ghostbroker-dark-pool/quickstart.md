@@ -117,6 +117,8 @@ Expected MVP migrations:
 
 - `database/migrations/001_create_institutions.sql`
 - `database/migrations/002_create_agent_authority_revocations.sql`
+- `database/migrations/002_create_completed_trades.sql`
+- `database/migrations/003_create_audit_receipts.sql`
 
 ## Backend
 
@@ -177,7 +179,7 @@ Before marking the US1 MVP complete:
 - `POST /api/agents/admit` admits a valid signed delegation proof and rejects expired, revoked, over-scoped, or tampered proofs.
 - Dashboard secure status screens render without active order language.
 
-Hidden intent submission, settlement, completed trade history, and receipt retrieval start in later task phases and are not part of the current MVP.
+Hidden intent submission, settlement, completed trade history, and receipt retrieval are validated by the later story-specific checks below.
 
 ## US2 Hidden Intent Validation
 
@@ -196,3 +198,21 @@ Expected behavior:
 - Successful responses contain only `intentHandle` and `state`.
 - Telemetry emits only `intent_received`, `intent_sealed`, and `encrypted_evaluation` with opaque correlation references.
 - T3 enclave tests prove encrypted envelopes are converted to opaque handles only.
+
+## US3 Settlement Validation
+
+After US3 implementation, validate settlement and receipt persistence locally:
+
+```powershell
+npm run test --workspace @ghostbroker/backend -- settlement completed-trades-schema audit-receipts-schema completed-trades receipts telemetry-settlement
+npm run test --workspace @ghostbroker/t3-enclave -- match-contract-client settlement
+```
+
+Expected behavior:
+
+- Compatible opaque match outcomes produce completed trade records only after settlement command construction succeeds.
+- Failed persistence returns `service_unavailable` and does not return a partial completed trade.
+- Revoked authority, expired outcomes, and token metering failures are bucketed into redacted public errors.
+- `GET /api/trades/completed` returns only authenticated-institution completed history with encrypted trade fields.
+- `GET /api/receipts/{receiptId}` returns encrypted receipt data only for the receipt owner and records an access audit timestamp.
+- Settlement telemetry emits only `settlement_pending`, `settlement_finalized`, `receipt_available`, and redacted failure buckets.

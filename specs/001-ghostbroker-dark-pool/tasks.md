@@ -190,44 +190,44 @@
 
 ### Tests for User Story 3 (MANDATORY)
 
-- [ ] T120 [P] [US3] Add integration test for compatible match settlement and completed trade persistence in `backend/src/tests/integration/settlement-success.test.ts`
-- [ ] T121 [P] [US3] Add integration test for failed settlement with no one-sided balance update in `backend/src/tests/integration/settlement-atomicity.test.ts`
-- [ ] T122 [P] [US3] Add integration test for revoked authority before settlement in `backend/src/tests/integration/settlement-revoked-authority.test.ts`
-- [ ] T123 [P] [US3] Add integration test for expired intent before settlement in `backend/src/tests/integration/settlement-expired-intent.test.ts`
-- [ ] T124 [P] [US3] Add integration test for T3 token exhaustion bucketed as redacted telemetry in `backend/src/tests/integration/settlement-token-exhaustion.test.ts`
-- [ ] T125 [P] [US3] Add T3 match contract client tests for opaque match outcomes in `t3-enclave/src/tests/match-contract-client.test.ts`
-- [ ] T126 [P] [US3] Add T3 settlement command tests for successful, failed, and retryable outcomes in `t3-enclave/src/tests/settlement.test.ts`
-- [ ] T127 [P] [US3] Add database migration test for completed trade constraints in `backend/src/tests/integration/completed-trades-schema.test.ts`
-- [ ] T128 [P] [US3] Add database migration test for audit receipt constraints in `backend/src/tests/integration/audit-receipts-schema.test.ts`
-- [ ] T129 [P] [US3] Add WebSocket test for settlement telemetry without trade plaintext in `backend/src/tests/integration/telemetry-settlement-redaction.test.ts`
-- [ ] T130 [P] [US3] Add REST contract test for `GET /api/trades/completed` scoped results in `backend/src/tests/contracts/completed-trades.contract.test.ts`
-- [ ] T131 [P] [US3] Add REST contract test for `GET /api/receipts/{receiptId}` authorization and encrypted payload shape in `backend/src/tests/contracts/receipts.contract.test.ts`
+- [X] T120 [P] [US3] Add integration test for compatible match settlement and completed trade persistence in `backend/src/tests/integration/settlement-success.test.ts`
+- [X] T121 [P] [US3] Add integration test for failed settlement with no one-sided balance update in `backend/src/tests/integration/settlement-atomicity.test.ts`
+- [X] T122 [P] [US3] Add integration test for revoked authority before settlement in `backend/src/tests/integration/settlement-revoked-authority.test.ts`
+- [X] T123 [P] [US3] Add integration test for expired intent before settlement in `backend/src/tests/integration/settlement-expired-intent.test.ts`
+- [X] T124 [P] [US3] Add integration test for T3 token exhaustion bucketed as redacted telemetry in `backend/src/tests/integration/settlement-token-exhaustion.test.ts`
+- [X] T125 [P] [US3] Add T3 match contract client tests for opaque match outcomes in `t3-enclave/src/tests/match-contract-client.test.ts`
+- [X] T126 [P] [US3] Add T3 settlement command tests for successful, failed, and retryable outcomes in `t3-enclave/src/tests/settlement.test.ts`
+- [X] T127 [P] [US3] Add database migration test for completed trade constraints in `backend/src/tests/integration/completed-trades-schema.test.ts`
+- [X] T128 [P] [US3] Add database migration test for audit receipt constraints in `backend/src/tests/integration/audit-receipts-schema.test.ts`
+- [X] T129 [P] [US3] Add WebSocket test for settlement telemetry without trade plaintext in `backend/src/tests/integration/telemetry-settlement-redaction.test.ts`
+- [X] T130 [P] [US3] Add REST contract test for `GET /api/trades/completed` scoped results in `backend/src/tests/contracts/completed-trades.contract.test.ts`
+- [X] T131 [P] [US3] Add REST contract test for `GET /api/receipts/{receiptId}` authorization and encrypted payload shape in `backend/src/tests/contracts/receipts.contract.test.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T132 [P] [US3] Create completed trades migration from the data model in `database/migrations/002_create_completed_trades.sql`
-- [ ] T133 [P] [US3] Create audit receipts migration from the data model in `database/migrations/003_create_audit_receipts.sql`
-- [ ] T134 [P] [US3] Create completed trades row-level security policies in `database/policies/002_completed_trades_rls.sql`
-- [ ] T135 [P] [US3] Create audit receipts row-level security policies in `database/policies/003_audit_receipts_rls.sql`
-- [ ] T136 [P] [US3] Create backend completed trade model and validation types in `backend/src/models/completed-trade.ts`
-- [ ] T137 [P] [US3] Create backend audit receipt model and validation types in `backend/src/models/audit-receipt.ts`
-- [ ] T138 [P] [US3] Create backend balance update command types in `backend/src/models/balance.ts`
-- [ ] T139 [US3] Implement T3 match contract client with opaque execution references in `t3-enclave/src/matching/match-contract-client.ts`
-- [ ] T140 [US3] Implement T3 settlement command builder with authority recheck in `t3-enclave/src/matching/settlement-command.ts`
-- [ ] T141 [US3] Implement backend settlement service with atomic completed trade and receipt write orchestration in `backend/src/services/settlement.service.ts`
-- [ ] T142 [US3] Implement backend trade history service scoped to authenticated institution in `backend/src/services/trade-history.service.ts`
-- [ ] T143 [US3] Implement backend receipt service for encrypted receipt persistence and retrieval in `backend/src/services/receipt.service.ts`
-- [ ] T144 [US3] Implement completed trades route for `GET /api/trades/completed` in `backend/src/api/trades.routes.ts`
-- [ ] T145 [US3] Implement receipt route for `GET /api/receipts/:receiptId` in `backend/src/api/receipts.routes.ts`
-- [ ] T146 [US3] Register trade and receipt routes in `backend/src/app.ts`
-- [ ] T147 [US3] Publish settlement telemetry phases without trade plaintext in `backend/src/services/settlement.service.ts`
-- [ ] T148 [US3] Add bounded retry handling for T3 consensus conflicts in `t3-enclave/src/runner/lifecycle.ts`
-- [ ] T149 [US3] Add T3 token metering failure mapping to redacted backend errors in `backend/src/services/settlement.service.ts`
-- [ ] T150 [US3] Add settlement test data builders for buyer, seller, encrypted trade fields, and receipts in `backend/src/tests/data/us3-settlement-builders.ts`
-- [ ] T151 [US3] Verify backend US3 tests fail before implementation and pass after implementation using `backend/package.json`
-- [ ] T152 [US3] Verify T3 enclave US3 tests fail before implementation and pass after implementation using `t3-enclave/package.json`
-- [ ] T153 [US3] Add settlement audit event emission for match, settlement, balance, and receipt steps in `backend/src/services/settlement.service.ts`
-- [ ] T154 [US3] Update quickstart validation steps for settlement and receipt creation in `specs/001-ghostbroker-dark-pool/quickstart.md`
+- [X] T132 [P] [US3] Create completed trades migration from the data model in `database/migrations/002_create_completed_trades.sql`
+- [X] T133 [P] [US3] Create audit receipts migration from the data model in `database/migrations/003_create_audit_receipts.sql`
+- [X] T134 [P] [US3] Create completed trades row-level security policies in `database/policies/002_completed_trades_rls.sql`
+- [X] T135 [P] [US3] Create audit receipts row-level security policies in `database/policies/003_audit_receipts_rls.sql`
+- [X] T136 [P] [US3] Create backend completed trade model and validation types in `backend/src/models/completed-trade.ts`
+- [X] T137 [P] [US3] Create backend audit receipt model and validation types in `backend/src/models/audit-receipt.ts`
+- [X] T138 [P] [US3] Create backend balance update command types in `backend/src/models/balance.ts`
+- [X] T139 [US3] Implement T3 match contract client with opaque execution references in `t3-enclave/src/matching/match-contract-client.ts`
+- [X] T140 [US3] Implement T3 settlement command builder with authority recheck in `t3-enclave/src/matching/settlement-command.ts`
+- [X] T141 [US3] Implement backend settlement service with atomic completed trade and receipt write orchestration in `backend/src/services/settlement.service.ts`
+- [X] T142 [US3] Implement backend trade history service scoped to authenticated institution in `backend/src/services/trade-history.service.ts`
+- [X] T143 [US3] Implement backend receipt service for encrypted receipt persistence and retrieval in `backend/src/services/receipt.service.ts`
+- [X] T144 [US3] Implement completed trades route for `GET /api/trades/completed` in `backend/src/api/trades.routes.ts`
+- [X] T145 [US3] Implement receipt route for `GET /api/receipts/:receiptId` in `backend/src/api/receipts.routes.ts`
+- [X] T146 [US3] Register trade and receipt routes in `backend/src/app.ts`
+- [X] T147 [US3] Publish settlement telemetry phases without trade plaintext in `backend/src/services/settlement.service.ts`
+- [X] T148 [US3] Add bounded retry handling for T3 consensus conflicts in `t3-enclave/src/runner/lifecycle.ts`
+- [X] T149 [US3] Add T3 token metering failure mapping to redacted backend errors in `backend/src/services/settlement.service.ts`
+- [X] T150 [US3] Add settlement test data builders for buyer, seller, encrypted trade fields, and receipts in `backend/src/tests/data/us3-settlement-builders.ts`
+- [X] T151 [US3] Verify backend US3 tests fail before implementation and pass after implementation using `backend/package.json`
+- [X] T152 [US3] Verify T3 enclave US3 tests fail before implementation and pass after implementation using `t3-enclave/package.json`
+- [X] T153 [US3] Add settlement audit event emission for match, settlement, balance, and receipt steps in `backend/src/services/settlement.service.ts`
+- [X] T154 [US3] Update quickstart validation steps for settlement and receipt creation in `specs/001-ghostbroker-dark-pool/quickstart.md`
 
 **Checkpoint**: User Story 3 settles compatible matches and writes completed history plus encrypted receipts without exposing active order details.
 
