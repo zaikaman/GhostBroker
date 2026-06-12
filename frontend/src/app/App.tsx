@@ -119,78 +119,28 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         </div>
       )}
 
-      {/* Main Left Section: Blind Order Submission */}
+      {/* Main Left Section: Sealed Order Book */}
       <main className="layout-left card">
         <h2 className="card-title">
-          <span>📝</span> Blind Order Submission
+          <span>👁️‍🗨️</span> Sealed Order Book
         </h2>
-        <form onSubmit={(e) => e.preventDefault()}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="assetTicker">Asset Ticker</label>
-            <input
-              type="text"
-              id="assetTicker"
-              className="form-input"
-              placeholder="e.g. BTC-USD, ETH-USD"
-              disabled
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="direction">Direction</label>
-            <select id="direction" className="form-select" disabled>
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="limitPrice">Limit Price</label>
-            <input
-              type="number"
-              id="limitPrice"
-              className="form-input"
-              placeholder="0.00"
-              disabled
-            />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="volume">Volume</label>
-            <input
-              type="number"
-              id="volume"
-              className="form-input"
-              placeholder="0.00"
-              disabled
-            />
-          </div>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled>
-              Submit Sealed Intent
-            </button>
-          </div>
-        </form>
-      </main>
-
-      {/* Main Right Section: Sealed Order Book & Connected Agents */}
-      <section className="layout-right" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-        <div className="card">
-          <h2 className="card-title">
-            <span>👁️‍🗨️</span> Sealed Order Book
-          </h2>
-          <div className="radar-container">
-            <div className="radar-sweep"></div>
-            <div className="radar-grid"></div>
-            <div className="radar-grid-inner"></div>
-            <div className="radar-crosshair-h"></div>
-            <div className="radar-crosshair-v"></div>
-            <div className="radar-message">
-              <div className="radar-message-title">Enclave Vault Sealed</div>
-              <div className="radar-message-text">
-                Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
-              </div>
+        <div className="radar-container">
+          <div className="radar-sweep"></div>
+          <div className="radar-grid"></div>
+          <div className="radar-grid-inner"></div>
+          <div className="radar-crosshair-h"></div>
+          <div className="radar-crosshair-v"></div>
+          <div className="radar-message">
+            <div className="radar-message-title">Enclave Vault Sealed</div>
+            <div className="radar-message-text">
+              Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
             </div>
           </div>
         </div>
+      </main>
 
+      {/* Main Right Section: Live Telemetry & Connected Agents */}
+      <section className="layout-right" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
         {/* Live Agent Activity Stream */}
         <div className="card">
           <LiveAgentActivityStream
