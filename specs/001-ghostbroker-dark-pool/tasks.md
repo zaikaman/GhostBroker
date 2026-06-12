@@ -27,22 +27,22 @@
 - [X] T008 Create frontend Vite configuration in `frontend/vite.config.ts`
 - [X] T009 Create frontend TypeScript app configuration in `frontend/tsconfig.json`
 - [X] T010 Create frontend test setup for jest-dom matchers in `frontend/src/test/setup.ts`
-- [ ] T011 Create frontend HTML entry point in `frontend/index.html`
-- [ ] T012 Create backend package manifest with Express, WebSocket, Supabase, Supertest, and Vitest scripts in `backend/package.json`
-- [ ] T013 Create backend TypeScript configuration in `backend/tsconfig.json`
-- [ ] T014 Create backend Vitest configuration in `backend/vitest.config.ts`
-- [ ] T015 Create Heroku process declaration for the API server in `backend/Procfile`
-- [ ] T016 Create T3 enclave package manifest with TypeScript, Vitest, and sandbox check scripts in `t3-enclave/package.json`
-- [ ] T017 Create T3 enclave TypeScript configuration in `t3-enclave/tsconfig.json`
-- [ ] T018 Create T3 enclave Vitest configuration in `t3-enclave/vitest.config.ts`
-- [ ] T019 Create database migration directory marker in `database/migrations/.gitkeep`
-- [ ] T020 Create database policy directory marker in `database/policies/.gitkeep`
-- [ ] T021 Create database seed directory marker in `database/seed/.gitkeep`
-- [ ] T022 Create Playwright configuration for dashboard privacy checks in `playwright.config.ts`
-- [ ] T023 Create local environment variable template for frontend values in `frontend/.env.example`
-- [ ] T024 Create local environment variable template for backend values in `backend/.env.example`
-- [ ] T025 Create local environment variable template for T3 enclave values in `t3-enclave/.env.example`
-- [ ] T026 Create repository README with workspace commands and privacy warning in `README.md`
+- [X] T011 Create frontend HTML entry point in `frontend/index.html`
+- [X] T012 Create backend package manifest with Express, WebSocket, Supabase, Supertest, and Vitest scripts in `backend/package.json`
+- [X] T013 Create backend TypeScript configuration in `backend/tsconfig.json`
+- [X] T014 Create backend Vitest configuration in `backend/vitest.config.ts`
+- [X] T015 Create Heroku process declaration for the API server in `backend/Procfile`
+- [X] T016 Create T3 enclave package manifest with TypeScript, Vitest, and sandbox check scripts in `t3-enclave/package.json`
+- [X] T017 Create T3 enclave TypeScript configuration in `t3-enclave/tsconfig.json`
+- [X] T018 Create T3 enclave Vitest configuration in `t3-enclave/vitest.config.ts`
+- [X] T019 Create database migration directory marker in `database/migrations/.gitkeep`
+- [X] T020 Create database policy directory marker in `database/policies/.gitkeep`
+- [X] T021 Create database seed directory marker in `database/seed/.gitkeep`
+- [X] T022 Create Playwright configuration for dashboard privacy checks in `playwright.config.ts`
+- [X] T023 Create local environment variable template for frontend values in `frontend/.env.example`
+- [X] T024 Create local environment variable template for backend values in `backend/.env.example`
+- [X] T025 Create local environment variable template for T3 enclave values in `t3-enclave/.env.example`
+- [X] T026 Create repository README with workspace commands and privacy warning in `README.md`
 
 **Checkpoint**: Workspaces install, typecheck, and test commands are defined, even if implementation tests fail until later phases.
 
