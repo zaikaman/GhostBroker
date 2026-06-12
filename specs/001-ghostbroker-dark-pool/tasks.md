@@ -18,7 +18,7 @@
 **Purpose**: Create the monorepo structure, strict TypeScript baseline, local scripts, and deployment configuration templates.
 
 - [X] T001 Create root npm workspace manifest with `frontend`, `backend`, and `t3-enclave` workspaces in `package.json`
-- [ ] T002 Create root TypeScript shared compiler settings in `tsconfig.base.json`
+- [X] T002 Create root TypeScript shared compiler settings in `tsconfig.base.json`
 - [ ] T003 Create root test workspace configuration in `vitest.workspace.ts`
 - [ ] T004 Create root lint configuration for strict TypeScript and React in `eslint.config.js`
 - [ ] T005 Create root formatting configuration in `.prettierrc.json`
