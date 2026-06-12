@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import '../styles/theme.css';
 import '../styles/dashboard.css';
-import { RouterProvider, Route } from './routes';
+import { RouterProvider, Route, useRouter } from './routes';
 import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
 import { SecureMetric } from '../components/SecureMetric';
 import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
@@ -10,6 +10,7 @@ import { LiveAgentActivityStream } from '../components/LiveAgentActivityStream';
 import { CompletedTradesTable } from '../components/CompletedTradesTable';
 import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
 import { AuthGateway } from '../components/AuthGateway';
+import { LandingPage } from '../components/LandingPage';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { apiClient, type AuthSession } from '../services/api-client';
@@ -28,19 +29,27 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
   const { trades, isLoading: isHistoryLoading } = useTradeHistory();
 
   // Receipt drawer state
-  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(() =>
+    localStorage.getItem('ghostbroker-selected-receipt-id')
+  );
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(() =>
+    localStorage.getItem('ghostbroker-is-drawer-open') === 'true'
+  );
 
   const { receipt, isLoading: isReceiptLoading, error: receiptError } = useReceipt(selectedReceiptId);
 
   const handleViewReceipt = (receiptId: string) => {
     setSelectedReceiptId(receiptId);
     setIsDrawerOpen(true);
+    localStorage.setItem('ghostbroker-selected-receipt-id', receiptId);
+    localStorage.setItem('ghostbroker-is-drawer-open', 'true');
   };
 
   const handleCloseDrawer = () => {
     setIsDrawerOpen(false);
     setSelectedReceiptId(null);
+    localStorage.removeItem('ghostbroker-selected-receipt-id');
+    localStorage.removeItem('ghostbroker-is-drawer-open');
   };
 
   return (
@@ -133,7 +142,7 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
           <div className="radar-message">
             <div className="radar-message-title">Enclave Vault Sealed</div>
             <div className="radar-message-text">
-              Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
+              Sealed matching core is cryptographically secured inside hardware TEE. Zero visibility mode active.
             </div>
           </div>
         </div>
@@ -187,17 +196,69 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
   );
 }
 
+function AppContent({
+  session,
+  setSession,
+}: {
+  session: AuthSession | null;
+  setSession: React.Dispatch<React.SetStateAction<AuthSession | null>>;
+}): React.JSX.Element {
+  const { currentPath, navigate } = useRouter();
+
+  // Redirect/Route guard logic based on authentication state
+  useEffect(() => {
+    if (!session && (currentPath === '/dashboard' || currentPath === '/settings')) {
+      navigate('/');
+    } else if (session && (currentPath === '/' || currentPath === '/auth')) {
+      navigate('/dashboard');
+    }
+  }, [session, currentPath, navigate]);
+
+  return (
+    <>
+      <Route path="/" element={
+        session ? null : <LandingPage onLaunch={() => navigate('/auth')} />
+      } />
+      
+      <Route path="/auth" element={
+        session ? null : (
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigate('/')}
+              style={{
+                position: 'absolute',
+                top: '20px',
+                left: '20px',
+                zIndex: 10,
+                fontSize: '0.75rem',
+                padding: 'var(--spacing-xs) var(--spacing-md)'
+              }}
+            >
+              ← Back to Landing
+            </button>
+            <AuthGateway onAuthenticated={(newSession) => {
+              setSession(newSession);
+              navigate('/dashboard');
+            }} />
+          </div>
+        )
+      } />
+
+      <Route path="/dashboard" element={
+        session ? <DashboardView session={session} /> : null
+      } />
+    </>
+  );
+}
+
 export function App(): React.JSX.Element {
   const [session, setSession] = useState<AuthSession | null>(() => apiClient.getAuthSession());
 
-  if (!session) {
-    return <AuthGateway onAuthenticated={setSession} />;
-  }
-
   return (
     <RouterProvider>
-      <Route path="/" element={<DashboardView session={session} />} />
-      <Route path="/dashboard" element={<DashboardView session={session} />} />
+      <AppContent session={session} setSession={setSession} />
     </RouterProvider>
   );
 }

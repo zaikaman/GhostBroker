@@ -674,6 +674,37 @@ Without an official DID challenge verification API, implementers may accidentall
 
 ---
 
+### T3-ONB-016: Headless E2E Browser Testing and Drawer State Persistence Guidelines
+
+**Severity**: P2  
+**Category**: QA / E2E Testing gap  
+**Affected docs**: Testing & Local Stack Integration, Operator Authentication System, Telemetry Integration  
+
+**What I found**
+
+Headless E2E test runners (like Playwright) running in automated pipelines do not have access to Web3 browser wallets (like MetaMask) to solve wallet challenge prompts. The local documentation does not specify how automation should authenticate as institutional operators to execute console/observatory tasks.
+
+Additionally, E2E tests verifying credential rotations or unauthorized receipt access often perform page reloads in the middle of validation. If critical UI states (such as active receipt selection and drawer open state) are kept purely in transient React component state, they are wiped on reload, breaking E2E verification flows. Furthermore, CSS opacity transitions on overlays without visibility state toggling cause automated hit-test click blockers.
+
+**Why this matters for GhostBroker**
+
+Without a standardized testing bypass and state persistence mechanism, operators cannot build robust, repeatable E2E tests for secure dashboard features like attestation receipts or enclaved trade metrics.
+
+**Recommended fix for docs**
+
+- Add guidelines for E2E testing operator console pages:
+  - Documenting E2E local storage markers (`x-operator-institution-id` and `x-operator-id`) that the frontend client API and state hooks can detect to supply a mock session.
+  - Recommending local storage or hash-based persistence for modal/drawer states to survive page reloads during multi-step E2E tests.
+  - Outlining CSS transition guidelines requiring visibility transitions or `display: none` to avoid overlay pointer-event interception.
+
+**Recommended implementation action**
+
+- Allow E2E bypass in `api-client.ts`'s session parser by checking for operator local storage context when a wallet bearer session is absent.
+- Persist receipt selection and drawer open states to local storage on value update, and restore them during component mount.
+- Add `visibility: hidden;` to `.drawer-backdrop` transitions and use `dispatchEvent('click')` in Playwright for robust element clicks.
+
+---
+
 ## Implementation Guardrails for GhostBroker
 
 These guardrails should be treated as non-negotiable until Terminal 3 fills the relevant documentation gaps or confirms private integration details.

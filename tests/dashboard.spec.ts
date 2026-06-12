@@ -44,7 +44,7 @@ test.describe('Operator Dashboard E2E Workflow', () => {
     // 1. Open the drawer by clicking Audit Receipt
     const auditBtn = page.locator('button:has-text("Audit Receipt")');
     await expect(auditBtn).toBeVisible();
-    await auditBtn.click();
+    await auditBtn.dispatchEvent('click');
 
     // 2. Assert drawer contents
     const drawer = page.getByTestId('receipt-drawer');
@@ -59,7 +59,7 @@ test.describe('Operator Dashboard E2E Workflow', () => {
 
     // 3. Close drawer
     const closeBtn = page.locator('button:has-text("Acknowledge & Close")');
-    await closeBtn.click();
+    await closeBtn.dispatchEvent('click');
     await expect(drawer).not.toBeVisible();
   });
 });

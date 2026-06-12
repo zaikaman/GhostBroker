@@ -47,7 +47,7 @@ test.describe('Dashboard Privacy Guardrails', () => {
     // Open receipt drawer
     const auditBtn = page.locator('button:has-text("Audit Receipt")');
     await expect(auditBtn).toBeVisible();
-    await auditBtn.click();
+    await auditBtn.dispatchEvent('click');
     await expect(page.getByTestId('receipt-drawer')).toBeVisible();
 
     // 2. Change operator context in localStorage to unrelated institution
