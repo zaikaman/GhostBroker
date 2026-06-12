@@ -3,3 +3,7 @@ export interface AgentAuthorityReference {
   authorityRef: string;
   policyHash: string;
 }
+
+export * from "./agent-auth-client.js";
+export * from "./authority-claims.js";
+export * from "./did-registry.js";

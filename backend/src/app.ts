@@ -13,6 +13,22 @@ import {
 import { toPublicError } from "./errors/public-error.js";
 import { correlationIdMiddleware } from "./middleware/correlation-id.js";
 import { createHealthRouter } from "./api/health.routes.js";
+import { createInstitutionsRouter } from "./api/institutions.routes.js";
+import { createAgentsRouter } from "./api/agents.routes.js";
+import { operatorAuthMiddleware } from "./auth/operator-auth.js";
+import { T3AgentAuthorizationFacade } from "./auth/agent-authz.js";
+import { createSupabaseServiceClient } from "./services/supabase-client.js";
+import {
+  InstitutionService,
+  SupabaseInstitutionRepository,
+  type InstitutionManagementService,
+} from "./services/institution.service.js";
+import { AgentService, type AgentAdmissionService } from "./services/agent.service.js";
+import {
+  AdkTenantDidRegistry,
+  DashboardDelegationAgentAuthClient,
+  FetchT3NetworkClient,
+} from "@ghostbroker/t3-enclave";
 
 function createCorsMiddleware(env: BackendEnv): RequestHandler {
   const allowedOrigins = getCorsAllowedOrigins(env);
@@ -39,7 +55,39 @@ const publicErrorHandler: ErrorRequestHandler = (error, _request, response, _nex
   response.status(publicError.statusCode).json(publicError.toResponse());
 };
 
-export function createApp(env: BackendEnv = loadEnv()): Express {
+export interface BackendServices {
+  institutionService: InstitutionManagementService;
+  agentService: AgentAdmissionService;
+}
+
+function createDefaultServices(env: BackendEnv): BackendServices {
+  const t3NetworkClient = new FetchT3NetworkClient({
+    networkUrl: env.T3_NETWORK_URL,
+    tenantDid: env.T3_TENANT_DID,
+    walletPrivateKeyRef: env.T3_WALLET_PRIVATE_KEY_REF,
+  });
+  const supabase = createSupabaseServiceClient(env);
+  const institutionRepository = new SupabaseInstitutionRepository(
+    supabase as never,
+  );
+
+  return {
+    institutionService: new InstitutionService(
+      institutionRepository,
+      new AdkTenantDidRegistry(t3NetworkClient),
+    ),
+    agentService: new AgentService(
+      new T3AgentAuthorizationFacade(
+        new DashboardDelegationAgentAuthClient(t3NetworkClient),
+      ),
+    ),
+  };
+}
+
+export function createApp(
+  env: BackendEnv = loadEnv(),
+  services: BackendServices = createDefaultServices(env),
+): Express {
   const app = express();
 
   app.disable("x-powered-by");
@@ -48,6 +96,8 @@ export function createApp(env: BackendEnv = loadEnv()): Express {
   app.use(express.json({ limit: "1mb" }));
   app.use(correlationIdMiddleware());
   app.use("/api", createHealthRouter(env));
+  app.use("/api", createInstitutionsRouter(services.institutionService));
+  app.use("/api", operatorAuthMiddleware(), createAgentsRouter(services.agentService));
   app.use(publicErrorHandler);
 
   return app;
