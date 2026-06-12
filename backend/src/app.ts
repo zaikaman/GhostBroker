@@ -23,6 +23,7 @@ import {
   SupabaseInstitutionRepository,
   type InstitutionManagementService,
 } from "./services/institution.service.js";
+import { SupabaseAuthorityRevocationRepository } from "./services/authority-revocation.service.js";
 import { AgentService, type AgentAdmissionService } from "./services/agent.service.js";
 import {
   AdkTenantDidRegistry,
@@ -80,6 +81,8 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
   const institutionRepository = new SupabaseInstitutionRepository(
     supabase as never,
   );
+  const authorityRevocationRepository =
+    new SupabaseAuthorityRevocationRepository(supabase as never);
 
   return {
     institutionService: new InstitutionService(
@@ -90,6 +93,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       new T3AgentAuthorizationFacade(
         new DashboardDelegationAgentAuthClient(t3NetworkClient),
       ),
+      authorityRevocationRepository,
     ),
   };
 }

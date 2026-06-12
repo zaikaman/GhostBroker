@@ -8,6 +8,7 @@ export interface AgentDelegationVerificationRequest {
   agentDid: string;
   authorityProof: string;
   requestedAction: RequestedAgentAction;
+  revokedAuthorityRefs?: ReadonlySet<string>;
 }
 
 export type AgentDelegationRejectionReason =
@@ -62,11 +63,13 @@ export class DashboardDelegationAgentAuthClient
       return signedProofResult;
     }
 
+    const { revokedAuthorityRefs: _revokedAuthorityRefs, ...verificationRequest } =
+      request;
     const response =
       await this.client.request<AgentDelegationVerificationResult>({
         method: "POST",
         path: this.verificationPath,
-        body: request,
+        body: verificationRequest,
       });
 
     if (response.status < 200 || response.status >= 300) {

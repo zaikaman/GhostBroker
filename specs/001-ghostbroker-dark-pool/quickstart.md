@@ -116,6 +116,7 @@ supabase db push
 Expected MVP migrations:
 
 - `database/migrations/001_create_institutions.sql`
+- `database/migrations/002_create_agent_authority_revocations.sql`
 
 ## Backend
 

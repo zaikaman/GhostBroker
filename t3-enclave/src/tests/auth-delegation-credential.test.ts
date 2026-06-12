@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SigningKey, getBytes, hexlify } from "ethers";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import {
   b64uEncodeBytes,
   buildDelegationCredential,
@@ -19,8 +19,12 @@ const agentDid = "did:t3n:agent:us1-authorized";
 const userDid = `did:t3n:${"a".repeat(40)}`;
 const orgDid = `did:t3n:${"b".repeat(40)}`;
 const policyHash = "policy:ghostbroker:us1";
-const userPrivateKey = `0x${"11".repeat(32)}`;
-const agentPrivateKey = `0x${"22".repeat(32)}`;
+const userPrivateKey = new Uint8Array(32).fill(0x11);
+const agentPrivateKey = new Uint8Array(32).fill(0x22);
+
+function hexLower(value: Uint8Array): string {
+  return `0x${Buffer.from(value).toString("hex")}`;
+}
 
 function buildSignedAuthorityProof(
   overrides: {
@@ -39,12 +43,11 @@ function buildSignedAuthorityProof(
     requestedAction: overrides.requestedAction ?? "agent.admit",
     policyHash: overrides.policyHash ?? policyHash,
   };
-  const agentSigningKey = new SigningKey(agentPrivateKey);
   const vcId = new Uint8Array(16).fill(1);
   const nonce = new Uint8Array(16).fill(2);
   const credential = buildDelegationCredential({
     user_did: userDid,
-    agent_pubkey: getBytes(agentSigningKey.compressedPublicKey),
+    agent_pubkey: secp256k1.getPublicKey(agentPrivateKey, true),
     org_did: orgDid,
     contract: "ghostbroker.darkpool",
     functions: overrides.functions ?? ["agent.admit"],
@@ -59,19 +62,19 @@ function buildSignedAuthorityProof(
     vc_id: vcId,
   });
   const credentialJcs = canonicaliseCredential(credential);
-  const userSignature = signCredential(credentialJcs, getBytes(userPrivateKey));
+  const userSignature = signCredential(credentialJcs, userPrivateKey);
   const requestHash = createDelegationRequestHash(request);
   const preimage = buildInvocationPreimage(vcId, nonce, requestHash);
   const agentSignature = signAgentInvocation(
     preimage,
-    getBytes(agentPrivateKey),
+    agentPrivateKey,
   );
 
   return JSON.stringify({
     version: ghostBrokerDelegationProofVersion,
     credentialJcs: b64uEncodeBytes(credentialJcs),
     userSignature: b64uEncodeBytes(userSignature.sig),
-    recoveredUserAddress: hexlify(userSignature.addr),
+    recoveredUserAddress: hexLower(userSignature.addr),
     agentSignature: b64uEncodeBytes(agentSignature),
     nonce: b64uEncodeBytes(nonce),
     requestHash: b64uEncodeBytes(requestHash),
