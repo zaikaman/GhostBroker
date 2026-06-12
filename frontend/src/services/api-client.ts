@@ -29,6 +29,22 @@ export interface AgentAdmission {
   authorityRef: string;
 }
 
+export interface AuthChallenge {
+  challengeId: string;
+  challenge: string;
+  expiresAt: string;
+}
+
+export interface AuthSession {
+  token: string;
+  expiresAt: string;
+  institution: {
+    id: string;
+    displayName: string;
+    t3TenantDid: string;
+  };
+}
+
 export interface EncryptedIntentRequest {
   institutionId: string;
   agentDid: string;
@@ -90,7 +106,17 @@ export class ApiClientError extends Error {
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
 
+const AUTH_TOKEN_KEY = 'ghostbroker-auth-token';
+const AUTH_SESSION_KEY = 'ghostbroker-auth-session';
+
 const getOperatorHeaders = (): Record<string, string> => {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) {
+    return {
+      Authorization: `Bearer ${token}`,
+    };
+  }
+
   const institutionId = localStorage.getItem('x-operator-institution-id') || '00000000-0000-4000-8000-000000000301';
   const operatorId = localStorage.getItem('x-operator-id') || 'operator:unattributed';
   return {
@@ -133,6 +159,37 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 export const apiClient = {
+  setAuthSession(session: AuthSession): void {
+    localStorage.setItem(AUTH_TOKEN_KEY, session.token);
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+    localStorage.setItem('x-operator-institution-id', session.institution.id);
+    localStorage.setItem('x-operator-id', `did:${session.institution.t3TenantDid}`);
+  },
+
+  clearAuthSession(): void {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_SESSION_KEY);
+    localStorage.removeItem('x-operator-institution-id');
+    localStorage.removeItem('x-operator-id');
+  },
+
+  getAuthSession(): AuthSession | null {
+    const raw = localStorage.getItem(AUTH_SESSION_KEY);
+    if (!raw) return null;
+
+    try {
+      const session = JSON.parse(raw) as AuthSession;
+      if (new Date(session.expiresAt).getTime() <= Date.now()) {
+        this.clearAuthSession();
+        return null;
+      }
+      return session;
+    } catch {
+      this.clearAuthSession();
+      return null;
+    }
+  },
+
   setOperatorContext(institutionId: string, operatorId?: string): void {
     localStorage.setItem('x-operator-institution-id', institutionId);
     if (operatorId) {
@@ -168,6 +225,37 @@ export const apiClient = {
       body: JSON.stringify(req),
     });
     return handleResponse<Institution>(res);
+  },
+
+  async requestAuthChallenge(did: string): Promise<AuthChallenge> {
+    const res = await fetch(`${API_BASE_URL}/api/auth/challenge`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ did }),
+    });
+    return handleResponse<AuthChallenge>(res);
+  },
+
+  async verifyAuthChallenge(req: {
+    challengeId: string;
+    did: string;
+    signature: string;
+    walletAddress?: string;
+  }): Promise<AuthSession> {
+    const res = await fetch(`${API_BASE_URL}/api/auth/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(req),
+    });
+    const session = await handleResponse<AuthSession>(res);
+    this.setAuthSession(session);
+    return session;
   },
 
   async admitAgent(req: AdmitAgentRequest): Promise<AgentAdmission> {

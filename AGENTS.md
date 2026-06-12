@@ -7,3 +7,4 @@ We will be using only the main branch, forget the prequisities that you need a f
 All code written must be production ready, no mock, fake or hard code.
 terminal3docs.md is where you can find the documentation for the terminal3 SDK.
 When working with Terminal3 ADK, if you find any bugs or documentation gaps, please add them to the terminal3-adk-onboarding-doc-gaps.md file in the docs folder.
+Current database schema is at database/schema.sql

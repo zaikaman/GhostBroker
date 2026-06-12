@@ -8,10 +8,12 @@ import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
 import { ProcessingStatusRail } from '../components/ProcessingStatusRail';
 import { CompletedTradesTable } from '../components/CompletedTradesTable';
 import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
+import { AuthGateway } from '../components/AuthGateway';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
+import { apiClient, type AuthSession } from '../services/api-client';
 
-function DashboardView(): React.JSX.Element {
+function DashboardView({ session }: { session: AuthSession }): React.JSX.Element {
   const {
     connectionStatus,
     enclaveStatus,
@@ -49,7 +51,7 @@ function DashboardView(): React.JSX.Element {
         </div>
         <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center' }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-            DID: did:t3:vcb_institutional_darkpool_operator
+            DID: {session.institution.t3TenantDid}
           </div>
         </div>
       </header>
@@ -207,10 +209,16 @@ function DashboardView(): React.JSX.Element {
 }
 
 export function App(): React.JSX.Element {
+  const [session, setSession] = useState<AuthSession | null>(() => apiClient.getAuthSession());
+
+  if (!session) {
+    return <AuthGateway onAuthenticated={setSession} />;
+  }
+
   return (
     <RouterProvider>
-      <Route path="/" element={<DashboardView />} />
-      <Route path="/dashboard" element={<DashboardView />} />
+      <Route path="/" element={<DashboardView session={session} />} />
+      <Route path="/dashboard" element={<DashboardView session={session} />} />
     </RouterProvider>
   );
 }

@@ -17,6 +17,7 @@ import { createInstitutionsRouter } from "./api/institutions.routes.js";
 import { createAgentsRouter } from "./api/agents.routes.js";
 import { createTradesRouter } from "./api/trades.routes.js";
 import { createReceiptsRouter } from "./api/receipts.routes.js";
+import { createAuthRouter } from "./api/auth.routes.js";
 import { operatorAuthMiddleware } from "./auth/operator-auth.js";
 import { T3AgentAuthorizationFacade } from "./auth/agent-authz.js";
 import { createSupabaseServiceClient } from "./services/supabase-client.js";
@@ -25,6 +26,7 @@ import {
   SupabaseInstitutionRepository,
   type InstitutionManagementService,
 } from "./services/institution.service.js";
+import { DidAuthService, type AuthSessionService } from "./services/auth.service.js";
 import { SupabaseAuthorityRevocationRepository } from "./services/authority-revocation.service.js";
 import { AgentService, type AgentAdmissionService } from "./services/agent.service.js";
 import {
@@ -50,6 +52,7 @@ import {
   SandboxTokenBalanceClient,
   SettlementCommandBuilder,
   T3BlindIntentClient,
+  T3AgentIdentityVerifier,
   createAuthenticatedT3NetworkClient,
   type AuthenticatedT3NetworkClientOptions,
 } from "@ghostbroker/t3-enclave";
@@ -86,6 +89,7 @@ export interface BackendServices {
   settlementService?: SettlementService;
   tradeHistoryService?: TradeHistoryService;
   receiptService?: ReceiptService;
+  authService?: AuthSessionService;
 }
 
 async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
@@ -143,6 +147,13 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       new SupabaseTradeHistoryRepository(supabase as never),
     ),
     receiptService: new ReceiptService(new SupabaseReceiptRepository(supabase as never)),
+    authService: new DidAuthService({
+      institutions: institutionRepository,
+      identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
+      sessionSecret:
+        env.AUTH_SESSION_SECRET ??
+        "development-only-auth-session-secret-change-before-production",
+    }),
   };
 }
 
@@ -158,23 +169,26 @@ export function createApp(
   app.use(express.json({ limit: "1mb" }));
   app.use(correlationIdMiddleware());
   app.use("/api", createHealthRouter(env));
+  if (services.authService) {
+    app.use("/api", createAuthRouter(services.authService));
+  }
   app.use("/api", createInstitutionsRouter(services.institutionService));
   app.use(
     "/api",
-    operatorAuthMiddleware(),
+    operatorAuthMiddleware(env),
     createAgentsRouter(services.agentService, services.hiddenIntentService),
   );
   if (services.tradeHistoryService) {
     app.use(
       "/api",
-      operatorAuthMiddleware(),
+      operatorAuthMiddleware(env),
       createTradesRouter(services.tradeHistoryService),
     );
   }
   if (services.receiptService) {
     app.use(
       "/api",
-      operatorAuthMiddleware(),
+      operatorAuthMiddleware(env),
       createReceiptsRouter(services.receiptService),
     );
   }

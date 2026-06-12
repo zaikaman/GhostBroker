@@ -634,6 +634,46 @@ Logging active order parameters, matching inputs, or decrypted settlement values
 
 ---
 
+### T3-ONB-015: DID Challenge Verification API Is Not Documented as `verifyAgentIdentity()`
+
+**Severity**: P1  
+**Category**: Authentication onboarding gap  
+**Affected docs**: ADK overview, T3N DIDs, Host API, Delegate Access to AI Agents  
+
+**What I found**
+
+GhostBroker's frontend authentication flow requires a backend-generated nonce, a wallet or DID signature, and Terminal 3 verification of the DID subject before issuing an operator session. Gemini's suggested flow names a `verifyAgentIdentity()` call inside a simulated T3 TEE context, but the reviewed local Terminal 3 docs do not document a concrete TypeScript `verifyAgentIdentity()` SDK method, request shape, response shape, or error model.
+
+The Terminal 3 SDK does expose low-level EIP-191 recovery helpers and broader wallet/authenticator surfaces, and the docs describe DIDs and dashboard-based agent delegation. That is enough for GhostBroker to keep a guarded adapter boundary, but not enough to claim a stable production `verifyAgentIdentity()` API.
+
+**Why this matters for GhostBroker**
+
+Without an official DID challenge verification API, implementers may accidentally conflate wallet signature recovery, DID resolution, dashboard delegation, and TEE identity verification. Those are related but distinct checks.
+
+**Recommended fix for docs**
+
+- Add a DID challenge authentication guide covering:
+  - backend nonce generation requirements
+  - browser wallet signing format
+  - DID-to-wallet or DID-document verification
+  - TEE-backed verification method name
+  - success and rejection response schema
+  - replay protection and nonce expiration
+  - production error codes
+
+**Recommended implementation action**
+
+- Keep GhostBroker's verification behind `t3-enclave/src/auth/agent-identity.ts`.
+- Use local cryptographic wallet recovery only for wallet-backed DIDs where the DID or request provides the expected address.
+- Delegate unresolved DID formats to a Terminal 3 network verification endpoint through the adapter.
+- Fail closed when neither local cryptographic verification nor Terminal 3 verification succeeds.
+
+**Verification**
+
+- Auth tests must prove challenges are one-time, expired challenges fail, invalid signatures fail, and production API routes require a bearer session rather than unsigned institution headers.
+
+---
+
 ## Implementation Guardrails for GhostBroker
 
 These guardrails should be treated as non-negotiable until Terminal 3 fills the relevant documentation gaps or confirms private integration details.

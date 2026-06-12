@@ -15,6 +15,14 @@ interface InsertQuery<TResult> {
   };
 }
 
+interface SelectQuery<TResult> {
+  select(columns?: string): {
+    eq(column: string, value: string): {
+      maybeSingle(): Promise<{ data: TResult | null; error: Error | null }>;
+    };
+  };
+}
+
 export interface InstitutionRepository {
   createInstitution(value: {
     legalName: string;
@@ -23,6 +31,7 @@ export interface InstitutionRepository {
     t3TenantDid: string;
     metadata: Readonly<Record<string, unknown>>;
   }): Promise<Institution>;
+  findByTenantDid(did: string): Promise<Institution | null>;
 }
 
 export interface InstitutionManagementService {
@@ -30,7 +39,8 @@ export interface InstitutionManagementService {
 }
 
 export interface SupabaseInstitutionClient {
-  from(table: "institutions"): InsertQuery<InstitutionRecord>;
+  from(table: "institutions"): InsertQuery<InstitutionRecord> &
+    SelectQuery<InstitutionRecord>;
 }
 
 export class SupabaseInstitutionRepository implements InstitutionRepository {
@@ -65,6 +75,20 @@ export class SupabaseInstitutionRepository implements InstitutionRepository {
     }
 
     return institutionFromRecord(data);
+  }
+
+  public async findByTenantDid(did: string): Promise<Institution | null> {
+    const { data, error } = await this.client
+      .from("institutions")
+      .select("*")
+      .eq("t3_tenant_did", did)
+      .maybeSingle();
+
+    if (error) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
+
+    return data ? institutionFromRecord(data) : null;
   }
 }
 

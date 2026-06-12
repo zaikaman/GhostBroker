@@ -38,6 +38,22 @@ vi.mock('../hooks/useReceipt', () => ({
 }));
 
 describe('Dashboard Accessibility Tests', () => {
+  beforeEach(() => {
+    localStorage.setItem(
+      'ghostbroker-auth-session',
+      JSON.stringify({
+        token: 'session.jwt.test',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        institution: {
+          id: '00000000-0000-4000-8000-000000000101',
+          displayName: 'Northstar Capital',
+          t3TenantDid: 'did:t3:0x0000000000000000000000000000000000000301',
+        },
+      }),
+    );
+    localStorage.setItem('ghostbroker-auth-token', 'session.jwt.test');
+  });
+
   it('renders a single h1 heading for the application title', () => {
     render(<App />);
     const headings = screen.getAllByRole('heading', { level: 1 });
