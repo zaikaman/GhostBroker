@@ -457,6 +457,74 @@
   outline-offset: -2px;
 }
 
+/* Observatory Mode Badge (Header) */
+.observatory-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 9999px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-success);
+  text-transform: uppercase;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-success);
+  animation: pulse-animation 2s infinite;
+}
+
+/* Agent-to-Agent Mandate Banner */
+.a2a-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: linear-gradient(135deg, rgba(197, 168, 128, 0.06) 0%, rgba(16, 185, 129, 0.04) 100%);
+  border: 1px solid rgba(197, 168, 128, 0.2);
+  border-radius: var(--radius-lg);
+  flex-wrap: wrap;
+}
+
+.a2a-banner-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.a2a-banner-content {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.a2a-banner-content strong {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.a2a-banner-content span {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.a2a-banner-badge {
+  flex-shrink: 0;
+}
+
 /* Authentication */
 .auth-layout {
   min-height: 100vh;

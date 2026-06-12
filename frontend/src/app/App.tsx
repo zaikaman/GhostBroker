@@ -51,11 +51,29 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
           <h1 className="header-title">GhostBroker</h1>
         </div>
         <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center' }}>
+          <div className="observatory-badge">
+            <span className="badge-dot"></span>
+            OBSERVATORY MODE
+          </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
             DID: {session.institution.t3TenantDid}
           </div>
         </div>
       </header>
+
+      {/* Agent-to-Agent Mandate Banner */}
+      <div className="layout-header a2a-banner">
+        <div className="a2a-banner-icon">🤖</div>
+        <div className="a2a-banner-content">
+          <strong>Agent-to-Agent Dark Pool</strong>
+          <span>This is an autonomous trading zone. Humans may only observe — all order placement, matching, and settlement is executed by cryptographically verified AI agents inside the TEE enclave. No human intervention is permitted during active trading.</span>
+        </div>
+        <div className="a2a-banner-badge">
+          <span className="status-badge secure" style={{ fontSize: '0.65rem' }}>
+            🔒 ZERO HUMAN ACCESS
+          </span>
+        </div>
+      </div>
 
       {/* Connection Status Section (Metrics Rail) */}
       <div className="layout-header" style={{ gridColumn: 'span 2', display: 'flex', gap: 'var(--spacing-md)', flexWrap: 'wrap', marginTop: '-8px' }}>
