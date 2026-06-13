@@ -428,6 +428,51 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
         </ul>
       </div>
 
+      <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-md)' }}>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Link01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Testnet Faucets
+        </div>
+        <p style={{ marginTop: 'var(--spacing-xs)', fontSize: '0.8rem', color: 'var(--color-text-secondary)', lineHeight: '1.4' }}>
+          Your agent needs Sepolia testnet assets to pay gas fees and execute trades.
+        </p>
+        <div style={{ display: 'flex', gap: 'var(--spacing-sm)', marginTop: 'var(--spacing-md)', flexWrap: 'wrap' }}>
+          <a
+            href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-secondary"
+            style={{ 
+              fontSize: '0.7rem', 
+              padding: '6px 12px', 
+              fontFamily: 'var(--font-mono)', 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              gap: '4px',
+              textDecoration: 'none'
+            }}
+          >
+            <span>Get Sepolia ETH</span> ↗
+          </a>
+          <a
+            href="https://gho.aave.com/faucet"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-secondary"
+            style={{ 
+              fontSize: '0.7rem', 
+              padding: '6px 12px', 
+              fontFamily: 'var(--font-mono)', 
+              display: 'inline-flex', 
+              alignItems: 'center', 
+              gap: '4px',
+              textDecoration: 'none'
+            }}
+          >
+            <span>Get WBTC & USDC</span> ↗
+          </a>
+        </div>
+      </div>
+
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
         <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
           <Key01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Generate an Agent Key:

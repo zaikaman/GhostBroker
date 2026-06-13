@@ -9,7 +9,8 @@ import {
   DatabaseIcon,
   LockIcon,
   AlertCircleIcon,
-  Refresh01Icon
+  Refresh01Icon,
+  Link01Icon
 } from 'hugeicons-react';
 
 export interface PortfolioHolding {
@@ -180,6 +181,7 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
                 {assetLabel(holding.assetCode)}
               </span>
             </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <span
                 style={{
@@ -199,6 +201,109 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
             </div>
           </div>
         ))}
+      </div>
+
+      <div
+        style={{
+          marginTop: 'var(--spacing-md)',
+          paddingTop: 'var(--spacing-md)',
+          borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            marginBottom: 'var(--spacing-xs)',
+            fontSize: '0.68rem',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-accent)',
+          }}
+        >
+          <Link01Icon size={12} /> Testnet Faucets
+        </div>
+        <p
+          style={{
+            fontSize: '0.65rem',
+            color: 'var(--color-text-muted)',
+            marginBottom: 'var(--spacing-sm)',
+            lineHeight: 1.4,
+          }}
+        >
+          Fund your mirrored enclave portfolio with Sepolia testnet assets.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-sm)' }}>
+          <a
+            href="https://cloud.google.com/application/web3/faucet/ethereum/sepolia"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-secondary"
+            style={{
+              fontSize: '0.65rem',
+              padding: '6px 10px',
+              fontFamily: 'var(--font-mono)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              textDecoration: 'none',
+              borderRadius: '6px',
+              border: '1px solid var(--color-border)',
+              background: 'rgba(255, 255, 255, 0.02)',
+              color: 'var(--color-text-secondary)',
+              transition: 'all var(--transition-fast)',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.borderColor = 'var(--color-accent)';
+              e.currentTarget.style.color = 'var(--color-text-primary)';
+              e.currentTarget.style.background = 'rgba(94, 210, 156, 0.05)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.borderColor = 'var(--color-border)';
+              e.currentTarget.style.color = 'var(--color-text-secondary)';
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+            }}
+          >
+            <span>sepETH Faucet</span>
+            <span style={{ fontSize: '0.6rem', opacity: 0.7 }}>↗</span>
+          </a>
+          <a
+            href="https://gho.aave.com/faucet"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-secondary"
+            style={{
+              fontSize: '0.65rem',
+              padding: '6px 10px',
+              fontFamily: 'var(--font-mono)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              textDecoration: 'none',
+              borderRadius: '6px',
+              border: '1px solid var(--color-border)',
+              background: 'rgba(255, 255, 255, 0.02)',
+              color: 'var(--color-text-secondary)',
+              transition: 'all var(--transition-fast)',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.borderColor = 'var(--color-accent)';
+              e.currentTarget.style.color = 'var(--color-text-primary)';
+              e.currentTarget.style.background = 'rgba(94, 210, 156, 0.05)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.borderColor = 'var(--color-border)';
+              e.currentTarget.style.color = 'var(--color-text-secondary)';
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+            }}
+          >
+            <span>WBTC & USDC Faucet</span>
+            <span style={{ fontSize: '0.6rem', opacity: 0.7 }}>↗</span>
+          </a>
+        </div>
       </div>
     </div>
   );
