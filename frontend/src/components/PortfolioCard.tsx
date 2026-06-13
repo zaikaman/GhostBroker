@@ -122,9 +122,9 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
       <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Mirrored Portfolio
       </h2>
-      <div style={{ marginBottom: 'var(--spacing-sm)', fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+      {/* <div style={{ marginBottom: 'var(--spacing-sm)', fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
         Tradeable Sepolia assets mirrored from custody or a signed snapshot.
-      </div>
+      </div> */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
         {portfolio.holdings.map((holding) => (
           <div

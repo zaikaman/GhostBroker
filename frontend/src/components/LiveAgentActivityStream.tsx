@@ -340,18 +340,21 @@ export function LiveAgentActivityStream({
   const isEnclaveIdle = agents.length === 0 && leftLogs.length === 0 && rightLogs.length === 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', flex: 1, minHeight: 0 }}>
       <style>{`
         .live-agent-stream-layout {
           display: grid;
           grid-template-columns: 1fr;
           gap: var(--spacing-md);
+          flex: 1;
+          min-height: 0;
         }
 
         @media (min-width: 992px) {
           .live-agent-stream-layout {
             grid-template-columns: 1.2fr 180px 1.2fr;
             gap: var(--spacing-sm);
+            height: 100%;
           }
         }
 
@@ -362,7 +365,8 @@ export function LiveAgentActivityStream({
           border-radius: var(--radius-md);
           display: flex;
           flex-direction: column;
-          height: 280px;
+          flex: 1;
+          min-height: 280px;
           overflow: hidden;
           box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.4);
         }
@@ -439,6 +443,7 @@ export function LiveAgentActivityStream({
           border-radius: var(--radius-md);
           padding: var(--spacing-md) var(--spacing-sm);
           position: relative;
+          flex: 1;
           min-height: 280px;
           box-sizing: border-box;
         }
@@ -563,6 +568,7 @@ export function LiveAgentActivityStream({
           border-radius: var(--radius-md);
           background: rgba(15, 21, 36, 0.3);
           box-sizing: border-box;
+          flex: 1;
         }
 
         .empty-icon {

@@ -66,6 +66,10 @@
     gap: var(--spacing-lg);
   }
   
+  .enclave-health-card {
+    grid-column: span 2;
+  }
+  
   .layout-bottom {
     grid-column: span 2;
   }

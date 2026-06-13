@@ -18,6 +18,7 @@ import { PortfolioCard } from '../components/PortfolioCard';
 import { PortfolioHistory } from '../components/PortfolioHistory';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
+import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
 import { apiClient, type AuthSession } from '../services/api-client';
 import {
   Robot01Icon,
@@ -386,6 +387,9 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         </div>
         <div className="card">
           <AgentConnectionGrid agents={agents} />
+        </div>
+        <div className="card enclave-health-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '300px' }}>
+          <EnclaveHealthMonitor />
         </div>
       </section>
 
