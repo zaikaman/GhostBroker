@@ -10,6 +10,15 @@ The following environment variables must be configured in the Vercel dashboard s
 | `VITE_API_BASE_URL` | Plaintext | The backend endpoint base URL (e.g., `https://ghostbroker-backend.herokuapp.com`). |
 | `VITE_WS_TELEMETRY_URL` | Plaintext | The secure telemetry WebSocket endpoint (e.g., `wss://ghostbroker-backend.herokuapp.com/ws/telemetry`). |
 
+## Backend CORS
+Make sure the backend environment allows the deployed Vercel origin in `CORS_ALLOWED_ORIGINS`, otherwise browser requests from the dashboard will be blocked even if the frontend env vars are correct.
+
+Example:
+
+```text
+CORS_ALLOWED_ORIGINS=https://your-ghostbroker-frontend.vercel.app
+```
+
 ## Build and Deployment Settings
 1. **Framework Preset**: Vite / Other (Auto-detected).
 2. **Root Directory**: `frontend`.

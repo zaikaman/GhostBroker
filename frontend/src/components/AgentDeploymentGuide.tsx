@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { type AuthSession } from '../services/api-client';
 import {
   EyeIcon,
@@ -20,8 +20,198 @@ import {
   AlertCircleIcon,
   Plug01Icon,
   Link01Icon,
-  ScrollIcon
+  ScrollIcon,
 } from 'hugeicons-react';
+
+const DEFAULT_API_BASE_URL = 'http://localhost:3001';
+const DEFAULT_TELEMETRY_WS_URL = 'ws://localhost:3001/ws/telemetry';
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '');
+const TELEMETRY_WS_URL = (import.meta.env.VITE_WS_TELEMETRY_URL || DEFAULT_TELEMETRY_WS_URL).replace(/\/$/, '');
+
+function buildAuthSample(): string {
+  return String.raw`# Step 1: Request a challenge
+curl -s ${API_BASE_URL}/api/auth/challenge \
+  -H "Content-Type: application/json" \
+  -d '{"did": "did:t3n:0xYourAgentAddress"}' | jq .
+
+# Returns: { challengeId: "ch_...", challenge: "...", expiresAt: "..." }
+
+# Step 2: Sign the challenge with your agent's private key
+# (Use ethers or your wallet to produce the signature)
+
+# Step 3: Verify and get session token
+curl -s ${API_BASE_URL}/api/auth/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "did": "did:t3n:0xYourAgentAddress",
+    "challengeId": "ch_...",
+    "signature": "0x<your_signature>",
+    "walletAddress": "0xYourAgentAddress"
+  }' | jq .
+
+# Returns: { token: "gb_session_...", institution: {...} }`;
+}
+
+function buildWriteAgentSample(institutionId: string): string {
+  return String.raw`import { Wallet } from "ethers";
+
+const GHOSTBROKER_API_BASE_URL = process.env.GHOSTBROKER_API_BASE_URL ?? "${API_BASE_URL}";
+const GHOSTBROKER_TELEMETRY_URL = process.env.GHOSTBROKER_TELEMETRY_URL ?? "${TELEMETRY_WS_URL}";
+const INSTITUTION_ID = process.env.GHOSTBROKER_INSTITUTION_ID ?? "${institutionId}";
+const AGENT_DID = process.env.AGENT_DID ?? "did:t3n:0xYourAgentAddress";
+const AGENT_KEY = process.env.AGENT_PRIVATE_KEY ?? "";
+const AGENT_AUTHORITY_PROOF = process.env.GHOSTBROKER_AUTHORITY_PROOF ?? "";
+
+const agent = new Wallet(AGENT_KEY);
+
+async function authenticate() {
+  const challengeResponse = await fetch(
+    GHOSTBROKER_API_BASE_URL + "/api/auth/challenge",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ did: AGENT_DID }),
+    }
+  ).then((response) => response.json());
+
+  const signature = await agent.signMessage(challengeResponse.challenge);
+
+  const verifyResponse = await fetch(
+    GHOSTBROKER_API_BASE_URL + "/api/auth/verify",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        did: AGENT_DID,
+        challengeId: challengeResponse.challengeId,
+        signature,
+        walletAddress: agent.address,
+      }),
+    }
+  ).then((response) => response.json());
+
+  return verifyResponse.token as string;
+}
+
+async function admitAgent(token: string) {
+  const admission = await fetch(GHOSTBROKER_API_BASE_URL + "/api/agents/admit", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + token,
+    },
+    body: JSON.stringify({
+      institutionId: INSTITUTION_ID,
+      agentDid: AGENT_DID,
+      authorityProof: AGENT_AUTHORITY_PROOF,
+    }),
+  }).then((response) => response.json());
+
+  return admission.authorityRef as string;
+}
+
+function listen(institutionId: string) {
+  const ws = new WebSocket(
+    GHOSTBROKER_TELEMETRY_URL + "?institutionId=" + encodeURIComponent(institutionId)
+  );
+
+  ws.onmessage = (event) => {
+    const telemetry = JSON.parse(event.data);
+    if (
+      telemetry.type === "telemetry.processing.changed" &&
+      telemetry.phase === "settlement_finalized"
+    ) {
+      console.log("[SETTLEMENT] Trade settled!", telemetry.correlationRef);
+    }
+  };
+}
+
+async function submitIntent(
+  token: string,
+  authorityRef: string,
+  encryptedIntentEnvelope: string,
+) {
+  const response = await fetch(GHOSTBROKER_API_BASE_URL + "/api/agents/intents", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + token,
+    },
+    body: JSON.stringify({
+      institutionId: INSTITUTION_ID,
+      agentDid: AGENT_DID,
+      encryptedIntentEnvelope,
+      authorityRef,
+    }),
+  });
+
+  return response.json();
+}
+
+async function main() {
+  console.log("[AUTH] Authenticating...");
+  const token = await authenticate();
+
+  console.log("[ADMIT] Admitting agent...");
+  const authorityRef = await admitAgent(token);
+
+  listen(INSTITUTION_ID);
+
+  console.log("[AGENT] Agent ready - waiting for matches...", authorityRef);
+}
+
+main().catch(console.error);`;
+}
+
+function buildDockerfileSample(): string {
+  return String.raw`FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY agent.ts tsconfig.json ./
+RUN npx tsc --outDir dist
+
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+CMD ["node", "dist/agent.js"]`;
+}
+
+function buildDockerComposeSample(institutionId: string): string {
+  return `version: "3.9"
+services:
+  trading-agent:
+    build: .
+    container_name: ghostbroker-agent
+    restart: unless-stopped
+    environment:
+      - GHOSTBROKER_API_BASE_URL=${API_BASE_URL}
+      - GHOSTBROKER_TELEMETRY_URL=${TELEMETRY_WS_URL}
+      - GHOSTBROKER_INSTITUTION_ID=${institutionId}
+      - AGENT_DID=did:t3n:0xYourAgentAddress
+      - AGENT_PRIVATE_KEY=${'${AGENT_PRIVATE_KEY}'}  # Set in .env
+      - GHOSTBROKER_AUTHORITY_PROOF=${'${GHOSTBROKER_AUTHORITY_PROOF}'}  # Set in a secrets manager or .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"`;
+}
+
+function buildDeploySample(): string {
+  return String.raw`# Create .env with your secrets
+echo "AGENT_PRIVATE_KEY=0x..." > .env
+
+# Build and run
+docker compose up -d
+
+# Check logs
+docker compose logs -f trading-agent`;
+}
 
 interface AgentDeploymentGuideProps {
   session: AuthSession;
@@ -39,7 +229,7 @@ const STEPS: { id: Step; label: string }[] = [
   { id: 'monitor', label: 'Monitor' },
 ];
 
-const getStepIcon = (id: Step, size = 16) => {
+const getStepIcon = (id: Step, size = 16): React.JSX.Element => {
   switch (id) {
     case 'overview':
       return <EyeIcon size={size} />;
@@ -53,6 +243,8 @@ const getStepIcon = (id: Step, size = 16) => {
       return <Package01Icon size={size} />;
     case 'monitor':
       return <Chart01Icon size={size} />;
+    default:
+      return <EyeIcon size={size} />;
   }
 };
 
@@ -109,20 +301,20 @@ function CopyField({ label, value }: { label: string; value: string }): React.JS
 }
 
 function StepIndicator({ currentStep }: { currentStep: Step }): React.JSX.Element {
-  const currentIndex = STEPS.findIndex(s => s.id === currentStep);
+  const currentIndex = STEPS.findIndex((step) => step.id === currentStep);
 
   return (
     <div className="deploy-steps-indicator">
-      {STEPS.map((step, i) => (
+      {STEPS.map((step, index) => (
         <div
           key={step.id}
-          className={`deploy-step-dot ${i === currentIndex ? 'active' : ''} ${i < currentIndex ? 'completed' : ''}`}
+          className={`deploy-step-dot ${index === currentIndex ? 'active' : ''} ${index < currentIndex ? 'completed' : ''}`}
         >
           <div className="deploy-step-circle">
-            {i < currentIndex ? <CheckmarkCircle01Icon size={14} /> : getStepIcon(step.id, 14)}
+            {index < currentIndex ? <CheckmarkCircle01Icon size={14} /> : getStepIcon(step.id, 14)}
           </div>
           <span className="deploy-step-label">{step.label}</span>
-          {i < STEPS.length - 1 && <div className={`deploy-step-line ${i < currentIndex ? 'filled' : ''}`} />}
+          {index < STEPS.length - 1 && <div className={`deploy-step-line ${index < currentIndex ? 'filled' : ''}`} />}
         </div>
       ))}
     </div>
@@ -134,10 +326,7 @@ function OverviewStep(): React.JSX.Element {
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Deploy Your Agent to GhostBroker</h2>
       <p className="deploy-step-desc">
-        GhostBroker runs on an <strong>Agent-to-Agent (A2A)</strong> model. Humans do not place orders, 
-        match trades, or settle positions — autonomous agents do, inside cryptographically verified 
-        hardware enclaves. Your role as an institution is to <strong>deploy an agent</strong> that represents 
-        your trading strategy.
+        GhostBroker runs on an <strong>Agent-to-Agent (A2A)</strong> model. Humans do not place orders, match trades, or settle positions - autonomous agents do, inside cryptographically verified hardware enclaves.
       </p>
 
       <div className="deploy-arch-diagram">
@@ -162,7 +351,7 @@ function OverviewStep(): React.JSX.Element {
             <Chart01Icon size={24} style={{ color: 'var(--color-accent)' }} />
           </div>
           <div className="deploy-arch-title">Observatory Console</div>
-          <div className="deploy-arch-desc">Your dashboard — watch-only, no intervention</div>
+          <div className="deploy-arch-desc">Watch-only dashboard for status and history</div>
         </div>
       </div>
 
@@ -173,34 +362,24 @@ function OverviewStep(): React.JSX.Element {
         <ul className="deploy-info-list no-bullet">
           <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-            <span>Authenticate using your institution's GhostBroker credentials</span>
+            <span>Authenticate with the DID challenge-response flow</span>
           </li>
           <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-            <span>Submit encrypted trading intents (price, volume, direction)</span>
+            <span>Submit encrypted trading intents with an authority reference</span>
           </li>
           <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-            <span>Listen for match settlement events via secure WebSocket</span>
-          </li>
-          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-            <span>Retrieve encrypted audit receipts for settled trades</span>
+            <span>Listen for settlement events via secure WebSocket telemetry</span>
           </li>
           <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
-            <span>Cannot view other institutions' intents or positions</span>
-          </li>
-          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
-            <span>No human override — once deployed, the agent operates autonomously</span>
+            <span>Cannot see other institutions' intents or positions</span>
           </li>
         </ul>
       </div>
 
-      <p className="deploy-step-cta-text">
-        Follow the steps below to get your agent connected. The entire process takes about 15 minutes.
-      </p>
+      <p className="deploy-step-cta-text">Follow the steps below to connect your agent. The whole flow takes about 15 minutes.</p>
     </div>
   );
 }
@@ -210,17 +389,17 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Your GhostBroker Credentials</h2>
       <p className="deploy-step-desc">
-        Your institution is already registered on GhostBroker. These are the credentials your agent will use to 
-        authenticate. No external setup needed — just copy these values into your agent's configuration.
+        Copy these runtime values into your agent config. In production the dashboard origin is not the API origin, so use the backend and telemetry URLs shown here.
       </p>
 
       <div className="deploy-info-card">
         <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ClipboardIcon size={16} style={{ color: 'var(--color-accent)' }} /> Your Platform Credentials
+          <ClipboardIcon size={16} style={{ color: 'var(--color-accent)' }} /> Platform Values
         </div>
         <div className="deploy-credentials" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', marginTop: 'var(--spacing-md)' }}>
-          <CopyField label="API Base URL" value={window.location.origin} />
-          <CopyField label="Your DID" value={session.institution.t3TenantDid} />
+          <CopyField label="API Base URL" value={API_BASE_URL} />
+          <CopyField label="Telemetry WebSocket URL" value={TELEMETRY_WS_URL} />
+          <CopyField label="Institution DID" value={session.institution.t3TenantDid} />
           <CopyField label="Institution ID" value={session.institution.id} />
         </div>
       </div>
@@ -230,9 +409,9 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
           <Wrench01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Required Tools
         </div>
         <ul className="deploy-info-list">
-          <li><strong>Node.js 20+</strong> — Runtime for the agent (or any language that speaks HTTP/WebSocket)</li>
-          <li><strong>Docker</strong> — Recommended for production deployment</li>
-          <li><strong>An Ethereum wallet or private key</strong> — To sign authentication challenges. Generate one with <code>ethers</code> or use your existing key.</li>
+          <li><strong>Node.js 20+</strong> - Runtime for the agent</li>
+          <li><strong>Docker</strong> - Recommended for production deployment</li>
+          <li><strong>An Ethereum wallet or private key</strong> - Signs the DID challenge for the agent</li>
         </ul>
       </div>
 
@@ -242,8 +421,7 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
         </strong> Run this locally to create a new keypair for your agent:
         <CodeBlock code="npx -y ethers@6 wallet create" />
         <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-          Save the private key — it will be used to sign authentication challenges. The corresponding 
-          address will be your agent's identity on GhostBroker.
+          Save the private key. The corresponding address becomes the DID subject the agent presents to GhostBroker.
         </span>
       </div>
     </div>
@@ -255,9 +433,7 @@ function AuthenticateStep(): React.JSX.Element {
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Agent Authentication Flow</h2>
       <p className="deploy-step-desc">
-        Every agent must authenticate using GhostBroker's <strong>DID Challenge-Response</strong> protocol 
-        before it can submit intents or receive settlement events. Your agent proves its identity by signing 
-        a cryptographic challenge with its private key.
+        Every agent must authenticate using GhostBroker's <strong>DID Challenge-Response</strong> protocol before it can submit intents or receive settlement events.
       </p>
 
       <div className="deploy-flow-diagram">
@@ -265,7 +441,7 @@ function AuthenticateStep(): React.JSX.Element {
           <div className="deploy-flow-num">1</div>
           <div className="deploy-flow-body">
             <strong>Request Challenge</strong>
-            <span>Agent sends its DID to <code>POST /api/auth/challenge</code></span>
+            <span>Agent sends its DID to <code>{API_BASE_URL}/api/auth/challenge</code></span>
           </div>
         </div>
         <div className="deploy-flow-arrow">↓</div>
@@ -281,7 +457,7 @@ function AuthenticateStep(): React.JSX.Element {
           <div className="deploy-flow-num">3</div>
           <div className="deploy-flow-body">
             <strong>Verify & Get Session</strong>
-            <span>Agent submits signed challenge to <code>POST /api/auth/verify</code></span>
+            <span>Agent submits the signed challenge and wallet address to <code>{API_BASE_URL}/api/auth/verify</code></span>
           </div>
         </div>
         <div className="deploy-flow-arrow">↓</div>
@@ -289,7 +465,7 @@ function AuthenticateStep(): React.JSX.Element {
           <div className="deploy-flow-num">4</div>
           <div className="deploy-flow-body">
             <strong>Admit Agent</strong>
-            <span>Agent is registered and ready to trade</span>
+            <span>Use the session token to admit the agent and capture an authority reference</span>
           </div>
         </div>
         <div className="deploy-flow-arrow">↓</div>
@@ -297,7 +473,7 @@ function AuthenticateStep(): React.JSX.Element {
           <div className="deploy-flow-num">5</div>
           <div className="deploy-flow-body">
             <strong>Trade Ready</strong>
-            <span>Agent can submit intents and receive settlement events</span>
+            <span>Agent can submit encrypted intents and receive settlement events</span>
           </div>
         </div>
       </div>
@@ -306,145 +482,43 @@ function AuthenticateStep(): React.JSX.Element {
         <Settings01Icon size={16} /> Quick Test with curl
       </h3>
       <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-md)' }}>
-        Replace <code>YOUR_DID</code> and <code>YOUR_SIGNATURE</code> with your actual values.
+        Replace the DID, signature, and wallet address with the values from the wallet that controls the agent.
       </p>
 
-      <CodeBlock code={`# Step 1: Request a challenge
-curl -s ${window.location.origin}/api/auth/challenge \\
-  -H "Content-Type: application/json" \\
-  -d '{"did": "did:t3n:your-institution-did"}' | jq .
-
-# Returns: { challengeId: "ch_...", challenge: "...", expiresAt: "..." }
-
-# Step 2: Sign the challenge with your agent's private key
-# (Use ethers or your wallet to produce the signature)
-
-# Step 3: Verify and get session token
-curl -s ${window.location.origin}/api/auth/verify \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "did": "did:t3n:your-institution-did",
-    "challengeId": "ch_...",
-    "signature": "0x<your_signature>"
-  }' | jq .
-
-# Returns: { token: "gb_session_...", institution: {...} }`} />
+      <CodeBlock code={buildAuthSample()} />
 
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
         <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
           <Idea01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Tip:
-        </strong> Your agent should store the session token and include it as a Bearer token 
-        in all subsequent requests: <code>Authorization: Bearer gb_session_...</code>
+        </strong> Store the session token and include it as a Bearer token in subsequent REST calls.
       </div>
     </div>
   );
 }
 
 function WriteAgentStep({ session }: { session: AuthSession }): React.JSX.Element {
+  const agentSample = buildWriteAgentSample(session.institution.id);
+
   return (
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Write Your Agent</h2>
       <p className="deploy-step-desc">
-        Here's a complete, production-ready agent script. Copy this into a file called <code>agent.ts</code> 
-        and customize the parameters to your strategy.
+        This bootstrap matches the current REST and WebSocket contracts. Replace the placeholders with your wallet key, DID, and delegation proof payload.
       </p>
 
       <div className="deploy-tip-box" style={{ marginBottom: 'var(--spacing-md)' }}>
         <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
           <Package01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Dependencies:
-        </strong> You only need <code>ethers</code> for cryptographic signing:
+        </strong> You need <code>ethers</code> for signing and a delegation proof payload for agent admission.
         <CodeBlock code="npm install ethers" />
-        The GhostBroker API is plain HTTP + WebSocket — no SDK required.
       </div>
 
-      <CodeBlock code={`import { Wallet } from "ethers";
-
-// [CONFIG] Configuration
-const GHOSTBROKER_URL = "${window.location.origin}";
-const AGENT_DID = "${session.institution.t3TenantDid}";
-const AGENT_KEY = "0x...";  // Store securely in env vars / secrets manager
-
-const agent = new Wallet(AGENT_KEY);
-
-// [AUTH] Authenticate with DID Challenge-Response
-async function authenticate() {
-  // 1. Request a cryptographic challenge
-  const { challengeId, challenge } = await fetch(
-    \`\${GHOSTBROKER_URL}/api/auth/challenge\`,
-    { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ did: AGENT_DID }) }
-  ).then(r => r.json());
-
-  // 2. Sign the challenge with your agent's private key
-  const signature = await agent.signMessage(challenge);
-
-  // 3. Verify signature and get session token
-  const { token } = await fetch(
-    \`\${GHOSTBROKER_URL}/api/auth/verify\`,
-    { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        did: AGENT_DID,
-        challengeId,
-        signature,
-        walletAddress: agent.address,
-      }) }
-  ).then(r => r.json());
-
-  return token;
-}
-
-// [TELEMETRY] Listen for Settlement Events
-function listen(token: string) {
-  const ws = new WebSocket(
-    \`\${GHOSTBROKER_URL.replace("http", "ws")}/ws/telemetry\`
-  );
-
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: "subscribe", sessionToken: token }));
-    console.log("[TELEMETRY] Connected to telemetry stream");
-  };
-
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === "settlement_executed") {
-      console.log("[SETTLEMENT] Trade settled!", msg);
-    }
-  };
-}
-
-// [INTENT] Submit an Encrypted Intent
-async function submitIntent(token: string, encrypted: object) {
-  const res = await fetch(\`\${GHOSTBROKER_URL}/api/agents/intents\`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: \`Bearer \${token}\`,
-    },
-    body: JSON.stringify({
-      agentId: AGENT_DID,
-      encryptedPayload: encrypted,
-    }),
-  });
-  return res.json();
-}
-
-// [RUN] Run
-async function main() {
-  console.log("[AUTH] Authenticating...");
-  const token = await authenticate();
-  console.log("[AUTH] Authenticated — session acquired");
-
-  listen(token);
-
-  console.log("[AGENT] Agent ready — waiting for matches...");
-}
-
-main().catch(console.error);`} />
+      <CodeBlock code={agentSample} />
 
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
         <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
           <Settings01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Customize:
-        </strong> Replace the <code>AGENT_KEY</code> with your actual private key, then run:
+        </strong> Replace the <code>AGENT_KEY</code>, <code>AGENT_DID</code>, and <code>AGENT_AUTHORITY_PROOF</code> values with your deployment secrets, then run:
         <CodeBlock code="npm install ethers && npx tsx agent.ts" />
       </div>
     </div>
@@ -452,74 +526,38 @@ main().catch(console.error);`} />
 }
 
 function DockerDeployStep({ session }: { session: AuthSession }): React.JSX.Element {
+  const dockerComposeSample = buildDockerComposeSample(session.institution.id);
+
   return (
     <div className="deploy-step-content">
-      <h2 className="deploy-step-title">Deploy with Docker</h2>
+      <h2 className="deploy-step-title">Docker Deployment</h2>
       <p className="deploy-step-desc">
-        For production, wrap your agent in a Docker container and deploy it to your infrastructure.
+        For production, wrap your agent in a Docker container and deploy it to your infrastructure. Keep secrets in runtime env vars or a secrets manager; do not bake them into the image.
       </p>
 
       <h3 style={{ marginBottom: 'var(--spacing-sm)', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         1. Dockerfile
       </h3>
-      <CodeBlock code={`FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY agent.ts tsconfig.json ./
-RUN npx tsc --outDir dist
-
-FROM node:20-alpine
-WORKDIR /app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-
-ENV GHOSTBROKER_BASE_URL="${window.location.origin}"
-ENV AGENT_DID="${session.institution.t3TenantDid}"
-ENV AGENT_PRIVATE_KEY=""
-
-CMD ["node", "dist/agent.js"]`} language="dockerfile" />
+      <CodeBlock code={buildDockerfileSample()} language="dockerfile" />
 
       <h3 style={{ marginTop: 'var(--spacing-lg)', marginBottom: 'var(--spacing-sm)', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         2. docker-compose.yml
       </h3>
-      <CodeBlock code={`version: "3.9"
-services:
-  trading-agent:
-    build: .
-    container_name: ghostbroker-agent
-    restart: unless-stopped
-    environment:
-      - GHOSTBROKER_BASE_URL=${window.location.origin}
-      - AGENT_DID=${session.institution.t3TenantDid}
-      - AGENT_PRIVATE_KEY=${'${AGENT_PRIVATE_KEY}'}  # Set in .env
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"`} />
+      <CodeBlock code={dockerComposeSample} />
 
       <h3 style={{ marginTop: 'var(--spacing-lg)', marginBottom: 'var(--spacing-sm)', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         3. Deploy
       </h3>
-      <CodeBlock code={`# Create .env with your secrets
-echo "AGENT_PRIVATE_KEY=0x..." > .env
-
-# Build and run
-docker compose up -d
-
-# Check logs
-docker compose logs -f trading-agent`} />
+      <CodeBlock code={buildDeploySample()} />
 
       <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-lg)' }}>
         <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <CloudIcon size={16} style={{ color: 'var(--color-accent)' }} /> Deployment Options
         </div>
         <ul className="deploy-info-list">
-          <li><strong>Your own VM</strong> — Any cloud provider (AWS EC2, GCP Compute, Azure VM, DigitalOcean)</li>
-          <li><strong>Kubernetes</strong> — Deploy as a Deployment with secrets for private keys</li>
-          <li><strong>Serverless</strong> — Not recommended; agents need persistent WebSocket connections</li>
+          <li><strong>Your own VM</strong> - Any cloud provider (AWS EC2, GCP Compute, Azure VM, DigitalOcean)</li>
+          <li><strong>Kubernetes</strong> - Deploy as a Deployment with secrets for private keys</li>
+          <li><strong>Serverless</strong> - Not recommended; agents need persistent WebSocket connections</li>
         </ul>
         <p style={{ marginTop: 'var(--spacing-md)', fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <AlertCircleIcon size={14} style={{ color: 'var(--color-error)' }} />
@@ -532,12 +570,12 @@ docker compose logs -f trading-agent`} />
   );
 }
 
-function MonitorStep(): React.JSX.Element {
+function MonitorStep({ onBack }: { onBack: () => void }): React.JSX.Element {
   return (
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Monitor Your Agent</h2>
       <p className="deploy-step-desc">
-        Once deployed, your agent appears in the <strong>Observatory Console</strong>. Here's what you can see:
+        Once deployed, your agent appears in the <strong>Observatory Console</strong>. The telemetry stream is filtered by institution ID and never requires a client-side subscribe message.
       </p>
 
       <div className="deploy-monitor-grid">
@@ -547,7 +585,7 @@ function MonitorStep(): React.JSX.Element {
           </div>
           <div className="deploy-monitor-title">Connection Status</div>
           <div className="deploy-monitor-desc">
-            Real-time telemetry link indicator. Shows whether your agent's WebSocket connection is active.
+            Real-time telemetry link indicator. Open the socket with the institutionId query parameter.
           </div>
         </div>
         <div className="deploy-monitor-card">
@@ -556,7 +594,7 @@ function MonitorStep(): React.JSX.Element {
           </div>
           <div className="deploy-monitor-title">Activity Feed</div>
           <div className="deploy-monitor-desc">
-            Live stream of agent events: authentication, intent submission, settlement confirmations.
+            Live stream of agent events: authentication, admission, intent sealing, settlement finalization, and receipt availability.
           </div>
         </div>
         <div className="deploy-monitor-card">
@@ -602,16 +640,22 @@ function MonitorStep(): React.JSX.Element {
           </li>
           <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
-            <span>Intervene in active trades — the enclave is autonomous</span>
+            <span>Intervene in active trades - the enclave is autonomous</span>
           </li>
         </ul>
+      </div>
+
+      <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)', textAlign: 'center' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <Idea01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Open telemetry with <code>{TELEMETRY_WS_URL}?institutionId=&lt;uuid&gt;</code>. The server filters by institution ID and ignores client-side subscribe messages.
+        </span>
       </div>
 
       <div style={{ marginTop: 'var(--spacing-lg)', textAlign: 'center', padding: 'var(--spacing-lg)' }}>
         <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
           <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)' }} /> Your agent is now part of the GhostBroker dark pool. All matching and settlement happens automatically inside the secure enclave.
         </p>
-        <button type="button" className="btn btn-primary" onClick={() => window.location.hash = '#/dashboard'} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+        <button type="button" className="btn btn-primary" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <EyeIcon size={14} /> Return to Observatory Console
         </button>
       </div>
@@ -628,7 +672,7 @@ function MonitorStep(): React.JSX.Element {
 export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuideProps): React.JSX.Element {
   const [currentStep, setCurrentStep] = useState<Step>('overview');
 
-  const stepIndex = STEPS.findIndex(s => s.id === currentStep);
+  const stepIndex = STEPS.findIndex((step) => step.id === currentStep);
 
   const goNext = () => {
     const nextIndex = stepIndex + 1;
@@ -650,18 +694,25 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
   const renderStep = () => {
     switch (currentStep) {
-      case 'overview': return <OverviewStep />;
-      case 'credentials': return <CredentialsStep session={session} />;
-      case 'authenticate': return <AuthenticateStep />;
-      case 'write-agent': return <WriteAgentStep session={session} />;
-      case 'docker-deploy': return <DockerDeployStep session={session} />;
-      case 'monitor': return <MonitorStep />;
+      case 'overview':
+        return <OverviewStep />;
+      case 'credentials':
+        return <CredentialsStep session={session} />;
+      case 'authenticate':
+        return <AuthenticateStep />;
+      case 'write-agent':
+        return <WriteAgentStep session={session} />;
+      case 'docker-deploy':
+        return <DockerDeployStep session={session} />;
+      case 'monitor':
+        return <MonitorStep onBack={onBack} />;
+      default:
+        return <OverviewStep />;
     }
   };
 
   return (
     <div className="deploy-layout">
-      {/* Header */}
       <header className="deploy-header">
         <div className="deploy-header-left">
           <button type="button" className="btn btn-secondary" onClick={onBack} style={{ fontSize: '0.75rem', padding: 'var(--spacing-xs) var(--spacing-md)' }}>
@@ -680,15 +731,12 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         </div>
       </header>
 
-      {/* Step Indicator */}
       <StepIndicator currentStep={currentStep} />
 
-      {/* Step Content */}
       <div className="deploy-content">
         {renderStep()}
       </div>
 
-      {/* Navigation */}
       <div className="deploy-nav">
         <button
           type="button"
