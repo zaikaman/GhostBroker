@@ -164,11 +164,26 @@ const getOperatorHeaders = (): Record<string, string> => {
 };
 
 function buildOperatorRequestInit(init: RequestInit = {}): RequestInit {
-  const headers = new Headers(init.headers ?? {});
-  headers.set('Accept', headers.get('Accept') ?? 'application/json');
+  const headers: Record<string, string> = {};
+
+  if (init.headers) {
+    if (init.headers instanceof Headers) {
+      init.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+    } else if (Array.isArray(init.headers)) {
+      init.headers.forEach(([key, value]) => {
+        headers[key] = value;
+      });
+    } else {
+      Object.assign(headers, init.headers);
+    }
+  }
+
+  headers['Accept'] = headers['Accept'] ?? 'application/json';
 
   for (const [key, value] of Object.entries(getOperatorHeaders())) {
-    headers.set(key, value);
+    headers[key] = value;
   }
 
   return {

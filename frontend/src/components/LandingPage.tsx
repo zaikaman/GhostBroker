@@ -108,7 +108,6 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
       {/* 5. Global Navigation Header */}
       <header className="header-v2">
         <div className="logo-v2" onClick={() => handleNavClick('hero-top')}>
-          <span>GB</span>
           <span style={{ fontSize: '1.25rem', letterSpacing: '0.05em', opacity: 0.9 }}>GhostBroker</span>
         </div>
 

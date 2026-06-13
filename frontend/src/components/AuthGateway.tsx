@@ -112,7 +112,6 @@ export function AuthGateway({ onAuthenticated }: AuthGatewayProps): React.JSX.El
       <section className="auth-v2-card" aria-labelledby="auth-title">
         {/* Logo matching the header */}
         <div className="auth-v2-logo">
-          <span>GB</span>
           <span style={{ fontSize: '1.25rem', letterSpacing: '0.05em', opacity: 0.9 }}>GhostBroker</span>
         </div>
 

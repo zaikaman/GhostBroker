@@ -29,11 +29,20 @@ import {
   AlertCircleIcon,
   ScrollIcon,
   LockIcon,
-  RocketIcon
+  RocketIcon,
+  Key01Icon,
+  EyeIcon,
+  CancelCircleIcon
 } from 'hugeicons-react';
 
-function AgentDeployView({ session }: { session: AuthSession }): React.JSX.Element {
-  const { navigate } = useRouter();
+function DashboardView({
+  session,
+  setSession,
+}: {
+  session: AuthSession;
+  setSession: React.Dispatch<React.SetStateAction<AuthSession | null>>;
+}): React.JSX.Element {
+  const { currentPath, navigate } = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -70,95 +79,6 @@ function AgentDeployView({ session }: { session: AuthSession }): React.JSX.Eleme
     };
   }, []);
 
-  return (
-    <div className="dashboard-v2-container">
-      {/* 1. Background Video */}
-      <div className="video-background-container">
-        <video
-          ref={videoRef}
-          className="video-background"
-          muted
-          loop
-          playsInline
-          autoPlay
-        />
-      </div>
-
-      {/* 2. Overlays */}
-      <div className="overlay-left-to-right" />
-      <div className="overlay-bottom-up" />
-
-      {/* 4. Central Glow SVG */}
-      <svg
-        className="central-glow-svg"
-        viewBox="0 0 1000 400"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <defs>
-          <filter id="glowBlur" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="25" />
-          </filter>
-        </defs>
-        <ellipse
-          cx="500"
-          cy="100"
-          rx="350"
-          ry="80"
-          fill="url(#glowGradient)"
-          filter="url(#glowBlur)"
-          opacity="0.35"
-        />
-        <linearGradient id="glowGradient" x1="150" y1="100" x2="850" y2="100" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#00f2fe" />
-          <stop offset="50%" stopColor="#5ed29c" />
-          <stop offset="100%" stopColor="#0575e6" />
-        </linearGradient>
-      </svg>
-
-      <AgentDeploymentGuide session={session} onBack={() => navigate('/dashboard')} />
-    </div>
-  );
-}
-
-function DashboardView({ session }: { session: AuthSession }): React.JSX.Element {
-  const { navigate } = useRouter();
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const streamUrl = 'https://stream.mux.com/tLkHO1qZoaaQOUeVWo8hEBeGQfySP02EPS02BmnNFyXys.m3u8';
-    let hls: Hls | null = null;
-
-    if (Hls.isSupported()) {
-      hls = new Hls({
-        enableWorker: false
-      });
-      hls.loadSource(streamUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch((err) => {
-          console.warn('Auto-play failed/prevented:', err);
-        });
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = streamUrl;
-      video.addEventListener('loadedmetadata', () => {
-        video.play().catch((err) => {
-          console.warn('Native auto-play failed/prevented:', err);
-        });
-      });
-    }
-
-    return () => {
-      if (hls) {
-        hls.destroy();
-      }
-    };
-  }, []);
   const {
     connectionStatus,
     enclaveStatus,
@@ -195,6 +115,161 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
     localStorage.removeItem('ghostbroker-is-drawer-open');
   };
 
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (window.location.hash === '#/deploy') return 'deploy';
+    return localStorage.getItem('ghostbroker-active-tab') || 'overview';
+  });
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    if (tab === 'deploy') {
+      navigate('/deploy');
+    } else {
+      localStorage.setItem('ghostbroker-active-tab', tab);
+      navigate('/dashboard');
+    }
+  };
+
+  useEffect(() => {
+    if (currentPath === '/deploy') {
+      setActiveTab('deploy');
+    } else if (currentPath === '/dashboard') {
+      const savedTab = localStorage.getItem('ghostbroker-active-tab') || 'overview';
+      if (savedTab === 'deploy') {
+        setActiveTab('overview');
+      } else {
+        setActiveTab(savedTab);
+      }
+    }
+  }, [currentPath]);
+
+  const handleLogout = () => {
+    apiClient.clearAuthSession();
+    setSession(null);
+    navigate('/');
+  };
+
+  // Render tab content dynamically
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'overview':
+        return (
+          <div className="dashboard-grid-overview" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+              <PortfolioCard institutionId={session.institution.id} />
+              <PortfolioHistory institutionId={session.institution.id} />
+            </div>
+            <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+              <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <LiveAgentActivityStream
+                  agents={agents}
+                  intents={intents}
+                  institutionName={session.institution.displayName}
+                  institutionDid={session.institution.t3TenantDid}
+                />
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'enclaves':
+        return (
+          <div className="dashboard-grid-enclaves" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div className="enclaves-main" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+              {agents.length === 0 && (
+                <div className="deploy-onboarding-hero" style={{ margin: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '50%',
+                      background: 'rgba(94, 210, 156, 0.1)',
+                      border: '1px solid rgba(94, 210, 156, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <RocketIcon size={20} style={{ color: 'var(--color-accent)' }} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
+                        ONBOARDING: NO ACTIVE TRADING AGENT REGISTERED
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-secondary)', maxWidth: '650px' }}>
+                        GhostBroker operates under Zero-Human Access rules. Standard order entry is disabled. To begin trading in the dark pool, you must first deploy a verified enclave runner agent for your institution.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleTabChange('deploy')}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: '0.75rem',
+                      fontFamily: 'var(--font-mono)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: '0 0 15px rgba(94, 210, 156, 0.25)',
+                      border: '1px solid var(--color-accent)'
+                    }}
+                  >
+                    <RocketIcon size={14} /> Start Onboarding →
+                  </button>
+                </div>
+              )}
+              <div className="card">
+                <AgentConnectionGrid agents={agents} onDeploy={() => handleTabChange('deploy')} />
+              </div>
+            </div>
+            <div className="enclaves-side" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+              <div className="card enclave-health-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '300px' }}>
+                <EnclaveHealthMonitor />
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'ledger':
+        return (
+          <div className="dashboard-grid-ledger" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div className="card">
+              <ProcessingStatusRail intents={intents} />
+            </div>
+            <footer className="card">
+              <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ScrollIcon size={18} style={{ color: 'var(--color-accent)' }} /> Completed Trades & Audit History
+              </h2>
+              <CompletedTradesTable
+                trades={trades}
+                isLoading={isHistoryLoading}
+                onViewReceipt={handleViewReceipt}
+              />
+            </footer>
+          </div>
+        );
+
+      case 'developer':
+        return (
+          <div className="dashboard-grid-developer" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <ApiKeysPanel />
+          </div>
+        );
+
+      case 'deploy':
+        return (
+          <div style={{ animation: 'fadeIn 0.3s ease' }}>
+            <AgentDeploymentGuide session={session} onBack={() => handleTabChange('enclaves')} />
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="dashboard-v2-container">
       {/* 1. Background Video */}
@@ -213,7 +288,7 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
       <div className="overlay-left-to-right" />
       <div className="overlay-bottom-up" />
 
-      {/* 4. Central Glow SVG */}
+      {/* 3. Central Glow SVG */}
       <svg
         className="central-glow-svg"
         viewBox="0 0 1000 400"
@@ -242,218 +317,202 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         </linearGradient>
       </svg>
 
-      <div className="dashboard-layout">
-      {/* Header Section */}
-      <header className="layout-header dashboard-header" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 'var(--spacing-sm)' }}>
-          <div className="header-brand" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
-            <h1 className="logo-v2" style={{ fontSize: '1.4rem', cursor: 'default', margin: 0 }}>GB GHOSTBROKER</h1>
-            <div className="observatory-badge">
-              <span className="badge-dot"></span>
+      <div className="dashboard-container-v3">
+        {/* Left Sidebar */}
+        <aside className="sidebar">
+          <div className="sidebar-brand">
+            <h1 className="sidebar-logo">GHOSTBROKER</h1>
+            <div className="observatory-badge" style={{ alignSelf: 'flex-start' }}>
+              <span className="badge-dot" />
               OBSERVATORY MODE
             </div>
           </div>
-          <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-              DID: {session.institution.t3TenantDid}
+
+          <nav className="sidebar-nav">
+            <button
+              type="button"
+              className={`sidebar-link ${activeTab === 'overview' ? 'active' : ''}`}
+              onClick={() => handleTabChange('overview')}
+            >
+              <EyeIcon size={16} /> Overview
+            </button>
+            <button
+              type="button"
+              className={`sidebar-link ${activeTab === 'enclaves' ? 'active' : ''}`}
+              onClick={() => handleTabChange('enclaves')}
+            >
+              <Robot01Icon size={16} /> Secure Enclaves
+            </button>
+            <button
+              type="button"
+              className={`sidebar-link ${activeTab === 'ledger' ? 'active' : ''}`}
+              onClick={() => handleTabChange('ledger')}
+            >
+              <ScrollIcon size={16} /> Audit Ledger
+            </button>
+            <button
+              type="button"
+              className={`sidebar-link ${activeTab === 'developer' ? 'active' : ''}`}
+              onClick={() => handleTabChange('developer')}
+            >
+              <Key01Icon size={16} /> Developer Keys
+            </button>
+            <button
+              type="button"
+              className={`sidebar-link ${activeTab === 'deploy' ? 'active' : ''}`}
+              onClick={() => handleTabChange('deploy')}
+              style={{ marginTop: 'var(--spacing-md)' }}
+            >
+              <RocketIcon size={16} style={{ color: 'var(--color-accent)' }} /> Deploy Agent
+            </button>
+          </nav>
+
+          <div className="sidebar-footer">
+            <div className="sidebar-institution">
+              <div style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Institution</div>
+              <div className="sidebar-institution-name">{session.institution.displayName}</div>
+              <div className="sidebar-did" title={session.institution.t3TenantDid}>
+                {session.institution.t3TenantDid.slice(0, 18)}...
+              </div>
             </div>
             <button
               type="button"
-              className="btn-deploy-premium"
-              onClick={() => navigate('/deploy')}
+              className="sidebar-btn-logout"
+              onClick={handleLogout}
             >
-              <RocketIcon size={12} /> Deploy Agent
+              <CancelCircleIcon size={12} /> Disconnect DID
             </button>
           </div>
-        </div>
+        </aside>
 
-        {/* Integrated Mandate Banner */}
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          background: 'rgba(94, 210, 156, 0.02)', 
-          border: '1px solid rgba(94, 210, 156, 0.1)', 
-          borderRadius: '12px', 
-          padding: '10px 16px',
-          fontSize: '0.75rem',
-          width: '100%',
-          gap: 'var(--spacing-md)',
-          boxSizing: 'border-box'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255, 255, 255, 0.85)', lineHeight: '1.4' }}>
-            <Robot01Icon size={16} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span>
-                <strong>Agent-to-Agent Zone:</strong> Cryptographically verified TEE matching active. No human order visibility.
-              </span>
-              <span style={{ fontSize: '0.7rem', opacity: 0.8, color: 'var(--color-accent)' }}>
-                Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
-              </span>
+        {/* Main Content Area */}
+        <main className="main-content">
+          {/* Header block (only shown if not in deploy tab to prevent double headers) */}
+          {activeTab !== 'deploy' && (
+            <header className="dashboard-header" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', marginBottom: 'var(--spacing-lg)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 'var(--spacing-sm)' }}>
+                <div className="header-brand">
+                  <h2 style={{ fontSize: '1.1rem', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {activeTab === 'overview' && 'SYSTEM OVERVIEW'}
+                    {activeTab === 'enclaves' && 'SECURE ENCLAVE RUNNERS'}
+                    {activeTab === 'ledger' && 'SECURE AUDIT LEDGER'}
+                    {activeTab === 'developer' && 'DEVELOPER INTEGRATIONS'}
+                  </h2>
+                </div>
+                <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                    DID: {session.institution.t3TenantDid}
+                  </div>
+                  {activeTab !== 'enclaves' && (
+                    <button
+                      type="button"
+                      className="btn-deploy-premium"
+                      onClick={() => handleTabChange('deploy')}
+                    >
+                      <RocketIcon size={12} /> Deploy Agent
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Integrated Mandate Banner */}
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                background: 'rgba(94, 210, 156, 0.02)', 
+                border: '1px solid rgba(94, 210, 156, 0.1)', 
+                borderRadius: '12px', 
+                padding: '10px 16px',
+                fontSize: '0.75rem',
+                width: '100%',
+                gap: 'var(--spacing-md)',
+                boxSizing: 'border-box'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255, 255, 255, 0.85)', lineHeight: '1.4' }}>
+                  <Robot01Icon size={16} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span>
+                      <strong>Agent-to-Agent Zone:</strong> Cryptographically verified TEE matching active. No human order visibility.
+                    </span>
+                    <span style={{ fontSize: '0.7rem', opacity: 0.8, color: 'var(--color-accent)' }}>
+                      Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
+                    </span>
+                  </div>
+                </div>
+                <span style={{ 
+                  fontFamily: 'var(--font-mono)', 
+                  fontSize: '0.65rem', 
+                  color: 'var(--color-accent)', 
+                  background: 'rgba(94, 210, 156, 0.08)',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(94, 210, 156, 0.15)',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <LockIcon size={10} /> ZERO HUMAN ACCESS
+                </span>
+              </div>
+            </header>
+          )}
+
+          {/* Connection Status Section (Metrics Grid) - Only shown if not in deploy tab */}
+          {activeTab !== 'deploy' && (
+            <div className="layout-metrics" style={{ marginBottom: 'var(--spacing-lg)' }}>
+              <SecureMetric 
+                title="TEE Enclave Status" 
+                value={enclaveStatus === 'secure' ? 'SECURE' : enclaveStatus === 'processing' ? 'PROCESSING' : 'ERROR'} 
+                status={enclaveStatus} 
+                subtext="SGX Hardware Attested"
+                icon={enclaveStatus === 'secure' ? <Shield01Icon size={16} /> : <AlertCircleIcon size={16} />}
+              />
+              <SecureMetric 
+                title="Telemetry Link" 
+                value={connectionStatus.toUpperCase()} 
+                status={connectionStatus === 'connected' ? 'secure' : connectionStatus === 'connecting' ? 'processing' : 'error'} 
+                subtext="Encrypted Event Pipeline"
+                icon={connectionStatus === 'connected' ? <Plug01Icon size={16} /> : <AlertCircleIcon size={16} />}
+              />
+              <SecureMetric 
+                title="T3 Sandbox Network" 
+                value={sandboxStatus.toUpperCase()} 
+                status={sandboxStatus === 'connected' ? 'secure' : 'error'} 
+                subtext="Smart Contract Broker Link"
+                icon={sandboxStatus === 'connected' ? <Link01Icon size={16} /> : <AlertCircleIcon size={16} />}
+              />
             </div>
-          </div>
-          <span style={{ 
-            fontFamily: 'var(--font-mono)', 
-            fontSize: '0.65rem', 
-            color: 'var(--color-accent)', 
-            background: 'rgba(94, 210, 156, 0.08)',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            border: '1px solid rgba(94, 210, 156, 0.15)',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px'
-          }}>
-            <LockIcon size={10} /> ZERO HUMAN ACCESS
-          </span>
-        </div>
-      </header>
+          )}
 
-      {/* Conditional Agent Onboarding Hero Banner */}
-      {agents.length === 0 && (
-        <div className="deploy-onboarding-hero">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '50%',
-              background: 'rgba(94, 210, 156, 0.1)',
-              border: '1px solid rgba(94, 210, 156, 0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0
-            }}>
-              <RocketIcon size={20} style={{ color: 'var(--color-accent)' }} />
+          {/* System Error Notification Banner */}
+          {errorAlert && activeTab !== 'deploy' && (
+            <div 
+              className="layout-header status-badge error" 
+              style={{ 
+                borderRadius: 'var(--radius-md)', 
+                padding: 'var(--spacing-md)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.8rem',
+                width: '100%',
+                justifyContent: 'flex-start',
+                boxSizing: 'border-box',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-sm)',
+                marginBottom: 'var(--spacing-lg)'
+              }}
+            >
+              <AlertCircleIcon size={16} /> {errorAlert}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
-                ONBOARDING: NO ACTIVE TRADING AGENT REGISTERED
-              </h4>
-              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-secondary)', maxWidth: '650px' }}>
-                GhostBroker operates under Zero-Human Access rules. Standard order entry is disabled. To begin trading in the dark pool, you must first deploy a verified enclave runner agent for your institution.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => navigate('/deploy')}
-            style={{
-              padding: '8px 16px',
-              fontSize: '0.75rem',
-              fontFamily: 'var(--font-mono)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 0 15px rgba(94, 210, 156, 0.25)',
-              border: '1px solid var(--color-accent)'
-            }}
-          >
-            <RocketIcon size={14} /> Start Onboarding →
-          </button>
-        </div>
-      )}
+          )}
 
-
-      {/* Connection Status Section (Metrics Grid) */}
-      <div className="layout-metrics">
-        <SecureMetric 
-          title="TEE Enclave Status" 
-          value={enclaveStatus === 'secure' ? 'SECURE' : enclaveStatus === 'processing' ? 'PROCESSING' : 'ERROR'} 
-          status={enclaveStatus} 
-          subtext="SGX Hardware Attested"
-          icon={enclaveStatus === 'secure' ? <Shield01Icon size={16} /> : <AlertCircleIcon size={16} />}
-        />
-        <SecureMetric 
-          title="Telemetry Link" 
-          value={connectionStatus.toUpperCase()} 
-          status={connectionStatus === 'connected' ? 'secure' : connectionStatus === 'connecting' ? 'processing' : 'error'} 
-          subtext="Encrypted Event Pipeline"
-          icon={connectionStatus === 'connected' ? <Plug01Icon size={16} /> : <AlertCircleIcon size={16} />}
-        />
-        <SecureMetric 
-          title="T3 Sandbox Network" 
-          value={sandboxStatus.toUpperCase()} 
-          status={sandboxStatus === 'connected' ? 'secure' : 'error'} 
-          subtext="Smart Contract Broker Link"
-          icon={sandboxStatus === 'connected' ? <Link01Icon size={16} /> : <AlertCircleIcon size={16} />}
-        />
+          {/* Active View Content */}
+          {renderTabContent()}
+        </main>
       </div>
-
-      {/* System Error Notification Banner */}
-      {errorAlert && (
-        <div 
-          className="layout-header status-badge error" 
-          style={{ 
-            gridColumn: '1 / -1', 
-            borderRadius: 'var(--radius-md)', 
-            padding: 'var(--spacing-md)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.8rem',
-            width: '100%',
-            justifyContent: 'flex-start',
-            boxSizing: 'border-box',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--spacing-sm)'
-          }}
-        >
-          <AlertCircleIcon size={16} /> {errorAlert}
-        </div>
-      )}
-
-      {/* Column 1: Institution Portfolio & Balance History */}
-      <main className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-        <PortfolioCard
-          institutionId={session.institution.id}
-        />
-        <PortfolioHistory
-          institutionId={session.institution.id}
-        />
-      </main>
-
-      {/* Column 2: Live Telemetry Activity Feed */}
-      <section className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-        <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <LiveAgentActivityStream
-            agents={agents}
-            intents={intents}
-            institutionName={session.institution.displayName}
-            institutionDid={session.institution.t3TenantDid}
-          />
-        </div>
-      </section>
-
-      {/* Column 3: Decrypted Intent processing & Active sessions */}
-      <section className="layout-col-3" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-        <div className="card">
-          <ProcessingStatusRail intents={intents} />
-        </div>
-        <div className="card">
-          <AgentConnectionGrid agents={agents} onDeploy={() => navigate('/deploy')} />
-        </div>
-        <div className="card enclave-health-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '300px' }}>
-          <EnclaveHealthMonitor />
-        </div>
-      </section>
-
-      {/* Bottom Section: API Keys & Completed Trades */}
-      <section className="layout-bottom" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-        <ApiKeysPanel />
-        <footer className="card">
-          <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ScrollIcon size={18} style={{ color: 'var(--color-accent)' }} /> Completed Trades & Audit History
-          </h2>
-          <CompletedTradesTable
-            trades={trades}
-            isLoading={isHistoryLoading}
-            onViewReceipt={handleViewReceipt}
-          />
-        </footer>
-      </section>
 
       {/* Encrypted Audit Receipt Drawer */}
       <EncryptedReceiptDrawer
@@ -465,7 +524,6 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         error={receiptError}
       />
     </div>
-  </div>
   );
 }
 
@@ -480,7 +538,7 @@ function AppContent({
 
   // Redirect/Route guard logic based on authentication state
   useEffect(() => {
-    if (!session && (currentPath === '/dashboard' || currentPath === '/settings')) {
+    if (!session && (currentPath === '/dashboard' || currentPath === '/deploy' || currentPath === '/settings')) {
       navigate('/');
     } else if (session && (currentPath === '/' || currentPath === '/auth')) {
       navigate('/dashboard');
@@ -519,13 +577,9 @@ function AppContent({
         )
       } />
 
-      <Route path="/dashboard" element={
-        session ? <DashboardView session={session} /> : null
-      } />
-      
-      <Route path="/deploy" element={
-        session ? <AgentDeployView session={session} /> : null
-      } />
+      {session && (currentPath === '/dashboard' || currentPath === '/deploy') ? (
+        <DashboardView session={session} setSession={setSession} />
+      ) : null}
     </>
   );
 }
@@ -541,5 +595,6 @@ export function App(): React.JSX.Element {
 }
 
 export default App;
+
 
 
