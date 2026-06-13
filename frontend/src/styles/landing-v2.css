@@ -45,34 +45,6 @@
   z-index: 2;
 }
 
-/* 2. Grid System (Desktop only) */
-.grid-lines-overlay {
-  display: none;
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  pointer-events: none;
-  grid-template-columns: repeat(4, 1fr);
-  width: 100%;
-  height: 100%;
-}
-
-@media (min-width: 1024px) {
-  .grid-lines-overlay {
-    display: grid;
-  }
-}
-
-.vertical-grid-line {
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  height: 100%;
-  width: 100%;
-}
-
-.vertical-grid-line:last-child {
-  border-right: none;
-}
-
 /* 3. Central Glow */
 .central-glow-svg {
   position: absolute;
@@ -523,4 +495,156 @@
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.6);
   line-height: 1.6;
+}
+
+/* 8. High-end Auth / Login View Styles */
+.auth-v2-container {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  background-color: #070b0a;
+  color: #ffffff;
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.auth-v2-card {
+  width: min(100%, 460px);
+  background: rgba(255, 255, 255, 0.01);
+  background-blend-mode: luminosity;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 20px 50px rgba(0, 0, 0, 0.6);
+  border-radius: 24px;
+  padding: 3rem 2.5rem;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.auth-v2-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  padding: 1.4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0.02) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.auth-v2-logo {
+  font-family: 'Cinzel', serif;
+  font-weight: 800;
+  font-size: 1.5rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+.auth-v2-logo span:first-child {
+  color: #5ed29c;
+}
+
+.auth-v2-eyebrow {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #5ed29c;
+  letter-spacing: 0.25em;
+  margin-bottom: 1.25rem;
+}
+
+.auth-v2-title {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 2.25rem;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.25rem;
+  color: #ffffff;
+}
+
+.auth-v2-title-dot {
+  color: #5ed29c;
+}
+
+.auth-v2-description {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.65);
+  margin-bottom: 2.5rem;
+}
+
+.auth-v2-button {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #070b0a;
+  background-color: #5ed29c;
+  border: none;
+  border-radius: 9999px;
+  padding: 1.1rem 2.2rem;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 20px rgba(94, 210, 156, 0.2);
+}
+
+.auth-v2-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background-color: #4ec28c;
+  box-shadow: 0 8px 30px rgba(94, 210, 156, 0.35);
+}
+
+.auth-v2-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-v2-error {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@keyframes authCardFloat {
+  0% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(0.2deg);
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
 }

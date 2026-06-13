@@ -76,13 +76,6 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
       <div className="overlay-left-to-right" />
       <div className="overlay-bottom-up" />
 
-      {/* 3. Grid System */}
-      <div className="grid-lines-overlay" aria-hidden="true">
-        <div className="vertical-grid-line" />
-        <div className="vertical-grid-line" />
-        <div className="vertical-grid-line" />
-      </div>
-
       {/* 4. Central Glow SVG */}
       <svg
         className="central-glow-svg"
