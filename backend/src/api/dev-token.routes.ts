@@ -20,17 +20,28 @@ export function createDevTokenRouter(env: BackendEnv): Router {
         return;
       }
 
-      const token = issueOperatorSessionToken({
+      const tokenParams: {
+        secret: string;
+        did: string;
+        institutionId: string;
+        walletAddress?: string;
+      } = {
         secret:
           env.AUTH_SESSION_SECRET ??
           "development-only-auth-session-secret-change-before-production",
         did: did ?? `did:t3n:e2e:${institutionId}`,
         institutionId,
-        walletAddress:
-          did?.startsWith("did:t3:") || did?.startsWith("did:t3n:")
-            ? extractWalletAddressFromDid(did)
-            : undefined,
-      });
+      };
+
+      const walletAddress =
+        did?.startsWith("did:t3:") || did?.startsWith("did:t3n:")
+          ? extractWalletAddressFromDid(did)
+          : undefined;
+      if (walletAddress) {
+        tokenParams.walletAddress = walletAddress;
+      }
+
+      const token = issueOperatorSessionToken(tokenParams);
 
       response.status(200).json({ token });
     } catch (error) {

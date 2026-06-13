@@ -201,12 +201,22 @@ export class DidAuthService implements AuthSessionService {
       }
     }
 
-    const token = issueOperatorSessionToken({
+    const tokenParams: {
+      secret: string;
+      did: string;
+      institutionId: string;
+      walletAddress?: string;
+    } = {
       secret: this.sessionSecret,
       did: request.did,
       institutionId: institution.id,
-      walletAddress: connectedWalletAddress,
-    });
+    };
+
+    if (connectedWalletAddress) {
+      tokenParams.walletAddress = connectedWalletAddress;
+    }
+
+    const token = issueOperatorSessionToken(tokenParams);
     const expiresAt = new Date(Date.now() + 60 * 60 * 8 * 1000).toISOString();
 
     return {

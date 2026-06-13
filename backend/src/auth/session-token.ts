@@ -21,6 +21,8 @@ const claimsSchema = z.object({
   exp: z.number().int().positive(),
 });
 
+type ParsedClaims = z.infer<typeof claimsSchema>;
+
 function encode(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
@@ -46,14 +48,35 @@ export function issueOperatorSessionToken(params: {
     did: params.did,
     institutionId: params.institutionId,
     operatorId: `did:${params.did}`,
-    walletAddress: params.walletAddress,
     iat: issuedAt,
     exp: issuedAt + (params.ttlSeconds ?? 60 * 60 * 8),
   };
+
+  if (params.walletAddress) {
+    claims.walletAddress = params.walletAddress;
+  }
+
   const header = encode({ alg: "HS256", typ: "JWT" });
   const payload = encode(claims);
   const unsigned = `${header}.${payload}`;
   return `${unsigned}.${sign(unsigned, params.secret)}`;
+}
+
+function toOperatorSessionClaims(parsed: ParsedClaims): OperatorSessionClaims {
+  const claims: OperatorSessionClaims = {
+    sub: parsed.sub,
+    did: parsed.did,
+    institutionId: parsed.institutionId,
+    operatorId: parsed.operatorId,
+    iat: parsed.iat,
+    exp: parsed.exp,
+  };
+
+  if (parsed.walletAddress) {
+    claims.walletAddress = parsed.walletAddress;
+  }
+
+  return claims;
 }
 
 export function verifyOperatorSessionToken(
@@ -89,7 +112,7 @@ export function verifyOperatorSessionToken(
       return undefined;
     }
 
-    return parsed;
+    return toOperatorSessionClaims(parsed);
   } catch {
     return undefined;
   }

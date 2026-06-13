@@ -91,7 +91,6 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
   private readonly wbtcContractAddress: string;
   private readonly usdcContractAddress: string;
   private readonly fetchImpl: EtherscanFetch;
-  private readonly inFlightSyncs = new Map<string, Promise<Portfolio>>();
 
   public constructor(
     portfolioService: PortfolioService,

@@ -63,6 +63,7 @@ const envSchema = z.object({
   SEPOLIA_USDC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
   AUTH_SESSION_SECRET: z.string().min(32).optional(),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
+  PORTFOLIO_SYNC_TOKEN: z.string().min(32).optional(),
 });
 
 export type BackendEnv = z.infer<typeof envSchema>;

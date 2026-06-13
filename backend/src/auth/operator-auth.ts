@@ -74,12 +74,17 @@ export function operatorAuthMiddleware(
       return;
     }
 
-    response.locals[operatorAuthLocalKey] = {
+    const authContext: OperatorAuthContext = {
       institutionId: claims.institutionId,
       operatorId: claims.operatorId,
       did: claims.did,
-      walletAddress: claims.walletAddress,
-    } satisfies OperatorAuthContext;
+    };
+
+    if (claims.walletAddress) {
+      authContext.walletAddress = claims.walletAddress;
+    }
+
+    response.locals[operatorAuthLocalKey] = authContext;
     next();
   };
 }
