@@ -24,29 +24,23 @@ export function createPortfoliosRouter(
         return;
       }
 
-      // Query Sepolia blockchain LIVE for the wallet's balances
+      // Query Sepolia blockchain LIVE for the wallet's balances — no database fallback
       const walletAddress = operatorAuth.walletAddress;
-      if (walletPortfolioSyncService && walletAddress) {
-        try {
-          const livePortfolio = await walletPortfolioSyncService.fetchLivePortfolio({
-            walletAddress,
-          });
-          response.status(200).json({
-            institutionId,
-            holdings: livePortfolio.holdings,
-          });
-          return;
-        } catch (error) {
-          logger.warn(
-            { err: error, institutionId, walletAddress },
-            "Live Sepolia fetch failed; falling back to stored portfolio.",
-          );
-        }
+      if (!walletPortfolioSyncService || !walletAddress) {
+        response.status(200).json({
+          institutionId,
+          holdings: [],
+        });
+        return;
       }
 
-      // Fallback: return whatever is stored in the database
-      const portfolio = await portfolioService.getPortfolio(institutionId);
-      response.status(200).json(portfolio);
+      const livePortfolio = await walletPortfolioSyncService.fetchLivePortfolio({
+        walletAddress,
+      });
+      response.status(200).json({
+        institutionId,
+        holdings: livePortfolio.holdings,
+      });
     } catch (error) {
       next(error);
     }
