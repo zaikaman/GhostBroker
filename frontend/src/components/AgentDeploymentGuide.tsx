@@ -300,23 +300,36 @@ function CopyField({ label, value }: { label: string; value: string }): React.JS
   );
 }
 
-function StepIndicator({ currentStep }: { currentStep: Step }): React.JSX.Element {
+function StepIndicator({ currentStep, onStepSelect }: { currentStep: Step; onStepSelect: (step: Step) => void }): React.JSX.Element {
   const currentIndex = STEPS.findIndex((step) => step.id === currentStep);
 
   return (
     <div className="deploy-steps-indicator">
-      {STEPS.map((step, index) => (
-        <div
-          key={step.id}
-          className={`deploy-step-dot ${index === currentIndex ? 'active' : ''} ${index < currentIndex ? 'completed' : ''}`}
-        >
-          <div className="deploy-step-circle">
-            {index < currentIndex ? <CheckmarkCircle01Icon size={14} /> : getStepIcon(step.id, 14)}
-          </div>
-          <span className="deploy-step-label">{step.label}</span>
-          {index < STEPS.length - 1 && <div className={`deploy-step-line ${index < currentIndex ? 'filled' : ''}`} />}
-        </div>
-      ))}
+      {STEPS.map((step, index) => {
+        const isActive = step.id === currentStep;
+        const isCompleted = index < currentIndex;
+
+        return (
+          <button
+            key={step.id}
+            type="button"
+            className={`deploy-step-tab ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}
+            onClick={() => onStepSelect(step.id)}
+            aria-current={isActive ? 'step' : undefined}
+          >
+            <div className="deploy-step-tab-content">
+              <div className="deploy-step-tab-icon">
+                {isCompleted ? <CheckmarkCircle01Icon size={14} /> : getStepIcon(step.id, 14)}
+              </div>
+              <div className="deploy-step-tab-info">
+                <span className="deploy-step-tab-num">0{index + 1}</span>
+                <span className="deploy-step-tab-label">{step.label}</span>
+              </div>
+            </div>
+            <div className="deploy-step-tab-indicator-bar" />
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -731,7 +744,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         </div>
       </header>
 
-      <StepIndicator currentStep={currentStep} />
+      <StepIndicator currentStep={currentStep} onStepSelect={setCurrentStep} />
 
       <div className="deploy-content">
         {renderStep()}
