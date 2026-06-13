@@ -27,6 +27,7 @@ function buildServices(
     } satisfies AgentAdmissionService,
     hiddenIntentService,
     portfolioService: {} as never,
+    apiKeyService: {} as never,
   };
 }
 

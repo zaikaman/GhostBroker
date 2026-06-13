@@ -2,6 +2,8 @@ import type { NextFunction, Request, RequestHandler, Response } from "express";
 import type { BackendEnv } from "../config/env.js";
 import { PublicError } from "../errors/public-error.js";
 import { verifyOperatorSessionToken } from "./session-token.js";
+import type { ApiKeyManagementService } from "../services/api-key.service.js";
+import { authenticateWithApiKey, isApiKeyToken } from "./api-key-auth.js";
 
 export interface OperatorAuthContext {
   operatorId: string;
@@ -23,14 +25,43 @@ function readBearerToken(request: Request): string | undefined {
   return match?.[1]?.trim();
 }
 
+/**
+ * Middleware that authenticates requests using either:
+ * 1. A JWT session token (from DID challenge-response), or
+ * 2. An API key (`gbk_xxx`) for persistent agent authentication.
+ *
+ * Pass an `apiKeyService` to enable API key authentication.
+ */
 export function operatorAuthMiddleware(
   env?: Pick<BackendEnv, "NODE_ENV" | "AUTH_SESSION_SECRET">,
+  apiKeyService?: ApiKeyManagementService,
 ): RequestHandler {
-  return (request: Request, response: Response, next: NextFunction) => {
-    const token = readBearerToken(request);
+  return async (request: Request, response: Response, next: NextFunction) => {
+    const authorization = readHeader(request, "authorization");
     const sessionSecret =
       env?.AUTH_SESSION_SECRET ??
       "development-only-auth-session-secret-change-before-production";
+
+    if (!authorization) {
+      next(new PublicError("authorization_failed", 401));
+      return;
+    }
+
+    // Check if this is an API key token (starts with gbk_)
+    if (apiKeyService && isApiKeyToken(authorization)) {
+      try {
+        const authContext = await authenticateWithApiKey(authorization, apiKeyService);
+        response.locals[operatorAuthLocalKey] = authContext;
+        next();
+        return;
+      } catch (error) {
+        next(error);
+        return;
+      }
+    }
+
+    // Fall through to JWT session authentication
+    const token = readBearerToken(request);
 
     if (!token || !sessionSecret) {
       next(new PublicError("authorization_failed", 401));

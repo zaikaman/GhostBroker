@@ -82,3 +82,15 @@ CREATE TABLE public.portfolio_history (
   CONSTRAINT portfolio_history_pkey PRIMARY KEY (id),
   CONSTRAINT portfolio_history_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
 );
+CREATE TABLE public.api_keys (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  institution_id uuid NOT NULL,
+  label text NOT NULL CHECK (label <> ''::text AND char_length(label) <= 100),
+  prefix text NOT NULL CHECK (prefix <> ''::text AND char_length(prefix) <= 16),
+  key_hash text NOT NULL UNIQUE CHECK (key_hash <> ''::text),
+  scopes text NOT NULL DEFAULT 'agent:operate'::text CHECK (scopes <> ''::text),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  revoked_at timestamp with time zone,
+  CONSTRAINT api_keys_pkey PRIMARY KEY (id),
+  CONSTRAINT api_keys_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
+);

@@ -23,6 +23,7 @@ function buildServices(authService: AuthSessionService): BackendServices {
     } satisfies AgentAdmissionService,
     authService,
     portfolioService: {} as never,
+    apiKeyService: {} as never,
   };
 }
 

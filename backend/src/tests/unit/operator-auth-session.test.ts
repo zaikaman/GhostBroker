@@ -20,6 +20,7 @@ function buildServices(agentService: AgentAdmissionService): BackendServices {
     } satisfies InstitutionManagementService,
     agentService,
     portfolioService: {} as never,
+    apiKeyService: {} as never,
   };
 }
 

@@ -19,6 +19,7 @@ import { PortfolioHistory } from '../components/PortfolioHistory';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
+import { ApiKeysPanel } from '../components/ApiKeysPanel';
 import { apiClient, type AuthSession } from '../services/api-client';
 import {
   Robot01Icon,
@@ -439,17 +440,20 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         </div>
       </section>
 
-      {/* Bottom Section: Completed Trades & Audit History */}
-      <footer className="layout-bottom card">
-        <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <ScrollIcon size={18} style={{ color: 'var(--color-accent)' }} /> Completed Trades & Audit History
-        </h2>
-        <CompletedTradesTable
-          trades={trades}
-          isLoading={isHistoryLoading}
-          onViewReceipt={handleViewReceipt}
-        />
-      </footer>
+      {/* Bottom Section: API Keys & Completed Trades */}
+      <section className="layout-bottom" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+        <ApiKeysPanel />
+        <footer className="card">
+          <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <ScrollIcon size={18} style={{ color: 'var(--color-accent)' }} /> Completed Trades & Audit History
+          </h2>
+          <CompletedTradesTable
+            trades={trades}
+            isLoading={isHistoryLoading}
+            onViewReceipt={handleViewReceipt}
+          />
+        </footer>
+      </section>
 
       {/* Encrypted Audit Receipt Drawer */}
       <EncryptedReceiptDrawer

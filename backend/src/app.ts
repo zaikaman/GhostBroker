@@ -23,6 +23,12 @@ import { operatorAuthMiddleware } from "./auth/operator-auth.js";
 import { T3AgentAuthorizationFacade } from "./auth/agent-authz.js";
 import { createSupabaseServiceClient } from "./services/supabase-client.js";
 import {
+  ApiKeyService,
+  SupabaseApiKeyRepository,
+  type ApiKeyManagementService,
+} from "./services/api-key.service.js";
+import { createApiKeysRouter } from "./api/api-keys.routes.js";
+import {
   InstitutionService,
   SupabaseInstitutionRepository,
   type InstitutionManagementService,
@@ -97,6 +103,7 @@ export interface BackendServices {
   tradeHistoryService?: TradeHistoryService;
   receiptService?: ReceiptService;
   authService?: AuthSessionService;
+  apiKeyService: ApiKeyManagementService;
 }
 
 async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
@@ -120,6 +127,8 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
   );
   const authorityRevocationRepository =
     new SupabaseAuthorityRevocationRepository(supabase as never);
+
+  const apiKeyRepository = new SupabaseApiKeyRepository(supabase as never);
 
   const authorizationFacade = new T3AgentAuthorizationFacade(
     new DashboardDelegationAgentAuthClient(t3NetworkClient),
@@ -192,6 +201,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       new SupabaseTradeHistoryRepository(supabase as never),
     ),
     receiptService: new ReceiptService(new SupabaseReceiptRepository(supabase as never)),
+    apiKeyService: new ApiKeyService(apiKeyRepository),
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
@@ -226,20 +236,25 @@ export function createApp(
   );
   app.use(
     "/api",
-    operatorAuthMiddleware(env),
+    operatorAuthMiddleware(env, services.apiKeyService),
+    createApiKeysRouter(services.apiKeyService),
+  );
+  app.use(
+    "/api",
+    operatorAuthMiddleware(env, services.apiKeyService),
     createAgentsRouter(services.agentService, services.hiddenIntentService),
   );
   if (services.tradeHistoryService) {
     app.use(
       "/api",
-      operatorAuthMiddleware(env),
+      operatorAuthMiddleware(env, services.apiKeyService),
       createTradesRouter(services.tradeHistoryService),
     );
   }
   if (services.receiptService) {
     app.use(
       "/api",
-      operatorAuthMiddleware(env),
+      operatorAuthMiddleware(env, services.apiKeyService),
       createReceiptsRouter(services.receiptService),
     );
   }

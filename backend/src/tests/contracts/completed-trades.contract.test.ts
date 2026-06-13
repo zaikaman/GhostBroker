@@ -26,6 +26,7 @@ function buildServices(tradeHistoryService: TradeHistoryService): BackendService
     } satisfies AgentAdmissionService,
     tradeHistoryService,
     portfolioService: {} as never,
+    apiKeyService: {} as never,
   };
 }
 

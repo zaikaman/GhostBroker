@@ -100,6 +100,21 @@ export interface AuditReceipt {
   t3AttestationRef: string;
 }
 
+export interface ApiKey {
+  id: string;
+  institutionId: string;
+  label: string;
+  prefix: string;
+  scopes: string[];
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface CreatedApiKey extends ApiKey {
+  /** The plaintext API key. Returned only once on creation. */
+  key: string;
+}
+
 export type RedactedErrorCode =
   | 'authorization_failed'
   | 'validation_failed'
@@ -376,5 +391,33 @@ export const apiClient = {
   async getReceipt(receiptId: string): Promise<AuditReceipt> {
     const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/receipts/${receiptId}`);
     return handleResponse<AuditReceipt>(res);
+  },
+
+  // ── API Key Management ────────────────────────────────────────────────
+
+  async listApiKeys(): Promise<ApiKey[]> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/keys`,
+    );
+    return handleResponse<ApiKey[]>(res);
+  },
+
+  async createApiKey(label: string, scopes?: string[]): Promise<CreatedApiKey> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/keys`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, scopes: scopes ?? ['agent:operate'] }),
+      },
+    );
+    return handleResponse<CreatedApiKey>(res);
+  },
+
+  async revokeApiKey(id: string): Promise<void> {
+    await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/keys/${id}/revoke`,
+      { method: 'POST' },
+    );
   },
 };

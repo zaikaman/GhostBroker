@@ -62,25 +62,29 @@ GhostBroker has strong **cryptographic primitives** (DID auth, delegation proofs
 
 ### Gap 1: No API Key System for Agents
 
-**Severity: 🔴 Blocking**
+**Status: ✅ Resolved**
 
-Currently, agents authenticate the exact same way human operators do — DID challenge-response → 8-hour JWT. This means:
+Agents can now authenticate using persistent API keys (`gbk_<prefix>_<random>`) instead of re-signing DID challenges every 8 hours.
 
-- Agents must re-authenticate every 8 hours by re-signing a cryptographic challenge
-- There is **no persistent credential** an agent can present on every API call
-- If the agent's wallet key lives on a server, the institution's master wallet key is used for every API call
-- On short-lived containers/serverless functions, the auth overhead is significant
+**What was built:**
 
-**What's needed:**
+| Component | File(s) |
+|-----------|---------|
+| `api_keys` DB table | `database/migrations/007_create_api_keys.sql` |
+| `POST /api/keys` — Generate a new API key | `backend/src/api/api-keys.routes.ts` |
+| `GET /api/keys` — List active keys (without secret) | `backend/src/api/api-keys.routes.ts` |
+| `POST /api/keys/:id/revoke` — Revoke a key | `backend/src/api/api-keys.routes.ts` |
+| API key middleware | `backend/src/auth/api-key-auth.ts`, updated `backend/src/auth/operator-auth.ts` |
+| Key-scoped auth context | `backend/src/services/api-key.service.ts` |
+| Dashboard UI for key management | `frontend/src/components/ApiKeysPanel.tsx` |
 
-| Item | Description |
-|------|-------------|
-| `api_keys` DB table | Hash (bcrypt/sha256) + prefix + label + institution_id + scopes + revoked_at |
-| `POST /api/keys` | Generate a new API key (returns plaintext once) |
-| `GET /api/keys` | List active API keys (without secret) |
-| `POST /api/keys/:id/revoke` | Revoke a key |
-| API key middleware | Accept `Authorization: Bearer <apikey_xxx>` alongside JWT |
-| Key-scoped auth context | Map API key to institution/agent without DID challenge |
+**Key design decisions:**
+
+- Keys are hashed with SHA-256 before storage — plaintext returned only once on creation
+- Bearer tokens starting with `gbk_` are routed to API key auth; other tokens fall through to JWT
+- Revoke includes `institution_id` check for cross-institution protection
+- Keys can be managed from the dashboard UI (generate, list, copy, revoke)
+- The frontend `api-client.ts` exposes `listApiKeys()`, `createApiKey()`, `revokeApiKey()`
 
 ---
 

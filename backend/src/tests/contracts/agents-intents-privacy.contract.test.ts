@@ -25,6 +25,7 @@ const services: BackendServices = {
     },
   },
   portfolioService: {} as never,
+  apiKeyService: {} as never,
 };
 
 describe("POST /api/agents/intents privacy contract", () => {
