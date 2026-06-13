@@ -19,6 +19,15 @@ import { PortfolioHistory } from '../components/PortfolioHistory';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { apiClient, type AuthSession } from '../services/api-client';
+import {
+  Robot01Icon,
+  Shield01Icon,
+  Plug01Icon,
+  Link01Icon,
+  AlertCircleIcon,
+  ScrollIcon,
+  LockIcon
+} from 'hugeicons-react';
 
 function AgentDeployView({ session }: { session: AuthSession }): React.JSX.Element {
   const { navigate } = useRouter();
@@ -221,7 +230,7 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
           boxSizing: 'border-box'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255, 255, 255, 0.85)', lineHeight: '1.4' }}>
-            <span style={{ fontSize: '1rem' }}>🤖</span>
+            <Robot01Icon size={16} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span>
                 <strong>Agent-to-Agent Zone:</strong> Cryptographically verified TEE matching active. No human order visibility.
@@ -240,35 +249,38 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
             borderRadius: '4px',
             border: '1px solid rgba(94, 210, 156, 0.15)',
             whiteSpace: 'nowrap',
-            flexShrink: 0
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px'
           }}>
-            🔒 ZERO HUMAN ACCESS
+            <LockIcon size={10} /> ZERO HUMAN ACCESS
           </span>
         </div>
       </header>
 
       {/* Connection Status Section (Metrics Grid) */}
-      <div style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 'var(--spacing-md)', marginTop: '-8px' }}>
+      <div className="layout-metrics">
         <SecureMetric 
           title="TEE Enclave Status" 
           value={enclaveStatus === 'secure' ? 'SECURE' : enclaveStatus === 'processing' ? 'PROCESSING' : 'ERROR'} 
           status={enclaveStatus} 
           subtext="SGX Hardware Attested"
-          icon="🛡️"
+          icon={enclaveStatus === 'secure' ? <Shield01Icon size={16} /> : <AlertCircleIcon size={16} />}
         />
         <SecureMetric 
           title="Telemetry Link" 
           value={connectionStatus.toUpperCase()} 
           status={connectionStatus === 'connected' ? 'secure' : connectionStatus === 'connecting' ? 'processing' : 'error'} 
           subtext="Encrypted Event Pipeline"
-          icon="🔌"
+          icon={connectionStatus === 'connected' ? <Plug01Icon size={16} /> : <AlertCircleIcon size={16} />}
         />
         <SecureMetric 
           title="T3 Sandbox Network" 
           value={sandboxStatus.toUpperCase()} 
           status={sandboxStatus === 'connected' ? 'secure' : 'error'} 
           subtext="Smart Contract Broker Link"
-          icon="⛓️"
+          icon={sandboxStatus === 'connected' ? <Link01Icon size={16} /> : <AlertCircleIcon size={16} />}
         />
       </div>
 
@@ -277,22 +289,25 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         <div 
           className="layout-header status-badge error" 
           style={{ 
-            gridColumn: 'span 2', 
+            gridColumn: '1 / -1', 
             borderRadius: 'var(--radius-md)', 
             padding: 'var(--spacing-md)',
             fontFamily: 'var(--font-mono)',
             fontSize: '0.8rem',
             width: '100%',
             justifyContent: 'flex-start',
-            boxSizing: 'border-box'
+            boxSizing: 'border-box',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--spacing-sm)'
           }}
         >
-          🚨 {errorAlert}
+          <AlertCircleIcon size={16} /> {errorAlert}
         </div>
       )}
 
-      {/* Main Left Section: Institution Portfolio & Balance History */}
-      <main className="layout-left" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+      {/* Column 1: Institution Portfolio & Balance History */}
+      <main className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
         <PortfolioCard
           institutionId={session.institution.id}
           token={session.token}
@@ -303,10 +318,9 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         />
       </main>
 
-      {/* Main Right Section: Live Telemetry & Connected Agents */}
-      <section className="layout-right" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-        {/* Live Agent Activity Stream */}
-        <div className="card">
+      {/* Column 2: Live Telemetry Activity Feed */}
+      <section className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+        <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           <LiveAgentActivityStream
             agents={agents}
             intents={intents}
@@ -314,22 +328,22 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
             institutionDid={session.institution.t3TenantDid}
           />
         </div>
+      </section>
 
-        {/* Secondary Telemetry Side-by-Side Panel Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--spacing-lg)' }}>
-          <div className="card">
-            <ProcessingStatusRail intents={intents} />
-          </div>
-          <div className="card">
-            <AgentConnectionGrid agents={agents} />
-          </div>
+      {/* Column 3: Decrypted Intent processing & Active sessions */}
+      <section className="layout-col-3" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+        <div className="card">
+          <ProcessingStatusRail intents={intents} />
+        </div>
+        <div className="card">
+          <AgentConnectionGrid agents={agents} />
         </div>
       </section>
 
       {/* Bottom Section: Completed Trades & Audit History */}
       <footer className="layout-bottom card">
-        <h2 className="card-title">
-          <span>📜</span> Completed Trades & Audit History
+        <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ScrollIcon size={18} style={{ color: 'var(--color-accent)' }} /> Completed Trades & Audit History
         </h2>
         <CompletedTradesTable
           trades={trades}

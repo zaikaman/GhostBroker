@@ -1,5 +1,6 @@
 import React from 'react';
 import type { AgentState } from '../hooks/useConnectionTelemetry';
+import { UserIcon, Activity01Icon } from 'hugeicons-react';
 
 export interface AgentConnectionGridProps {
   agents: AgentState[];
@@ -26,8 +27,8 @@ export function AgentConnectionGrid({ agents }: AgentConnectionGridProps): React
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-      <h3 className="form-label" style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-        Active Enclave Agent Sessions ({agents.length})
+      <h3 className="form-label" style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Active Enclave Agent Sessions ({agents.length})
       </h3>
       {agents.length === 0 ? (
         <div 
@@ -62,11 +63,14 @@ export function AgentConnectionGrid({ agents }: AgentConnectionGridProps): React
                     fontFamily: 'var(--font-mono)', 
                     fontSize: '0.8rem', 
                     fontWeight: 600,
-                    color: 'var(--color-text-primary)' 
+                    color: 'var(--color-text-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
                   }}
                   title={agent.agentDid}
                 >
-                  👤 {truncateDid(agent.agentDid)}
+                  <UserIcon size={12} style={{ color: 'var(--color-accent)' }} /> {truncateDid(agent.agentDid)}
                 </span>
                 <span 
                   style={{ 

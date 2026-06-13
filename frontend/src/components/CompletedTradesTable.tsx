@@ -1,5 +1,6 @@
 import React from 'react';
 import type { CompletedTrade } from '../services/api-client';
+import { LockIcon, ScrollIcon, Shield01Icon } from 'hugeicons-react';
 
 export interface CompletedTradesTableProps {
   trades: CompletedTrade[];
@@ -13,7 +14,7 @@ export function CompletedTradesTable({
   onViewReceipt,
 }: CompletedTradesTableProps): React.JSX.Element {
   const truncateCiphertext = (text: string | undefined) => {
-    if (!text) return '🔒 [ENCRYPTED]';
+    if (!text) return <><LockIcon size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} /> [ENCRYPTED]</>;
     if (text.length <= 20) return text;
     if (text.endsWith('sealed')) {
       return `${text.slice(0, 11)}...${text.slice(-6)}`;
@@ -55,7 +56,7 @@ export function CompletedTradesTable({
           gap: 'var(--spacing-sm)'
         }}
       >
-        <div style={{ fontSize: '1.5rem', opacity: 0.7 }}>📜</div>
+        <ScrollIcon size={28} style={{ opacity: 0.5, color: 'var(--color-text-muted)' }} />
         <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.9rem' }}>
           No completed trades recorded
         </div>
@@ -91,13 +92,13 @@ export function CompletedTradesTable({
                   {trade.tradeRef}
                 </td>
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--color-accent)' }}>
-                  🔒 {truncateCiphertext(trade.assetCodeCiphertext)}
+                  <LockIcon size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} /> {truncateCiphertext(trade.assetCodeCiphertext)}
                 </td>
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
-                  🔒 {truncateCiphertext(trade.quantityCiphertext)}
+                  <LockIcon size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} /> {truncateCiphertext(trade.quantityCiphertext)}
                 </td>
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
-                  🔒 {truncateCiphertext(trade.executionPriceCiphertext)}
+                  <LockIcon size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '2px' }} /> {truncateCiphertext(trade.executionPriceCiphertext)}
                 </td>
                 <td>
                   <span 
@@ -120,11 +121,11 @@ export function CompletedTradesTable({
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      style={{ padding: 'var(--spacing-xs) var(--spacing-sm)', fontSize: '0.75rem' }}
+                      style={{ padding: 'var(--spacing-xs) var(--spacing-sm)', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                       onClick={() => onViewReceipt(primaryReceiptId)}
                       aria-label={`View audit receipt for trade ${trade.tradeRef}`}
                     >
-                      🛡️ Audit Receipt
+                      <Shield01Icon size={12} /> Audit Receipt
                     </button>
                   ) : (
                     <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>

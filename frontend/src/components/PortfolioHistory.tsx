@@ -1,4 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Activity01Icon,
+  BitcoinIcon,
+  EthereumIcon,
+  Dollar01Icon,
+  AppleIcon,
+  DatabaseIcon,
+  Wrench01Icon,
+  CheckmarkCircle01Icon,
+  CancelCircleIcon,
+  ScrollIcon,
+  AlertCircleIcon
+} from 'hugeicons-react';
 
 export interface PortfolioHistoryEntry {
   id: string;
@@ -17,11 +30,11 @@ interface PortfolioHistoryProps {
   token: string;
 }
 
-const CHANGE_TYPE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
-  settlement_buy: { label: 'Settlement (Buy)', icon: '🟢', color: 'var(--color-success)' },
-  settlement_sell: { label: 'Settlement (Sell)', icon: '🔴', color: 'var(--color-error)' },
-  adjustment: { label: 'Adjustment', icon: '🔧', color: 'var(--color-warning)' },
-  seed: { label: 'Initial Seed', icon: '🌱', color: 'var(--color-accent)' },
+const CHANGE_TYPE_LABELS: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+  settlement_buy: { label: 'Settlement (Buy)', icon: <CheckmarkCircle01Icon size={12} />, color: 'var(--color-success)' },
+  settlement_sell: { label: 'Settlement (Sell)', icon: <CancelCircleIcon size={12} />, color: 'var(--color-error)' },
+  adjustment: { label: 'Adjustment', icon: <Wrench01Icon size={12} />, color: 'var(--color-warning)' },
+  seed: { label: 'Initial Seed', icon: <DatabaseIcon size={12} />, color: 'var(--color-accent)' },
 };
 
 function formatValue(value: number, asset: string): string {
@@ -39,13 +52,13 @@ function formatDelta(value: number, asset: string): string {
   return `${sign}${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
 }
 
-function getAssetIcon(asset: string): string {
+function getAssetIcon(asset: string): React.ReactNode {
   switch (asset) {
-    case 'USD': return '💵';
-    case 'BTC': return '₿';
-    case 'ETH': return '⟠';
-    case 'AAPL': return '🍎';
-    default: return '📦';
+    case 'USD': return <Dollar01Icon size={12} style={{ color: 'var(--color-accent)' }} />;
+    case 'BTC': return <BitcoinIcon size={12} style={{ color: 'var(--color-accent)' }} />;
+    case 'ETH': return <EthereumIcon size={12} style={{ color: 'var(--color-accent)' }} />;
+    case 'AAPL': return <AppleIcon size={12} style={{ color: 'var(--color-accent)' }} />;
+    default: return <DatabaseIcon size={12} style={{ color: 'var(--color-accent)' }} />;
   }
 }
 
@@ -95,24 +108,37 @@ export function PortfolioHistory({ institutionId, token }: PortfolioHistoryProps
 
   if (error) {
     return (
-      <div className="card" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-lg)' }}>
-        <div style={{ fontSize: '0.75rem' }}>⚠️ Portfolio history unavailable</div>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-lg)', gap: 'var(--spacing-sm)' }}>
+        <AlertCircleIcon size={24} style={{ color: 'var(--color-error)' }} />
+        <div style={{ fontSize: '0.75rem' }}>Portfolio history unavailable</div>
       </div>
     );
   }
 
   if (history.length === 0) {
-    return null; // Don't show the section if there's no history yet
+    return (
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 'var(--spacing-xl)', textAlign: 'center', minHeight: '160px', gap: 'var(--spacing-sm)' }}>
+        <ScrollIcon size={28} style={{ color: 'var(--color-text-muted)', opacity: 0.4 }} />
+        <div>
+          <h4 style={{ margin: 0, fontWeight: 600, fontSize: '0.85rem', color: 'var(--color-text-primary)' }}>
+            No balance changes recorded
+          </h4>
+          <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            Initial seed pending or settlement awaiting agent trades.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="card">
-      <h3 className="card-title" style={{ fontSize: '0.85rem', marginBottom: 'var(--spacing-md)' }}>
-        <span>📊</span> Balance Change History
+      <h3 className="card-title" style={{ fontSize: '0.85rem', marginBottom: 'var(--spacing-md)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Balance Change History
       </h3>
       <div style={{ maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
         {history.map((entry) => {
-          const typeInfo = CHANGE_TYPE_LABELS[entry.changeType] ?? { label: entry.changeType, icon: '❓', color: 'var(--color-text-muted)' };
+          const typeInfo = CHANGE_TYPE_LABELS[entry.changeType] ?? { label: entry.changeType, icon: <AlertCircleIcon size={12} />, color: 'var(--color-text-muted)' };
           return (
             <div
               key={entry.id}
@@ -129,10 +155,10 @@ export function PortfolioHistory({ institutionId, token }: PortfolioHistoryProps
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', minWidth: 0, flex: 1 }}>
-                <span style={{ flexShrink: 0 }}>{typeInfo.icon}</span>
+                <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', color: typeInfo.color }}>{typeInfo.icon}</span>
                 <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.75rem' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       {getAssetIcon(entry.assetCode)} {entry.assetCode}
                     </span>
                     <span

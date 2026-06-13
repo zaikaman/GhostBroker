@@ -1,4 +1,16 @@
 import React from 'react';
+import {
+  LockIcon,
+  Search01Icon,
+  CheckmarkCircle01Icon,
+  CancelCircleIcon,
+  Download01Icon,
+  LockKeyIcon,
+  BrainIcon,
+  HourglassIcon,
+  ScrollIcon,
+  Activity01Icon
+} from 'hugeicons-react';
 
 export interface AgentLogEntryProps {
   timestamp: string;
@@ -8,33 +20,33 @@ export interface AgentLogEntryProps {
 }
 
 export function AgentLogEntry({ timestamp, phase, message, severity }: AgentLogEntryProps): React.JSX.Element {
-  const getStatusLabel = (p: string) => {
+  const getStatusLabel = (p: string): { icon: React.ReactNode; text: string } => {
     switch (p) {
       case 'agent_connecting':
       case 'agent_connected':
-        return { icon: '🔐', text: 'Authenticating' };
+        return { icon: <LockIcon size={12} />, text: 'Authenticating' };
       case 'agent_verifying':
-        return { icon: '🔍', text: 'Verifying' };
+        return { icon: <Search01Icon size={12} />, text: 'Verifying' };
       case 'agent_verified':
-        return { icon: '✅', text: 'Verified' };
+        return { icon: <CheckmarkCircle01Icon size={12} />, text: 'Verified' };
       case 'agent_rejected':
-        return { icon: '🚫', text: 'Denied' };
+        return { icon: <CancelCircleIcon size={12} />, text: 'Denied' };
       case 'intent_received':
-        return { icon: '📥', text: 'Mandate' };
+        return { icon: <Download01Icon size={12} />, text: 'Mandate' };
       case 'intent_sealed':
-        return { icon: '📦', text: 'Blinded' };
+        return { icon: <LockKeyIcon size={12} />, text: 'Blinded' };
       case 'encrypted_evaluation':
-        return { icon: '🧠', text: 'Scanning' };
+        return { icon: <BrainIcon size={12} />, text: 'Scanning' };
       case 'settlement_pending':
-        return { icon: '💰', text: 'Executing' };
+        return { icon: <HourglassIcon size={12} />, text: 'Executing' };
       case 'settlement_finalized':
-        return { icon: '✨', text: 'Settled' };
+        return { icon: <CheckmarkCircle01Icon size={12} />, text: 'Settled' };
       case 'settlement_failed':
-        return { icon: '❌', text: 'Failed' };
+        return { icon: <CancelCircleIcon size={12} />, text: 'Failed' };
       case 'receipt_available':
-        return { icon: '📜', text: 'Receipt' };
+        return { icon: <ScrollIcon size={12} />, text: 'Receipt' };
       default:
-        return { icon: '⚡', text: 'System' };
+        return { icon: <Activity01Icon size={12} />, text: 'System' };
     }
   };
 
@@ -77,7 +89,7 @@ export function AgentLogEntry({ timestamp, phase, message, severity }: AgentLogE
           fontWeight: 600, 
           display: 'inline-flex', 
           alignItems: 'center', 
-          gap: '2px',
+          gap: '4px',
           flexShrink: 0,
           background: 'rgba(255, 255, 255, 0.02)',
           padding: '1px 6px',

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { AgentState, ProcessingIntent } from '../hooks/useConnectionTelemetry';
 import { telemetryClient, type TelemetryEvent } from '../services/telemetry-client';
 import { AgentLogEntry } from './AgentLogEntry';
+import { Robot01Icon, Shield01Icon } from 'hugeicons-react';
 
 export interface LiveAgentActivityStreamProps {
   agents: AgentState[];
@@ -625,12 +626,12 @@ export function LiveAgentActivityStream({
       `}</style>
 
       <h3 className="form-label" style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span>🤖</span> Live Agent Activity Stream
+        <Robot01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Live Agent Activity Stream
       </h3>
 
       {isEnclaveIdle ? (
         <div className="stream-empty-state">
-          <span className="empty-icon">🛡️</span>
+          <Shield01Icon size={36} style={{ color: 'var(--color-text-muted)', opacity: 0.5, marginBottom: 'var(--spacing-md)' }} />
           <h4 className="empty-title">Awaiting agent connections...</h4>
           <p className="empty-text">The enclave is ready. Agents will appear here once they authenticate.</p>
         </div>
@@ -639,8 +640,8 @@ export function LiveAgentActivityStream({
           {/* LEFT PANEL: Buyer Agent (Own) */}
           <div className="agent-log-panel" tabIndex={0}>
             <div className="agent-log-header">
-              <div className="agent-log-title">
-                <span>🟢</span> BUYER AGENT LOGS ({institutionName})
+              <div className="agent-log-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span className="pulse-dot" style={{ background: 'var(--color-success)', boxShadow: '0 0 8px var(--color-success)' }}></span> BUYER AGENT LOGS ({institutionName})
               </div>
               <div className="agent-log-did">
                 DID: {leftAgentDid ? truncateDid(leftAgentDid) : 'did:t3:verifying...'}
@@ -714,8 +715,8 @@ export function LiveAgentActivityStream({
           {/* RIGHT PANEL: Seller Agent (Counterparty) */}
           <div className="agent-log-panel" tabIndex={0}>
             <div className="agent-log-header">
-              <div className="agent-log-title">
-                <span>🟡</span> SELLER AGENT LOGS ({getCounterpartyName(rightAgentDid)})
+              <div className="agent-log-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span className="pulse-dot" style={{ background: 'var(--color-warning)', boxShadow: '0 0 8px var(--color-warning)' }}></span> SELLER AGENT LOGS ({getCounterpartyName(rightAgentDid)})
               </div>
               <div className="agent-log-did">
                 DID: {rightAgentDid ? truncateDid(rightAgentDid) : 'did:t3:pending...'}

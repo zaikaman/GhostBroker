@@ -1,4 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Wallet01Icon,
+  BitcoinIcon,
+  EthereumIcon,
+  Dollar01Icon,
+  AppleIcon,
+  DatabaseIcon,
+  LockIcon,
+  AlertCircleIcon
+} from 'hugeicons-react';
 
 export interface PortfolioHolding {
   assetCode: string;
@@ -58,11 +68,11 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
 
   const getAssetIcon = (asset: string) => {
     switch (asset) {
-      case 'USD': return '💵';
-      case 'BTC': return '₿';
-      case 'ETH': return '⟠';
-      case 'AAPL': return '🍎';
-      default: return '📦';
+      case 'USD': return <Dollar01Icon size={16} style={{ color: 'var(--color-accent)' }} />;
+      case 'BTC': return <BitcoinIcon size={16} style={{ color: 'var(--color-accent)' }} />;
+      case 'ETH': return <EthereumIcon size={16} style={{ color: 'var(--color-accent)' }} />;
+      case 'AAPL': return <AppleIcon size={16} style={{ color: 'var(--color-accent)' }} />;
+      default: return <DatabaseIcon size={16} style={{ color: 'var(--color-accent)' }} />;
     }
   };
 
@@ -79,17 +89,18 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
 
   if (error) {
     return (
-      <div className="card" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-lg)' }}>
-        <div style={{ fontSize: '0.8rem' }}>⚠️ Portfolio unavailable</div>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-lg)', gap: 'var(--spacing-sm)' }}>
+        <AlertCircleIcon size={24} style={{ color: 'var(--color-error)' }} />
+        <div style={{ fontSize: '0.8rem' }}>Portfolio unavailable</div>
       </div>
     );
   }
 
   if (!portfolio || portfolio.holdings.length === 0) {
     return (
-      <div className="card" style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-xl)' }}>
-        <div style={{ fontSize: '1.5rem', opacity: 0.7 }}>🏦</div>
-        <div style={{ fontWeight: 600, fontSize: '0.9rem', marginTop: 'var(--spacing-sm)' }}>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-xl)', gap: 'var(--spacing-sm)' }}>
+        <Wallet01Icon size={32} style={{ opacity: 0.5, color: 'var(--color-text-muted)' }} />
+        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
           No portfolio data
         </div>
       </div>
@@ -98,8 +109,8 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
 
   return (
     <div className="card">
-      <h2 className="card-title">
-        <span>🏦</span> Institution Portfolio
+      <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Institution Portfolio
       </h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
         {portfolio.holdings.map((holding) => (
@@ -114,7 +125,7 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
-              <span style={{ fontSize: '1.2rem' }}>{getAssetIcon(holding.assetCode)}</span>
+              <span style={{ display: 'flex', alignItems: 'center' }}>{getAssetIcon(holding.assetCode)}</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
                 {holding.assetCode}
               </span>
@@ -131,8 +142,8 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
                 {formatBalance(holding.balance, holding.assetCode)}
               </span>
               {holding.locked > 0 && (
-                <span style={{ fontSize: '0.65rem', color: 'var(--color-warning)', fontFamily: 'var(--font-mono)' }}>
-                  🔒 {formatBalance(holding.locked, holding.assetCode)} locked
+                <span style={{ fontSize: '0.65rem', color: 'var(--color-warning)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                  <LockIcon size={10} style={{ color: 'var(--color-warning)' }} /> {formatBalance(holding.locked, holding.assetCode)} locked
                 </span>
               )}
             </div>
