@@ -64,6 +64,13 @@ export interface SupabasePortfolioClient {
     InsertQueryWithSelect<PortfolioHistoryRecord>;
 }
 
+/**
+ * Minimum absolute delta (in token units) required to record a history entry
+ * during portfolio snapshot sync. Changes smaller than this threshold are
+ * considered dust / wei-level noise and are silently skipped.
+ */
+const MINIMUM_HISTORY_DELTA = 1e-8;
+
 export class InsufficientBalanceError extends Error {
   public readonly assetCode: string;
   public readonly requested: number;
@@ -292,11 +299,12 @@ export class PortfolioService {
         throw new PublicError("service_unavailable", 503, error);
       }
 
-      if (targetBalance !== currentBalance) {
+      const delta = targetBalance - currentBalance;
+      if (Math.abs(delta) >= MINIMUM_HISTORY_DELTA) {
         await this.recordHistory({
           institutionId: params.institutionId,
           assetCode,
-          delta: targetBalance - currentBalance,
+          delta,
           balanceAfter: targetBalance,
           changeType: "import",
           referenceType: "portfolio_snapshot",

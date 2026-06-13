@@ -124,7 +124,7 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
 
   const filteredHistory = history.filter((entry) =>
     ['SEPOLIAETH', 'WBTC', 'USDC'].includes(entry.assetCode.toUpperCase())
-  );
+  ).filter((entry) => entry.delta !== 0);
 
   if (filteredHistory.length === 0) {
     return (
