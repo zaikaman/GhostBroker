@@ -62,10 +62,17 @@ const INSTITUTION_ID = process.env.GHOSTBROKER_INSTITUTION_ID ?? "${institutionI
 const AGENT_DID = process.env.AGENT_DID ?? "did:t3n:0xYourAgentAddress";
 const AGENT_KEY = process.env.AGENT_PRIVATE_KEY ?? "";
 const AGENT_AUTHORITY_PROOF = process.env.GHOSTBROKER_AUTHORITY_PROOF ?? "";
+const API_KEY = process.env.GHOSTBROKER_API_KEY ?? ""; // Optional: use API key instead of DID auth
 
 const agent = new Wallet(AGENT_KEY);
 
-async function authenticate() {
+async function getAuthToken() {
+  // Option A: API key (simpler, no expiry)
+  if (API_KEY) {
+    return API_KEY;
+  }
+
+  // Option B: DID challenge-response
   const challengeResponse = await fetch(
     GHOSTBROKER_API_BASE_URL + "/api/auth/challenge",
     {
@@ -150,8 +157,8 @@ async function submitIntent(
 }
 
 async function main() {
-  console.log("[AUTH] Authenticating...");
-  const token = await authenticate();
+  console.log("[AUTH] Getting auth token...");
+  const token = await getAuthToken();
 
   console.log("[ADMIT] Admitting agent...");
   const authorityRef = await admitAgent(token);
@@ -192,8 +199,9 @@ services:
       - GHOSTBROKER_API_BASE_URL=${API_BASE_URL}
       - GHOSTBROKER_TELEMETRY_URL=${TELEMETRY_WS_URL}
       - GHOSTBROKER_INSTITUTION_ID=${institutionId}
+      - GHOSTBROKER_API_KEY=${'${GHOSTBROKER_API_KEY}'}  # Optional: use instead of DID auth
       - AGENT_DID=did:t3n:0xYourAgentAddress
-      - AGENT_PRIVATE_KEY=${'${AGENT_PRIVATE_KEY}'}  # Set in .env
+      - AGENT_PRIVATE_KEY=${'${AGENT_PRIVATE_KEY}'}  # Set in .env (only needed if not using API key)
       - GHOSTBROKER_AUTHORITY_PROOF=${'${GHOSTBROKER_AUTHORITY_PROOF}'}  # Set in a secrets manager or .env
     logging:
       driver: "json-file"
@@ -375,7 +383,7 @@ function OverviewStep(): React.JSX.Element {
         <ul className="deploy-info-list no-bullet">
           <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-            <span>Authenticate with the DID challenge-response flow</span>
+            <span>Authenticate with a persistent API key <strong style={{ color: 'var(--color-accent)' }}>or</strong> the DID challenge-response flow</span>
           </li>
           <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
@@ -473,6 +481,20 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
         </div>
       </div>
 
+      <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-md)' }}>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Key01Icon size={16} style={{ color: 'var(--color-accent)' }} /> API Keys (Alternative Auth)
+        </div>
+        <p style={{ marginTop: 'var(--spacing-xs)', fontSize: '0.8rem', color: 'var(--color-text-secondary)', lineHeight: '1.4' }}>
+          Instead of signing DID challenges every 8 hours, your agent can use a persistent API key. Generate one from the <strong>API Keys</strong> panel on the dashboard.
+        </p>
+        <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-sm)' }}>
+          <span style={{ fontSize: '0.75rem' }}>
+            <strong>Usage:</strong> Pass the key as a Bearer token: <code>Authorization: Bearer gbk_&lt;your_key&gt;</code>
+          </span>
+        </div>
+      </div>
+
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
         <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
           <Key01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Generate an Agent Key:
@@ -536,8 +558,35 @@ function AuthenticateStep(): React.JSX.Element {
         </div>
       </div>
 
+      <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-lg)' }}>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Key01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Option A: Use API Keys (Recommended)
+        </div>
+        <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-sm)' }}>
+          The simplest option. Generate an API key from the <strong>API Keys</strong> panel on the dashboard. No DID challenge needed.
+        </p>
+        <CodeBlock code={`# View your already-generated API keys
+curl -s ${API_BASE_URL}/api/keys \
+  -H "Authorization: Bearer <your-session-token>" | jq .
+
+# Generate a new key from the dashboard, then use it directly:
+curl -s ${API_BASE_URL}/api/agents/admit \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer gbk_<your_key>" \
+  -d '{
+    "institutionId": "...",
+    "agentDid": "did:t3n:0xYourAgentAddress",
+    "authorityProof": "..."
+  }' | jq .`} />
+        <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-sm)' }}>
+          <span style={{ fontSize: '0.75rem' }}>
+            <strong>No 8-hour expiry.</strong> API keys are persistent until revoked. Perfect for serverless functions and long-running containers.
+          </span>
+        </div>
+      </div>
+
       <h3 style={{ marginTop: 'var(--spacing-lg)', marginBottom: 'var(--spacing-sm)', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <Settings01Icon size={16} /> Quick Test with curl
+        <Settings01Icon size={16} /> Option B: DID Challenge-Response (curl test)
       </h3>
       <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-md)' }}>
         Replace the DID, signature, and wallet address with the values from the wallet that controls the agent.
@@ -561,7 +610,7 @@ function WriteAgentStep({ session }: { session: AuthSession }): React.JSX.Elemen
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Write Your Agent</h2>
       <p className="deploy-step-desc">
-        This bootstrap matches the current REST and WebSocket contracts. Replace the placeholders with your wallet key, DID, and delegation proof payload.
+        This bootstrap matches the current REST and WebSocket contracts. The starter code supports <strong>two auth methods:</strong> use an API key (env var <code>GHOSTBROKER_API_KEY</code>) for persistent auth, or fall back to the DID challenge-response flow.
       </p>
 
       <div className="deploy-tip-box" style={{ marginBottom: 'var(--spacing-md)' }}>
