@@ -30,7 +30,7 @@ function isStableAsset(asset: string): boolean {
 function assetLabel(asset: string): string {
   switch (asset) {
     case 'WBTC': return 'WBTC';
-    case 'SEPOLIAETH': return 'SepoliaETH';
+    case 'SEPOLIAETH': return 'sepETH';
     case 'USDC': return 'USDC';
     case 'USD': return 'USD';
     case 'USDT': return 'USDT';
