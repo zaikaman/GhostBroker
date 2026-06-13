@@ -14,6 +14,11 @@ export class FakeAgentRepository implements AgentRepository {
     agentDid: string;
     authorityRef: string;
     label?: string | null;
+    instrumentScope?: string[] | null;
+    directionScope?: string[] | null;
+    maxNotional?: string | null;
+    limitReference?: string | null;
+    policyHash?: string | null;
   }): Promise<Agent> {
     const id = `test-agent-${this.nextId++}`;
     const now = new Date().toISOString();
@@ -24,6 +29,11 @@ export class FakeAgentRepository implements AgentRepository {
       status: "admitted",
       authorityRef: params.authorityRef,
       label: params.label ?? null,
+      instrumentScope: params.instrumentScope ?? null,
+      directionScope: params.directionScope ?? null,
+      maxNotional: params.maxNotional ?? null,
+      limitReference: params.limitReference ?? null,
+      policyHash: params.policyHash ?? null,
       metadata: {},
       createdAt: now,
       updatedAt: now,

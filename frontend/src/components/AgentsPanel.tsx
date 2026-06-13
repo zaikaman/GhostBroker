@@ -20,6 +20,7 @@ export function AgentsPanel(): React.JSX.Element {
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -155,8 +156,9 @@ export function AgentsPanel(): React.JSX.Element {
           </div>
 
           {agents.map((agent) => (
+            <React.Fragment key={agent.id}>
             <div
-              key={agent.id}
+              onClick={() => setExpandedAgentId(expandedAgentId === agent.id ? null : agent.id)}
               style={{
                 display: 'grid',
                 gridTemplateColumns: '2fr 1.5fr 1fr 1fr auto',
@@ -165,8 +167,9 @@ export function AgentsPanel(): React.JSX.Element {
                 padding: 'var(--spacing-sm) var(--spacing-md)',
                 background: 'var(--color-input-bg)',
                 border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-sm)',
+                borderRadius: expandedAgentId === agent.id ? 'var(--radius-sm) var(--radius-sm) 0 0' : 'var(--radius-sm)',
                 fontSize: '0.75rem',
+                cursor: 'pointer',
                 transition: 'border-color var(--transition-fast)',
                 opacity: agent.status === 'revoked' ? 0.5 : 1,
               }}
@@ -275,6 +278,51 @@ export function AgentsPanel(): React.JSX.Element {
                 )}
               </div>
             </div>
+
+            {/* Expandable Limits Detail */}
+            {expandedAgentId === agent.id && (
+              <div style={{
+                padding: 'var(--spacing-sm) var(--spacing-md)',
+                background: 'rgba(255, 255, 255, 0.01)',
+                border: '1px solid var(--color-border)',
+                borderTop: 'none',
+                borderRadius: '0 0 var(--radius-sm) var(--radius-sm)',
+                fontSize: '0.7rem',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: 'var(--spacing-sm)',
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>Instruments</div>
+                  <code style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
+                    {agent.instrumentScope?.join(', ') || 'All'}
+                  </code>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>Direction</div>
+                  <code style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
+                    {agent.directionScope?.join(', ') || 'All'}
+                  </code>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>Max Notional</div>
+                  <code style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
+                    {agent.maxNotional
+                      ? `${(BigInt(agent.maxNotional) / 1000000n).toLocaleString()} units`
+                      : 'Unlimited'}
+                  </code>
+                </div>
+                {agent.policyHash && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '2px' }}>Policy Hash</div>
+                    <code style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.6rem', wordBreak: 'break-all' }}>
+                      {agent.policyHash}
+                    </code>
+                  </div>
+                )}
+              </div>
+            )}
+            </React.Fragment>
           ))}
         </div>
       )}

@@ -54,6 +54,11 @@ export interface AgentRepository {
     agentDid: string;
     authorityRef: string;
     label?: string | null;
+    instrumentScope?: string[] | null;
+    directionScope?: string[] | null;
+    maxNotional?: string | null;
+    limitReference?: string | null;
+    policyHash?: string | null;
   }): Promise<Agent>;
   listByInstitution(
     institutionId: string,
@@ -80,6 +85,11 @@ export class SupabaseAgentRepository implements AgentRepository {
     agentDid: string;
     authorityRef: string;
     label?: string | null;
+    instrumentScope?: string[] | null;
+    directionScope?: string[] | null;
+    maxNotional?: string | null;
+    limitReference?: string | null;
+    policyHash?: string | null;
   }): Promise<Agent> {
     const { data, error } = await this.client
       .from("agents")
@@ -89,6 +99,11 @@ export class SupabaseAgentRepository implements AgentRepository {
         authority_ref: params.authorityRef,
         status: "admitted",
         label: params.label ?? null,
+        instrument_scope: params.instrumentScope ?? null,
+        direction_scope: params.directionScope ?? null,
+        max_notional: params.maxNotional ?? null,
+        limit_reference: params.limitReference ?? null,
+        policy_hash: params.policyHash ?? null,
         metadata: {},
       })
       .select("*")

@@ -177,6 +177,8 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     matchContractClient,
     settlementService,
     telemetryBus,
+    portfolioService,
+    env.SETTLEMENT_ASSET_CODE,
   );
 
   return {
@@ -198,6 +200,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       telemetryBus,
       authorityRevocationRepository,
       matchingOrchestrator,
+      new SupabaseAgentRepository(supabase as never),
     ),
     settlementService,
     tradeHistoryService: new TradeHistoryService(

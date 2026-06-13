@@ -14,6 +14,7 @@ import {
   EmptyAuthorityRevocationRepository,
   type AuthorityRevocationRepository,
 } from "./authority-revocation.service.js";
+import type { AgentRepository } from "./agent-repository.js";
 
 export interface HiddenIntentSubmissionContext {
   correlationRef: string;
@@ -32,6 +33,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   private readonly telemetryBus: TelemetryBus;
   private readonly revocations: AuthorityRevocationRepository;
   private readonly matchingOrchestrator: MatchingOrchestrator | undefined;
+  private readonly agentRepository: AgentRepository | undefined;
 
   public constructor(
     authorization: AgentAuthorizationFacade,
@@ -39,12 +41,14 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     telemetryBus: TelemetryBus,
     revocations: AuthorityRevocationRepository = new EmptyAuthorityRevocationRepository(),
     matchingOrchestrator?: MatchingOrchestrator,
+    agentRepository?: AgentRepository,
   ) {
     this.authorization = authorization;
     this.blindIntentClient = blindIntentClient;
     this.telemetryBus = telemetryBus;
     this.revocations = revocations;
     this.matchingOrchestrator = matchingOrchestrator;
+    this.agentRepository = agentRepository;
   }
 
   public async submitIntent(
@@ -65,9 +69,46 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     this.publish(request, context.correlationRef, "intent_sealed");
     this.publish(request, sealed.intentHandle, "encrypted_evaluation");
 
+    // Look up agent limits for pre-match authorization enforcement
+    let instrumentScope: string[] | undefined;
+    let directionScope: string[] | undefined;
+    let maxNotional: string | undefined;
+
+    if (this.agentRepository) {
+      try {
+        const agent = await this.agentRepository.findByAgentDid(
+          request.institutionId,
+          request.agentDid,
+        );
+        if (agent) {
+          instrumentScope = agent.instrumentScope ?? undefined;
+          directionScope = agent.directionScope ?? undefined;
+          maxNotional = agent.maxNotional ?? undefined;
+        }
+      } catch {
+        // Agent lookup failure is non-blocking — matching proceeds without limit checks
+      }
+    }
+
     // Trigger matching against pending intents (fire-and-forget)
     if (this.matchingOrchestrator) {
-      this.matchingOrchestrator.onIntentSealed({
+      const pendingIntent: {
+        correlationRef: string;
+        institutionId: string;
+        agentDid: string;
+        intentHandle: string;
+        executionRef: string;
+        encryptedEnvelope: string;
+        authorityRef: string;
+        assetCode: string;
+        side: "buy" | "sell";
+        quantity: number;
+        price: number;
+        sealedAt: string;
+        instrumentScope?: string[];
+        directionScope?: string[];
+        maxNotional?: string;
+      } = {
         correlationRef: context.correlationRef,
         institutionId: request.institutionId,
         agentDid: request.agentDid,
@@ -80,7 +121,21 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         quantity: request.settlementMetadata.quantity,
         price: request.settlementMetadata.price,
         sealedAt: sealed.sealedAt,
-      }).catch((error: unknown) => {
+      };
+
+      if (instrumentScope) {
+        pendingIntent.instrumentScope = instrumentScope;
+      }
+      if (directionScope) {
+        pendingIntent.directionScope = directionScope;
+      }
+      if (maxNotional) {
+        pendingIntent.maxNotional = maxNotional;
+      }
+
+      this.matchingOrchestrator.onIntentSealed(
+        pendingIntent as Parameters<typeof this.matchingOrchestrator.onIntentSealed>[0],
+      ).catch((error: unknown) => {
         // Matching/settlement failures are non-blocking — intent is already sealed
         console.error(
           `[MatchingOrchestrator] Match error for ${context.correlationRef}:`,

@@ -90,22 +90,43 @@ Agents can now authenticate using persistent API keys (`gbk_<prefix>_<random>`) 
 
 ### Gap 2: No Agent-to-Asset Authorization Enforcement
 
-**Severity: 🔴 Blocking**
+**Status: ✅ Resolved**
 
-The authority claim schema (`authority-claims.ts`) defines `instrumentScope`, `directionScope`, `maxNotionalMinorUnits`, but:
+The `MatchingOrchestrator` now enforces portfolio balance checks and agent authority limits before calling the TEE match contract. Agent limits are stored on admission and carried through to the pending intent queue for enforcement at matching time.
 
-- There is **no dashboard UI** to configure these limits
-- The `MatchingOrchestrator` does **not check** trading limits before matching
-- The portfolio is owned at the **institution level**, not per-agent
-- The first agent to submit a buy intent could drain the institution's entire cash balance
+**What was built:**
 
-**What's needed:**
+| Component | File(s) |
+|-----------|---------|
+| DB migration — authority limit columns on agents table | `database/migrations/009_add_agent_authority_limits.sql` |
+| Agent model — `AgentAuthorityLimits`, `AuthorityLimitsSchema` | `backend/src/models/agent.ts` |
+| Admission — limits accepted and persisted via `POST /api/agents/admit` | `backend/src/services/agent.service.ts` |
+| PendingIntent — carries `instrumentScope`, `directionScope`, `maxNotional` | `backend/src/models/hidden-intent.ts` |
+| HiddenIntentService — looks up agent limits from DB, passes through PendingIntent | `backend/src/services/hidden-intent.service.ts` |
+| Pre-match portfolio balance check | `backend/src/services/matching-orchestrator.ts` (`checkBalance`) |
+| Pre-match direction scope check | `backend/src/services/matching-orchestrator.ts` (`checkDirectionScope`) |
+| Pre-match instrument scope check | `backend/src/services/matching-orchestrator.ts` (`checkInstrumentScope`) |
+| Pre-match max notional check | `backend/src/services/matching-orchestrator.ts` (`checkMaxNotional`) |
+| Dashboard — expandable limits detail per agent | `frontend/src/components/AgentsPanel.tsx` |
 
-| Item | Description |
-|------|-------------|
-| Per-agent limit enforcement | Check instrumentScope, directionScope, maxNotional at matching time |
-| Per-agent portfolio sub-accounts | Or at minimum balance reservation against the institution portfolio |
-| Dashboard limit configuration | UI for operators to set agent trading limits |
+**Enforcement flow:**
+
+1. Agent is admitted with optional `limits` (instrumentScope, directionScope, maxNotional)
+2. On intent submission, `HiddenIntentService` looks up stored limits from the agents table
+3. Limits are carried through `PendingIntent` to the `MatchingOrchestrator`
+4. Before calling `evaluateMatch`, the orchestrator checks:
+   - **Balance**: Buyer has enough settlement asset (quantity × price), seller has enough of the asset
+   - **Direction**: Buy agent is authorized to buy, sell agent is authorized to sell
+   - **Instrument**: Agent is authorized to trade the asset code
+   - **Notional**: Trade value does not exceed the agent's maxNotional
+5. If any check fails, a telemetry error is published to the failing institution and the match is skipped
+
+**Key design decisions:**
+
+- All checks are non-blocking for the intent submission — failures just skip the match attempt
+- Balance check falls back to passing if the portfolio service is unavailable (settlement service has the final check)
+- Missing limits (null/undefined) means "no restriction" — all assets, all directions, unlimited notional
+- Limits are visible in the Agents Panel via click-to-expand detail rows
 
 ---
 
@@ -226,12 +247,12 @@ When settlement runs, it debits/credits the **institution-level portfolio**. Mul
 | Gap | Severity | Depends On |
 |-----|----------|------------|
 | 1 - API Key System | 🔴 Blocking | Nothing |
-| 2 - Agent-to-Asset Authorization | 🔴 Blocking | Gap 4 (agent DB) |
+| 2 - Agent-to-Asset Authorization | ✅ Resolved | Gap 4 (agent DB) |
 | 3 - Agent Key Management | ✅ Resolved | Gap 4 (agent DB) |
 | 4 - Agent DB & Admitted Tracking | ✅ Resolved | Nothing |
 | 5 - Intent Cancellation | 🟡 High | Gap 4 (agent DB) |
 | 6 - Missing API Endpoints | 🟡 Partially Resolved | Gap 4 (agent DB) |
-| 7 - Institution-Scoped Portfolio | 🟡 Medium | Gap 2 (authorization) |
+| 7 - Institution-Scoped Portfolio | 🟡 Medium | Gap 4 (agent DB) |
 
 ---
 

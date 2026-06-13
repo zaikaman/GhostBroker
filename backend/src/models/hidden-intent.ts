@@ -48,4 +48,8 @@ export interface PendingIntent {
   price: number;
   /** When this intent was added to the pending queue */
   sealedAt: string;
+  /** Agent authority limits — checked at matching time */
+  instrumentScope?: string[];
+  directionScope?: string[];
+  maxNotional?: string;
 }

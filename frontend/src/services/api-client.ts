@@ -30,6 +30,11 @@ export interface Agent {
   status: 'admitted' | 'revoked';
   authorityRef: string;
   label: string | null;
+  instrumentScope: string[] | null;
+  directionScope: string[] | null;
+  maxNotional: string | null;
+  limitReference: string | null;
+  policyHash: string | null;
   createdAt: string;
   updatedAt: string;
 }

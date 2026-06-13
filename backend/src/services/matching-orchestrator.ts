@@ -6,6 +6,7 @@ import type {
 } from "./settlement.service.js";
 import type { PendingIntent } from "../models/hidden-intent.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
+import type { PortfolioService } from "./portfolio.service.js";
 
 /** Default TTL for pending intents: 5 minutes */
 const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
@@ -13,19 +14,25 @@ const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 30 * 1000;
 
 /**
- * Orchestrates intent matching and settlement.
+ * Orchestrates intent matching and settlement with pre-match
+ * authorization enforcement.
  *
- * Maintains an in-memory queue of sealed intents. When a new intent arrives,
- * it tries to match it against pending intents from other institutions with
- * the same asset and opposite side. On match, it calls the TEE match contract
- * and triggers settlement.
+ * Before calling the TEE match contract, the orchestrator checks:
+ * 1. Buyer has sufficient settlement asset balance (quantity × price)
+ * 2. Seller has sufficient asset balance
+ * 3. Intent side matches the agent's direction scope (if available)
+ * 4. Asset is within the agent's instrument scope (if available)
+ * 5. Notional value does not exceed agent's maxNotional (if available)
  *
+ * On match, it calls the TEE match contract and triggers settlement.
  * Pending intents that expire (TTL) are automatically evicted.
  */
 export class MatchingOrchestrator {
   private readonly matchClient: MatchContractClient;
   private readonly settlementService: SettlementService;
   private readonly telemetryBus: TelemetryBus;
+  private readonly portfolioService: PortfolioService | undefined;
+  private readonly settlementAssetCode: string;
   private readonly intentTtlMs: number;
   private readonly cleanupTimer: ReturnType<typeof setInterval>;
   private pendingIntents: PendingIntent[] = [];
@@ -35,12 +42,16 @@ export class MatchingOrchestrator {
     matchClient: MatchContractClient,
     settlementService: SettlementService,
     telemetryBus: TelemetryBus,
+    portfolioService?: PortfolioService,
+    settlementAssetCode = "USDC",
     intentTtlMs: number = DEFAULT_INTENT_TTL_MS,
     cleanupIntervalMs: number = DEFAULT_CLEANUP_INTERVAL_MS,
   ) {
     this.matchClient = matchClient;
     this.settlementService = settlementService;
     this.telemetryBus = telemetryBus;
+    this.portfolioService = portfolioService;
+    this.settlementAssetCode = settlementAssetCode;
     this.intentTtlMs = intentTtlMs;
 
     // Start periodic cleanup sweep
@@ -56,7 +67,7 @@ export class MatchingOrchestrator {
 
   /**
    * Called after an intent has been sealed by the TEE.
-   * Adds to the pending queue and attempts to find a match.
+   * Runs pre-match checks, adds to the pending queue, and attempts to find a match.
    */
   public async onIntentSealed(intent: PendingIntent): Promise<void> {
     // Sweep expired intents before adding the new one
@@ -71,10 +82,103 @@ export class MatchingOrchestrator {
       if (other.assetCode !== intent.assetCode) continue;
       if (other.side === intent.side) continue;
 
-      // Found a potential counterparty — evaluate match
+      // Found a potential counterparty — run pre-match checks
       const buyIntent = intent.side === "buy" ? intent : other;
       const sellIntent = intent.side === "sell" ? intent : other;
+      const matchQuantity = Math.min(
+        buyIntent.quantity,
+        sellIntent.quantity,
+      );
+      const matchPrice = Math.round(
+        (buyIntent.price + sellIntent.price) / 2,
+      );
 
+      // Pre-match check 1: Verify buyer has sufficient balance
+      if (this.portfolioService) {
+        const balanceCheck = await this.checkBalance(
+          buyIntent,
+          sellIntent,
+          matchQuantity,
+          matchPrice,
+        );
+        if (!balanceCheck.passed) {
+          const failingInstitutionId = balanceCheck.side === "seller"
+            ? sellIntent.institutionId
+            : buyIntent.institutionId;
+          this.telemetryBus.publish({
+            institutionId: failingInstitutionId,
+            type: "telemetry.error.changed",
+            phase: "authorization_failed",
+            severity: "error",
+            correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+            agentId: buyIntent.agentDid,
+          });
+          this.pendingIntents.splice(i, 1);
+          this.removeIntent(other);
+          return;
+        }
+      }
+
+      // Pre-match check 2: Verify agent direction scope
+      const directionCheck = this.checkDirectionScope(
+        buyIntent,
+        sellIntent,
+      );
+      if (!directionCheck.passed) {
+        this.telemetryBus.publish({
+          institutionId: directionCheck.institutionId,
+          type: "telemetry.error.changed",
+          phase: "authorization_failed",
+          severity: "error",
+          correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+          agentId: directionCheck.agentDid,
+        });
+        this.pendingIntents.splice(i, 1);
+        this.removeIntent(other);
+        return;
+      }
+
+      // Pre-match check 3: Verify instrument scope
+      const instrumentCheck = this.checkInstrumentScope(
+        buyIntent,
+        sellIntent,
+      );
+      if (!instrumentCheck.passed) {
+        this.telemetryBus.publish({
+          institutionId: instrumentCheck.institutionId,
+          type: "telemetry.error.changed",
+          phase: "authorization_failed",
+          severity: "error",
+          correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+          agentId: instrumentCheck.agentDid,
+        });
+        this.pendingIntents.splice(i, 1);
+        this.removeIntent(other);
+        return;
+      }
+
+      // Pre-match check 4: Verify max notional
+      const notionalCheck = this.checkMaxNotional(
+        buyIntent,
+        sellIntent,
+        matchQuantity,
+        matchPrice,
+      );
+      if (!notionalCheck.passed) {
+        this.telemetryBus.publish({
+          institutionId: notionalCheck.institutionId,
+          type: "telemetry.error.changed",
+          phase: "authorization_failed",
+          severity: "error",
+          correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+          agentId: notionalCheck.agentDid,
+        });
+        this.pendingIntents.splice(i, 1);
+        this.removeIntent(other);
+        return;
+      }
+
+      // Evaluate match via TEE
       const outcome = await this.matchClient.evaluateMatch({
         buyIntentHandle: buyIntent.intentHandle,
         sellIntentHandle: sellIntent.intentHandle,
@@ -82,14 +186,6 @@ export class MatchingOrchestrator {
       });
 
       if (outcome.status === "matched") {
-        // Match price: midpoint for demo (TEE would return actual value)
-        const matchPrice = Math.round(
-          (buyIntent.price + sellIntent.price) / 2,
-        );
-        const matchQuantity = Math.min(
-          buyIntent.quantity,
-          sellIntent.quantity,
-        );
         // Generate receipt ciphertexts deterministically from the outcome
         const receiptBase = `t3receipt.${outcome.outcomeRef}.${outcome.executionRef}`;
 
@@ -132,12 +228,185 @@ export class MatchingOrchestrator {
 
         // Remove matched intents from queue
         this.pendingIntents.splice(i, 1);
-        const otherIdx = this.pendingIntents.indexOf(other);
-        if (otherIdx >= 0) {
-          this.pendingIntents.splice(otherIdx, 1);
-        }
+        this.removeIntent(other);
         return;
       }
+    }
+  }
+
+  /**
+   * Run pre-match balance checks.
+   * Returns { passed: true } if both sides have sufficient balance.
+   */
+
+
+  /**
+   * Run pre-match balance checks.
+   * Returns { passed: true } if both sides have sufficient balance,
+   * or { passed: false, side: "buyer"|"seller" } identifying which side failed.
+   */
+  private async checkBalance(
+    buyIntent: PendingIntent,
+    sellIntent: PendingIntent,
+    matchQuantity: number,
+    matchPrice: number,
+  ): Promise<{
+    passed: boolean;
+    side?: "buyer" | "seller";
+    reason?: string;
+  }> {
+    if (!this.portfolioService) {
+      return { passed: true };
+    }
+
+    try {
+      const totalCost = matchQuantity * matchPrice;
+
+      // Check buyer has enough settlement asset
+      const buyerPortfolio = await this.portfolioService.getPortfolio(
+        buyIntent.institutionId,
+      );
+      const buyerCash = buyerPortfolio.holdings.find(
+        (h) => h.assetCode === this.settlementAssetCode,
+      );
+      if (!buyerCash || buyerCash.balance < totalCost) {
+        return {
+          passed: false,
+          side: "buyer",
+          reason: `Buyer ${
+            buyIntent.institutionId
+          } has insufficient ${
+            this.settlementAssetCode
+          } balance: has ${buyerCash?.balance ?? 0}, needs ${totalCost}`,
+        };
+      }
+
+      // Check seller has enough of the asset
+      const sellerPortfolio = await this.portfolioService.getPortfolio(
+        sellIntent.institutionId,
+      );
+      const sellerAsset = sellerPortfolio.holdings.find(
+        (h) => h.assetCode === sellIntent.assetCode,
+      );
+      if (!sellerAsset || sellerAsset.balance < matchQuantity) {
+        return {
+          passed: false,
+          side: "seller",
+          reason: `Seller ${
+            sellIntent.institutionId
+          } has insufficient ${
+            sellIntent.assetCode
+          } balance: has ${sellerAsset?.balance ?? 0}, needs ${matchQuantity}`,
+        };
+      }
+
+      return { passed: true };
+    } catch {
+      // If portfolio service is unavailable, allow the match to proceed
+      // (the settlement service will also check balances)
+      return { passed: true };
+    }
+  }
+
+  /**
+   * Verify the intent side is within the agent's direction scope.
+   */
+  private checkDirectionScope(
+    buyIntent: PendingIntent,
+    sellIntent: PendingIntent,
+  ): { passed: boolean; institutionId: string; agentDid: string; reason?: string } {
+    if (buyIntent.directionScope) {
+      if (!buyIntent.directionScope.includes("buy")) {
+        return {
+          passed: false,
+          institutionId: buyIntent.institutionId,
+          agentDid: buyIntent.agentDid,
+          reason: `Buy agent ${buyIntent.agentDid} not authorized to buy (direction scope: ${buyIntent.directionScope.join(", ")})`,
+        };
+      }
+    }
+    if (sellIntent.directionScope) {
+      if (!sellIntent.directionScope.includes("sell")) {
+        return {
+          passed: false,
+          institutionId: sellIntent.institutionId,
+          agentDid: sellIntent.agentDid,
+          reason: `Sell agent ${sellIntent.agentDid} not authorized to sell (direction scope: ${sellIntent.directionScope.join(", ")})`,
+        };
+      }
+    }
+    return { passed: true, institutionId: "", agentDid: "" };
+  }
+
+  /**
+   * Verify the trade asset is within the agent's instrument scope.
+   */
+  private checkInstrumentScope(
+    buyIntent: PendingIntent,
+    sellIntent: PendingIntent,
+  ): { passed: boolean; institutionId: string; agentDid: string; reason?: string } {
+    if (buyIntent.instrumentScope && !buyIntent.instrumentScope.includes(buyIntent.assetCode)) {
+      return {
+        passed: false,
+        institutionId: buyIntent.institutionId,
+        agentDid: buyIntent.agentDid,
+        reason: `Buy agent ${buyIntent.agentDid} not authorized to trade ${buyIntent.assetCode} (instrument scope: ${buyIntent.instrumentScope.join(", ")})`,
+      };
+    }
+    if (sellIntent.instrumentScope && !sellIntent.instrumentScope.includes(sellIntent.assetCode)) {
+      return {
+        passed: false,
+        institutionId: sellIntent.institutionId,
+        agentDid: sellIntent.agentDid,
+        reason: `Sell agent ${sellIntent.agentDid} not authorized to trade ${sellIntent.assetCode} (instrument scope: ${sellIntent.instrumentScope.join(", ")})`,
+      };
+    }
+    return { passed: true, institutionId: "", agentDid: "" };
+  }
+
+  /**
+   * Verify the trade notional (quantity × price) is within the agent's max.
+   */
+  private checkMaxNotional(
+    buyIntent: PendingIntent,
+    sellIntent: PendingIntent,
+    matchQuantity: number,
+    matchPrice: number,
+  ): { passed: boolean; institutionId: string; agentDid: string; reason?: string } {
+    const totalCost = BigInt(Math.round(matchQuantity * matchPrice));
+
+    if (buyIntent.maxNotional) {
+      const limit = BigInt(buyIntent.maxNotional);
+      if (totalCost > limit) {
+        return {
+          passed: false,
+          institutionId: buyIntent.institutionId,
+          agentDid: buyIntent.agentDid,
+          reason: `Buy agent ${buyIntent.agentDid} notional ${totalCost} exceeds max ${limit}`,
+        };
+      }
+    }
+    if (sellIntent.maxNotional) {
+      const limit = BigInt(sellIntent.maxNotional);
+      if (totalCost > limit) {
+        return {
+          passed: false,
+          institutionId: sellIntent.institutionId,
+          agentDid: sellIntent.agentDid,
+          reason: `Sell agent ${sellIntent.agentDid} notional ${totalCost} exceeds max ${limit}`,
+        };
+      }
+    }
+    return { passed: true, institutionId: "", agentDid: "" };
+  }
+
+  /**
+   * Remove a specific intent from the pending queue.
+   */
+  private removeIntent(intent: PendingIntent): void {
+    const idx = this.pendingIntents.indexOf(intent);
+    if (idx >= 0) {
+      this.pendingIntents.splice(idx, 1);
     }
   }
 

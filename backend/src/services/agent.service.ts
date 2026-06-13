@@ -5,6 +5,7 @@ import type {
   AgentAdmission,
   Agent,
   AgentStatus,
+  DirectionScope,
 } from "../models/agent.js";
 import type { AgentRepository } from "./agent-repository.js";
 import {
@@ -63,11 +64,16 @@ export class AgentService implements AgentManagementService {
       throw new PublicError("authorization_failed", 403);
     }
 
-    // Persist the admission to the database
+    // Persist the admission to the database with authority limits
     const agent = await this.repository.create({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
       authorityRef: verification.authorityRef,
+      instrumentScope: request.limits?.instrumentScope ?? null,
+      directionScope: request.limits?.directionScope ?? null,
+      maxNotional: request.limits?.maxNotional ?? null,
+      limitReference: request.limits?.limitReference ?? null,
+      policyHash: request.limits?.policyHash ?? verification.policyHash,
     });
 
     return {
@@ -75,6 +81,17 @@ export class AgentService implements AgentManagementService {
       agentDid: agent.agentDid,
       status: "admitted",
       authorityRef: agent.authorityRef,
+      ...(agent.instrumentScope
+        ? {
+            limits: {
+              instrumentScope: agent.instrumentScope,
+              directionScope: (agent.directionScope ?? ["buy", "sell"]) as DirectionScope[],
+              maxNotional: agent.maxNotional ?? "0",
+              limitReference: agent.limitReference ?? "",
+              policyHash: agent.policyHash ?? "",
+            },
+          }
+        : {}),
     };
   }
 
