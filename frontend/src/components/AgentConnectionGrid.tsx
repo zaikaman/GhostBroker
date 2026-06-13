@@ -31,33 +31,28 @@ export function AgentConnectionGrid({ agents }: AgentConnectionGridProps): React
       </h3>
       {agents.length === 0 ? (
         <div 
-          className="card" 
           style={{ 
             textAlign: 'center', 
             color: 'var(--color-text-muted)', 
             padding: 'var(--spacing-lg)',
-            borderStyle: 'dashed' 
+            border: '1px dashed var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--color-input-bg)'
           }}
         >
           No agents currently onboarded or connecting.
         </div>
       ) : (
-        <div 
-          style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
-            gap: 'var(--spacing-md)' 
-          }}
-        >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
           {agents.map((agent) => (
             <div 
               key={agent.agentDid}
-              className="card" 
               style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                gap: 'var(--spacing-sm)',
-                borderColor: agent.connected ? 'rgba(197, 168, 128, 0.3)' : 'var(--color-border)'
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                padding: 'var(--spacing-sm) 0',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.03)'
               }}
               tabIndex={0}
             >
@@ -95,7 +90,7 @@ export function AgentConnectionGrid({ agents }: AgentConnectionGridProps): React
                   {agent.connected ? 'ONLINE' : 'OFFLINE'}
                 </span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'var(--spacing-xs)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
                 {getStatusBadge(agent.status)}
                 <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
                   {new Date(agent.timestamp).toLocaleTimeString()}
@@ -104,8 +99,8 @@ export function AgentConnectionGrid({ agents }: AgentConnectionGridProps): React
               {agent.authorityRef && (
                 <div 
                   style={{ 
-                    marginTop: 'var(--spacing-xs)', 
-                    padding: 'var(--spacing-xs) var(--spacing-sm)', 
+                    marginTop: '2px', 
+                    padding: '2px 8px', 
                     background: 'var(--color-input-bg)', 
                     border: '1px solid var(--color-border)', 
                     borderRadius: 'var(--radius-sm)',

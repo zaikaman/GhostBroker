@@ -545,9 +545,9 @@ export function LiveAgentActivityStream({
         }
 
         @keyframes pulse-glow-accent {
-          0% { box-shadow: 0 0 0 0px rgba(197, 168, 128, 0.4); }
-          70% { box-shadow: 0 0 0 5px rgba(197, 168, 128, 0); }
-          100% { box-shadow: 0 0 0 0px rgba(197, 168, 128, 0); }
+          0% { box-shadow: 0 0 0 0px rgba(var(--color-accent-rgb), 0.4); }
+          70% { box-shadow: 0 0 0 5px rgba(var(--color-accent-rgb), 0); }
+          100% { box-shadow: 0 0 0 0px rgba(var(--color-accent-rgb), 0); }
         }
 
         /* Empty state design */
@@ -601,7 +601,7 @@ export function LiveAgentActivityStream({
           width: 36px;
           height: 36px;
           border-radius: 50%;
-          border: 1px dashed rgba(197, 168, 128, 0.2);
+          border: 1px dashed rgba(var(--color-accent-rgb), 0.2);
           position: relative;
           margin-bottom: 6px;
           display: flex;
@@ -614,7 +614,7 @@ export function LiveAgentActivityStream({
           width: 100%;
           height: 100%;
           border-radius: 50%;
-          background: conic-gradient(from 0deg at 50% 50%, rgba(197, 168, 128, 0.15) 0deg, rgba(197, 168, 128, 0) 90deg);
+          background: conic-gradient(from 0deg at 50% 50%, rgba(var(--color-accent-rgb), 0.15) 0deg, rgba(var(--color-accent-rgb), 0) 90deg);
           animation: radar-sweep-animation 3s linear infinite;
         }
 

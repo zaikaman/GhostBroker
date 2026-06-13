@@ -648,3 +648,192 @@
     transform: translateY(0px) rotate(0deg);
   }
 }
+
+/* 9. High-end Dashboard View Styles */
+.dashboard-v2-container {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  background-color: #070b0a;
+  color: #ffffff;
+  font-family: 'Inter', sans-serif;
+  overflow-y: auto;
+  box-sizing: border-box;
+  
+  /* Override CSS variables for the dashboard component tree */
+  --color-bg: #070b0a;
+  --color-surface: rgba(255, 255, 255, 0.01);
+  --color-surface-hover: rgba(255, 255, 255, 0.02);
+  --color-input-bg: rgba(255, 255, 255, 0.02);
+  --color-border: rgba(255, 255, 255, 0.05);
+  --color-border-focus: #5ed29c;
+  --color-accent: #5ed29c;
+  --color-accent-hover: #4ec28c;
+  --color-accent-rgb: 94, 210, 156;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: rgba(255, 255, 255, 0.75);
+  --color-text-muted: rgba(255, 255, 255, 0.45);
+  --color-table-header: rgba(255, 255, 255, 0.02);
+  --color-table-border: rgba(255, 255, 255, 0.05);
+  --color-table-hover: rgba(255, 255, 255, 0.03);
+}
+
+/* Background video opacity on dashboard must be more subtle than landing page */
+.dashboard-v2-container .video-background {
+  opacity: 0.15;
+}
+
+/* Glow on dashboard must be more subtle */
+.dashboard-v2-container .central-glow-svg ellipse {
+  opacity: 0.2;
+}
+
+/* Glassmorphic card styling for dashboard containers */
+.dashboard-v2-container .card, 
+.dashboard-v2-container .dashboard-header, 
+.dashboard-v2-container .a2a-banner {
+  position: relative;
+  background: rgba(255, 255, 255, 0.01) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: none !important;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 12px 35px rgba(0, 0, 0, 0.6) !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Add custom hover glow only on cards */
+.dashboard-v2-container .card:hover {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15), 0 16px 45px rgba(0, 0, 0, 0.7), 0 0 30px rgba(94, 210, 156, 0.03) !important;
+}
+
+/* Double-mask borders for all primary containers */
+.dashboard-v2-container .card::before, 
+.dashboard-v2-container .dashboard-header::before, 
+.dashboard-v2-container .a2a-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.2px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.01) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Dashboard Header adjustments */
+.dashboard-v2-container .dashboard-header {
+  padding: 1.25rem 2rem !important;
+  border-radius: 20px !important;
+}
+
+.dashboard-v2-container .header-title {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 1.75rem;
+  letter-spacing: -0.01em;
+  background: #ffffff;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  -webkit-text-fill-color: unset;
+  color: #ffffff;
+}
+
+.dashboard-v2-container .header-title::after {
+  content: ".";
+  color: #5ed29c;
+}
+
+.dashboard-v2-container .observatory-badge {
+  background: rgba(94, 210, 156, 0.1);
+  color: #5ed29c;
+  border: 1px solid rgba(94, 210, 156, 0.2);
+  border-radius: 9999px;
+  padding: 0.25rem 0.75rem;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+}
+
+.dashboard-v2-container .observatory-badge .badge-dot {
+  background-color: #5ed29c;
+}
+
+/* Mandate banner adjustments */
+.dashboard-v2-container .a2a-banner {
+  border-radius: 20px !important;
+  padding: 1.25rem 2rem !important;
+  background: rgba(22, 29, 47, 0.25) !important;
+}
+
+.dashboard-v2-container .a2a-banner-badge .status-badge.secure {
+  background: rgba(94, 210, 156, 0.1);
+  color: #5ed29c;
+  border: 1px solid rgba(94, 210, 156, 0.2);
+}
+
+
+
+/* Card titles */
+.dashboard-v2-container .card-title {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Premium form button */
+.dashboard-v2-container .btn-primary {
+  background-color: #5ed29c !important;
+  color: #070b0a !important;
+  font-weight: 700 !important;
+  border-radius: 9999px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  box-shadow: 0 4px 15px rgba(94, 210, 156, 0.15) !important;
+  font-family: 'Inter', sans-serif;
+}
+
+.dashboard-v2-container .btn-primary:hover:not(:disabled) {
+  background-color: #4ec28c !important;
+  box-shadow: 0 8px 25px rgba(94, 210, 156, 0.3) !important;
+}
+
+.dashboard-v2-container .btn-secondary {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  border-radius: 9999px !important;
+  font-family: 'Inter', sans-serif;
+}
+
+.dashboard-v2-container .btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Align layout top margin */
+.dashboard-layout {
+  position: relative;
+  z-index: 10;
+  padding-top: 2rem !important;
+}
+
+/* Tables and logs */
+.dashboard-v2-container th {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 11px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.dashboard-v2-container td {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 13px !important;
+}

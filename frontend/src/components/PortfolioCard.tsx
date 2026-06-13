@@ -101,39 +101,41 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
       <h2 className="card-title">
         <span>🏦</span> Institution Portfolio
       </h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--spacing-md)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
         {portfolio.holdings.map((holding) => (
           <div
             key={holding.assetCode}
             style={{
-              background: 'var(--color-input-bg)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              padding: 'var(--spacing-md)',
               display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--spacing-xs)',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: 'var(--spacing-sm) 0',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="form-label" style={{ margin: 0, fontSize: '0.7rem' }}>{holding.assetCode}</span>
-              <span style={{ fontSize: '1.1rem' }}>{getAssetIcon(holding.assetCode)}</span>
-            </div>
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '1rem',
-                fontWeight: 700,
-                color: 'var(--color-text-primary)',
-              }}
-            >
-              {formatBalance(holding.balance, holding.assetCode)}
-            </span>
-            {holding.locked > 0 && (
-              <span style={{ fontSize: '0.65rem', color: 'var(--color-warning)', fontFamily: 'var(--font-mono)' }}>
-                🔒 {formatBalance(holding.locked, holding.assetCode)} locked
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+              <span style={{ fontSize: '1.2rem' }}>{getAssetIcon(holding.assetCode)}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                {holding.assetCode}
               </span>
-            )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.95rem',
+                  fontWeight: 700,
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                {formatBalance(holding.balance, holding.assetCode)}
+              </span>
+              {holding.locked > 0 && (
+                <span style={{ fontSize: '0.65rem', color: 'var(--color-warning)', fontFamily: 'var(--font-mono)' }}>
+                  🔒 {formatBalance(holding.locked, holding.assetCode)} locked
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>

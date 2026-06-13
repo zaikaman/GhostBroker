@@ -52,15 +52,16 @@ export function ProcessingStatusRail({ intents }: ProcessingStatusRailProps): Re
 
       {intents.length === 0 ? (
         <div 
-          className="card" 
           style={{ 
             textAlign: 'center', 
             color: 'var(--color-text-muted)', 
             padding: 'var(--spacing-xl)',
-            borderStyle: 'dashed',
+            border: '1px dashed var(--color-border)',
+            borderRadius: 'var(--radius-md)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
+            background: 'var(--color-input-bg)',
             gap: 'var(--spacing-sm)'
           }}
         >
@@ -87,13 +88,12 @@ export function ProcessingStatusRail({ intents }: ProcessingStatusRailProps): Re
             return (
               <div 
                 key={intent.correlationRef}
-                className="card" 
                 style={{ 
                   display: 'flex', 
                   flexDirection: 'column', 
                   gap: 'var(--spacing-sm)',
-                  borderLeftWidth: '4px',
-                  borderLeftColor: `var(--color-${labelInfo.statusType === 'info' ? 'text-secondary' : labelInfo.statusType})`
+                  padding: 'var(--spacing-sm) 0',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.03)'
                 }}
                 tabIndex={0}
               >

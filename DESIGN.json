@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-13T06:18:40Z",
+  "title": "Design System: GhostBroker",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Enclave Emerald", "canonical": "oklch(80% 0.16 150)", "tonalRamp": ["#0b261b", "#143f2d", "#1f5c42", "#2e7a5a", "#419974", "#5ed29c", "#8ae3b9", "#c3f4dd"] },
+      "neutral-bg": { "role": "neutral", "displayName": "Deep Black-Tint", "canonical": "oklch(12% 0.005 150)", "tonalRamp": ["#030504", "#070b0a", "#0d1311", "#151b19", "#212826", "#323a37", "#4b5350", "#767e7a"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Cinzel Display", "purpose": "Classical institutional brand marking." },
+      "body": { "displayName": "Plus Jakarta Sans Body", "purpose": "High-legibility interface reading." }
+    },
+    "shadows": [
+      { "name": "glass-glow", "value": "inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 12px 35px rgba(0, 0, 0, 0.6)", "purpose": "Standard ambient overlay depth." }
+    ],
+    "motion": [
+      { "name": "ease-out-quint", "value": "cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "Smooth menu/state transitions." }
+    ],
+    "breakpoints": [
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Standard wallet connection and action button.",
+      "html": "<button class=\"ds-btn-primary\">Connect Web3 Wallet</button>",
+      "css": ".ds-btn-primary { background: #5ed29c; color: #070b0a; font-family: 'Inter', sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 1.1rem 2.2rem; border-radius: 9999px; border: none; cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 4px 20px rgba(94, 210, 156, 0.2); } .ds-btn-primary:hover { background: #4ec28c; transform: translateY(-2px); box-shadow: 0 8px 30px rgba(94, 210, 156, 0.35); }"
+    },
+    {
+      "name": "Liquid Glass Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Unified glass panel with double-mask sharp border.",
+      "html": "<div class=\"ds-glass-card\"><div class=\"ds-tag\">[ GB-TEE ]</div><h3 class=\"ds-title\">TEE-Enforced Execution</h3><p class=\"ds-desc\">Programmatic matching shielded from human eyes inside attested Intel SGX enclaves.</p></div>",
+      "css": ".ds-glass-card { position: relative; background: rgba(255, 255, 255, 0.01); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 24px; padding: 2.5rem; display: flex; flex-direction: column; gap: 1rem; width: 300px; box-sizing: border-box; } .ds-glass-card::before { content: ''; position: absolute; inset: 0; border-radius: 24px; padding: 1.4px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.02) 100%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; } .ds-tag { font-family: 'Share Tech Mono', monospace; font-size: 14px; color: #5ed29c; letter-spacing: 0.05em; } .ds-title { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 1.25rem; margin: 0; color: #ffffff; } .ds-desc { font-family: 'Inter', sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.65); line-height: 1.5; margin: 0; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Attested Enclave",
+    "overview": "GhostBroker is an institutional dark pool observatory interface. The design system is constructed to convey absolute security, confidentiality, and machine-attested authority. It rejects typical neon-slop consumer crypto widgets, SaaS-blue layouts, and multi-colored grid cards in favor of a clean, highly structured, dark glassmorphic design.",
+    "keyCharacteristics": [
+      "Dark, monochromatic foundations with clean emerald green (#5ed29c) indicators.",
+      "Double-mask composited glassmorphic border elements providing depth.",
+      "Clear typographic separation of displays (Cinzel), body copy (Plus Jakarta Sans), and cryptographic data (Share Tech Mono)."
+    ],
+    "rules": [
+      { "name": "The Rarity Rule", "body": "Emerald green is used strictly for successful cryptographic attestation or key CTA states. It must never exceed 10% of any visible screen surface.", "section": "colors" },
+      { "name": "The Flat-By-Default Rule", "body": "All layouts rest flat on the background with 12px backdrop blur. Elevation is shown only via high-contrast border states on hover, rather than traditional drop shadows.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do wrap primary blocks in glassmorphic .card selectors to ensure unified backdrop blurs.",
+      "Do format all cryptographically secure/sensitive data columns using the monospace Share Tech Mono font.",
+      "Do preserve the 'Zero Human Access' TEE secure enclave disclaimer in compliance boundaries."
+    ],
+    "donts": [
+      "Don't add colored left-stripe or right-stripe borders as card accents.",
+      "Don't use neon gradient text for numbers or telemetry fields.",
+      "Don't use standard SaaS-blue grids or cards."
+    ]
+  }
+}

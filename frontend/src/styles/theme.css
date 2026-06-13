@@ -7,12 +7,12 @@
   --color-surface-hover: #1E293B;
   --color-input-bg: #0F1524;
   --color-border: #24314E;
-  --color-border-focus: #C5A880;
+  --color-border-focus: #5ed29c;
   
-  /* Primary Accent - Institutional Gold/Bronze */
-  --color-accent: #C5A880;
-  --color-accent-hover: #B3966E;
-  --color-accent-rgb: 197, 168, 128;
+  /* Primary Accent - Enclave Emerald */
+  --color-accent: #5ed29c;
+  --color-accent-hover: #4ec28c;
+  --color-accent-rgb: 94, 210, 156;
   
   /* Status Colors */
   --color-success: #10B981;
@@ -54,8 +54,8 @@
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.15);
-  --shadow-premium: 0 0 25px rgba(197, 168, 128, 0.05);
-
+  --shadow-premium: 0 0 25px rgba(94, 210, 156, 0.05);
+ 
   /* Status, Receipt, Table, and Drawer Token Variants */
   --color-table-header: var(--color-input-bg);
   --color-table-border: var(--color-border);
@@ -64,7 +64,7 @@
   --color-drawer-border: var(--color-border);
   --color-receipt-bg: var(--color-input-bg);
   --color-receipt-text: var(--color-success);
-  --focus-ring-color: rgba(197, 168, 128, 0.5);
+  --focus-ring-color: rgba(94, 210, 156, 0.5);
 }
 
 /* Base resets & styles */

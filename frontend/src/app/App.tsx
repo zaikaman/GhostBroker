@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import Hls from 'hls.js';
 import '../styles/theme.css';
 import '../styles/dashboard.css';
+import '../styles/landing-v2.css';
 import { RouterProvider, Route, useRouter } from './routes';
 import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
 import { SecureMetric } from '../components/SecureMetric';
@@ -20,11 +22,81 @@ import { apiClient, type AuthSession } from '../services/api-client';
 
 function AgentDeployView({ session }: { session: AuthSession }): React.JSX.Element {
   const { navigate } = useRouter();
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const streamUrl = 'https://stream.mux.com/tLkHO1qZoaaQOUeVWo8hEBeGQfySP02EPS02BmnNFyXys.m3u8';
+    let hls: Hls | null = null;
+
+    if (Hls.isSupported()) {
+      hls = new Hls({
+        enableWorker: false
+      });
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch((err) => {
+          console.warn('Auto-play failed/prevented:', err);
+        });
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = streamUrl;
+      video.addEventListener('loadedmetadata', () => {
+        video.play().catch((err) => {
+          console.warn('Native auto-play failed/prevented:', err);
+        });
+      });
+    }
+
+    return () => {
+      if (hls) {
+        hls.destroy();
+      }
+    };
+  }, []);
   return <AgentDeploymentGuide session={session} onBack={() => navigate('/dashboard')} />;
 }
 
 function DashboardView({ session }: { session: AuthSession }): React.JSX.Element {
   const { navigate } = useRouter();
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const streamUrl = 'https://stream.mux.com/tLkHO1qZoaaQOUeVWo8hEBeGQfySP02EPS02BmnNFyXys.m3u8';
+    let hls: Hls | null = null;
+
+    if (Hls.isSupported()) {
+      hls = new Hls({
+        enableWorker: false
+      });
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch((err) => {
+          console.warn('Auto-play failed/prevented:', err);
+        });
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = streamUrl;
+      video.addEventListener('loadedmetadata', () => {
+        video.play().catch((err) => {
+          console.warn('Native auto-play failed/prevented:', err);
+        });
+      });
+    }
+
+    return () => {
+      if (hls) {
+        hls.destroy();
+      }
+    };
+  }, []);
   const {
     connectionStatus,
     enclaveStatus,
@@ -62,50 +134,121 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
   };
 
   return (
-    <div className="dashboard-layout">
-      {/* Header Section */}
-      <header className="layout-header dashboard-header">
-        <div className="header-brand">
-          <h1 className="header-title">GhostBroker</h1>
-        </div>
-        <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center' }}>
-          <div className="observatory-badge">
-            <span className="badge-dot"></span>
-            OBSERVATORY MODE
-          </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-            DID: {session.institution.t3TenantDid}
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => navigate('/deploy')}
-            style={{ fontSize: '0.7rem', padding: '4px 10px', fontFamily: 'var(--font-mono)' }}
-          >
-            🚀 Deploy Agent
-          </button>
-        </div>
-      </header>
+    <div className="dashboard-v2-container">
+      {/* 1. Background Video */}
+      <div className="video-background-container">
+        <video
+          ref={videoRef}
+          className="video-background"
+          muted
+          loop
+          playsInline
+          autoPlay
+        />
+      </div>
 
-      {/* Agent-to-Agent Mandate Banner */}
-      <div className="layout-header a2a-banner">
-        <div className="a2a-banner-icon">🤖</div>
-        <div className="a2a-banner-content">
-          <strong>Agent-to-Agent Dark Pool</strong>
-          <span>This is an autonomous trading zone. Humans may only observe — all order placement, matching, and settlement is executed by cryptographically verified AI agents inside the TEE enclave. No human intervention is permitted during active trading.</span>
-          <div style={{ marginTop: '4px', fontSize: '0.75rem', opacity: 0.8, color: 'var(--color-accent)' }}>
-            Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
+      {/* 2. Overlays */}
+      <div className="overlay-left-to-right" />
+      <div className="overlay-bottom-up" />
+
+      {/* 4. Central Glow SVG */}
+      <svg
+        className="central-glow-svg"
+        viewBox="0 0 1000 400"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <defs>
+          <filter id="glowBlur" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="25" />
+          </filter>
+        </defs>
+        <ellipse
+          cx="500"
+          cy="100"
+          rx="350"
+          ry="80"
+          fill="url(#glowGradient)"
+          filter="url(#glowBlur)"
+          opacity="0.35"
+        />
+        <linearGradient id="glowGradient" x1="150" y1="100" x2="850" y2="100" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#00f2fe" />
+          <stop offset="50%" stopColor="#5ed29c" />
+          <stop offset="100%" stopColor="#0575e6" />
+        </linearGradient>
+      </svg>
+
+      <div className="dashboard-layout">
+      {/* Header Section */}
+      <header className="layout-header dashboard-header" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 'var(--spacing-sm)' }}>
+          <div className="header-brand" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
+            <h1 className="logo-v2" style={{ fontSize: '1.4rem', cursor: 'default', margin: 0 }}>GB GHOSTBROKER</h1>
+            <div className="observatory-badge">
+              <span className="badge-dot"></span>
+              OBSERVATORY MODE
+            </div>
+          </div>
+          <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+              DID: {session.institution.t3TenantDid}
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigate('/deploy')}
+              style={{ fontSize: '0.7rem', padding: '4px 10px', fontFamily: 'var(--font-mono)' }}
+            >
+              🚀 Deploy Agent
+            </button>
           </div>
         </div>
-        <div className="a2a-banner-badge">
-          <span className="status-badge secure" style={{ fontSize: '0.65rem' }}>
+
+        {/* Integrated Mandate Banner */}
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          background: 'rgba(94, 210, 156, 0.02)', 
+          border: '1px solid rgba(94, 210, 156, 0.1)', 
+          borderRadius: '12px', 
+          padding: '10px 16px',
+          fontSize: '0.75rem',
+          width: '100%',
+          gap: 'var(--spacing-md)',
+          boxSizing: 'border-box'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255, 255, 255, 0.85)', lineHeight: '1.4' }}>
+            <span style={{ fontSize: '1rem' }}>🤖</span>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span>
+                <strong>Agent-to-Agent Zone:</strong> Cryptographically verified TEE matching active. No human order visibility.
+              </span>
+              <span style={{ fontSize: '0.7rem', opacity: 0.8, color: 'var(--color-accent)' }}>
+                Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
+              </span>
+            </div>
+          </div>
+          <span style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: '0.65rem', 
+            color: 'var(--color-accent)', 
+            background: 'rgba(94, 210, 156, 0.08)',
+            padding: '2px 8px',
+            borderRadius: '4px',
+            border: '1px solid rgba(94, 210, 156, 0.15)',
+            whiteSpace: 'nowrap',
+            flexShrink: 0
+          }}>
             🔒 ZERO HUMAN ACCESS
           </span>
         </div>
-      </div>
+      </header>
 
-      {/* Connection Status Section (Metrics Rail) */}
-      <div className="layout-header" style={{ gridColumn: 'span 2', display: 'flex', gap: 'var(--spacing-md)', flexWrap: 'wrap', marginTop: '-8px' }}>
+      {/* Connection Status Section (Metrics Grid) */}
+      <div style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 'var(--spacing-md)', marginTop: '-8px' }}>
         <SecureMetric 
           title="TEE Enclave Status" 
           value={enclaveStatus === 'secure' ? 'SECURE' : enclaveStatus === 'processing' ? 'PROCESSING' : 'ERROR'} 
@@ -172,14 +315,14 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
           />
         </div>
 
-        {/* Processing Status Rail */}
-        <div className="card">
-          <ProcessingStatusRail intents={intents} />
-        </div>
-
-        {/* Admitted Agents Connection Grid */}
-        <div className="card">
-          <AgentConnectionGrid agents={agents} />
+        {/* Secondary Telemetry Side-by-Side Panel Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--spacing-lg)' }}>
+          <div className="card">
+            <ProcessingStatusRail intents={intents} />
+          </div>
+          <div className="card">
+            <AgentConnectionGrid agents={agents} />
+          </div>
         </div>
       </section>
 
@@ -205,6 +348,7 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         error={receiptError}
       />
     </div>
+  </div>
   );
 }
 
@@ -280,3 +424,5 @@ export function App(): React.JSX.Element {
 }
 
 export default App;
+
+
