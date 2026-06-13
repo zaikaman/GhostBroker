@@ -48,7 +48,8 @@ interface EtherscanApiResponse {
   result?: unknown;
 }
 
-const SEPOLIA_ETHERSCAN_API_URL = "https://api-sepolia.etherscan.io/api";
+const ETHERSCAN_API_V2_URL = "https://api.etherscan.io/v2/api";
+const SEPOLIA_CHAIN_ID = "11155111";
 const SEPOLIA_NATIVE_ASSET_CODE = "SEPOLIAETH";
 const WBTC_DECIMALS = 8;
 const USDC_DECIMALS = 6;
@@ -206,10 +207,11 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
     contractAddress?: string;
     context: string;
   }): Promise<EtherscanApiResponse> {
-    const url = new URL(SEPOLIA_ETHERSCAN_API_URL);
+    const url = new URL(ETHERSCAN_API_V2_URL);
     url.searchParams.set("module", "account");
     url.searchParams.set("action", params.action);
     url.searchParams.set("address", params.walletAddress);
+    url.searchParams.set("chainid", SEPOLIA_CHAIN_ID);
     url.searchParams.set("tag", "latest");
     url.searchParams.set("apikey", this.apiKey);
 

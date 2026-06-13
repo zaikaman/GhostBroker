@@ -24,7 +24,7 @@ export function createPortfoliosRouter(
         return;
       }
 
-      // Query Sepolia blockchain LIVE for the wallet's balances — no database fallback
+      // Try to fetch live balances from Sepolia via Etherscan, fall back to stored database
       const walletAddress = operatorAuth.walletAddress;
       if (!walletPortfolioSyncService || !walletAddress) {
         response.status(200).json({
@@ -34,13 +34,27 @@ export function createPortfoliosRouter(
         return;
       }
 
-      const livePortfolio = await walletPortfolioSyncService.fetchLivePortfolio({
-        walletAddress,
-      });
-      response.status(200).json({
-        institutionId,
-        holdings: livePortfolio.holdings,
-      });
+      try {
+        const livePortfolio = await walletPortfolioSyncService.fetchLivePortfolio({
+          walletAddress,
+        });
+        response.status(200).json({
+          institutionId,
+          holdings: livePortfolio.holdings,
+        });
+        return;
+      } catch (liveError) {
+        logger.warn(
+          { err: liveError, institutionId, walletAddress },
+          "Live Sepolia portfolio fetch failed; returning stored portfolio.",
+        );
+        // Fall through to database fallback
+      }
+
+      // Fallback: return whatever is stored in the database
+      const portfolio = await portfolioService.getPortfolio(institutionId);
+      response.status(200).json(portfolio);
+      return;
     } catch (error) {
       next(error);
     }
