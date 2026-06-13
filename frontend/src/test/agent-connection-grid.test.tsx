@@ -27,7 +27,7 @@ describe('AgentConnectionGrid Component', () => {
 
   it('renders empty state when no agents are connected', () => {
     render(<AgentConnectionGrid agents={[]} />);
-    expect(screen.getByText(/No agents currently onboarded or connecting/i)).toBeInTheDocument();
+    expect(screen.getByText(/NO ENCLAVE AGENT ACTIVE/i)).toBeInTheDocument();
   });
 
   it('renders connection grid with agent cards and secure statuses', () => {

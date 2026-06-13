@@ -258,9 +258,8 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
             </div>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn-deploy-premium"
               onClick={() => navigate('/deploy')}
-              style={{ fontSize: '0.7rem', padding: '4px 10px', fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
               <RocketIcon size={12} /> Deploy Agent
             </button>
@@ -310,6 +309,53 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
           </span>
         </div>
       </header>
+
+      {/* Conditional Agent Onboarding Hero Banner */}
+      {agents.length === 0 && (
+        <div className="deploy-onboarding-hero">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: 'rgba(94, 210, 156, 0.1)',
+              border: '1px solid rgba(94, 210, 156, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              <RocketIcon size={20} style={{ color: 'var(--color-accent)' }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>
+                ONBOARDING: NO ACTIVE TRADING AGENT REGISTERED
+              </h4>
+              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-secondary)', maxWidth: '650px' }}>
+                GhostBroker operates under Zero-Human Access rules. Standard order entry is disabled. To begin trading in the dark pool, you must first deploy a verified enclave runner agent for your institution.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => navigate('/deploy')}
+            style={{
+              padding: '8px 16px',
+              fontSize: '0.75rem',
+              fontFamily: 'var(--font-mono)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 0 15px rgba(94, 210, 156, 0.25)',
+              border: '1px solid var(--color-accent)'
+            }}
+          >
+            <RocketIcon size={14} /> Start Onboarding →
+          </button>
+        </div>
+      )}
+
 
       {/* Connection Status Section (Metrics Grid) */}
       <div className="layout-metrics">
@@ -386,7 +432,7 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
           <ProcessingStatusRail intents={intents} />
         </div>
         <div className="card">
-          <AgentConnectionGrid agents={agents} />
+          <AgentConnectionGrid agents={agents} onDeploy={() => navigate('/deploy')} />
         </div>
         <div className="card enclave-health-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '300px' }}>
           <EnclaveHealthMonitor />

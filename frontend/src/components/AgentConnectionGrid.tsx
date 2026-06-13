@@ -1,12 +1,13 @@
 import React from 'react';
 import type { AgentState } from '../hooks/useConnectionTelemetry';
-import { UserIcon, Activity01Icon } from 'hugeicons-react';
+import { UserIcon, Activity01Icon, RocketIcon } from 'hugeicons-react';
 
 export interface AgentConnectionGridProps {
   agents: AgentState[];
+  onDeploy?: () => void;
 }
 
-export function AgentConnectionGrid({ agents }: AgentConnectionGridProps): React.JSX.Element {
+export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridProps): React.JSX.Element {
   const truncateDid = (did: string) => {
     if (did.length <= 16) return did;
     return `${did.slice(0, 10)}...${did.slice(-6)}`;
@@ -27,21 +28,84 @@ export function AgentConnectionGrid({ agents }: AgentConnectionGridProps): React
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-      <h3 className="form-label" style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Active Enclave Agent Sessions ({agents.length})
-      </h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="form-label" style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Active Enclave Agent Sessions ({agents.length})
+        </h3>
+        <button
+          type="button"
+          className="btn-grid-header-deploy"
+          onClick={onDeploy}
+          title="Deploy another agent session"
+        >
+          <RocketIcon size={10} /> + Deploy
+        </button>
+      </div>
       {agents.length === 0 ? (
         <div 
           style={{ 
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
             textAlign: 'center', 
-            color: 'var(--color-text-muted)', 
-            padding: 'var(--spacing-lg)',
-            border: '1px dashed var(--color-border)',
+            gap: 'var(--spacing-sm)',
+            padding: 'var(--spacing-xl) var(--spacing-md)',
+            border: '1px dashed rgba(94, 210, 156, 0.2)',
             borderRadius: 'var(--radius-md)',
-            background: 'var(--color-input-bg)'
+            background: 'linear-gradient(180deg, rgba(15, 21, 36, 0.4) 0%, rgba(11, 15, 25, 0.6) 100%)',
+            boxShadow: 'inset 0 0 10px rgba(94, 210, 156, 0.01)'
           }}
         >
-          No agents currently onboarded or connecting.
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '50%',
+            background: 'rgba(94, 210, 156, 0.05)',
+            border: '1px solid rgba(94, 210, 156, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '4px',
+            animation: 'pulse-animation 3s infinite'
+          }}>
+            <RocketIcon size={18} style={{ color: 'var(--color-accent)' }} />
+          </div>
+          <h4 style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: '0.75rem', 
+            color: 'var(--color-text-primary)',
+            letterSpacing: '0.05em',
+            margin: 0
+          }}>
+            NO ENCLAVE AGENT ACTIVE
+          </h4>
+          <p style={{ 
+            fontSize: '0.7rem', 
+            color: 'var(--color-text-secondary)', 
+            lineHeight: '1.4',
+            maxWidth: '220px',
+            margin: 0
+          }}>
+            GhostBroker is an agent-only dark pool. You must deploy a secure enclave agent to submit intents.
+          </p>
+          <button 
+            type="button"
+            className="btn btn-primary"
+            onClick={onDeploy}
+            style={{ 
+              marginTop: '8px', 
+              fontSize: '0.7rem', 
+              padding: '6px 12px',
+              fontFamily: 'var(--font-mono)',
+              width: '100%',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px'
+            }}
+          >
+            Launch Onboarding Guide
+          </button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
