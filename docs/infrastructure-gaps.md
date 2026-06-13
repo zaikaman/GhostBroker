@@ -111,44 +111,58 @@ The authority claim schema (`authority-claims.ts`) defines `instrumentScope`, `d
 
 ### Gap 3: No Agent Key Management Infrastructure
 
-**Severity: 🟡 High**
+**Status: ✅ Resolved (Agent Management Panel)**
 
-- Agents need Ethereum private keys to sign DID challenges
-- There is no dashboard flow to **generate**, **register**, or **export** agent keys
-- The examples (`agent-buyer.ts`, `agent-seller.ts`) require passing `ADMIN_PRIVATE_KEY`, `AGENT_PRIVATE_KEY`, and a `CREDENTIAL_JCS_BASE64` from the T3N Dashboard
+With API keys (Gap 1) replacing DID challenge-response for agent auth, and agent DB tracking (Gap 4) providing persistent storage, Gap 3 shifted focus to an Agent Management Panel that connects these systems.
 
-**What's needed:**
+**What was built:**
 
-| Item | Description |
-|------|-------------|
-| Agent key generation | Dashboard UI to generate an Ethereum keypair for a new agent |
-| Agent naming/labeling | Human-readable agent names tied to DIDs |
-| Secure key export | Download/display the private key once with a "saved" confirmation |
-| Automatic delegation | Auto-create the T3N delegation credential from the dashboard |
-| Key rotation | Replace an agent's key without re-registering |
+| Component | File(s) |
+|-----------|---------|
+| Agent Management Panel (Dashboard UI) | `frontend/src/components/AgentsPanel.tsx` |
+| `GET /api/agents/:id` — Single agent details | `backend/src/api/agents.routes.ts` |
+| `PATCH /api/agents/:id` — Update agent label | `backend/src/api/agents.routes.ts` |
+| `AgentService.getAgent()` / `updateAgentLabel()` | `backend/src/services/agent.service.ts` |
+| `AgentRepository.findById()` / `updateLabel()` | `backend/src/services/agent-repository.ts` |
+| Frontend API methods | `frontend/src/services/api-client.ts` (`getAgent`, `updateAgentLabel`) |
+
+**Key design decisions:**
+
+- Agents panel lives in the Enclaves/Agents tab alongside the connection grid
+- Inline label editing with Enter to save / Escape to cancel
+- Revoke with confirmation dialog — cascades to clear active intents
+- Shows status badges (ADMITTED / REVOKED) with full agent DIDs and registration dates
+- API key count summary links to the Developer Keys tab for full management
+- All new routes are institution-scoped via `operatorAuth.institutionId`
 
 ---
 
 ### Gap 4: No Admitted-Agent Tracking in the Database
 
-**Severity: 🟡 High**
+**Status: ✅ Resolved**
 
-Currently `POST /api/agents/admit` just verifies the delegation proof and returns `{ status: "admitted" }`. There is **no database table** tracking admitted agents:
+Agents are now persisted to the database on admission. The `agents` table tracks every admission with status (admitted/revoked), authority reference, and timestamps.
 
-- All admissions live in-memory only (lost on server restart)
-- The `agent_authority_revocations` table exists but there is no base `agents` table to revoke against
-- No way to list "which agents does my institution have?"
-- No way to audit admission history
+**What was built:**
 
-**What's needed:**
+| Component | File(s) |
+|-----------|---------|
+| `agents` DB table | `database/migrations/008_create_agents.sql` |
+| `POST /api/agents/admit` — Now persists admission to DB | `backend/src/services/agent.service.ts` |
+| `GET /api/agents` — List admitted agents for institution | `backend/src/api/agents.routes.ts` |
+| `POST /api/agents/:id/revoke` — Revoke agent admission | `backend/src/api/agents.routes.ts` |
+| Revocation cascade — Clears active intents | `backend/src/services/matching-orchestrator.ts` (`removeIntentsByAgent`) |
+| Supabase agent repository | `backend/src/services/agent-repository.ts` |
+| In-memory fake repository for tests | `backend/src/tests/data/fake-agent-repository.ts` |
+| Frontend API client methods | `frontend/src/services/api-client.ts` (`listAgents`, `revokeAgent`) |
 
-| Item | Description |
-|------|-------------|
-| `agents` DB table | id, institution_id, agent_did, status, authority_ref, label, metadata, created_at, updated_at |
-| `POST /api/agents/admit` update | Persist admission to DB |
-| `GET /api/agents` | List admitted agents for an institution |
-| `POST /api/agents/:id/revoke` | Revoke an agent's admission |
-| Revocation cascade | Clear active intents on revocation |
+**Key design decisions:**
+
+- Admitted agents get an auto-generated UUID `id` returned in the admission response
+- The `institution_id + agent_did` pair is unique (one admission per agent per institution)
+- Revoking an agent also clears their pending intents from the matching orchestrator queue
+- The `listAgents` endpoint supports an optional `status` query parameter filter
+- Auto-updating `updated_at` via a database trigger
 
 ---
 
@@ -172,17 +186,17 @@ Currently `POST /api/agents/admit` just verifies the delegation proof and return
 
 ### Gap 6: Missing Agent-Related API Endpoints
 
-**Severity: 🟡 Medium**
+**Status: 🟡 Partially Resolved**
 
-| Missing Endpoint | Why It's Needed |
-|------------------|-----------------|
-| `GET /api/agents` | List admitted agents for the authenticated institution |
-| `POST /api/agents/:id/revoke` | Revoke an agent's admission credentials |
-| `GET /api/agents/intents` | List own active intents (privacy-safe, agent-scoped) |
-| `POST /api/agents/intents/cancel` | Cancel an active intent |
-| `GET /api/keys` | List/manage API keys for the institution |
-| `POST /api/keys` | Generate a new API key |
-| `POST /api/keys/:id/revoke` | Revoke an API key |
+| Missing Endpoint | Status |
+|------------------|--------|
+| `GET /api/agents` | ✅ Resolved (part of Gap 4) |
+| `POST /api/agents/:id/revoke` | ✅ Resolved (part of Gap 4) |
+| `GET /api/agents/intents` | ❌ Still missing |
+| `POST /api/agents/intents/cancel` | ❌ Still missing (Gap 5) |
+| `GET /api/keys` | ✅ Resolved (part of Gap 1) |
+| `POST /api/keys` | ✅ Resolved (part of Gap 1) |
+| `POST /api/keys/:id/revoke` | ✅ Resolved (part of Gap 1) |
 
 ---
 
@@ -213,10 +227,10 @@ When settlement runs, it debits/credits the **institution-level portfolio**. Mul
 |-----|----------|------------|
 | 1 - API Key System | 🔴 Blocking | Nothing |
 | 2 - Agent-to-Asset Authorization | 🔴 Blocking | Gap 4 (agent DB) |
-| 3 - Agent Key Management | 🟡 High | Gap 4 (agent DB) |
-| 4 - Agent DB & Admitted Tracking | 🟡 High | Nothing |
+| 3 - Agent Key Management | ✅ Resolved | Gap 4 (agent DB) |
+| 4 - Agent DB & Admitted Tracking | ✅ Resolved | Nothing |
 | 5 - Intent Cancellation | 🟡 High | Gap 4 (agent DB) |
-| 6 - Missing API Endpoints | 🟡 Medium | Gap 4 (agent DB) |
+| 6 - Missing API Endpoints | 🟡 Partially Resolved | Gap 4 (agent DB) |
 | 7 - Institution-Scoped Portfolio | 🟡 Medium | Gap 2 (authorization) |
 
 ---

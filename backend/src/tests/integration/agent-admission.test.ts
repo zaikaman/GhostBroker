@@ -7,6 +7,7 @@ import { PublicError } from "../../errors/public-error.js";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { AgentService } from "../../services/agent.service.js";
 import type { AuthorityRevocationRepository } from "../../services/authority-revocation.service.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import { buildAdmitAgentRequest } from "../data/us1-seed-builders.js";
 
 class StaticAuthorization implements AgentAuthorizationFacade {
@@ -52,13 +53,17 @@ describe("agent admission", () => {
         authorityRef: "authority:valid",
         policyHash: "policy:valid",
       }),
+      new FakeAgentRepository(),
     );
 
-    await expect(service.admitAgent(buildAdmitAgentRequest())).resolves.toEqual({
+    const result = await service.admitAgent(buildAdmitAgentRequest());
+    expect(result).toMatchObject({
       agentDid: "did:t3n:agent:us1-authorized",
       status: "admitted",
       authorityRef: "authority:valid",
     });
+    // A real id was assigned by the repository
+    expect(result.id).toBeDefined();
   });
 
   it.each(["expired", "revoked", "over_scoped", "unverified"] as const)(
@@ -70,6 +75,7 @@ describe("agent admission", () => {
           agentDid: "did:t3n:agent:placeholder",
           reason,
         }),
+        new FakeAgentRepository(),
       );
 
       await expect(service.admitAgent(buildAdmitAgentRequest())).rejects.toThrow(
@@ -91,6 +97,7 @@ describe("agent admission", () => {
           expect(request.revokedAuthorityRefs).toBe(revokedAuthorityRefs);
         },
       ),
+      new FakeAgentRepository(),
       new StaticRevocations(revokedAuthorityRefs),
     );
 

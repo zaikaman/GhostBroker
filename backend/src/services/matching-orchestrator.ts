@@ -142,6 +142,34 @@ export class MatchingOrchestrator {
   }
 
   /**
+   * Remove all pending intents for a given agent/institution.
+   * Used when an agent is revoked — clears their active intents from the queue.
+   */
+  public removeIntentsByAgent(agentDid: string, institutionId: string): void {
+    const removed: PendingIntent[] = [];
+    this.pendingIntents = this.pendingIntents.filter((intent) => {
+      const matches =
+        intent.agentDid === agentDid &&
+        intent.institutionId === institutionId;
+      if (matches) {
+        removed.push(intent);
+      }
+      return !matches;
+    });
+
+    for (const intent of removed) {
+      this.telemetryBus.publish({
+        institutionId: intent.institutionId,
+        type: "telemetry.processing.changed",
+        phase: "intent_cancelled",
+        severity: "warning",
+        correlationRef: intent.correlationRef,
+        agentId: intent.agentDid,
+      });
+    }
+  }
+
+  /**
    * Get current count of pending (unmatched) intents.
    */
   public pendingCount(): number {

@@ -94,3 +94,16 @@ CREATE TABLE public.api_keys (
   CONSTRAINT api_keys_pkey PRIMARY KEY (id),
   CONSTRAINT api_keys_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
 );
+CREATE TABLE public.agents (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  institution_id uuid NOT NULL,
+  agent_did text NOT NULL CHECK (agent_did <> ''::text),
+  status text NOT NULL DEFAULT 'admitted'::text CHECK (status = ANY (ARRAY['admitted'::text, 'revoked'::text])),
+  authority_ref text NOT NULL CHECK (authority_ref <> ''::text),
+  label text CHECK (label IS NULL OR label <> ''::text AND char_length(label) <= 100),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT agents_pkey PRIMARY KEY (id),
+  CONSTRAINT agents_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
+);

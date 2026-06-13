@@ -23,7 +23,19 @@ export interface AdmitAgentRequest {
   authorityProof: string;
 }
 
+export interface Agent {
+  id: string;
+  institutionId: string;
+  agentDid: string;
+  status: 'admitted' | 'revoked';
+  authorityRef: string;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AgentAdmission {
+  id?: string;
   agentDid: string;
   status: 'admitted' | 'rejected';
   authorityRef: string;
@@ -406,6 +418,42 @@ export const apiClient = {
   async getReceipt(receiptId: string): Promise<AuditReceipt> {
     const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/receipts/${receiptId}`);
     return handleResponse<AuditReceipt>(res);
+  },
+
+  // ── Agent Management ──────────────────────────────────────────────────
+
+  async listAgents(status?: "admitted" | "revoked"): Promise<Agent[]> {
+    const url = new URL(`${API_BASE_URL}/api/agents`);
+    if (status) url.searchParams.append("status", status);
+
+    const res = await requestWithOperatorFallback(url.toString());
+    return handleResponse<Agent[]>(res);
+  },
+
+  async getAgent(id: string): Promise<Agent> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/agents/${id}`,
+    );
+    return handleResponse<Agent>(res);
+  },
+
+  async updateAgentLabel(id: string, label: string): Promise<Agent> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/agents/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      },
+    );
+    return handleResponse<Agent>(res);
+  },
+
+  async revokeAgent(id: string): Promise<void> {
+    await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/agents/${id}/revoke`,
+      { method: "POST" },
+    );
   },
 
   // ── API Key Management ────────────────────────────────────────────────

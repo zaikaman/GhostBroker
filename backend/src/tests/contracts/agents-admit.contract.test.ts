@@ -2,7 +2,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
 import { issueOperatorSessionToken } from "../../auth/session-token.js";
-import type { AgentAdmissionService } from "../../services/agent.service.js";
+import type { AgentManagementService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import {
   buildAdmitAgentRequest,
@@ -11,7 +11,7 @@ import {
   us1OperatorInstitutionId,
 } from "../data/us1-seed-builders.js";
 
-function buildServices(agentService: AgentAdmissionService): BackendServices {
+function buildServices(agentService: AgentManagementService): BackendServices {
   return {
     institutionService: {
       createInstitution: async () => buildInstitution(),
@@ -24,13 +24,16 @@ function buildServices(agentService: AgentAdmissionService): BackendServices {
 
 describe("POST /api/agents/admit contract", () => {
   it("admits a verified agent and returns only the authority reference", async () => {
-    const agentService: AgentAdmissionService = {
+    const agentService: AgentManagementService = {
       admitAgent: async () => ({
         agentDid: "did:t3n:agent:us1-authorized",
         status: "admitted",
         authorityRef: "authority:verified:test",
-      }),
-    };
+      }),            listAgents: async () => { throw new Error("not used"); },
+            getAgent: async () => { throw new Error("not used"); },
+            updateAgentLabel: async () => { throw new Error("not used"); },
+          revokeAgent: async () => { throw new Error("not used"); },
+        };
     const app = createApp(buildBackendTestEnv(), buildServices(agentService));
 
     const token = issueOperatorSessionToken({
@@ -61,6 +64,10 @@ describe("POST /api/agents/admit contract", () => {
           status: "admitted",
           authorityRef: "authority:unexpected",
         }),
+        listAgents: async () => { throw new Error("not used"); },
+        getAgent: async () => { throw new Error("not used"); },
+        updateAgentLabel: async () => { throw new Error("not used"); },
+        revokeAgent: async () => { throw new Error("not used"); },
       }),
     );
 

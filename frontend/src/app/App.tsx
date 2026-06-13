@@ -20,6 +20,7 @@ import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
 import { ApiKeysPanel } from '../components/ApiKeysPanel';
+import { AgentsPanel } from '../components/AgentsPanel';
 import { apiClient, type AuthSession } from '../services/api-client';
 import {
   Robot01Icon,
@@ -32,7 +33,7 @@ import {
   RocketIcon,
   Key01Icon,
   EyeIcon,
-  CancelCircleIcon
+  CancelCircleIcon,
 } from 'hugeicons-react';
 
 function DashboardView({
@@ -175,6 +176,7 @@ function DashboardView({
       case 'enclaves':
         return (
           <div className="dashboard-grid-enclaves" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ gridColumn: '1 / -1' }}><AgentsPanel /></div>
             <div className="enclaves-main" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               {agents.length === 0 && (
                 <div className="deploy-onboarding-hero" style={{ margin: 0 }}>
@@ -341,7 +343,7 @@ function DashboardView({
               className={`sidebar-link ${activeTab === 'enclaves' ? 'active' : ''}`}
               onClick={() => handleTabChange('enclaves')}
             >
-              <Robot01Icon size={16} /> Secure Enclaves
+              <Robot01Icon size={16} /> Agents & Keys
             </button>
             <button
               type="button"

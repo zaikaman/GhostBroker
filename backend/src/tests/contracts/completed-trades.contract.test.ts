@@ -2,7 +2,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
 import { issueOperatorSessionToken } from "../../auth/session-token.js";
-import type { AgentAdmissionService } from "../../services/agent.service.js";
+import type { AgentManagementService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import { TradeHistoryService } from "../../services/trade-history.service.js";
 import {
@@ -23,7 +23,11 @@ function buildServices(tradeHistoryService: TradeHistoryService): BackendService
       admitAgent: async () => {
         throw new Error("not used");
       },
-    } satisfies AgentAdmissionService,
+      listAgents: async () => { throw new Error("not used"); },
+      getAgent: async () => { throw new Error("not used"); },
+      updateAgentLabel: async () => { throw new Error("not used"); },
+      revokeAgent: async () => { throw new Error("not used"); },
+    } as AgentManagementService,
     tradeHistoryService,
     portfolioService: {} as never,
     apiKeyService: {} as never,

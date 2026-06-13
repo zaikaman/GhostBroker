@@ -35,7 +35,8 @@ import {
 } from "./services/institution.service.js";
 import { DidAuthService, type AuthSessionService } from "./services/auth.service.js";
 import { SupabaseAuthorityRevocationRepository } from "./services/authority-revocation.service.js";
-import { AgentService, type AgentAdmissionService } from "./services/agent.service.js";
+import { AgentService, type AgentManagementService } from "./services/agent.service.js";
+import { SupabaseAgentRepository } from "./services/agent-repository.js";
 import {
   HiddenIntentService,
   type HiddenIntentSubmissionService,
@@ -97,7 +98,7 @@ export interface BackendServices {
   institutionService: InstitutionManagementService;
   portfolioService: PortfolioService;
   walletPortfolioSyncService?: WalletPortfolioSyncService;
-  agentService: AgentAdmissionService;
+  agentService: AgentManagementService;
   hiddenIntentService?: HiddenIntentSubmissionService;
   settlementService?: SettlementService;
   tradeHistoryService?: TradeHistoryService;
@@ -187,7 +188,9 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
     agentService: new AgentService(
       authorizationFacade,
+      new SupabaseAgentRepository(supabase as never),
       authorityRevocationRepository,
+      matchingOrchestrator,
     ),
     hiddenIntentService: new HiddenIntentService(
       authorizationFacade,

@@ -18,6 +18,10 @@ const services: BackendServices = {
     admitAgent: async () => {
       throw new Error("not used");
     },
+    listAgents: async () => { throw new Error("not used"); },
+    getAgent: async () => { throw new Error("not used"); },
+    updateAgentLabel: async () => { throw new Error("not used"); },
+    revokeAgent: async () => { throw new Error("not used"); },
   },
   hiddenIntentService: {
     submitIntent: async () => {

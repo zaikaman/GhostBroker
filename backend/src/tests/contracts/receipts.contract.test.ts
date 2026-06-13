@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
 import { issueOperatorSessionToken } from "../../auth/session-token.js";
 import { auditReceiptFromRecord } from "../../models/audit-receipt.js";
-import type { AgentAdmissionService } from "../../services/agent.service.js";
+import type { AgentManagementService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import { ReceiptService } from "../../services/receipt.service.js";
 import { buildBackendTestEnv } from "../data/us2-encrypted-intent-builders.js";
@@ -25,7 +25,11 @@ function buildServices(receiptService: ReceiptService): BackendServices {
       admitAgent: async () => {
         throw new Error("not used");
       },
-    } satisfies AgentAdmissionService,
+      listAgents: async () => { throw new Error("not used"); },
+      getAgent: async () => { throw new Error("not used"); },
+      updateAgentLabel: async () => { throw new Error("not used"); },
+      revokeAgent: async () => { throw new Error("not used"); },
+    } as AgentManagementService,
     receiptService,
     portfolioService: {} as never,
     apiKeyService: {} as never,

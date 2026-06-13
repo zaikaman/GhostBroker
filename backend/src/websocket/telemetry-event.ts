@@ -29,7 +29,8 @@ export type TelemetryPhase =
   | "token_metering_failed"
   | "settlement_failed"
   | "service_unavailable"
-  | "intent_expired";
+  | "intent_expired"
+  | "intent_cancelled";
 
 export interface TelemetryEvent {
   eventId: string;

@@ -1,7 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
-import type { AgentAdmissionService } from "../../services/agent.service.js";
+import type { AgentManagementService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import {
   buildBackendTestEnv,
@@ -18,7 +18,11 @@ function buildServices(): BackendServices {
       admitAgent: async () => {
         throw new Error("Agent service is not used by this contract test.");
       },
-    } satisfies AgentAdmissionService,
+      listAgents: async () => { throw new Error("not used"); },
+      getAgent: async () => { throw new Error("not used"); },
+      updateAgentLabel: async () => { throw new Error("not used"); },
+      revokeAgent: async () => { throw new Error("not used"); },
+    } as AgentManagementService,
     portfolioService: {} as never,
     apiKeyService: {} as never,
   };

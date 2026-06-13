@@ -2,7 +2,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
 import type { AuthSessionService } from "../../services/auth.service.js";
-import type { AgentAdmissionService } from "../../services/agent.service.js";
+import type { AgentManagementService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import {
   buildBackendTestEnv,
@@ -20,7 +20,11 @@ function buildServices(authService: AuthSessionService): BackendServices {
         status: "admitted",
         authorityRef: "authority:test",
       }),
-    } satisfies AgentAdmissionService,
+      listAgents: async () => { throw new Error("not used"); },
+      getAgent: async () => { throw new Error("not used"); },
+      updateAgentLabel: async () => { throw new Error("not used"); },
+      revokeAgent: async () => { throw new Error("not used"); },
+    } as AgentManagementService,
     authService,
     portfolioService: {} as never,
     apiKeyService: {} as never,

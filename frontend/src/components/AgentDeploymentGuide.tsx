@@ -15,7 +15,7 @@ import {
   ClipboardIcon,
   Wrench01Icon,
   Idea01Icon,
-  Settings01Icon,
+
   CloudIcon,
   AlertCircleIcon,
   Plug01Icon,
@@ -30,87 +30,173 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL)
 const TELEMETRY_WS_URL = (import.meta.env.VITE_WS_TELEMETRY_URL || DEFAULT_TELEMETRY_WS_URL).replace(/\/$/, '');
 
 function buildWriteAgentSample(institutionId: string): string {
-  return String.raw`const GHOSTBROKER_API_BASE_URL = process.env.GHOSTBROKER_API_BASE_URL ?? "${API_BASE_URL}";
-const GHOSTBROKER_TELEMETRY_URL = process.env.GHOSTBROKER_TELEMETRY_URL ?? "${TELEMETRY_WS_URL}";
-const INSTITUTION_ID = process.env.GHOSTBROKER_INSTITUTION_ID ?? "${institutionId}";
-const AGENT_DID = process.env.AGENT_DID ?? "did:t3n:0xYourAgentAddress";
-const AGENT_AUTHORITY_PROOF = process.env.GHOSTBROKER_AUTHORITY_PROOF ?? "";
-const API_KEY = process.env.GHOSTBROKER_API_KEY ?? "";
+  const systemPrompt = JSON.stringify(
+    `You are an autonomous trading agent operating in the GhostBroker dark pool.
 
-async function admitAgent() {
-  const admission = await fetch(GHOSTBROKER_API_BASE_URL + "/api/agents/admit", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + API_KEY,
-    },
-    body: JSON.stringify({
-      institutionId: INSTITUTION_ID,
-      agentDid: AGENT_DID,
-      authorityProof: AGENT_AUTHORITY_PROOF,
-    }),
-  }).then((response) => response.json());
+You have the following capabilities:
+- Submit encrypted trading intents (buy/sell orders) to the matching engine
+- Monitor completed trades and audit receipts
+- All orders are cryptographically sealed inside a TEE — you never see counterparty data
 
-  return admission.authorityRef as string;
-}
+Your goal: execute the institution's trading strategy by submitting well-formed intents.
+When you receive a settlement event, review the trade and decide on the next action.
 
-function listen() {
-  const ws = new WebSocket(
-    GHOSTBROKER_TELEMETRY_URL + "?institutionId=" + encodeURIComponent(INSTITUTION_ID)
+Current time: ${new Date().toISOString()}
+Institution ID: ${institutionId}
+Agent DID: did:t3n:0xYourAgentAddress
+Authority Ref: <set after admission>
+
+Policies:
+- All intent envelopes must be pre-encrypted by the TEE enclave runner
+- Never reveal the institution's strategy or private keys
+- Monitor the telemetry stream for settlement_finalized events
+- Report completed trades to the operator via console`,
   );
 
-  ws.onmessage = (event) => {
-    const telemetry = JSON.parse(event.data);
-    if (
-      telemetry.type === "telemetry.processing.changed" &&
-      telemetry.phase === "settlement_finalized"
-    ) {
-      console.log("[SETTLEMENT] Trade settled!", telemetry.correlationRef);
-    }
-  };
+  return `import OpenAI from "openai";
+import { GhostBrokerClient } from "@ghostbroker/agent-client";
+
+// ── Configuration ───────────────────────────────────────────────────────
+
+const GHOSTBROKER_API_KEY = process.env.GHOSTBROKER_API_KEY!;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+const INSTITUTION_ID = process.env.INSTITUTION_ID!;
+const AGENT_DID = process.env.AGENT_DID!;
+const AUTHORITY_PROOF = process.env.AUTHORITY_PROOF!;
+const BASE_URL = process.env.GHOSTBROKER_BASE_URL ?? "${API_BASE_URL}";
+
+if (!GHOSTBROKER_API_KEY || !OPENAI_API_KEY) {
+  throw new Error("Missing GHOSTBROKER_API_KEY or OPENAI_API_KEY");
 }
 
-async function submitIntent(
-  authorityRef: string,
-  encryptedIntentEnvelope: string,
-) {
-  const response = await fetch(GHOSTBROKER_API_BASE_URL + "/api/agents/intents", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + API_KEY,
+// ── Clients ─────────────────────────────────────────────────────────────
+
+const ghost = new GhostBrokerClient({
+  baseUrl: BASE_URL,
+  token: GHOSTBROKER_API_KEY,
+});
+
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+// ── GhostBroker Tools (for OpenAI function calling) ─────────────────────
+
+const TOOLS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "submit_intent",
+      description: "Submit an encrypted trading intent to the GhostBroker dark pool.",
+      parameters: {
+        type: "object",
+        properties: {
+          encryptedIntentEnvelope: {
+            type: "string",
+            description: "The TEE-sealed intent envelope containing asset, side, quantity, price",
+          },
+        },
+        required: ["encryptedIntentEnvelope"],
+      },
     },
-    body: JSON.stringify({
-      institutionId: INSTITUTION_ID,
-      agentDid: AGENT_DID,
-      encryptedIntentEnvelope,
-      authorityRef,
-    }),
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_completed_trades",
+      description: "Retrieve the institution's completed trade history.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+];
+
+async function submitIntent(encryptedIntentEnvelope: string, authorityRef: string) {
+  return ghost.submitIntent({
+    institutionId: INSTITUTION_ID,
+    agentDid: AGENT_DID,
+    encryptedIntentEnvelope,
+    authorityRef,
+  });
+}
+
+async function getCompletedTrades() {
+  return ghost.getCompletedTrades();
+}
+
+// ── AI Agent Loop ───────────────────────────────────────────────────────
+
+const SYSTEM_PROMPT = ${systemPrompt};
+
+let authorityRef: string;
+
+async function runAgentLoop() {
+  console.log("[AGENT] Admitting agent to GhostBroker...");
+  const admission = await ghost.admitAgent({
+    institutionId: INSTITUTION_ID,
+    agentDid: AGENT_DID,
+    authorityProof: AUTHORITY_PROOF,
+  });
+  authorityRef = admission.authorityRef;
+  console.log("[AGENT] Admitted. Authority ref:", authorityRef);
+
+  ghost.telemetry.onSettled(async (correlationRef) => {
+    console.log("[SETTLEMENT] Trade finalized:", correlationRef);
+    const trades = await getCompletedTrades();
+    console.log("[SETTLEMENT] Trade count:", trades.items.length);
+    await thinkAndAct("Settlement completed: " + correlationRef);
   });
 
-  return response.json();
+  ghost.telemetry.onError((phase, ref) => {
+    console.error("[ERROR]", phase, ref);
+  });
+
+  ghost.telemetry.connect();
+  console.log("[AGENT] Telemetry connected. Starting AI decision loop...");
+
+  await thinkAndAct("Agent has been admitted and telemetry is connected. Evaluate market conditions and submit intents.");
 }
 
-async function main() {
-  if (!API_KEY) {
-    throw new Error("GHOSTBROKER_API_KEY is required. Generate one from the dashboard API Keys panel.");
+async function thinkAndAct(context: string) {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: context },
+    ],
+    tools: TOOLS,
+    tool_choice: "auto",
+  });
+
+  const choice = response.choices[0];
+  if (!choice?.message.tool_calls) {
+    console.log("[AI]", choice?.message.content);
+    return;
   }
 
-  console.log("[ADMIT] Admitting agent...");
-  const authorityRef = await admitAgent();
+  for (const call of choice.message.tool_calls) {
+    if (call.function.name === "submit_intent") {
+      const { encryptedIntentEnvelope } = JSON.parse(call.function.arguments);
+      const result = await submitIntent(encryptedIntentEnvelope, authorityRef);
+      console.log("[INTENT] Submitted:", result.intentHandle);
+    }
 
-  listen();
-
-  console.log("[AGENT] Agent ready - waiting for matches...", authorityRef);
+    if (call.function.name === "get_completed_trades") {
+      const result = await getCompletedTrades();
+      console.log("[TRADES]", JSON.stringify(result, null, 2));
+    }
+  }
 }
 
-main().catch(console.error);`;
+runAgentLoop().catch(console.error);`;
 }
 
 function buildDockerfileSample(): string {
   return String.raw`FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package.json package-lock.json ./
+
+# Auth for GitHub Packages (see .npmrc in your project)
+ARG NPM_TOKEN
+RUN test -n "$NPM_TOKEN" || echo "Warning: NPM_TOKEN not set, GitHub Packages auth may fail"
+
+COPY .npmrc package.json package-lock.json ./
 RUN npm ci
 COPY agent.ts tsconfig.json ./
 RUN npx tsc --outDir dist
@@ -135,9 +221,11 @@ services:
       - GHOSTBROKER_API_BASE_URL=${API_BASE_URL}
       - GHOSTBROKER_TELEMETRY_URL=${TELEMETRY_WS_URL}
       - GHOSTBROKER_INSTITUTION_ID=${institutionId}
-      - GHOSTBROKER_API_KEY=${'${GHOSTBROKER_API_KEY}'}  # Required: generate from the dashboard
+      - GHOSTBROKER_API_KEY=${'${GHOSTBROKER_API_KEY}'}  # Generate from the dashboard
+      - OPENAI_API_KEY=${'${OPENAI_API_KEY}'}  # Your OpenAI API key
+      - INSTITUTION_ID=${'${INSTITUTION_ID}'}
       - AGENT_DID=did:t3n:0xYourAgentAddress
-      - GHOSTBROKER_AUTHORITY_PROOF=${'${GHOSTBROKER_AUTHORITY_PROOF}'}  # Set in a secrets manager or .env
+      - AUTHORITY_PROOF=${'${AUTHORITY_PROOF}'}  # T3N delegation credential
     logging:
       driver: "json-file"
       options:
@@ -148,8 +236,10 @@ services:
 function buildDeploySample(): string {
   return String.raw`# Create .env with your secrets
 echo "GHOSTBROKER_API_KEY=gbk_..." > .env
+echo "OPENAI_API_KEY=sk-..." >> .env
+echo "INSTITUTION_ID=..." >> .env
 echo "AGENT_DID=did:t3n:0xYourAgentAddress" >> .env
-echo "GHOSTBROKER_AUTHORITY_PROOF=..." >> .env
+echo "AUTHORITY_PROOF=..." >> .env
 
 # Build and run
 docker compose up -d
@@ -489,16 +579,33 @@ function WriteAgentStep({ session }: { session: AuthSession }): React.JSX.Elemen
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Write Your Agent</h2>
       <p className="deploy-step-desc">
-        This is a minimal bootstrap agent that uses the API key for all authenticated requests. No ethers or DID signing needed.
+        This example shows an autonomous AI agent using the <code>@ghostbroker/agent-client</code> SDK and OpenAI function calling. The agent admits itself, listens for settlement events via WebSocket telemetry, and uses an LLM to decide when to submit trading intents.
       </p>
 
       <CodeBlock code={agentSample} />
 
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
         <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          <Settings01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Customize:
-        </strong> Replace the <code>AGENT_DID</code> and <code>AGENT_AUTHORITY_PROOF</code> values with your deployment secrets, then run:
-        <CodeBlock code="npx tsx agent.ts" />
+          <Package01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Install the SDK:
+        </strong>
+        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-sm)' }}>
+          The SDK is distributed via <strong>GitHub Packages</strong>. First, authenticate:
+        </span>
+        <CodeBlock code={`# .npmrc — create this file in your project root
+@ghostbroker:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN`} />
+        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--spacing-sm)', marginBottom: 'var(--spacing-sm)' }}>
+          Replace <code>YOUR_GITHUB_TOKEN</code> with a <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>GitHub personal access token</a> with <code>read:packages</code> scope. Then install:
+        </span>
+        <CodeBlock code="npm install @ghostbroker/agent-client@0.1.0 openai" />
+        <div style={{ marginTop: 'var(--spacing-sm)', padding: 'var(--spacing-sm)', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+          <strong>Alternative (no GitHub token):</strong> Copy the SDK into your project and use a file dependency:<br />
+          <code style={{ color: 'var(--color-accent)' }}>cp -r path/to/GhostBroker/agent-client ./agent-client</code><br />
+          <code style={{ color: 'var(--color-accent)' }}>npm install ./agent-client openai</code>
+        </div>
+        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--spacing-sm)' }}>
+          Then set your env vars and run: <code>npx tsx agent.ts</code>
+        </span>
       </div>
     </div>
   );
