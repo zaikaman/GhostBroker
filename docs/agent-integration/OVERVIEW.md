@@ -1,109 +1,86 @@
-# GhostBroker Agent Integration Guide
+# GhostBroker Agent Integration Overview
 
-> **Bring Your Own Agent (BYOA)** — Connect your autonomous trading agent to the GhostBroker institutional dark pool.
+GhostBroker is a **privacy-preserving institutional dark pool** built on confidential computing infrastructure. Unlike traditional exchanges where humans place orders through a UI, GhostBroker operates on an **Agent-to-Agent (A2A)** model:
 
-## ⚠️ Core Principle: Zero-Human-Interference
+- **Autonomous agents** — Each institution deploys an AI agent that represents its trading strategy
+- **No human intervention** — Humans may only observe via the dashboard. All order placement, matching, and settlement is executed by cryptographically verified agents inside a secure enclave
+- **Cryptographically enforced** — The enclave rejects any request that doesn't carry a valid agent identity
 
-GhostBroker is an **Agent-to-Agent (A2A) dark pool**. This is not a platform for humans to trade through a UI.
+## Core Principle: Zero-Human-Interference
 
-- **Humans may only observe** — The operator dashboard is strictly read-only. You can watch agent activity, view completed trades, and inspect encrypted receipts. You cannot submit orders, cancel intents, or interfere with active matching.
-- **Agents do everything** — Only cryptographically verified autonomous agents may submit trading intents, match with counterparties, and settle trades inside the hardware-secured TEE enclave.
-- **No front-running, no insider advantage** — Because no human — not even GhostBroker's operators — can see active orders, the system is mathematically neutral.
-- **Cryptographically enforced** — The TEE enclave rejects any request that doesn't carry a valid agent delegation credential. Human API calls are structurally incapable of performing trading operations.
+GhostBroker is designed for institutions that want autonomous agents to trade directly with each other:
 
-> "Once a bank kicks off their agent, they cannot log in to alter the payload mid-flight. The agent controls its own isolated cryptographic session." — Gemini conversation, GhostBroker design doc
+- **Institutions deploy agents**, not traders
+- **Agents authenticate and trade**, using cryptographic signing (EIP-191 / secp256k1)
+- **Humans watch only** — the Observatory Console is strictly read-only
+- **The enclave enforces** — even platform operators cannot view active orders, modify intents, or intervene in matching
 
-## Architecture Overview
-
-GhostBroker is a **privacy-preserving institutional dark pool** built on Terminal 3's hardware-secured TEE infrastructure. Unlike traditional exchanges where humans place orders through a UI, GhostBroker operates on an **Agent-to-Agent (A2A)** model:
-
-```
-[Your Infrastructure]              [GhostBroker Platform]              [Counterparty Infrastructure]
-      ┌───────────────────┐              ┌───────────────────┐              ┌───────────────────┐
-      │  Your Agent       │              │  GhostBroker TEE  │              │  Counterparty     │
-      │  (Buyer/Seller)   │◄────────────►│  Dark Pool Room   │◄────────────►│  Agent            │
-      │                   │              │  (Secure Enclave)  │              │                   │
-      │  DID: did:t3n:... │              │  ┌─────────────┐  │              │  DID: did:t3n:... │
-      │  Authority: scope │              │  │Match Matrix │  │              │  Authority: scope  │
-      └───────────────────┘              │  │Settlement   │  │              └───────────────────┘
-                                         │  │Audit Receipt│  │
-                                         │  └─────────────┘  │
-                                         └───────────────────┘
-      ┌───────────────────┐              ┌───────────────────┐
-      │  Your Dashboard   │              │  GhostBroker API  │
-      │  (Watch Only)     │◄────────────►│  (REST + WS)      │
-      │                   │              │                   │
-      │  • View agents    │              │  • Auth endpoints │
-      │  • View trades    │              │  • Trade history  │
-      │  • View receipts  │              │  • Receipt access │
-      │  • CANNOT trade   │              │  • Telemetry      │
-      └───────────────────┘              └───────────────────┘
-```
-
-### Key Principles
-
-1. **Zero-Human Interference**: Once configured, agents execute trades autonomously. No human can see active orders, front-run trades, or cancel in-flight matching.
-2. **Cryptographic Identity**: Every agent is identified by a Terminal 3 DID (`did:t3n:...`) and proves authority through signed delegation credentials.
-3. **Blind Matching**: Order parameters (asset, quantity, price) are encrypted before submission. The TEE evaluates compatibility without exposing plaintext.
-4. **Atomic Settlement**: When a match is found, the TEE executes settlement atomically — both sides update or neither does.
+This is enforced at the architecture level: the sealed matching core runs inside a hardware-secured enclave that cryptographically verifies every agent action.
 
 ## Agent Lifecycle
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  1. Get a   │────►│  2. Obtain   │────►│  3. Connect  │────►│  4. Submit   │────►│  5. Monitor  │
-│  Terminal 3 │     │  Delegation  │     │  & Authenti- │     │  Encrypted   │     │  for Settle- │
-│  DID + Keys │     │  Credential  │     │  cate to     │     │  Trading     │     │  ment &      │
-│             │     │  from T3     │     │  GhostBroker │     │  Intent      │     │  Receipts    │
-│             │     │  Dashboard   │     │  Gateway     │     │  (POST       │     │  (WebSocket  │
-│             │     │              │     │  (POST       │     │  /agents/    │     │  + GET       │
-│             │     │              │     │  /auth/*)    │     │  intents)    │     │  /trades/*)  │
-└─────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      Agent Lifecycle                            │
+│                                                                 │
+│   Sign Up ──► Get Credentials ──► Authenticate ──► Admit ──► Trade    │
+│   (Done)        (Dashboard)       (DID Challenge)   (Verify)   (Submit Intents) │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Reference: API Endpoints
+### 1. Sign Up (Already Complete)
+Your institution is already registered on GhostBroker. Your DID and institution ID are shown in the dashboard.
 
-| Method | Endpoint | Purpose | Auth Required | Human Access? |
-|--------|----------|---------|---------------|---------------|
-| `POST` | `/api/auth/challenge` | Request a cryptographic challenge | No | ✅ Allowed |
-| `POST` | `/api/auth/verify` | Submit signed challenge for session token | Challenge ID | ✅ Allowed |
-| `POST` | `/api/institutions` | Create institution profile | No | ✅ Allowed |
-| `POST` | `/api/agents/admit` | Register and verify agent authority | JWT | ⚠️ Agent setup only |
-| `POST` | `/api/agents/intents` | Submit encrypted trading intent | JWT | ❌ Agents only |
-| `GET`  | `/api/trades/completed` | List completed trades | JWT | ✅ Read-only |
-| `GET`  | `/api/receipts/:id` | Retrieve encrypted receipt | JWT | ✅ Read-only |
-| `WS`   | `/ws/telemetry` | Real-time agent activity stream | Institution ID | ✅ Read-only |
+### 2. Get Credentials
+Generate an Ethereum keypair for your agent. The agent will use this keypair to sign authentication challenges.
 
-## Prerequisites for Integration
+### 3. Authenticate (DID Challenge-Response)
+Your agent proves its identity by signing a cryptographic challenge with its private key. GhostBroker verifies the signature and issues a session token.
 
-Before your agent can trade on GhostBroker, you need:
+### 4. Admit Agent
+The agent is registered with GhostBroker and authorized to submit trading intents.
 
-1. **A Terminal 3 Developer Account** — Sign up at [https://docs.terminal3.io](https://docs.terminal3.io) and request test tokens.
-2. **A Terminal 3 DID** — Your agent's decentralized identifier (`did:t3n:...`). Obtained during T3N SDK authentication.
-3. **A Delegation Credential** — A signed credential from the T3N Dashboard authorizing your agent for specific contract functions.
-4. **Ethereum Wallet (for signing)** — Used to sign cryptographic challenges and delegation proofs. MetaMask or any EIP-191 compatible wallet.
-5. **Infrastructure to run your agent** — See [Deploy Your Agent](./DEPLOY_YOUR_AGENT.md) for complete deployment instructions.
+### 5. Submit Intents & Trade
+The agent submits encrypted trading intents. The enclave matches compatible intents, executes settlement, and generates encrypted audit receipts.
 
-## What the Operator Dashboard Shows
+## Available APIs
 
-The GhostBroker dashboard is an **observatory console** — it exists so humans can verify the system is working, without being able to interfere:
+All API endpoints are served from your GhostBroker instance base URL.
 
-| Dashboard Section | What You See | What You CANNOT See |
-|------------------|-------------|---------------------|
-| **Observatory Mode** | Green badge confirming watch-only status | Trade buttons, cancel buttons, order forms |
-| **Agent-to-Agent Banner** | Explanation that agents execute all trades | Any way to bypass this |
-| **Live Agent Stream** | Real-time telemetry logs from connected agents | Order parameters, prices, quantities |
-| **Connection Grid** | Which agents are connected and their status | Order details, counterparty info |
-| **Completed Trades** | Settled trades with encrypted field values | Decrypted trade details (only your agent knows) |
-| **Audit Receipts** | Cryptographic proof of each settlement | Other institutions' receipts |
+| Endpoint | Method | Purpose | Human Access? |
+|----------|--------|---------|--------------|
+| `/api/auth/challenge` | POST | Request a cryptographic challenge | No — agents only |
+| `/api/auth/verify` | POST | Verify signed challenge, get session | No — agents only |
+| `/api/agents/admit` | POST | Register agent for trading | No — agents only |
+| `/api/agents/intents` | POST | Submit encrypted trading intent | No — agents only |
+| `/api/trades/completed` | GET | Retrieve trade history | Yes — read-only dashboard |
+| `/api/receipts/:id` | GET | Retrieve encrypted receipt | Yes — read-only dashboard |
+| `WS /ws/telemetry` | WebSocket | Real-time agent activity stream | Yes — read-only dashboard |
+
+Agents interact programmatically. Humans interact through the Observatory Console dashboard.
+
+## What You Need to Connect
+
+1. **A GhostBroker Account** — Already provisioned. Your DID and institution ID are in the dashboard.
+2. **An Ethereum Keypair** — Generate with `npx -y ethers@6 wallet create`. The private key signs authentication challenges.
+3. **Node.js 20+** — Runtime for the agent (or any language that speaks HTTP/WebSocket).
+
+## Observatory Console (Dashboard)
+
+The dashboard is strictly **watch-only**. Humans cannot:
+
+- ❌ Submit or cancel orders
+- ❌ View other institutions' intents or positions
+- ❌ Access the sealed matching core
+- ❌ Intervene in active trades
+
+Humans **can**:
+
+- ✅ View agent connection status and telemetry
+- ✅ View completed trade history
+- ✅ Retrieve encrypted audit receipts
+- ✅ Monitor the activity feed
 
 ## Next Steps
 
-- **[Deploy Your Agent](./DEPLOY_YOUR_AGENT.md)** — Step-by-step guide to deploy and connect your agent
-- **[Authentication](./AUTHENTICATION.md)** — Step-by-step DID challenge flow
-- **[Delegation Proof](./DELEGATION_PROOF.md)** — How to construct the authority proof
-- **[Intent Submission](./INTENT_SUBMISSION.md)** — How to encrypt and submit trading intents
-- **[Settlement & Receipts](./SETTLEMENT_AND_RECEIPTS.md)** — How to track completed trades
-- **[WebSocket Telemetry](./WEBSOCKET_TELEMETRY.md)** — Real-time event reference
-- **[Error Reference](./ERROR_REFERENCE.md)** — All error codes and recovery
-- **[API Reference](./API_REFERENCE.md)** — Complete OpenAPI specification
+Follow the [Deploy Your Agent](DEPLOY_YOUR_AGENT.md) guide to get your agent connected, or use the interactive deployment wizard in the dashboard.

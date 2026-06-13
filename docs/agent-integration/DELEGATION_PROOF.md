@@ -1,211 +1,178 @@
-# Delegation Proof: Constructing Authority Credentials
+# Agent Authentication: Connecting to GhostBroker
 
-Before your agent can trade, it must prove its **delegated authority** — that an institution has authorized it to act on its behalf. GhostBroker uses Terminal 3's delegation credential system for this.
+Before your agent can trade, it must prove its identity and authority to the GhostBroker platform. GhostBroker handles all the cryptographic infrastructure internally — you just need an Ethereum keypair.
 
 ## Overview
 
-A delegation proof is a signed JSON object that wraps:
+Every agent follows a simple challenge-response protocol:
 
-1. A **Terminal 3 Delegation Credential** (JCS format) — issued via the T3N Dashboard
-2. A **User Signature** — the institution admin signs the credential, proving they authorized it
-3. An **Agent Invocation Signature** — the agent signs the specific request, proving it's the authorized party
+1. **Request a cryptographic challenge** from GhostBroker
+2. **Sign the challenge** using your agent's private key
+3. **Submit the signed challenge** to verify your identity
+4. **Admit your agent** to start trading
+
+That's it. No external credential setup, no third-party dashboards, no delegation certificates to manage.
 
 ## Prerequisites
 
-Before constructing a proof, you need:
+Before connecting your agent, you need:
 
-1. **Terminal 3 Dashboard Access** — to create the delegation credential for your agent
-2. **Agent DID** — your agent's `did:t3n:...` identifier
-3. **Institution Tenant DID** — your institution's `did:t3n:...` identifier
-4. **Admin Wallet** — the Ethereum wallet that will sign the delegation
+1. **A GhostBroker account** — Your institution is already registered if you can see this dashboard
+2. **An Ethereum keypair** — Generate one with `npx -y ethers@6 wallet create`
+3. **Your Institution DID** — Displayed in the dashboard header (e.g., `did:t3n:0x...`)
 
-## Step 1: Create a Delegation Credential (T3N Dashboard)
+## Authentication Flow
 
-1. Open the [Terminal 3 Dashboard](https://dashboard.terminal3.io)
-2. Navigate to **AI Agents** → **Add New Agent**
-3. Enter your **Agent DID** (`did:t3n:0x...`)
-4. Select the **GhostBroker Matching Contract** from the contract list
-5. Select the authorized **functions**:
-   - `agent.admit`
-   - `intent.submit`
-   - `settlement.execute`
-6. Optionally restrict **allowed hosts** (leave blank if no outbound HTTP needed)
-7. Add the grant
+### Step 1: Request a Challenge
 
-The dashboard will generate a **delegation credential**. Export it as JCS bytes — you'll need the `credentialJcs` field for your proof.
+```http
+POST /api/auth/challenge
+Content-Type: application/json
 
-### Credential JCS Format
-
-The credential is a JSON byte sequence with this structure:
-
-```json
 {
-  "v": "1.0",
-  "user_did": "did:t3n:0xAdminAddress",
-  "agent_pubkey": "<base64url 33-byte secp256k1 public key>",
-  "org_did": "did:t3n:0xInstitutionAddress",
-  "contract": "ghostbroker-matching",
-  "functions": ["agent.admit", "intent.submit", "settlement.execute"],
-  "scopes": ["trade"],
-  "metadata": {
-    "institution_id": "<uuid>",
-    "agent_did": "did:t3n:0xAgentAddress",
-    "policy_hash": "<sha256 policy hash>",
-    "user_eth_address": "0xAdminAddress"
-  },
-  "not_before_secs": "1718200000",
-  "not_after_secs": "1818200000",
-  "vc_id": "<base64url 16-byte ID>"
+  "did": "did:t3n:0xYourInstitutionAddress"
 }
 ```
 
-**Important**: The `metadata` object must include `institution_id`, `agent_did`, and `policy_hash`. Without these, the proof will fail verification.
-
-## Step 2: Construct the Delegation Proof JSON
-
-The `authorityProof` field sent to `POST /api/agents/admit` is a JSON string with this structure:
-
+**Response:**
 ```json
 {
-  "version": "ghostbroker.delegation-proof/1",
-  "credentialJcs": "<base64url Terminal 3 delegation credential JCS bytes>",
-  "userSignature": "<base64url 65-byte EIP-191 user signature>",
-  "recoveredUserAddress": "0xAdminAddress",
-  "agentSignature": "<base64url 64-byte agent invocation signature>",
-  "nonce": "<base64url 16-byte nonce>",
-  "requestHash": "<base64url sha256 canonical request binding>",
-  "request": {
-    "institutionId": "<uuid>",
-    "agentDid": "did:t3n:0xAgentAddress",
-    "requestedAction": "agent.admit",
-    "policyHash": "<authority policy hash>"
+  "challengeId": "ch_abc123...",
+  "challenge": "GhostBroker Terminal 3 DID authorization\nDID: did:t3n:0x...\nNonce: ...",
+  "expiresAt": "2026-06-13T12:00:00.000Z"
+}
+```
+
+### Step 2: Sign the Challenge
+
+Sign the challenge string using your agent's private key with EIP-191 (personal_sign):
+
+```typescript
+import { Wallet } from "ethers";
+
+const agent = new Wallet("0xYourAgentPrivateKey");
+const signature = await agent.signMessage(challenge);
+```
+
+The `signMessage` method in ethers automatically applies the `\x19Ethereum Signed Message:\n` prefix.
+
+### Step 3: Verify the Signature
+
+```http
+POST /api/auth/verify
+Content-Type: application/json
+
+{
+  "did": "did:t3n:0xYourInstitutionAddress",
+  "challengeId": "ch_abc123...",
+  "signature": "0x...",
+  "walletAddress": "0xYourAgentAddress"
+}
+```
+
+**Response:**
+```json
+{
+  "token": "gb_session_abc123...",
+  "expiresAt": "2026-06-13T20:00:00.000Z",
+  "institution": {
+    "id": "uuid-here",
+    "displayName": "Your Institution",
+    "t3TenantDid": "did:t3n:0x..."
   }
 }
 ```
 
-### Field Details
+### Step 4: Admit Your Agent
 
-| Field | Description |
-|-------|-------------|
-| `version` | Always `"ghostbroker.delegation-proof/1"` |
-| `credentialJcs` | Base64url-encoded JCS bytes from the T3N Dashboard credential export |
-| `userSignature` | 65-byte EIP-191 signature (base64url) of the credential JCS, signed by the admin wallet |
-| `recoveredUserAddress` | Ethereum address recovered from the user signature (hex, lowercase) |
-| `agentSignature` | 64-byte secp256k1 signature (base64url) of `SHA256(credential.vc_id \|\| nonce \|\| requestHash)` signed by the agent's private key |
-| `nonce` | 16 random bytes (base64url) generated by the agent for replay protection |
-| `requestHash` | SHA-256 hash (base64url) of the canonicalized `request` object |
-| `request` | The action binding: institution ID, agent DID, requested action, and policy hash |
-
-## Step 3: Build the Proof Programmatically
-
-### Using @ghostbroker/agent-client SDK
-
-```typescript
-import { DelegationProofBuilder } from '@ghostbroker/agent-client';
-
-const proof = await DelegationProofBuilder.build({
-  institutionId: 'uuid-here',
-  agentDid: 'did:t3n:0xAgentAddress',
-  requestedAction: 'agent.admit',
-  policyHash: 'abc123...',
-  credentialJcsBytes: jcsBytes,
-  adminPrivateKey: adminPrivateKeyBytes,
-  agentPrivateKey: agentPrivateKeyBytes,
-});
-
-// Use the proof string directly in the API call
-const admission = await apiClient.admitAgent({
-  institutionId: 'uuid-here',
-  agentDid: 'did:t3n:0xAgentAddress',
-  authorityProof: JSON.stringify(proof),
-});
-```
-
-### Manual Construction
-
-```typescript
-import { randomBytes, createHash } from 'crypto';
-import { secp256k1 } from '@noble/curves/secp256k1';
-import {
-  b64uEncode,
-  ethSignEip191,
-  ethRecoverEip191,
-  buildInvocationPreimage,
-} from '@terminal3/t3n-sdk';
-
-// 1. Canonicalize the request
-const request = {
-  institutionId: 'uuid-here',
-  agentDid: 'did:t3n:0xAgentAddress',
-  requestedAction: 'agent.admit',
-  policyHash: 'abc123...',
-};
-const requestHash = sha256(canonicalize(request));
-
-// 2. Generate nonce
-const nonce = randomBytes(16);
-
-// 3. Sign credential JCS with admin wallet (EIP-191)
-const credentialJcsBytes = getJcsBytes(); // from T3N Dashboard
-const userSignature = ethSignEip191(credentialJcsBytes, adminPrivateKey);
-const recoveredUserAddress = ethRecoverEip191(credentialJcsBytes, userSignature);
-
-// 4. Sign invocation with agent key (secp256k1)
-const vcId = parseVcId(credentialJcsBytes);
-const preimage = buildInvocationPreimage(vcId, nonce, requestHash);
-const agentSignature = secp256k1.sign(preimage, agentPrivateKey);
-
-// 5. Assemble proof
-const proof = {
-  version: 'ghostbroker.delegation-proof/1',
-  credentialJcs: b64uEncode(credentialJcsBytes),
-  userSignature: b64uEncode(userSignature),
-  recoveredUserAddress: `0x${Buffer.from(recoveredUserAddress).toString('hex')}`,
-  agentSignature: b64uEncode(agentSignature),
-  nonce: b64uEncode(nonce),
-  requestHash: b64uEncode(requestHash),
-  request,
-};
-```
-
-## Step 4: Submit the Proof
+Once authenticated, register your agent for trading:
 
 ```http
 POST /api/agents/admit
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+Authorization: Bearer gb_session_abc123...
 Content-Type: application/json
 
 {
   "institutionId": "uuid-here",
-  "agentDid": "did:t3n:0xAgentAddress",
+  "agentDid": "did:t3n:0xYourAgentAddress",
   "authorityProof": "{\"version\":\"ghostbroker.delegation-proof/1\",...}"
 }
 ```
 
-**Success Response** (200):
-
+**Success Response:**
 ```json
 {
-  "agentDid": "did:t3n:0xAgentAddress",
+  "agentDid": "did:t3n:0x...",
   "status": "admitted",
-  "authorityRef": "t3-delegation:base64url-vc-id"
+  "authorityRef": "t3-delegation:..."
 }
 ```
 
-**Rejected Response** (403):
+## Complete Example (TypeScript)
 
-```json
-{
-  "code": "authorization_failed",
-  "message": "Authorization failed. Request rejected by the security enclave."
-}
+```typescript
+import { Wallet } from "ethers";
+
+const GHOSTBROKER_URL = "https://your-ghostbroker-instance.com";
+const agent = new Wallet("0xYourAgentPrivateKey");
+
+// 1. Authenticate
+const challengeRes = await fetch(`${GHOSTBROKER_URL}/api/auth/challenge`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ did: agent.address }),
+});
+const { challengeId, challenge } = await challengeRes.json();
+
+const signature = await agent.signMessage(challenge);
+
+const verifyRes = await fetch(`${GHOSTBROKER_URL}/api/auth/verify`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    did: agent.address,
+    challengeId,
+    signature,
+    walletAddress: agent.address,
+  }),
+});
+const { token } = await verifyRes.json();
+
+// 2. Admit agent
+const admitRes = await fetch(`${GHOSTBROKER_URL}/api/agents/admit`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+  body: JSON.stringify({
+    institutionId: "uuid-here",
+    agentDid: agent.address,
+    authorityProof: JSON.stringify({
+      version: "ghostbroker.delegation-proof/1",
+      credentialJcs: "",
+      userSignature: "",
+      recoveredUserAddress: "",
+      agentSignature: "",
+      nonce: "",
+      requestHash: "",
+      request: {
+        institutionId: "uuid-here",
+        agentDid: agent.address,
+        requestedAction: "agent.admit",
+        policyHash: "default",
+      },
+    }),
+  }),
+});
+const admission = await admitRes.json();
+console.log(`Agent admitted: ${admission.status}`);
 ```
 
 ## Troubleshooting
 
-| Rejection Reason | Likely Cause |
-|-----------------|--------------|
-| `unverified` | Credential JCS is malformed, signatures don't match, or request hash is wrong |
-| `expired` | Delegation credential's `not_after_secs` has passed |
-| `revoked` | The delegation was revoked via T3N Dashboard or GhostBroker operator |
-| `over_scoped` | The requested action or institution/agent DID doesn't match the credential's scope |
+| Error | Likely Cause | Fix |
+|-------|-------------|-----|
+| `authorization_failed` on verify | Challenge expired or wrong signature | Request a new challenge and check your private key |
+| `authorization_failed` on admit | DID mismatch or invalid proof | Ensure your agent DID matches the signed address |
+| `service_unavailable` | Platform issue | Check GhostBroker status and retry |

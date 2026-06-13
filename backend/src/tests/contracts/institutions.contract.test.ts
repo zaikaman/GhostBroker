@@ -19,6 +19,7 @@ function buildServices(): BackendServices {
         throw new Error("Agent service is not used by this contract test.");
       },
     } satisfies AgentAdmissionService,
+    portfolioService: {} as never,
   };
 }
 

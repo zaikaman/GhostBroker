@@ -58,3 +58,27 @@ CREATE TABLE public.audit_receipts (
   CONSTRAINT audit_receipts_completed_trade_id_fkey FOREIGN KEY (completed_trade_id) REFERENCES public.completed_trades(id),
   CONSTRAINT audit_receipts_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
 );
+CREATE TABLE public.portfolios (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  institution_id uuid NOT NULL,
+  asset_code text NOT NULL,
+  balance numeric NOT NULL DEFAULT 0 CHECK (balance >= 0::numeric),
+  locked numeric NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT portfolios_pkey PRIMARY KEY (id),
+  CONSTRAINT portfolios_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
+);
+CREATE TABLE public.portfolio_history (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  institution_id uuid NOT NULL,
+  asset_code text NOT NULL,
+  delta numeric NOT NULL,
+  balance_after numeric NOT NULL,
+  change_type text NOT NULL CHECK (change_type = ANY (ARRAY['settlement_buy'::text, 'settlement_sell'::text, 'adjustment'::text, 'seed'::text])),
+  reference_type text,
+  reference_id text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT portfolio_history_pkey PRIMARY KEY (id),
+  CONSTRAINT portfolio_history_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
+);

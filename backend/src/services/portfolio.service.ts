@@ -1,0 +1,374 @@
+import { PublicError } from "../errors/public-error.js";
+import {
+  portfolioFromRecords,
+  portfolioHistoryFromRecord,
+  type Portfolio,
+  type PortfolioAdjustment,
+  type PortfolioRecord,
+  type PortfolioHistoryEntry,
+  type PortfolioHistoryRecord,
+  type PortfolioHistoryChangeType,
+} from "../models/portfolio.js";
+
+interface RpcQuery<TResult> {
+  rpc(
+    functionName: string,
+    parameters?: Record<string, unknown>,
+  ): Promise<{ data: TResult | null; error: Error | null }>;
+}
+
+interface SelectQuery<TResult> {
+  select(columns?: string): {
+    eq(column: string, value: string): {
+      order(column: string, options?: { ascending?: boolean }): Promise<{
+        data: TResult[] | null;
+        error: Error | null;
+      }>;
+    };
+  };
+}
+
+interface SelectQueryWithMultiEq<TResult> {
+  select(columns?: string): {
+    eq(column: string, value: string): {
+      order(column: string, options?: { ascending?: boolean }): Promise<{
+        data: TResult[] | null;
+        error: Error | null;
+      }>;
+    };
+    not(column: string, operator: string, value: string): {
+      order(column: string, options?: { ascending?: boolean }): Promise<{
+        data: TResult[] | null;
+        error: Error | null;
+      }>;
+    };
+  };
+}
+
+interface InsertQuery {
+  insert(
+    values: Record<string, unknown>,
+  ): Promise<{ error: Error | null }>;
+}
+
+interface InsertQueryWithSelect<TResult> {
+  insert(value: Record<string, unknown>): {
+    select(columns?: string): Promise<{ data: TResult[] | null; error: Error | null }>;
+  };
+}
+
+export interface SupabasePortfolioClient {
+  from(table: "portfolios"): SelectQuery<PortfolioRecord> & InsertQuery;
+  from(table: "portfolio_history"): SelectQueryWithMultiEq<PortfolioHistoryRecord> &
+    InsertQueryWithSelect<PortfolioHistoryRecord>;
+}
+
+export class InsufficientBalanceError extends Error {
+  public readonly assetCode: string;
+  public readonly requested: number;
+  public readonly available: number;
+
+  public constructor(assetCode: string, requested: number, available: number) {
+    super(
+      `Insufficient ${assetCode} balance: requested ${requested}, available ${available}`,
+    );
+    this.name = "InsufficientBalanceError";
+    this.assetCode = assetCode;
+    this.requested = requested;
+    this.available = available;
+  }
+}
+
+export class PortfolioService {
+  private readonly client: SupabasePortfolioClient;
+
+  public constructor(client: SupabasePortfolioClient) {
+    this.client = client;
+  }
+
+  public async getPortfolio(institutionId: string): Promise<Portfolio> {
+    const { data, error } = await this.client
+      .from("portfolios")
+      .select("*")
+      .eq("institution_id", institutionId)
+      .order("asset_code", { ascending: true });
+
+    if (error) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
+
+    return portfolioFromRecords(data ?? []);
+  }
+
+  /**
+   * Atomically apply a list of balance adjustments.
+   * All adjustments are applied in order within a single RPC call.
+   * Returns the updated portfolio.
+   */
+  public async applyAdjustments(
+    adjustments: PortfolioAdjustment[],
+  ): Promise<Portfolio> {
+    if (adjustments.length === 0) {
+      throw new PublicError("validation_failed", 400);
+    }
+
+    const institutionId = adjustments[0]!.institutionId;
+
+    // Verify all adjustments belong to the same institution
+    for (const adj of adjustments) {
+      if (adj.institutionId !== institutionId) {
+        throw new PublicError("validation_failed", 400);
+      }
+    }
+
+    // Apply each adjustment via the portfolio_update_balance RPC
+    for (const adj of adjustments) {
+      // Fetch current balance before update for history tracking
+      const before = await this.getPortfolio(institutionId);
+      const currentBalance =
+        before.holdings.find((h) => h.assetCode === adj.assetCode)?.balance ?? 0;
+
+      const { error } = await (this.client as unknown as RpcQuery<undefined>).rpc(
+        "portfolio_update_balance",
+        {
+          p_institution_id: adj.institutionId,
+          p_asset_code: adj.assetCode,
+          p_delta: adj.delta.toString(),
+        },
+      );
+
+      if (error) {
+        if (error.message?.includes("insufficient balance")) {
+          throw new InsufficientBalanceError(
+            adj.assetCode,
+            Math.abs(adj.delta),
+            0,
+          );
+        }
+        throw new PublicError("service_unavailable", 503, error);
+      }
+
+      // Record history entry
+      const balanceAfter = Math.max(0, currentBalance + adj.delta);
+      await this.recordHistory({
+        institutionId: adj.institutionId,
+        assetCode: adj.assetCode,
+        delta: adj.delta,
+        balanceAfter,
+        changeType: "adjustment",
+      });
+    }
+
+    return this.getPortfolio(institutionId);
+  }
+
+  /**
+   * Apply settlement adjustments for both buyer and seller atomically.
+   * Buyer: cash decreases (-price * qty), asset increases (+qty)
+   * Seller: asset decreases (-qty), cash increases (+price * qty)
+   */
+  public async applySettlement(params: {
+    buyerInstitutionId: string;
+    sellerInstitutionId: string;
+    assetCode: string;
+    quantity: number;
+    price: number;
+  }): Promise<void> {
+    const totalCost = params.quantity * params.price;
+
+    // First check buyer has enough cash
+    const buyerPortfolio = await this.getPortfolio(params.buyerInstitutionId);
+    const buyerCash = buyerPortfolio.holdings.find(
+      (h) => h.assetCode === "USD",
+    );
+    if (!buyerCash || buyerCash.balance < totalCost) {
+      throw new InsufficientBalanceError(
+        "USD",
+        totalCost,
+        buyerCash?.balance ?? 0,
+      );
+    }
+
+    // Check seller has enough of the asset
+    const sellerPortfolio = await this.getPortfolio(
+      params.sellerInstitutionId,
+    );
+    const sellerAsset = sellerPortfolio.holdings.find(
+      (h) => h.assetCode === params.assetCode,
+    );
+    if (!sellerAsset || sellerAsset.balance < params.quantity) {
+      throw new InsufficientBalanceError(
+        params.assetCode,
+        params.quantity,
+        sellerAsset?.balance ?? 0,
+      );
+    }
+
+    // Apply buyer adjustments with settlement change type
+    await this.applyAdjustmentWithHistory({
+      institutionId: params.buyerInstitutionId,
+      assetCode: "USD",
+      delta: -totalCost,
+      changeType: "settlement_buy",
+    });
+    await this.applyAdjustmentWithHistory({
+      institutionId: params.buyerInstitutionId,
+      assetCode: params.assetCode,
+      delta: params.quantity,
+      changeType: "settlement_buy",
+    });
+
+    // Apply seller adjustments with settlement change type
+    await this.applyAdjustmentWithHistory({
+      institutionId: params.sellerInstitutionId,
+      assetCode: params.assetCode,
+      delta: -params.quantity,
+      changeType: "settlement_sell",
+    });
+    await this.applyAdjustmentWithHistory({
+      institutionId: params.sellerInstitutionId,
+      assetCode: "USD",
+      delta: totalCost,
+      changeType: "settlement_sell",
+    });
+  }
+
+  /**
+   * Record a history entry for a portfolio change.
+   */
+  private async recordHistory(params: {
+    institutionId: string;
+    assetCode: string;
+    delta: number;
+    balanceAfter: number;
+    changeType: PortfolioHistoryChangeType;
+    referenceType?: string;
+    referenceId?: string;
+  }): Promise<void> {
+    const { error } = await (
+      this.client as unknown as { from(table: string): { insert(values: Record<string, unknown>): Promise<{ error: Error | null }> } }
+    ).from("portfolio_history").insert({
+      institution_id: params.institutionId,
+      asset_code: params.assetCode,
+      delta: params.delta.toString(),
+      balance_after: params.balanceAfter.toString(),
+      change_type: params.changeType,
+      reference_type: params.referenceType ?? null,
+      reference_id: params.referenceId ?? null,
+    });
+
+    if (error) {
+      // Non-critical — don't throw, just log
+      console.error(
+        `[PortfolioService] Failed to record history: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Apply a single portfolio adjustment with history tracking.
+   * Used for settlement operations where change_type differs from 'adjustment'.
+   */
+  private async applyAdjustmentWithHistory(params: {
+    institutionId: string;
+    assetCode: string;
+    delta: number;
+    changeType: PortfolioHistoryChangeType;
+  }): Promise<void> {
+    // Fetch current balance before update
+    const before = await this.getPortfolio(params.institutionId);
+    const currentBalance =
+      before.holdings.find((h) => h.assetCode === params.assetCode)?.balance ?? 0;
+
+    const { error } = await (this.client as unknown as RpcQuery<undefined>).rpc(
+      "portfolio_update_balance",
+      {
+        p_institution_id: params.institutionId,
+        p_asset_code: params.assetCode,
+        p_delta: params.delta.toString(),
+      },
+    );
+
+    if (error) {
+      if (error.message?.includes("insufficient balance")) {
+        throw new InsufficientBalanceError(
+          params.assetCode,
+          Math.abs(params.delta),
+          0,
+        );
+      }
+      throw new PublicError("service_unavailable", 503, error);
+    }
+
+    const balanceAfter = Math.max(0, currentBalance + params.delta);
+    await this.recordHistory({
+      institutionId: params.institutionId,
+      assetCode: params.assetCode,
+      delta: params.delta,
+      balanceAfter,
+      changeType: params.changeType,
+    });
+  }
+
+  /**
+   * Get portfolio history for an institution, ordered most recent first.
+   */
+  public async getPortfolioHistory(
+    institutionId: string,
+    limit = 50,
+  ): Promise<PortfolioHistoryEntry[]> {
+    const { data, error } = await this.client
+      .from("portfolio_history")
+      .select("*")
+      .eq("institution_id", institutionId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
+
+    return (data ?? []).map(portfolioHistoryFromRecord).slice(0, limit);
+  }
+
+  /**
+   * Seed initial portfolio for a newly created institution.
+   */
+  public async seedInitialPortfolio(
+    institutionId: string,
+  ): Promise<Portfolio> {
+    const initialAssets = [
+      { assetCode: "USD", balance: 50_000_000 },
+      { assetCode: "BTC", balance: 500 },
+      { assetCode: "ETH", balance: 10_000 },
+      { assetCode: "AAPL", balance: 50_000 },
+    ];
+
+    for (const asset of initialAssets) {
+      const { error } = await (
+        this.client as unknown as RpcQuery<undefined>
+      ).rpc("portfolio_seed_initial", {
+        p_institution_id: institutionId,
+        p_asset_code: asset.assetCode,
+        p_balance: asset.balance.toString(),
+      });
+
+      if (error) {
+        // If row already exists (race with concurrent seed), skip
+        if (!error.message?.includes("unique constraint")) {
+          throw new PublicError("service_unavailable", 503, error);
+        }
+      } else {
+        // Record seed history
+        await this.recordHistory({
+          institutionId,
+          assetCode: asset.assetCode,
+          delta: asset.balance,
+          balanceAfter: asset.balance,
+          changeType: "seed",
+        });
+      }
+    }
+
+    return this.getPortfolio(institutionId);
+  }
+}

@@ -26,6 +26,7 @@ function buildServices(receiptService: ReceiptService): BackendServices {
       },
     } satisfies AgentAdmissionService,
     receiptService,
+    portfolioService: {} as never,
   };
 }
 

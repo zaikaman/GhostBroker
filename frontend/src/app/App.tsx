@@ -11,11 +11,20 @@ import { CompletedTradesTable } from '../components/CompletedTradesTable';
 import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
 import { AuthGateway } from '../components/AuthGateway';
 import { LandingPage } from '../components/LandingPage';
+import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
+import { PortfolioCard } from '../components/PortfolioCard';
+import { PortfolioHistory } from '../components/PortfolioHistory';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { apiClient, type AuthSession } from '../services/api-client';
 
+function AgentDeployView({ session }: { session: AuthSession }): React.JSX.Element {
+  const { navigate } = useRouter();
+  return <AgentDeploymentGuide session={session} onBack={() => navigate('/dashboard')} />;
+}
+
 function DashboardView({ session }: { session: AuthSession }): React.JSX.Element {
+  const { navigate } = useRouter();
   const {
     connectionStatus,
     enclaveStatus,
@@ -67,6 +76,14 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
             DID: {session.institution.t3TenantDid}
           </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => navigate('/deploy')}
+            style={{ fontSize: '0.7rem', padding: '4px 10px', fontFamily: 'var(--font-mono)' }}
+          >
+            🚀 Deploy Agent
+          </button>
         </div>
       </header>
 
@@ -128,24 +145,16 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         </div>
       )}
 
-      {/* Main Left Section: Sealed Order Book */}
-      <main className="layout-left card">
-        <h2 className="card-title">
-          <span>👁️‍🗨️</span> Sealed Order Book
-        </h2>
-        <div className="radar-container">
-          <div className="radar-sweep"></div>
-          <div className="radar-grid"></div>
-          <div className="radar-grid-inner"></div>
-          <div className="radar-crosshair-h"></div>
-          <div className="radar-crosshair-v"></div>
-          <div className="radar-message">
-            <div className="radar-message-title">Enclave Vault Sealed</div>
-            <div className="radar-message-text">
-              Sealed matching core is cryptographically secured inside hardware TEE. Zero visibility mode active.
-            </div>
-          </div>
-        </div>
+      {/* Main Left Section: Institution Portfolio & Balance History */}
+      <main className="layout-left" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+        <PortfolioCard
+          institutionId={session.institution.id}
+          token={session.token}
+        />
+        <PortfolioHistory
+          institutionId={session.institution.id}
+          token={session.token}
+        />
       </main>
 
       {/* Main Right Section: Live Telemetry & Connected Agents */}
@@ -248,6 +257,10 @@ function AppContent({
 
       <Route path="/dashboard" element={
         session ? <DashboardView session={session} /> : null
+      } />
+      
+      <Route path="/deploy" element={
+        session ? <AgentDeployView session={session} /> : null
       } />
     </>
   );

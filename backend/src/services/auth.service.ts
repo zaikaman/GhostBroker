@@ -7,6 +7,7 @@ import type {
   AuthSessionResponse,
 } from "../models/auth.js";
 import type { Institution } from "../models/institution.js";
+import type { PortfolioService } from "../services/portfolio.service.js";
 import { createOpaqueId, issueOperatorSessionToken } from "../auth/session-token.js";
 
 interface ChallengeRecord {
@@ -46,20 +47,25 @@ function walletDisplayName(did: string): string {
 }
 
 export class DidAuthService implements AuthSessionService {
-  private readonly challenges = new Map<string, ChallengeRecord>();
-  private readonly institutions: AuthInstitutionRepository;
-  private readonly identityVerifier: AgentIdentityVerifier;
-  private readonly sessionSecret: string;
+
 
   public constructor(params: {
     institutions: AuthInstitutionRepository;
     identityVerifier: AgentIdentityVerifier;
+    portfolioService?: PortfolioService;
     sessionSecret: string;
   }) {
     this.institutions = params.institutions;
     this.identityVerifier = params.identityVerifier;
+    this.portfolioService = params.portfolioService;
     this.sessionSecret = params.sessionSecret;
   }
+
+  private readonly challenges = new Map<string, ChallengeRecord>();
+  private readonly institutions: AuthInstitutionRepository;
+  private readonly identityVerifier: AgentIdentityVerifier;
+  private readonly portfolioService: PortfolioService | undefined;
+  private readonly sessionSecret: string;
 
   private async findOrCreateInstitution(did: string): Promise<Institution> {
     const existing = await this.institutions.findByTenantDid(did);
@@ -72,13 +78,24 @@ export class DidAuthService implements AuthSessionService {
     }
 
     try {
-      return await this.institutions.createInstitution({
+      const institution = await this.institutions.createInstitution({
         legalName: walletDisplayName(did),
         displayName: walletDisplayName(did),
         settlementProfileRef: "wallet:default",
         t3TenantDid: did,
         metadata: { source: "wallet_auth", type: "self_registered" },
       });
+
+      // Seed initial portfolio for newly self-registered institution
+      if (this.portfolioService) {
+        await this.portfolioService
+          .seedInitialPortfolio(institution.id)
+          .catch(() => {
+            // Portfolio seeding is best-effort; don't fail auth
+          });
+      }
+
+      return institution;
     } catch {
       // Race: another request may have just created this institution
       const retry = await this.institutions.findByTenantDid(did);

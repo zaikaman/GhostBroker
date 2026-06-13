@@ -1,10 +1,53 @@
-# Error Reference: Troubleshooting Agent Integration
+# GhostBroker Error Reference
 
-GhostBroker uses **redacted error responses** to avoid leaking information about active trading activity. All errors follow a standard format with a machine-readable code and a generic human-readable message.
+All API errors return a consistent JSON format:
 
-## Error Response Format
+```json
+{
+  "code": "error_code",
+  "message": "Human-readable description"
+}
+```
 
-All API errors return:
+## Error Codes
+
+| Code | HTTP Status | Meaning | Recovery |
+|------|-------------|---------|----------|
+| `validation_failed` | 400 | Request body doesn't match the expected schema | Check field types, required fields, and constraints |
+| `authorization_failed` | 401/403 | Authentication or authorization check failed | See detailed recovery below |
+| `service_unavailable` | 503 | Platform is temporarily unavailable | Retry with exponential backoff |
+
+## Authorization Failure Details
+
+### On Challenge (`POST /api/auth/challenge`)
+
+```json
+{
+  "code": "authorization_failed",
+  "message": "DID not recognized or institution not active."
+}
+```
+
+**Cause**: The DID doesn't match any registered institution, or the institution is suspended.
+**Fix**: Check that you're using the correct DID from the dashboard.
+
+### On Verify (`POST /api/auth/verify`)
+
+```json
+{
+  "code": "authorization_failed",
+  "message": "Challenge expired, invalid, or signature doesn't match."
+}
+```
+
+**Causes**:
+1. Challenge expired — challenges are valid for 5 minutes
+2. Wrong signature — the signature doesn't match the expected signer
+3. Wrong challenge ID — the challenge was already consumed or doesn't exist
+
+**Fix**: Request a new challenge and ensure the correct private key is used to sign.
+
+### On Admit (`POST /api/agents/admit`)
 
 ```json
 {
@@ -13,148 +56,55 @@ All API errors return:
 }
 ```
 
-## Error Codes
+**Causes**:
+- Agent DID doesn't match the authenticated session
+- Authority proof is malformed or invalid
 
-### `authorization_failed` (HTTP 401/403)
+**Fix**: Ensure the agent DID matches the signing address and regenerate the authority proof.
 
-The request was rejected due to authentication or authorization failure.
+## WebSocket Errors
 
-| Scenario | Likely Cause |
-|----------|-------------|
-| Authentication | Invalid or expired JWT token |
-| Challenge expired | The challenge was used after 5-minute expiry |
-| Signature invalid | EIP-191 signature doesn't match the expected wallet address |
-| Delegation rejected | Agent authority proof is invalid, expired, revoked, or over-scoped |
-| Scope mismatch | Agent tried an action not covered by its delegation credential |
-| Institution suspended | The institution account is suspended or closed |
+| Event | Meaning | Recovery |
+|-------|---------|----------|
+| `subscribe_failed` | Invalid or expired session token | Re-authenticate and get a new token |
+| WebSocket close (4001) | Authentication required | Send subscribe message with valid token |
+| WebSocket close (4003) | Session expired | Re-authenticate |
 
-**Recovery**:
-1. Re-authenticate via `POST /api/auth/challenge` + `POST /api/auth/verify`
-2. Check that your delegation credential is still valid in the T3N Dashboard
-3. Verify the `institutionId` matches what was returned during auth
+## HTTP Status Codes
 
-### `validation_failed` (HTTP 400)
-
-The request body didn't pass schema validation.
-
-| Scenario | Likely Cause |
-|----------|-------------|
-| Missing required field | One or more required fields (`institutionId`, `agentDid`, etc.) are absent |
-| Malformed DID | The DID doesn't match the `did:t3n:...` or `did:t3:...` pattern |
-| Invalid UUID | Institution ID or receipt ID isn't a valid UUID |
-| Plaintext trading field | Request body contains forbidden keys like `asset`, `side`, `quantity`, `price` |
-| Envelope too short | `encryptedIntentEnvelope` is less than 32 characters |
-| Envelope too long | `encryptedIntentEnvelope` exceeds 32KB |
-
-**Recovery**:
-1. Validate your request body against the API schema (see [API Reference](./API_REFERENCE.md))
-2. Ensure encrypted envelopes contain no plaintext trading fields
-3. Check UUIDs are properly formatted (e.g., `550e8400-e29b-41d4-a716-446655440000`)
-
-### `not_found` (HTTP 404)
-
-The requested resource doesn't exist or you're not authorized to access it.
-
-| Scenario | Likely Cause |
-|----------|-------------|
-| Receipt not found | Receipt ID doesn't exist or belongs to a different institution |
-| Trade not found | Trade ID doesn't exist |
-
-**Recovery**:
-1. Verify the receipt/trade ID is correct
-2. Receipts are only accessible by participating institutions — if you weren't a party to the trade, you'll get 404
-
-### `service_unavailable` (HTTP 503)
-
-The backend or TEE enclave is temporarily unable to process requests.
-
-| Scenario | Likely Cause |
-|----------|-------------|
-| Backend down | GhostBroker API server is restarting or under maintenance |
-| Supabase unavailable | Database layer is unreachable |
-| T3N network down | Terminal 3 sandbox network is unavailable |
-| Token exhaustion | GhostBroker's T3N token balance is depleted |
-| Settlement persistence failed | Could not write completed trade to database |
-
-**Recovery**:
-1. Wait and retry with exponential backoff
-2. Contact GhostBroker operator if the issue persists
-3. For token exhaustion, the operator needs to replenish T3N tokens
-
-## WebSocket Error Events
-
-WebSocket events with `severity: "error"` indicate problems:
-
-```json
-{
-  "eventId": "evt_error_...",
-  "institutionId": "uuid",
-  "type": "telemetry.error.changed",
-  "phase": "authorization_failed",
-  "severity": "error",
-  "timestamp": "2026-06-12T10:00:00.000Z",
-  "correlationRef": "intent_abc123..."
-}
-```
-
-| Error Phase | Meaning | Recovery |
-|-------------|---------|----------|
-| `authorization_failed` | Intent submission rejected due to revoked/exired authority | Check delegation, re-admit agent |
-| `token_metering_failed` | T3 execution tokens depleted | Contact operator |
-| `settlement_failed` | Atomic settlement transaction failed | Resubmit intent with different parameters |
-| `service_unavailable` | Backend enclave offline | Wait, retry later |
-
-## HTTP Status Code Reference
-
-| Status | Meaning | Typical Cause |
-|--------|---------|-------------|
-| 200 | Success | Request completed successfully |
-| 201 | Created | Resource created (challenge, institution) |
-| 202 | Accepted | Intent accepted for processing (async) |
-| 400 | Bad Request | Validation failed |
-| 401 | Unauthorized | Missing or invalid authentication |
-| 403 | Forbidden | Authenticated but not authorized |
-| 404 | Not Found | Resource not found or not accessible |
-| 429 | Too Many Requests | Rate limit exceeded (future) |
-| 503 | Service Unavailable | Temporary backend/TEE outage |
-
-## Retry Strategy
-
-For transient failures (503, WebSocket disconnects), implement exponential backoff:
-
-```typescript
-async function retryWithBackoff<T>(
-  fn: () => Promise<T>,
-  maxRetries = 3
-): Promise<T> {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (error.code === 'authorization_failed' || 
-          error.code === 'validation_failed' ||
-          error.code === 'not_found') {
-        throw error; // Don't retry client errors
-      }
-      
-      const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-  throw new Error('Max retries exceeded');
-}
-```
+| Status | Meaning |
+|--------|---------|
+| 200 | Success |
+| 201 | Created successfully |
+| 202 | Accepted (intent submitted, pending processing) |
+| 400 | Bad request — check validation errors |
+| 401 | Unauthorized — no valid session |
+| 403 | Forbidden — valid session but insufficient authority |
+| 404 | Not found |
+| 503 | Service unavailable — retry later |
 
 ## Debugging Checklist
 
-If your agent can't connect or trade:
+Before contacting support, verify:
 
-1. [ ] Can you reach `GET /api/health`? (no auth required)
-2. [ ] Did the auth challenge/verify flow return a token?
-3. [ ] Is the token included as `Authorization: Bearer <token>`?
-4. [ ] Does your agent DID match the delegation credential on T3N Dashboard?
-5. [ ] Is the delegation credential still within its time window (`not_before_secs` / `not_after_secs`)?
-6. [ ] Has the credential been revoked?
-7. [ ] Is the `authorityProof` JSON properly formatted?
-8. [ ] Is `encryptedIntentEnvelope` a valid base64url-encoded ciphertext?
-9. [ ] Does your `institutionId` match what was returned from auth?
+1. [ ] Is your API base URL correct?
+2. [ ] Is your DID correct (from the dashboard)?
+3. [ ] Is your private key loaded correctly?
+4. [ ] Is your session token still valid (not expired)?
+5. [ ] Are you including the `Authorization: Bearer` header?
+6. [ ] Is the request body valid JSON?
+7. [ ] Is your agent's network connectivity working?
+
+## Common curl Debugging
+
+```bash
+# Test platform connectivity
+curl -s https://your-instance.com/api/health
+
+# Test authentication flow
+CHALLENGE=$(curl -s -X POST https://your-instance.com/api/auth/challenge \
+  -H "Content-Type: application/json" \
+  -d '{"did": "did:t3n:0x..."}')
+
+echo "$CHALLENGE" | jq .
+```

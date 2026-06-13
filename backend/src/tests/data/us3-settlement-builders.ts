@@ -64,6 +64,9 @@ export function buildSettlementExecutionRequest(
       quantityCiphertext: "t3cipher.quantity.us3",
       executionPriceCiphertext: "t3cipher.execution.us3",
     },
+    assetCode: "BTC",
+    quantity: 100,
+    executionPrice: 45000,
     receipts: [
       {
         institutionId: us3BuyerInstitutionId,

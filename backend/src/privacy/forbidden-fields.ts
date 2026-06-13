@@ -46,6 +46,11 @@ export function isForbiddenOrderField(field: string): boolean {
   return forbiddenFieldSet.has(field.toLowerCase());
 }
 
+/** Fields that are exempt from the forbidden-fields scan.
+ * These are platform-level metadata fields, not encrypted intent params.
+ */
+const exemptPaths = new Set<string>(["$.settlementMetadata"]);
+
 export function scanForbiddenFields(
   value: unknown,
   path = "$",
@@ -53,6 +58,11 @@ export function scanForbiddenFields(
   const findings: ForbiddenFieldFinding[] = [];
 
   function visit(node: unknown, currentPath: string): void {
+    // Skip entire subtrees that are exempt
+    if (exemptPaths.has(currentPath)) {
+      return;
+    }
+
     if (Array.isArray(node)) {
       node.forEach((item, index) => visit(item, `${currentPath}[${index}]`));
       return;

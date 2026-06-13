@@ -35,6 +35,35 @@ export function buildHiddenIntentRequest(
     agentDid: us2AgentDid,
     encryptedIntentEnvelope: us2EncryptedEnvelope,
     authorityRef: us2AuthorityRef,
+    settlementMetadata: {
+      assetCode: "BTC",
+      side: "buy",
+      quantity: 100,
+      price: 45000,
+    },
     ...overrides,
   };
+}
+
+export function buildHiddenIntentRequestForSide(
+  side: "buy" | "sell",
+  overrides: Partial<HiddenIntentRequest> = {},
+): HiddenIntentRequest {
+  return buildHiddenIntentRequest({
+    institutionId:
+      side === "buy"
+        ? "00000000-0000-4000-8000-000000000211"
+        : "00000000-0000-4000-8000-000000000212",
+    agentDid:
+      side === "buy"
+        ? "did:t3n:agent:buyer-us2"
+        : "did:t3n:agent:seller-us2",
+    settlementMetadata: {
+      assetCode: "BTC",
+      side,
+      quantity: 100,
+      price: side === "buy" ? 47000 : 43000,
+    },
+    ...overrides,
+  });
 }

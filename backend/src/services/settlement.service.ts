@@ -14,6 +14,8 @@ import {
   type CompletedTradeRecord,
 } from "../models/completed-trade.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
+import type { PortfolioService } from "./portfolio.service.js";
+import { InsufficientBalanceError } from "./portfolio.service.js";
 
 export interface SettlementExecutionRequest {
   matchOutcome: OpaqueMatchOutcome;
@@ -24,6 +26,10 @@ export interface SettlementExecutionRequest {
     quantityCiphertext: string;
     executionPriceCiphertext: string;
   };
+  /** Plaintext trade parameters — provided by the TEE match outcome */
+  assetCode: string;
+  quantity: number;
+  executionPrice: number;
   receipts: {
     institutionId: string;
     receiptCiphertext: string;
@@ -128,17 +134,20 @@ export class SettlementService {
   private readonly repository: SettlementRepository;
   private readonly telemetryBus: TelemetryBus;
   private readonly auditEvents: SettlementAuditEventSink;
+  private readonly portfolioService: PortfolioService | undefined;
 
   public constructor(
     commandBuilder: SettlementCommandBuilder,
     repository: SettlementRepository,
     telemetryBus: TelemetryBus,
     auditEvents: SettlementAuditEventSink = new NoopSettlementAuditEventSink(),
+    portfolioService?: PortfolioService,
   ) {
     this.commandBuilder = commandBuilder;
     this.repository = repository;
     this.telemetryBus = telemetryBus;
     this.auditEvents = auditEvents;
+    this.portfolioService = portfolioService;
   }
 
   public async executeSettlement(
@@ -169,6 +178,18 @@ export class SettlementService {
         receipts: request.receipts,
       });
       await this.emitAudit("settlement", command, correlationRef);
+
+      // Update portfolio balances with plaintext trade params from TEE
+      if (this.portfolioService) {
+        await this.portfolioService.applySettlement({
+          buyerInstitutionId: request.matchOutcome.buyerInstitutionId,
+          sellerInstitutionId: request.matchOutcome.sellerInstitutionId,
+          assetCode: request.assetCode,
+          quantity: request.quantity,
+          price: request.executionPrice,
+        });
+      }
+
       await this.emitAudit("balance", command, correlationRef);
       await this.emitAudit("receipt", command, correlationRef);
       const receiptIds = persisted.receipts.map((receipt) => receipt.id);
@@ -245,7 +266,8 @@ export class SettlementService {
     const phase =
       error instanceof InsufficientT3TokenBalanceError
         ? "token_metering_failed"
-        : error instanceof SettlementAuthorityError
+        : error instanceof SettlementAuthorityError ||
+            error instanceof InsufficientBalanceError
           ? "authorization_failed"
           : "settlement_failed";
 
@@ -270,6 +292,12 @@ export class SettlementService {
       return new PublicError("service_unavailable", 503);
     }
 
+    if (error instanceof InsufficientBalanceError) {
+      return new PublicError("authorization_failed", 403);
+    }
+
     return new PublicError("service_unavailable", 503);
   }
+
 }
+

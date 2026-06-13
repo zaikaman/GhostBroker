@@ -16,6 +16,7 @@ function buildServices(agentService: AgentAdmissionService): BackendServices {
       createInstitution: async () => buildInstitution(),
     } satisfies InstitutionManagementService,
     agentService,
+    portfolioService: {} as never,
   };
 }
 

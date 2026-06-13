@@ -23,6 +23,7 @@ const services: BackendServices = {
       throw new Error("plaintext request should not reach service");
     },
   },
+  portfolioService: {} as never,
 };
 
 describe("POST /api/agents/intents privacy contract", () => {

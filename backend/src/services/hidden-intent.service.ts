@@ -9,6 +9,7 @@ import type {
   HiddenIntentRequest,
 } from "../models/hidden-intent.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
+import type { MatchingOrchestrator } from "./matching-orchestrator.js";
 import {
   EmptyAuthorityRevocationRepository,
   type AuthorityRevocationRepository,
@@ -30,17 +31,20 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   private readonly blindIntentClient: BlindIntentClient;
   private readonly telemetryBus: TelemetryBus;
   private readonly revocations: AuthorityRevocationRepository;
+  private readonly matchingOrchestrator: MatchingOrchestrator | undefined;
 
   public constructor(
     authorization: AgentAuthorizationFacade,
     blindIntentClient: BlindIntentClient,
     telemetryBus: TelemetryBus,
     revocations: AuthorityRevocationRepository = new EmptyAuthorityRevocationRepository(),
+    matchingOrchestrator?: MatchingOrchestrator,
   ) {
     this.authorization = authorization;
     this.blindIntentClient = blindIntentClient;
     this.telemetryBus = telemetryBus;
     this.revocations = revocations;
+    this.matchingOrchestrator = matchingOrchestrator;
   }
 
   public async submitIntent(
@@ -60,6 +64,29 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
 
     this.publish(request, context.correlationRef, "intent_sealed");
     this.publish(request, sealed.intentHandle, "encrypted_evaluation");
+
+    // Trigger matching against pending intents (fire-and-forget)
+    if (this.matchingOrchestrator) {
+      this.matchingOrchestrator.onIntentSealed({
+        correlationRef: context.correlationRef,
+        institutionId: request.institutionId,
+        agentDid: request.agentDid,
+        intentHandle: sealed.intentHandle,
+        executionRef: sealed.executionRef,
+        encryptedEnvelope: request.encryptedIntentEnvelope,
+        authorityRef: request.authorityRef,
+        assetCode: request.settlementMetadata.assetCode,
+        side: request.settlementMetadata.side,
+        quantity: request.settlementMetadata.quantity,
+        price: request.settlementMetadata.price,
+      }).catch((error: unknown) => {
+        // Matching/settlement failures are non-blocking — intent is already sealed
+        console.error(
+          `[MatchingOrchestrator] Match error for ${context.correlationRef}:`,
+          error,
+        );
+      });
+    }
 
     return {
       intentHandle: sealed.intentHandle,

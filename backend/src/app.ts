@@ -14,6 +14,7 @@ import { toPublicError } from "./errors/public-error.js";
 import { correlationIdMiddleware } from "./middleware/correlation-id.js";
 import { createHealthRouter } from "./api/health.routes.js";
 import { createInstitutionsRouter } from "./api/institutions.routes.js";
+import { createPortfoliosRouter } from "./api/portfolios.routes.js";
 import { createAgentsRouter } from "./api/agents.routes.js";
 import { createTradesRouter } from "./api/trades.routes.js";
 import { createReceiptsRouter } from "./api/receipts.routes.js";
@@ -45,6 +46,8 @@ import {
   SettlementService,
   SupabaseSettlementRepository,
 } from "./services/settlement.service.js";
+import { PortfolioService } from "./services/portfolio.service.js";
+import { MatchingOrchestrator } from "./services/matching-orchestrator.js";
 import { telemetryBus } from "./services/telemetry-bus.js";
 import {
   AdkTenantDidRegistry,
@@ -52,6 +55,7 @@ import {
   SandboxTokenBalanceClient,
   SettlementCommandBuilder,
   T3BlindIntentClient,
+  T3MatchContractClient,
   T3AgentIdentityVerifier,
   createAuthenticatedT3NetworkClient,
   type AuthenticatedT3NetworkClientOptions,
@@ -84,6 +88,7 @@ const publicErrorHandler: ErrorRequestHandler = (error, _request, response, _nex
 
 export interface BackendServices {
   institutionService: InstitutionManagementService;
+  portfolioService: PortfolioService;
   agentService: AgentAdmissionService;
   hiddenIntentService?: HiddenIntentSubmissionService;
   settlementService?: SettlementService;
@@ -118,31 +123,53 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     new DashboardDelegationAgentAuthClient(t3NetworkClient),
   );
   const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
+  const portfolioService = new PortfolioService(supabase as never);
+
+  const settlementService = new SettlementService(
+    new SettlementCommandBuilder(authorizationFacade),
+    new SupabaseSettlementRepository(supabase as never),
+    telemetryBus,
+    undefined, // audit sink
+    portfolioService,
+  );
+
+  const blindIntentClient = new T3BlindIntentClient({
+    networkClient: t3NetworkClient,
+    tokenBalanceClient,
+    tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
+    minimumTokenBalance: 1n,
+  });
+
+  const matchContractClient = new T3MatchContractClient({
+    networkClient: t3NetworkClient,
+    tokenBalanceClient,
+    tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
+    minimumTokenBalance: 1n,
+  });
+
+  const matchingOrchestrator = new MatchingOrchestrator(
+    matchContractClient,
+    settlementService,
+  );
+
   return {
     institutionService: new InstitutionService(
       institutionRepository,
       new AdkTenantDidRegistry(t3NetworkClient),
     ),
+    portfolioService,
     agentService: new AgentService(
       authorizationFacade,
       authorityRevocationRepository,
     ),
     hiddenIntentService: new HiddenIntentService(
       authorizationFacade,
-      new T3BlindIntentClient({
-        networkClient: t3NetworkClient,
-        tokenBalanceClient,
-        tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
-        minimumTokenBalance: 1n,
-      }),
+      blindIntentClient,
       telemetryBus,
       authorityRevocationRepository,
+      matchingOrchestrator,
     ),
-    settlementService: new SettlementService(
-      new SettlementCommandBuilder(authorizationFacade),
-      new SupabaseSettlementRepository(supabase as never),
-      telemetryBus,
-    ),
+    settlementService,
     tradeHistoryService: new TradeHistoryService(
       new SupabaseTradeHistoryRepository(supabase as never),
     ),
@@ -150,6 +177,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
+      portfolioService,
       sessionSecret:
         env.AUTH_SESSION_SECRET ??
         "development-only-auth-session-secret-change-before-production",
@@ -173,6 +201,11 @@ export function createApp(
     app.use("/api", createAuthRouter(services.authService));
   }
   app.use("/api", createInstitutionsRouter(services.institutionService));
+  app.use(
+    "/api",
+    operatorAuthMiddleware(env),
+    createPortfoliosRouter(services.portfolioService),
+  );
   app.use(
     "/api",
     operatorAuthMiddleware(env),

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export type RoutePath = '/' | '/dashboard' | '/settings' | '/auth';
+export type RoutePath = '/' | '/dashboard' | '/settings' | '/auth' | '/deploy';
 
 interface RouterContextType {
   currentPath: string;
