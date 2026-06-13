@@ -6,21 +6,30 @@ import {
   us3BuyerInstitutionId
 } from './support/local-stack';
 
+const API_BASE_URL = process.env.PLAYWRIGHT_API_BASE_URL || 'http://localhost:3001';
+
 test.describe('Operator Dashboard E2E Workflow', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request: pwRequest }) => {
     // Reset and seed the database
     await clearDatabase();
     await seedInstitutions();
     await seedCompletedTradeAndReceipt();
 
-    // Set operator context to Buyer Institution
+    // Get a real session token from the dev endpoint
+    const tokenRes = await pwRequest.post(`${API_BASE_URL}/api/dev/token`, {
+      data: { institutionId: us3BuyerInstitutionId },
+    });
+    const { token } = await tokenRes.json();
+
+    // Set operator context and auth token in localStorage
     await page.goto('/');
-    await page.evaluate((instId) => {
+    await page.evaluate(({ instId, authToken }) => {
       localStorage.setItem('x-operator-institution-id', instId);
       localStorage.setItem('x-operator-id', 'operator:e2e-buyer');
-    }, us3BuyerInstitutionId);
+      localStorage.setItem('ghostbroker-auth-token', authToken);
+    }, { instId: us3BuyerInstitutionId, authToken: token });
     
-    // Reload to apply the local storage headers
+    // Reload to apply the local storage auth
     await page.reload();
   });
 

@@ -33,6 +33,11 @@ T3_NETWORK_URL=
 T3_TENANT_DID=
 T3_MATCH_CONTRACT_ID=
 RECEIPT_KEY_VERSION=
+SETTLEMENT_ASSET_CODE=USDC
+PORTFOLIO_SYNC_TOKEN=<internal-sync-token>
+ETHERSCAN_API_KEY=<etherscan-api-key>
+SEPOLIA_WBTC_CONTRACT_ADDRESS=0x29f2D40B0605204364af54EC677bD022dA425d03
+SEPOLIA_USDC_CONTRACT_ADDRESS=0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8
 ```
 
 `DATABASE_URL` is optional for backend runtime. It is only needed by tooling that connects directly to Postgres, such as migration workflows or future database integration tests. The MVP API uses `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
@@ -53,6 +58,11 @@ T3_AUTH_SDK_ENV=sandbox
 T3_AGENT_DELEGATION_MODE=dashboard
 T3_AGENT_GRANT_VERIFICATION_REQUIRED=true
 T3_PRIVATE_MAP_PREFIX=ghostbroker-dev
+SETTLEMENT_ASSET_CODE=USDC
+PORTFOLIO_SYNC_TOKEN=<internal-sync-token>
+ETHERSCAN_API_KEY=<etherscan-api-key>
+SEPOLIA_WBTC_CONTRACT_ADDRESS=0x29f2D40B0605204364af54EC677bD022dA425d03
+SEPOLIA_USDC_CONTRACT_ADDRESS=0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8
 ```
 
 ## Local Setup
@@ -84,6 +94,21 @@ For hidden intent and settlement phases you will additionally need:
 - Contract registration output: the numeric contract ID and stable tenant script name.
 - Tenant KV maps such as `secrets`, `authority-claims`, and contract config maps with explicit reader/writer ACLs that include the registered contract ID.
 - Agent/self grants scoped to the registered script, function names, and any required outbound hosts.
+
+Portfolio balances are no longer seeded during wallet authentication. When `ETHERSCAN_API_KEY` and the Sepolia contract addresses are configured, the backend mirrors the connected wallet address from the auth payload during login. The internal snapshot route still exists for manual backfills or recovery through `POST /api/internal/portfolio-snapshots/:institutionId` with the `x-ghostbroker-sync-token` header. For this demo, set `SETTLEMENT_ASSET_CODE=USDC`.
+
+Example snapshot payload:
+
+```json
+{
+  "sourceRef": "custody:snapshot:2026-06-13",
+  "holdings": [
+    { "assetCode": "WBTC", "balance": 1.25 },
+    { "assetCode": "SEPOLIAETH", "balance": 24.5 },
+    { "assetCode": "USDC", "balance": 250000 }
+  ]
+}
+```
 
 The `POST /api/agents/admit` `authorityProof` field is a JSON string with this top-level shape:
 

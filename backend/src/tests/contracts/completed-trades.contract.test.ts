@@ -1,6 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
+import { issueOperatorSessionToken } from "../../auth/session-token.js";
 import type { AgentAdmissionService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import { TradeHistoryService } from "../../services/trade-history.service.js";
@@ -45,9 +46,15 @@ describe("GET /api/trades/completed contract", () => {
       ),
     );
 
+    const token = issueOperatorSessionToken({
+      secret: "development-only-auth-session-secret-change-before-production",
+      did: "did:t3n:operator:us3",
+      institutionId: us3BuyerInstitutionId,
+    });
+
     const response = await request(app)
       .get("/api/trades/completed")
-      .set("x-operator-institution-id", us3BuyerInstitutionId)
+      .set("Authorization", `Bearer ${token}`)
       .expect(200);
 
     expect(response.body).toEqual({ items: [trade] });

@@ -75,7 +75,7 @@ CREATE TABLE public.portfolio_history (
   asset_code text NOT NULL,
   delta numeric NOT NULL,
   balance_after numeric NOT NULL,
-  change_type text NOT NULL CHECK (change_type = ANY (ARRAY['settlement_buy'::text, 'settlement_sell'::text, 'adjustment'::text, 'seed'::text])),
+  change_type text NOT NULL CHECK (change_type = ANY (ARRAY['settlement_buy'::text, 'settlement_sell'::text, 'adjustment'::text, 'import'::text])),
   reference_type text,
   reference_id text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),

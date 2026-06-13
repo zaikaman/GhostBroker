@@ -1,6 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
+import { issueOperatorSessionToken } from "../../auth/session-token.js";
 import { auditReceiptFromRecord } from "../../models/audit-receipt.js";
 import type { AgentAdmissionService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
@@ -47,9 +48,15 @@ describe("GET /api/receipts/:receiptId contract", () => {
       ),
     );
 
+    const buyerToken = issueOperatorSessionToken({
+      secret: "development-only-auth-session-secret-change-before-production",
+      did: "did:t3n:operator:us3-buyer",
+      institutionId: us3BuyerInstitutionId,
+    });
+
     const response = await request(app)
       .get(`/api/receipts/${us3ReceiptId}`)
-      .set("x-operator-institution-id", us3BuyerInstitutionId)
+      .set("Authorization", `Bearer ${buyerToken}`)
       .expect(200);
 
     expect(response.body).toEqual(receipt);
@@ -66,9 +73,15 @@ describe("GET /api/receipts/:receiptId contract", () => {
       ),
     );
 
+    const unrelatedToken = issueOperatorSessionToken({
+      secret: "development-only-auth-session-secret-change-before-production",
+      did: "did:t3n:operator:us3-unrelated",
+      institutionId: us3UnrelatedInstitutionId,
+    });
+
     await request(app)
       .get(`/api/receipts/${us3ReceiptId}`)
-      .set("x-operator-institution-id", us3UnrelatedInstitutionId)
+      .set("Authorization", `Bearer ${unrelatedToken}`)
       .expect(404)
       .expect(({ body }) => {
         expect(body.code).toBe("not_found");

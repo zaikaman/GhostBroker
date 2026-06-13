@@ -1,5 +1,6 @@
--- Atomically update a portfolio balance with a delta (positive or negative)
--- Returns error if balance would go negative
+-- Upgrade portfolio support to production snapshot sync.
+-- This migration is safe to apply to databases that already ran earlier versions.
+
 CREATE OR REPLACE FUNCTION public.portfolio_update_balance(
   p_institution_id uuid,
   p_asset_code text,
@@ -10,7 +11,6 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-  -- Upsert: create row if not exists, otherwise update
   INSERT INTO public.portfolios (institution_id, asset_code, balance)
   VALUES (p_institution_id, p_asset_code, GREATEST(p_delta, 0))
   ON CONFLICT (institution_id, asset_code)
@@ -19,7 +19,6 @@ BEGIN
     locked = LEAST(public.portfolios.locked, GREATEST(public.portfolios.balance + p_delta, 0)),
     updated_at = now();
 
-  -- Check that the update did not leave a negative balance or invalid lock state
   IF EXISTS (
     SELECT 1 FROM public.portfolios
     WHERE institution_id = p_institution_id
@@ -31,7 +30,6 @@ BEGIN
 END;
 $$;
 
--- Sync a portfolio balance to an exact value from an external snapshot
 CREATE OR REPLACE FUNCTION public.portfolio_sync_balance(
   p_institution_id uuid,
   p_asset_code text,
@@ -51,3 +49,12 @@ BEGIN
     updated_at = now();
 END;
 $$;
+
+ALTER TABLE public.portfolio_history
+  DROP CONSTRAINT IF EXISTS portfolio_history_change_type_check;
+
+ALTER TABLE public.portfolio_history
+  ADD CONSTRAINT portfolio_history_change_type_check
+  CHECK (change_type = ANY (ARRAY['settlement_buy'::text, 'settlement_sell'::text, 'adjustment'::text, 'import'::text]));
+
+DROP FUNCTION IF EXISTS public.portfolio_seed_initial(uuid, text, numeric);

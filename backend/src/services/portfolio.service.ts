@@ -4,6 +4,7 @@ import {
   portfolioHistoryFromRecord,
   type Portfolio,
   type PortfolioAdjustment,
+  type PortfolioSnapshotHolding,
   type PortfolioRecord,
   type PortfolioHistoryEntry,
   type PortfolioHistoryRecord,
@@ -81,9 +82,14 @@ export class InsufficientBalanceError extends Error {
 
 export class PortfolioService {
   private readonly client: SupabasePortfolioClient;
+  private readonly settlementAssetCode: string;
 
-  public constructor(client: SupabasePortfolioClient) {
+  public constructor(
+    client: SupabasePortfolioClient,
+    settlementAssetCode = "USDC",
+  ) {
     this.client = client;
+    this.settlementAssetCode = settlementAssetCode.trim().toUpperCase();
   }
 
   public async getPortfolio(institutionId: string): Promise<Portfolio> {
@@ -176,14 +182,14 @@ export class PortfolioService {
   }): Promise<void> {
     const totalCost = params.quantity * params.price;
 
-    // First check buyer has enough cash
+    // First check buyer has enough settlement asset
     const buyerPortfolio = await this.getPortfolio(params.buyerInstitutionId);
     const buyerCash = buyerPortfolio.holdings.find(
-      (h) => h.assetCode === "USD",
+      (h) => h.assetCode === this.settlementAssetCode,
     );
     if (!buyerCash || buyerCash.balance < totalCost) {
       throw new InsufficientBalanceError(
-        "USD",
+        this.settlementAssetCode,
         totalCost,
         buyerCash?.balance ?? 0,
       );
@@ -207,7 +213,7 @@ export class PortfolioService {
     // Apply buyer adjustments with settlement change type
     await this.applyAdjustmentWithHistory({
       institutionId: params.buyerInstitutionId,
-      assetCode: "USD",
+      assetCode: this.settlementAssetCode,
       delta: -totalCost,
       changeType: "settlement_buy",
     });
@@ -227,10 +233,79 @@ export class PortfolioService {
     });
     await this.applyAdjustmentWithHistory({
       institutionId: params.sellerInstitutionId,
-      assetCode: "USD",
+      assetCode: this.settlementAssetCode,
       delta: totalCost,
       changeType: "settlement_sell",
     });
+  }
+
+  /**
+   * Sync a portfolio from an external custody snapshot.
+   * Any missing asset codes are treated as zero balance.
+   */
+  public async syncPortfolioSnapshot(params: {
+    institutionId: string;
+    holdings: ReadonlyArray<PortfolioSnapshotHolding>;
+    sourceRef?: string;
+    observedAt?: string;
+  }): Promise<Portfolio> {
+    const seenAssetCodes = new Set<string>();
+    for (const holding of params.holdings) {
+      if (seenAssetCodes.has(holding.assetCode)) {
+        throw new PublicError("validation_failed", 400);
+      }
+      seenAssetCodes.add(holding.assetCode);
+    }
+
+    const before = await this.getPortfolio(params.institutionId);
+    const beforeByAsset = new Map(
+      before.holdings.map((holding) => [holding.assetCode, holding] as const),
+    );
+    const targetByAsset = new Map(
+      params.holdings.map((holding) => [holding.assetCode, holding] as const),
+    );
+
+    const unionAssetCodes = new Set<string>([
+      ...beforeByAsset.keys(),
+      ...targetByAsset.keys(),
+    ]);
+
+    for (const assetCode of unionAssetCodes) {
+      const targetBalance = targetByAsset.get(assetCode)?.balance ?? 0;
+      const currentBalance = beforeByAsset.get(assetCode)?.balance ?? 0;
+      const hadExistingRow = beforeByAsset.has(assetCode);
+
+      if (targetBalance === currentBalance && hadExistingRow) {
+        continue;
+      }
+
+      const { error } = await (this.client as unknown as RpcQuery<undefined>).rpc(
+        "portfolio_sync_balance",
+        {
+          p_institution_id: params.institutionId,
+          p_asset_code: assetCode,
+          p_balance: targetBalance.toString(),
+        },
+      );
+
+      if (error) {
+        throw new PublicError("service_unavailable", 503, error);
+      }
+
+      if (targetBalance !== currentBalance) {
+        await this.recordHistory({
+          institutionId: params.institutionId,
+          assetCode,
+          delta: targetBalance - currentBalance,
+          balanceAfter: targetBalance,
+          changeType: "import",
+          referenceType: "portfolio_snapshot",
+          referenceId: params.sourceRef ?? params.observedAt ?? null,
+        });
+      }
+    }
+
+    return this.getPortfolio(params.institutionId);
   }
 
   /**
@@ -242,8 +317,8 @@ export class PortfolioService {
     delta: number;
     balanceAfter: number;
     changeType: PortfolioHistoryChangeType;
-    referenceType?: string;
-    referenceId?: string;
+    referenceType?: string | null;
+    referenceId?: string | null;
   }): Promise<void> {
     const { error } = await (
       this.client as unknown as { from(table: string): { insert(values: Record<string, unknown>): Promise<{ error: Error | null }> } }
@@ -330,45 +405,4 @@ export class PortfolioService {
     return (data ?? []).map(portfolioHistoryFromRecord).slice(0, limit);
   }
 
-  /**
-   * Seed initial portfolio for a newly created institution.
-   */
-  public async seedInitialPortfolio(
-    institutionId: string,
-  ): Promise<Portfolio> {
-    const initialAssets = [
-      { assetCode: "USD", balance: 50_000_000 },
-      { assetCode: "BTC", balance: 500 },
-      { assetCode: "ETH", balance: 10_000 },
-      { assetCode: "AAPL", balance: 50_000 },
-    ];
-
-    for (const asset of initialAssets) {
-      const { error } = await (
-        this.client as unknown as RpcQuery<undefined>
-      ).rpc("portfolio_seed_initial", {
-        p_institution_id: institutionId,
-        p_asset_code: asset.assetCode,
-        p_balance: asset.balance.toString(),
-      });
-
-      if (error) {
-        // If row already exists (race with concurrent seed), skip
-        if (!error.message?.includes("unique constraint")) {
-          throw new PublicError("service_unavailable", 503, error);
-        }
-      } else {
-        // Record seed history
-        await this.recordHistory({
-          institutionId,
-          assetCode: asset.assetCode,
-          delta: asset.balance,
-          balanceAfter: asset.balance,
-          changeType: "seed",
-        });
-      }
-    }
-
-    return this.getPortfolio(institutionId);
-  }
 }

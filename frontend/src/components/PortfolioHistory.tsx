@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { apiClient } from '../services/api-client';
 import {
   Activity01Icon,
   BitcoinIcon,
   EthereumIcon,
   Dollar01Icon,
-  AppleIcon,
   DatabaseIcon,
   Wrench01Icon,
   CheckmarkCircle01Icon,
@@ -19,7 +19,7 @@ export interface PortfolioHistoryEntry {
   assetCode: string;
   delta: number;
   balanceAfter: number;
-  changeType: 'settlement_buy' | 'settlement_sell' | 'adjustment' | 'seed';
+  changeType: 'settlement_buy' | 'settlement_sell' | 'adjustment' | 'import';
   referenceType: string | null;
   referenceId: string | null;
   createdAt: string;
@@ -27,18 +27,32 @@ export interface PortfolioHistoryEntry {
 
 interface PortfolioHistoryProps {
   institutionId: string;
-  token: string;
+}
+
+function isStableAsset(asset: string): boolean {
+  return asset === 'USDC' || asset === 'USD' || asset === 'USDT';
+}
+
+function assetLabel(asset: string): string {
+  switch (asset) {
+    case 'WBTC': return 'WBTC';
+    case 'SEPOLIAETH': return 'SepoliaETH';
+    case 'USDC': return 'USDC';
+    case 'USD': return 'USD';
+    case 'USDT': return 'USDT';
+    default: return asset;
+  }
 }
 
 const CHANGE_TYPE_LABELS: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
   settlement_buy: { label: 'Settlement (Buy)', icon: <CheckmarkCircle01Icon size={12} />, color: 'var(--color-success)' },
   settlement_sell: { label: 'Settlement (Sell)', icon: <CancelCircleIcon size={12} />, color: 'var(--color-error)' },
   adjustment: { label: 'Adjustment', icon: <Wrench01Icon size={12} />, color: 'var(--color-warning)' },
-  seed: { label: 'Initial Seed', icon: <DatabaseIcon size={12} />, color: 'var(--color-accent)' },
+  import: { label: 'Imported Sepolia Snapshot', icon: <DatabaseIcon size={12} />, color: 'var(--color-accent)' },
 };
 
 function formatValue(value: number, asset: string): string {
-  if (asset === 'USD') {
+  if (isStableAsset(asset)) {
     return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
@@ -46,7 +60,7 @@ function formatValue(value: number, asset: string): string {
 
 function formatDelta(value: number, asset: string): string {
   const sign = value >= 0 ? '+' : '';
-  if (asset === 'USD') {
+  if (isStableAsset(asset)) {
     return `${sign}$${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
   return `${sign}${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}`;
@@ -54,15 +68,16 @@ function formatDelta(value: number, asset: string): string {
 
 function getAssetIcon(asset: string): React.ReactNode {
   switch (asset) {
-    case 'USD': return <Dollar01Icon size={12} style={{ color: 'var(--color-accent)' }} />;
-    case 'BTC': return <BitcoinIcon size={12} style={{ color: 'var(--color-accent)' }} />;
-    case 'ETH': return <EthereumIcon size={12} style={{ color: 'var(--color-accent)' }} />;
-    case 'AAPL': return <AppleIcon size={12} style={{ color: 'var(--color-accent)' }} />;
+    case 'WBTC': return <BitcoinIcon size={12} style={{ color: 'var(--color-accent)' }} />;
+    case 'SEPOLIAETH': return <EthereumIcon size={12} style={{ color: 'var(--color-accent)' }} />;
+    case 'USDC':
+    case 'USD':
+    case 'USDT': return <Dollar01Icon size={12} style={{ color: 'var(--color-accent)' }} />;
     default: return <DatabaseIcon size={12} style={{ color: 'var(--color-accent)' }} />;
   }
 }
 
-export function PortfolioHistory({ institutionId, token }: PortfolioHistoryProps): React.JSX.Element | null {
+export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): React.JSX.Element | null {
   const [history, setHistory] = useState<PortfolioHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,15 +89,7 @@ export function PortfolioHistory({ institutionId, token }: PortfolioHistoryProps
       setIsLoading(true);
       setError(null);
       try {
-        const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
-        const res = await fetch(`${API_BASE_URL}/api/portfolios/${institutionId}/history`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as PortfolioHistoryEntry[];
+        const data = await apiClient.getPortfolioHistory(institutionId);
         if (!cancelled) setHistory(data);
       } catch (err: any) {
         if (!cancelled) setError(err.message ?? 'Failed to load portfolio history');
@@ -93,7 +100,7 @@ export function PortfolioHistory({ institutionId, token }: PortfolioHistoryProps
 
     fetchHistory();
     return () => { cancelled = true; };
-  }, [institutionId, token]);
+  }, [institutionId]);
 
   if (isLoading) {
     return (
@@ -124,7 +131,7 @@ export function PortfolioHistory({ institutionId, token }: PortfolioHistoryProps
             No balance changes recorded
           </h4>
           <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-            Initial seed pending or settlement awaiting agent trades.
+            Awaiting the first Sepolia snapshot or a completed settlement.
           </p>
         </div>
       </div>
@@ -159,7 +166,7 @@ export function PortfolioHistory({ institutionId, token }: PortfolioHistoryProps
                 <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                     <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      {getAssetIcon(entry.assetCode)} {entry.assetCode}
+                      {getAssetIcon(entry.assetCode)} {assetLabel(entry.assetCode)}
                     </span>
                     <span
                       style={{

@@ -27,6 +27,26 @@ export interface Portfolio {
   }[];
 }
 
+export interface PortfolioSnapshotHolding {
+  assetCode: string;
+  balance: number;
+}
+
+export const portfolioSnapshotHoldingSchema = z.object({
+  assetCode: z.string().trim().min(1).max(20).toUpperCase(),
+  balance: z.number().nonnegative(),
+});
+
+export const portfolioSnapshotSyncRequestSchema = z.object({
+  sourceRef: z.string().trim().min(1).max(256).optional(),
+  observedAt: z.string().datetime().optional(),
+  holdings: z.array(portfolioSnapshotHoldingSchema),
+});
+
+export type PortfolioSnapshotSyncRequest = z.infer<
+  typeof portfolioSnapshotSyncRequestSchema
+>;
+
 export function portfolioFromRecords(
   records: PortfolioRecord[],
 ): Portfolio {
@@ -59,7 +79,7 @@ export type PortfolioHistoryChangeType =
   | "settlement_buy"
   | "settlement_sell"
   | "adjustment"
-  | "seed";
+  | "import";
 
 export interface PortfolioHistoryRecord {
   id: string;

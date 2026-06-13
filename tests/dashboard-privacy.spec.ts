@@ -9,6 +9,20 @@ import {
 } from './support/local-stack';
 import { assertNoPrivacyLeaks } from './support/privacy-assertions';
 
+const API_BASE_URL = process.env.PLAYWRIGHT_API_BASE_URL || 'http://localhost:3001';
+
+async function setAuthContext(page: any, pwRequest: any, institutionId: string, operatorId: string) {
+  const tokenRes = await pwRequest.post(`${API_BASE_URL}/api/dev/token`, {
+    data: { institutionId },
+  });
+  const { token } = await tokenRes.json();
+  await page.evaluate(({ instId, opId, authToken }) => {
+    localStorage.setItem('x-operator-institution-id', instId);
+    localStorage.setItem('x-operator-id', opId);
+    localStorage.setItem('ghostbroker-auth-token', authToken);
+  }, { instId: institutionId, opId: operatorId, authToken: token });
+}
+
 test.describe('Dashboard Privacy Guardrails', () => {
   test.beforeEach(async ({ page }) => {
     // Reset and seed database
@@ -17,13 +31,10 @@ test.describe('Dashboard Privacy Guardrails', () => {
     await seedCompletedTradeAndReceipt();
   });
 
-  test('should hide trades from unrelated institution and prevent privacy leaks', async ({ page }) => {
+  test('should hide trades from unrelated institution and prevent privacy leaks', async ({ page, request: pwRequest }) => {
     // Set operator to Unrelated Institution
     await page.goto('/');
-    await page.evaluate((instId) => {
-      localStorage.setItem('x-operator-institution-id', instId);
-      localStorage.setItem('x-operator-id', 'operator:e2e-unrelated');
-    }, us3UnrelatedInstitutionId);
+    await setAuthContext(page, pwRequest, us3UnrelatedInstitutionId, 'operator:e2e-unrelated');
 
     await page.reload();
 
@@ -35,13 +46,10 @@ test.describe('Dashboard Privacy Guardrails', () => {
     await assertNoPrivacyLeaks(page);
   });
 
-  test('should deny receipt decryption for unrelated institution and render safe error', async ({ page }) => {
+  test('should deny receipt decryption for unrelated institution and render safe error', async ({ page, request: pwRequest }) => {
     // 1. Authenticate as Buyer first to open the receipt drawer
     await page.goto('/');
-    await page.evaluate((instId) => {
-      localStorage.setItem('x-operator-institution-id', instId);
-      localStorage.setItem('x-operator-id', 'operator:e2e-buyer');
-    }, us3BuyerInstitutionId);
+    await setAuthContext(page, pwRequest, us3BuyerInstitutionId, 'operator:e2e-buyer');
     await page.reload();
 
     // Open receipt drawer
@@ -51,10 +59,7 @@ test.describe('Dashboard Privacy Guardrails', () => {
     await expect(page.getByTestId('receipt-drawer')).toBeVisible();
 
     // 2. Change operator context in localStorage to unrelated institution
-    await page.evaluate((instId) => {
-      localStorage.setItem('x-operator-institution-id', instId);
-      localStorage.setItem('x-operator-id', 'operator:e2e-unrelated');
-    }, us3UnrelatedInstitutionId);
+    await setAuthContext(page, pwRequest, us3UnrelatedInstitutionId, 'operator:e2e-unrelated');
 
     // 3. Directly load/request the receipt endpoint as the unrelated operator
     // Since the drawer is open, a reload will trigger a fetch using the new credentials

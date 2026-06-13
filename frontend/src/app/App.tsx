@@ -361,11 +361,9 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
       <main className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
         <PortfolioCard
           institutionId={session.institution.id}
-          token={session.token}
         />
         <PortfolioHistory
           institutionId={session.institution.id}
-          token={session.token}
         />
       </main>
 

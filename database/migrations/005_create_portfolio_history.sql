@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS public.portfolio_history (
   asset_code text NOT NULL,
   delta numeric(40, 8) NOT NULL,
   balance_after numeric(40, 8) NOT NULL,
-  change_type text NOT NULL CHECK (change_type = ANY (ARRAY['settlement_buy'::text, 'settlement_sell'::text, 'adjustment'::text, 'seed'::text])),
+  change_type text NOT NULL CHECK (change_type = ANY (ARRAY['settlement_buy'::text, 'settlement_sell'::text, 'adjustment'::text, 'import'::text])),
   reference_type text DEFAULT NULL,
   reference_id text DEFAULT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),

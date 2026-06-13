@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { apiClient } from '../services/api-client';
 import {
   Wallet01Icon,
   BitcoinIcon,
   EthereumIcon,
   Dollar01Icon,
-  AppleIcon,
   DatabaseIcon,
   LockIcon,
   AlertCircleIcon
@@ -21,12 +21,26 @@ export interface Portfolio {
   holdings: PortfolioHolding[];
 }
 
-interface PortfolioCardProps {
-  institutionId: string;
-  token: string;
+function isStableAsset(asset: string): boolean {
+  return asset === 'USDC' || asset === 'USD' || asset === 'USDT';
 }
 
-export function PortfolioCard({ institutionId, token }: PortfolioCardProps): React.JSX.Element {
+function assetLabel(asset: string): string {
+  switch (asset) {
+    case 'WBTC': return 'WBTC';
+    case 'SEPOLIAETH': return 'SepoliaETH';
+    case 'USDC': return 'USDC';
+    case 'USD': return 'USD';
+    case 'USDT': return 'USDT';
+    default: return asset;
+  }
+}
+
+interface PortfolioCardProps {
+  institutionId: string;
+}
+
+export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.Element {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,15 +52,7 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
       setIsLoading(true);
       setError(null);
       try {
-        const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
-        const res = await fetch(`${API_BASE_URL}/api/portfolios/${institutionId}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json() as Portfolio;
+        const data = await apiClient.getPortfolio(institutionId);
         if (!cancelled) setPortfolio(data);
       } catch (err: any) {
         if (!cancelled) setError(err.message ?? 'Failed to load portfolio');
@@ -57,10 +63,10 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
 
     fetchPortfolio();
     return () => { cancelled = true; };
-  }, [institutionId, token]);
+  }, [institutionId]);
 
   const formatBalance = (value: number, asset: string) => {
-    if (asset === 'USD') {
+    if (isStableAsset(asset)) {
       return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
     return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
@@ -68,10 +74,11 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
 
   const getAssetIcon = (asset: string) => {
     switch (asset) {
-      case 'USD': return <Dollar01Icon size={16} style={{ color: 'var(--color-accent)' }} />;
-      case 'BTC': return <BitcoinIcon size={16} style={{ color: 'var(--color-accent)' }} />;
-      case 'ETH': return <EthereumIcon size={16} style={{ color: 'var(--color-accent)' }} />;
-      case 'AAPL': return <AppleIcon size={16} style={{ color: 'var(--color-accent)' }} />;
+      case 'WBTC': return <BitcoinIcon size={16} style={{ color: 'var(--color-accent)' }} />;
+      case 'SEPOLIAETH': return <EthereumIcon size={16} style={{ color: 'var(--color-accent)' }} />;
+      case 'USDC':
+      case 'USD':
+      case 'USDT': return <Dollar01Icon size={16} style={{ color: 'var(--color-accent)' }} />;
       default: return <DatabaseIcon size={16} style={{ color: 'var(--color-accent)' }} />;
     }
   };
@@ -101,7 +108,10 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-xl)', gap: 'var(--spacing-sm)' }}>
         <Wallet01Icon size={32} style={{ opacity: 0.5, color: 'var(--color-text-muted)' }} />
         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-          No portfolio data
+          Awaiting portfolio snapshot
+        </div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', maxWidth: '22rem' }}>
+          Balances are loaded from a Sepolia custody or testnet snapshot. T3N operational credits are tracked separately.
         </div>
       </div>
     );
@@ -110,8 +120,11 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
   return (
     <div className="card">
       <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Institution Portfolio
+        <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Mirrored Portfolio
       </h2>
+      <div style={{ marginBottom: 'var(--spacing-sm)', fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+        Tradeable Sepolia assets mirrored from custody or a signed snapshot.
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
         {portfolio.holdings.map((holding) => (
           <div
@@ -127,7 +140,7 @@ export function PortfolioCard({ institutionId, token }: PortfolioCardProps): Rea
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
               <span style={{ display: 'flex', alignItems: 'center' }}>{getAssetIcon(holding.assetCode)}</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                {holding.assetCode}
+                {assetLabel(holding.assetCode)}
               </span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>

@@ -1,6 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
+import { issueOperatorSessionToken } from "../../auth/session-token.js";
 import type { AgentAdmissionService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import {
@@ -31,9 +32,15 @@ describe("POST /api/agents/admit contract", () => {
     };
     const app = createApp(buildBackendTestEnv(), buildServices(agentService));
 
+    const token = issueOperatorSessionToken({
+      secret: "development-only-auth-session-secret-change-before-production",
+      did: "did:t3n:operator:us1",
+      institutionId: us1OperatorInstitutionId,
+    });
+
     const response = await request(app)
       .post("/api/agents/admit")
-      .set("x-operator-institution-id", us1OperatorInstitutionId)
+      .set("Authorization", `Bearer ${token}`)
       .send(buildAdmitAgentRequest())
       .expect(200);
 
@@ -56,9 +63,15 @@ describe("POST /api/agents/admit contract", () => {
       }),
     );
 
+    const token = issueOperatorSessionToken({
+      secret: "development-only-auth-session-secret-change-before-production",
+      did: "did:t3n:operator:us1",
+      institutionId: us1OperatorInstitutionId,
+    });
+
     const response = await request(app)
       .post("/api/agents/admit")
-      .set("x-operator-institution-id", us1OperatorInstitutionId)
+      .set("Authorization", `Bearer ${token}`)
       .send(
         buildAdmitAgentRequest({
           institutionId: "00000000-0000-4000-8000-000000000102",

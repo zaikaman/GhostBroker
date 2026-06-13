@@ -6,6 +6,7 @@ export interface OperatorSessionClaims {
   did: string;
   institutionId: string;
   operatorId: string;
+  walletAddress?: string;
   iat: number;
   exp: number;
 }
@@ -15,6 +16,7 @@ const claimsSchema = z.object({
   did: z.string().min(1),
   institutionId: z.string().uuid(),
   operatorId: z.string().min(1),
+  walletAddress: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
   iat: z.number().int().positive(),
   exp: z.number().int().positive(),
 });
@@ -35,6 +37,7 @@ export function issueOperatorSessionToken(params: {
   secret: string;
   did: string;
   institutionId: string;
+  walletAddress?: string;
   ttlSeconds?: number;
 }): string {
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -43,6 +46,7 @@ export function issueOperatorSessionToken(params: {
     did: params.did,
     institutionId: params.institutionId,
     operatorId: `did:${params.did}`,
+    walletAddress: params.walletAddress,
     iat: issuedAt,
     exp: issuedAt + (params.ttlSeconds ?? 60 * 60 * 8),
   };

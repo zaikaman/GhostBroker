@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
 import type { AgentIdentityVerifier } from "@ghostbroker/t3-enclave";
+import { logger } from "../logging/logger.js";
 import { PublicError } from "../errors/public-error.js";
 import type {
   AuthChallengeResponse,
@@ -7,8 +8,8 @@ import type {
   AuthSessionResponse,
 } from "../models/auth.js";
 import type { Institution } from "../models/institution.js";
-import type { PortfolioService } from "../services/portfolio.service.js";
 import { createOpaqueId, issueOperatorSessionToken } from "../auth/session-token.js";
+import type { WalletPortfolioSyncService } from "./sepolia-portfolio-sync.service.js";
 
 interface ChallengeRecord {
   did: string;
@@ -38,33 +39,36 @@ function hash(value: string): string {
 }
 
 function walletDisplayName(did: string): string {
-  const addressMatch = did.match(/:0x([0-9a-fA-F]{6,})/u);
-  if (addressMatch) {
-    return `Wallet 0x${addressMatch[1]!.toLowerCase().slice(0, 6)}`;
+  const walletAddress = extractWalletAddressFromDid(did);
+  if (walletAddress) {
+    return `Wallet ${walletAddress.slice(0, 8)}`;
   }
   const shortDid = did.length > 24 ? `${did.slice(0, 20)}...` : did;
   return `Wallet ${shortDid}`;
 }
 
+function extractWalletAddressFromDid(did: string): string | undefined {
+  const addressMatch = did.match(/:(0x[0-9a-fA-F]{40})$/u);
+  return addressMatch?.[1]?.toLowerCase();
+}
+
 export class DidAuthService implements AuthSessionService {
-
-
   public constructor(params: {
     institutions: AuthInstitutionRepository;
     identityVerifier: AgentIdentityVerifier;
-    portfolioService?: PortfolioService;
+    walletPortfolioSyncService?: WalletPortfolioSyncService;
     sessionSecret: string;
   }) {
     this.institutions = params.institutions;
     this.identityVerifier = params.identityVerifier;
-    this.portfolioService = params.portfolioService;
+    this.walletPortfolioSyncService = params.walletPortfolioSyncService;
     this.sessionSecret = params.sessionSecret;
   }
 
   private readonly challenges = new Map<string, ChallengeRecord>();
   private readonly institutions: AuthInstitutionRepository;
   private readonly identityVerifier: AgentIdentityVerifier;
-  private readonly portfolioService: PortfolioService | undefined;
+  private readonly walletPortfolioSyncService: WalletPortfolioSyncService | undefined;
   private readonly sessionSecret: string;
 
   private async findOrCreateInstitution(did: string): Promise<Institution> {
@@ -78,22 +82,23 @@ export class DidAuthService implements AuthSessionService {
     }
 
     try {
+      const metadata: Record<string, unknown> = {
+        source: "wallet_auth",
+        type: "self_registered",
+      };
+
+      const connectedWalletAddress = extractWalletAddressFromDid(did);
+      if (connectedWalletAddress) {
+        metadata.connectedWalletAddress = connectedWalletAddress;
+      }
+
       const institution = await this.institutions.createInstitution({
         legalName: walletDisplayName(did),
         displayName: walletDisplayName(did),
         settlementProfileRef: "wallet:default",
         t3TenantDid: did,
-        metadata: { source: "wallet_auth", type: "self_registered" },
+        metadata,
       });
-
-      // Seed initial portfolio for newly self-registered institution
-      if (this.portfolioService) {
-        await this.portfolioService
-          .seedInitialPortfolio(institution.id)
-          .catch(() => {
-            // Portfolio seeding is best-effort; don't fail auth
-          });
-      }
 
       return institution;
     } catch {
@@ -174,10 +179,33 @@ export class DidAuthService implements AuthSessionService {
 
     const institution = await this.findOrCreateInstitution(request.did);
 
+    const connectedWalletAddress =
+      request.walletAddress ?? extractWalletAddressFromDid(request.did);
+
+    // Sync portfolio from Sepolia on authentication
+    if (connectedWalletAddress && this.walletPortfolioSyncService) {
+      try {
+        await this.walletPortfolioSyncService.syncInstitutionPortfolio({
+          institutionId: institution.id,
+          walletAddress: connectedWalletAddress,
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+            institutionId: institution.id,
+            walletAddress: connectedWalletAddress,
+          },
+          "Failed to sync Sepolia wallet portfolio.",
+        );
+      }
+    }
+
     const token = issueOperatorSessionToken({
       secret: this.sessionSecret,
       did: request.did,
       institutionId: institution.id,
+      walletAddress: connectedWalletAddress,
     });
     const expiresAt = new Date(Date.now() + 60 * 60 * 8 * 1000).toISOString();
 

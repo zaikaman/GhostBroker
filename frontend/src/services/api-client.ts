@@ -68,6 +68,29 @@ export interface CompletedTrade {
   receiptIds: string[];
 }
 
+export interface PortfolioHolding {
+  assetCode: string;
+  balance: number;
+  locked: number;
+}
+
+export interface Portfolio {
+  institutionId: string;
+  holdings: PortfolioHolding[];
+}
+
+export interface PortfolioHistoryEntry {
+  id: string;
+  institutionId: string;
+  assetCode: string;
+  delta: number;
+  balanceAfter: number;
+  changeType: 'settlement_buy' | 'settlement_sell' | 'adjustment' | 'import';
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+}
+
 export interface AuditReceipt {
   id: string;
   completedTradeId: string;
@@ -125,6 +148,35 @@ const getOperatorHeaders = (): Record<string, string> => {
   };
 };
 
+function buildOperatorRequestInit(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers ?? {});
+  headers.set('Accept', headers.get('Accept') ?? 'application/json');
+
+  for (const [key, value] of Object.entries(getOperatorHeaders())) {
+    headers.set(key, value);
+  }
+
+  return {
+    ...init,
+    headers,
+  };
+}
+
+async function requestWithOperatorFallback(
+  input: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const performFetch = () => fetch(input, buildOperatorRequestInit(init));
+  let response = await performFetch();
+
+  if (response.status === 401 && localStorage.getItem(AUTH_TOKEN_KEY)) {
+    apiClient.clearAuthSession();
+    response = await performFetch();
+  }
+
+  return response;
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let errorCode: RedactedErrorCode | 'request_failed' = 'request_failed';
@@ -169,8 +221,6 @@ export const apiClient = {
   clearAuthSession(): void {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     localStorage.removeItem(AUTH_SESSION_KEY);
-    localStorage.removeItem('x-operator-institution-id');
-    localStorage.removeItem('x-operator-id');
   },
 
   getAuthSession(): AuthSession | null {
@@ -275,26 +325,18 @@ export const apiClient = {
   },
 
   async admitAgent(req: AdmitAgentRequest): Promise<AgentAdmission> {
-    const res = await fetch(`${API_BASE_URL}/api/agents/admit`, {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/admit`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        ...getOperatorHeaders(),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     });
     return handleResponse<AgentAdmission>(res);
   },
 
   async submitIntent(req: EncryptedIntentRequest): Promise<IntentAccepted> {
-    const res = await fetch(`${API_BASE_URL}/api/agents/intents`, {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/intents`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        ...getOperatorHeaders(),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     });
     return handleResponse<IntentAccepted>(res);
@@ -305,22 +347,34 @@ export const apiClient = {
     if (from) url.searchParams.append('from', from);
     if (to) url.searchParams.append('to', to);
 
-    const res = await fetch(url.toString(), {
-      headers: {
-        'Accept': 'application/json',
-        ...getOperatorHeaders(),
-      },
+    const res = await requestWithOperatorFallback(url.toString(), {
+      headers: {},
     });
     return handleResponse<{ items: CompletedTrade[] }>(res);
   },
 
+  async getPortfolio(institutionId: string): Promise<Portfolio> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/portfolios/${institutionId}`,
+    );
+    return handleResponse<Portfolio>(res);
+  },
+
+  async getPortfolioHistory(
+    institutionId: string,
+    limit = 50,
+  ): Promise<PortfolioHistoryEntry[]> {
+    const url = new URL(`${API_BASE_URL}/api/portfolios/${institutionId}/history`);
+    if (limit !== undefined) {
+      url.searchParams.set('limit', String(limit));
+    }
+
+    const res = await requestWithOperatorFallback(url.toString());
+    return handleResponse<PortfolioHistoryEntry[]>(res);
+  },
+
   async getReceipt(receiptId: string): Promise<AuditReceipt> {
-    const res = await fetch(`${API_BASE_URL}/api/receipts/${receiptId}`, {
-      headers: {
-        'Accept': 'application/json',
-        ...getOperatorHeaders(),
-      },
-    });
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/receipts/${receiptId}`);
     return handleResponse<AuditReceipt>(res);
   },
 };

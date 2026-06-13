@@ -53,11 +53,10 @@ describe("operator auth bearer sessions", () => {
     expect(response.body.authorityRef).toBe("authority:session:test");
   });
 
-  it("rejects unsigned header fallback in production", async () => {
+  it("rejects requests without a Bearer token", async () => {
     const app = createApp(
       {
         ...buildBackendTestEnv(),
-        NODE_ENV: "production",
         AUTH_SESSION_SECRET: authSecret,
       },
       buildServices({
@@ -71,7 +70,6 @@ describe("operator auth bearer sessions", () => {
 
     const response = await request(app)
       .post("/api/agents/admit")
-      .set("x-operator-institution-id", us1OperatorInstitutionId)
       .send(buildAdmitAgentRequest())
       .expect(401);
 

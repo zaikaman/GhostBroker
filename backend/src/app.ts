@@ -47,6 +47,7 @@ import {
   SupabaseSettlementRepository,
 } from "./services/settlement.service.js";
 import { PortfolioService } from "./services/portfolio.service.js";
+import { SepoliaEtherscanPortfolioSyncService, type WalletPortfolioSyncService } from "./services/sepolia-portfolio-sync.service.js";
 import { MatchingOrchestrator } from "./services/matching-orchestrator.js";
 import { telemetryBus } from "./services/telemetry-bus.js";
 import {
@@ -89,6 +90,7 @@ const publicErrorHandler: ErrorRequestHandler = (error, _request, response, _nex
 export interface BackendServices {
   institutionService: InstitutionManagementService;
   portfolioService: PortfolioService;
+  walletPortfolioSyncService?: WalletPortfolioSyncService;
   agentService: AgentAdmissionService;
   hiddenIntentService?: HiddenIntentSubmissionService;
   settlementService?: SettlementService;
@@ -123,7 +125,21 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     new DashboardDelegationAgentAuthClient(t3NetworkClient),
   );
   const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
-  const portfolioService = new PortfolioService(supabase as never);
+  const portfolioService = new PortfolioService(
+    supabase as never,
+    env.SETTLEMENT_ASSET_CODE,
+  );
+
+  const walletPortfolioSyncService =
+    env.ETHERSCAN_API_KEY &&
+    env.SEPOLIA_WBTC_CONTRACT_ADDRESS &&
+    env.SEPOLIA_USDC_CONTRACT_ADDRESS
+      ? new SepoliaEtherscanPortfolioSyncService(portfolioService, {
+          apiKey: env.ETHERSCAN_API_KEY,
+          wbtcContractAddress: env.SEPOLIA_WBTC_CONTRACT_ADDRESS,
+          usdcContractAddress: env.SEPOLIA_USDC_CONTRACT_ADDRESS,
+        })
+      : undefined;
 
   const settlementService = new SettlementService(
     new SettlementCommandBuilder(authorizationFacade),
@@ -159,6 +175,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       new AdkTenantDidRegistry(t3NetworkClient),
     ),
     portfolioService,
+    ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
     agentService: new AgentService(
       authorizationFacade,
       authorityRevocationRepository,
@@ -178,7 +195,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
-      portfolioService,
+      ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
       sessionSecret:
         env.AUTH_SESSION_SECRET ??
         "development-only-auth-session-secret-change-before-production",
@@ -205,7 +222,7 @@ export function createApp(
   app.use(
     "/api",
     operatorAuthMiddleware(env),
-    createPortfoliosRouter(services.portfolioService),
+    createPortfoliosRouter(services.portfolioService, services.walletPortfolioSyncService),
   );
   app.use(
     "/api",

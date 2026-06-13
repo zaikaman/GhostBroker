@@ -1,6 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
+import { issueOperatorSessionToken } from "../../auth/session-token.js";
 import type { AgentAdmissionService } from "../../services/agent.service.js";
 import type { HiddenIntentSubmissionService } from "../../services/hidden-intent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
@@ -41,9 +42,15 @@ describe("POST /api/agents/intents contract", () => {
       }),
     );
 
+    const token = issueOperatorSessionToken({
+      secret: "development-only-auth-session-secret-change-before-production",
+      did: "did:t3n:operator:us2",
+      institutionId: us2InstitutionId,
+    });
+
     const response = await request(app)
       .post("/api/agents/intents")
-      .set("x-operator-institution-id", us2InstitutionId)
+      .set("Authorization", `Bearer ${token}`)
       .send(buildHiddenIntentRequest())
       .expect(202);
 

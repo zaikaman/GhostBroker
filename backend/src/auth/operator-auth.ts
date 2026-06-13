@@ -6,6 +6,8 @@ import { verifyOperatorSessionToken } from "./session-token.js";
 export interface OperatorAuthContext {
   operatorId: string;
   institutionId: string;
+  did?: string;
+  walletAddress?: string;
 }
 
 export const operatorAuthLocalKey = "operatorAuth";
@@ -21,12 +23,6 @@ function readBearerToken(request: Request): string | undefined {
   return match?.[1]?.trim();
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-    value,
-  );
-}
-
 export function operatorAuthMiddleware(
   env?: Pick<BackendEnv, "NODE_ENV" | "AUTH_SESSION_SECRET">,
 ): RequestHandler {
@@ -36,37 +32,22 @@ export function operatorAuthMiddleware(
       env?.AUTH_SESSION_SECRET ??
       "development-only-auth-session-secret-change-before-production";
 
-    if (token && sessionSecret) {
-      const claims = verifyOperatorSessionToken(token, sessionSecret);
-
-      if (!claims) {
-        next(new PublicError("authorization_failed", 401));
-        return;
-      }
-
-      response.locals[operatorAuthLocalKey] = {
-        institutionId: claims.institutionId,
-        operatorId: claims.operatorId,
-      } satisfies OperatorAuthContext;
-      next();
-      return;
-    }
-
-    if (env?.NODE_ENV === "production") {
+    if (!token || !sessionSecret) {
       next(new PublicError("authorization_failed", 401));
       return;
     }
 
-    const institutionId = readHeader(request, "x-operator-institution-id");
-
-    if (!institutionId || !isUuid(institutionId)) {
+    const claims = verifyOperatorSessionToken(token, sessionSecret);
+    if (!claims) {
       next(new PublicError("authorization_failed", 401));
       return;
     }
 
     response.locals[operatorAuthLocalKey] = {
-      institutionId,
-      operatorId: readHeader(request, "x-operator-id") ?? "operator:unattributed",
+      institutionId: claims.institutionId,
+      operatorId: claims.operatorId,
+      did: claims.did,
+      walletAddress: claims.walletAddress,
     } satisfies OperatorAuthContext;
     next();
   };

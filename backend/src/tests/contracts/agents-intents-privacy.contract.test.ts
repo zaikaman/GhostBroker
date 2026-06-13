@@ -1,6 +1,7 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type BackendServices } from "../../app.js";
+import { issueOperatorSessionToken } from "../../auth/session-token.js";
 import {
   buildBackendTestEnv,
   buildHiddenIntentRequest,
@@ -27,6 +28,12 @@ const services: BackendServices = {
 };
 
 describe("POST /api/agents/intents privacy contract", () => {
+  const token = issueOperatorSessionToken({
+    secret: "development-only-auth-session-secret-change-before-production",
+    did: "did:t3n:operator:us2",
+    institutionId: us2InstitutionId,
+  });
+
   it.each(["asset", "side", "quantity", "price"] as const)(
     "rejects plaintext %s fields",
     async (field) => {
@@ -34,7 +41,7 @@ describe("POST /api/agents/intents privacy contract", () => {
 
       const response = await request(app)
         .post("/api/agents/intents")
-        .set("x-operator-institution-id", us2InstitutionId)
+        .set("Authorization", `Bearer ${token}`)
         .send({
           ...buildHiddenIntentRequest(),
           [field]: "SHOULD_NOT_BE_ACCEPTED",

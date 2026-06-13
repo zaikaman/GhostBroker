@@ -23,6 +23,7 @@ export function buildBackendTestEnv(
     T3_TENANT_DID: "did:t3n:institution:us2",
     T3_MATCH_CONTRACT_ID: "match-contract-us2",
     RECEIPT_KEY_VERSION: "receipt-key-v1",
+    SETTLEMENT_ASSET_CODE: "USDC",
     ...overrides,
   };
 }
@@ -36,7 +37,7 @@ export function buildHiddenIntentRequest(
     encryptedIntentEnvelope: us2EncryptedEnvelope,
     authorityRef: us2AuthorityRef,
     settlementMetadata: {
-      assetCode: "BTC",
+      assetCode: "WBTC",
       side: "buy",
       quantity: 100,
       price: 45000,
@@ -59,7 +60,7 @@ export function buildHiddenIntentRequestForSide(
         ? "did:t3n:agent:buyer-us2"
         : "did:t3n:agent:seller-us2",
     settlementMetadata: {
-      assetCode: "BTC",
+      assetCode: "WBTC",
       side,
       quantity: 100,
       price: side === "buy" ? 47000 : 43000,

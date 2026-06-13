@@ -57,6 +57,10 @@ const envSchema = z.object({
   T3_TENANT_DID: z.string().min(1).optional(),
   T3_MATCH_CONTRACT_ID: z.string().min(1).optional(),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
+  SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
+  ETHERSCAN_API_KEY: z.string().min(1).optional(),
+  SEPOLIA_WBTC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
+  SEPOLIA_USDC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
   AUTH_SESSION_SECRET: z.string().min(32).optional(),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
 });
