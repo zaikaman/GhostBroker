@@ -67,7 +67,57 @@ function AgentDeployView({ session }: { session: AuthSession }): React.JSX.Eleme
       }
     };
   }, []);
-  return <AgentDeploymentGuide session={session} onBack={() => navigate('/dashboard')} />;
+
+  return (
+    <div className="dashboard-v2-container">
+      {/* 1. Background Video */}
+      <div className="video-background-container">
+        <video
+          ref={videoRef}
+          className="video-background"
+          muted
+          loop
+          playsInline
+          autoPlay
+        />
+      </div>
+
+      {/* 2. Overlays */}
+      <div className="overlay-left-to-right" />
+      <div className="overlay-bottom-up" />
+
+      {/* 4. Central Glow SVG */}
+      <svg
+        className="central-glow-svg"
+        viewBox="0 0 1000 400"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <defs>
+          <filter id="glowBlur" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="25" />
+          </filter>
+        </defs>
+        <ellipse
+          cx="500"
+          cy="100"
+          rx="350"
+          ry="80"
+          fill="url(#glowGradient)"
+          filter="url(#glowBlur)"
+          opacity="0.35"
+        />
+        <linearGradient id="glowGradient" x1="150" y1="100" x2="850" y2="100" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#00f2fe" />
+          <stop offset="50%" stopColor="#5ed29c" />
+          <stop offset="100%" stopColor="#0575e6" />
+        </linearGradient>
+      </svg>
+
+      <AgentDeploymentGuide session={session} onBack={() => navigate('/dashboard')} />
+    </div>
+  );
 }
 
 function DashboardView({ session }: { session: AuthSession }): React.JSX.Element {

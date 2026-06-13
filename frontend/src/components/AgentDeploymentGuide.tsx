@@ -1,5 +1,27 @@
 import React, { useState, useCallback } from 'react';
 import { type AuthSession } from '../services/api-client';
+import {
+  EyeIcon,
+  Key01Icon,
+  LockKeyIcon,
+  CodeIcon,
+  Package01Icon,
+  Chart01Icon,
+  BankIcon,
+  Shield01Icon,
+  LockIcon,
+  CheckmarkCircle01Icon,
+  CancelCircleIcon,
+  ClipboardIcon,
+  Wrench01Icon,
+  Idea01Icon,
+  Settings01Icon,
+  CloudIcon,
+  AlertCircleIcon,
+  Plug01Icon,
+  Link01Icon,
+  ScrollIcon
+} from 'hugeicons-react';
 
 interface AgentDeploymentGuideProps {
   session: AuthSession;
@@ -8,14 +30,31 @@ interface AgentDeploymentGuideProps {
 
 type Step = 'overview' | 'credentials' | 'authenticate' | 'write-agent' | 'docker-deploy' | 'monitor';
 
-const STEPS: { id: Step; label: string; icon: string }[] = [
-  { id: 'overview', label: 'Overview', icon: '🔭' },
-  { id: 'credentials', label: 'Credentials', icon: '🔑' },
-  { id: 'authenticate', label: 'Authenticate', icon: '🔐' },
-  { id: 'write-agent', label: 'Write Agent', icon: '🤖' },
-  { id: 'docker-deploy', label: 'Deploy', icon: '🚢' },
-  { id: 'monitor', label: 'Monitor', icon: '📡' },
+const STEPS: { id: Step; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'credentials', label: 'Credentials' },
+  { id: 'authenticate', label: 'Authenticate' },
+  { id: 'write-agent', label: 'Write Agent' },
+  { id: 'docker-deploy', label: 'Deploy' },
+  { id: 'monitor', label: 'Monitor' },
 ];
+
+const getStepIcon = (id: Step, size = 16) => {
+  switch (id) {
+    case 'overview':
+      return <EyeIcon size={size} />;
+    case 'credentials':
+      return <Key01Icon size={size} />;
+    case 'authenticate':
+      return <LockKeyIcon size={size} />;
+    case 'write-agent':
+      return <CodeIcon size={size} />;
+    case 'docker-deploy':
+      return <Package01Icon size={size} />;
+    case 'monitor':
+      return <Chart01Icon size={size} />;
+  }
+};
 
 function CodeBlock({ code, language = 'bash' }: { code: string; language?: string }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
@@ -30,8 +69,16 @@ function CodeBlock({ code, language = 'bash' }: { code: string; language?: strin
     <div className="deploy-code-block">
       <div className="deploy-code-header">
         <span className="deploy-code-lang">{language}</span>
-        <button type="button" className="deploy-code-copy-btn" onClick={handleCopy}>
-          {copied ? '✓ Copied' : '📋 Copy'}
+        <button type="button" className="deploy-code-copy-btn" onClick={handleCopy} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          {copied ? (
+            <>
+              <CheckmarkCircle01Icon size={12} style={{ color: 'var(--color-success)' }} /> Copied
+            </>
+          ) : (
+            <>
+              <ClipboardIcon size={12} /> Copy
+            </>
+          )}
         </button>
       </div>
       <pre className="deploy-code-body"><code>{code}</code></pre>
@@ -53,8 +100,8 @@ function CopyField({ label, value }: { label: string; value: string }): React.JS
       <span className="deploy-copy-label">{label}</span>
       <div className="deploy-copy-value-row">
         <code className="deploy-copy-value">{value}</code>
-        <button type="button" className="deploy-code-copy-btn" onClick={handleCopy}>
-          {copied ? '✓' : '📋'}
+        <button type="button" className="deploy-code-copy-btn" onClick={handleCopy} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          {copied ? <CheckmarkCircle01Icon size={12} style={{ color: 'var(--color-success)' }} /> : <ClipboardIcon size={12} />}
         </button>
       </div>
     </div>
@@ -72,7 +119,7 @@ function StepIndicator({ currentStep }: { currentStep: Step }): React.JSX.Elemen
           className={`deploy-step-dot ${i === currentIndex ? 'active' : ''} ${i < currentIndex ? 'completed' : ''}`}
         >
           <div className="deploy-step-circle">
-            {i < currentIndex ? '✓' : step.icon}
+            {i < currentIndex ? <CheckmarkCircle01Icon size={14} /> : getStepIcon(step.id, 14)}
           </div>
           <span className="deploy-step-label">{step.label}</span>
           {i < STEPS.length - 1 && <div className={`deploy-step-line ${i < currentIndex ? 'filled' : ''}`} />}
@@ -95,33 +142,59 @@ function OverviewStep(): React.JSX.Element {
 
       <div className="deploy-arch-diagram">
         <div className="deploy-arch-node">
-          <div className="deploy-arch-icon">🏛️</div>
+          <div className="deploy-arch-icon">
+            <BankIcon size={24} style={{ color: 'var(--color-accent)' }} />
+          </div>
           <div className="deploy-arch-title">Your Institution</div>
           <div className="deploy-arch-desc">Runs an autonomous agent in your own infrastructure</div>
         </div>
         <div className="deploy-arch-arrow">↔</div>
         <div className="deploy-arch-node">
-          <div className="deploy-arch-icon">🛡️</div>
+          <div className="deploy-arch-icon">
+            <Shield01Icon size={24} style={{ color: 'var(--color-accent)' }} />
+          </div>
           <div className="deploy-arch-title">GhostBroker Platform</div>
           <div className="deploy-arch-desc">Secure enclave-based matching & settlement</div>
         </div>
         <div className="deploy-arch-arrow">↔</div>
         <div className="deploy-arch-node">
-          <div className="deploy-arch-icon">📊</div>
+          <div className="deploy-arch-icon">
+            <Chart01Icon size={24} style={{ color: 'var(--color-accent)' }} />
+          </div>
           <div className="deploy-arch-title">Observatory Console</div>
           <div className="deploy-arch-desc">Your dashboard — watch-only, no intervention</div>
         </div>
       </div>
 
       <div className="deploy-info-card">
-        <div className="deploy-info-header">🔒 What Your Agent Can Do</div>
-        <ul className="deploy-info-list">
-          <li>✅ Authenticate using your institution's GhostBroker credentials</li>
-          <li>✅ Submit encrypted trading intents (price, volume, direction)</li>
-          <li>✅ Listen for match settlement events via secure WebSocket</li>
-          <li>✅ Retrieve encrypted audit receipts for settled trades</li>
-          <li>❌ Cannot view other institutions' intents or positions</li>
-          <li>❌ No human override — once deployed, the agent operates autonomously</li>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <LockIcon size={16} style={{ color: 'var(--color-accent)' }} /> What Your Agent Can Do
+        </div>
+        <ul className="deploy-info-list no-bullet">
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
+            <span>Authenticate using your institution's GhostBroker credentials</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
+            <span>Submit encrypted trading intents (price, volume, direction)</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
+            <span>Listen for match settlement events via secure WebSocket</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
+            <span>Retrieve encrypted audit receipts for settled trades</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+            <span>Cannot view other institutions' intents or positions</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+            <span>No human override — once deployed, the agent operates autonomously</span>
+          </li>
         </ul>
       </div>
 
@@ -142,7 +215,9 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
       </p>
 
       <div className="deploy-info-card">
-        <div className="deploy-info-header">📋 Your Platform Credentials</div>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <ClipboardIcon size={16} style={{ color: 'var(--color-accent)' }} /> Your Platform Credentials
+        </div>
         <div className="deploy-credentials" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', marginTop: 'var(--spacing-md)' }}>
           <CopyField label="API Base URL" value={window.location.origin} />
           <CopyField label="Your DID" value={session.institution.t3TenantDid} />
@@ -151,7 +226,9 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
       </div>
 
       <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-md)' }}>
-        <div className="deploy-info-header">🛠️ Required Tools</div>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Wrench01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Required Tools
+        </div>
         <ul className="deploy-info-list">
           <li><strong>Node.js 20+</strong> — Runtime for the agent (or any language that speaks HTTP/WebSocket)</li>
           <li><strong>Docker</strong> — Recommended for production deployment</li>
@@ -160,7 +237,9 @@ function CredentialsStep({ session }: { session: AuthSession }): React.JSX.Eleme
       </div>
 
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
-        <strong>🔑 Generate an Agent Key:</strong> Run this locally to create a new keypair for your agent:
+        <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <Key01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Generate an Agent Key:
+        </strong> Run this locally to create a new keypair for your agent:
         <CodeBlock code="npx -y ethers@6 wallet create" />
         <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
           Save the private key — it will be used to sign authentication challenges. The corresponding 
@@ -223,8 +302,8 @@ function AuthenticateStep(): React.JSX.Element {
         </div>
       </div>
 
-      <h3 style={{ marginTop: 'var(--spacing-lg)', marginBottom: 'var(--spacing-sm)', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-        Quick Test with curl
+      <h3 style={{ marginTop: 'var(--spacing-lg)', marginBottom: 'var(--spacing-sm)', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <Settings01Icon size={16} /> Quick Test with curl
       </h3>
       <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-md)' }}>
         Replace <code>YOUR_DID</code> and <code>YOUR_SIGNATURE</code> with your actual values.
@@ -252,7 +331,9 @@ curl -s ${window.location.origin}/api/auth/verify \\
 # Returns: { token: "gb_session_...", institution: {...} }`} />
 
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
-        <strong>💡 Tip:</strong> Your agent should store the session token and include it as a Bearer token 
+        <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <Idea01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Tip:
+        </strong> Your agent should store the session token and include it as a Bearer token 
         in all subsequent requests: <code>Authorization: Bearer gb_session_...</code>
       </div>
     </div>
@@ -269,21 +350,23 @@ function WriteAgentStep({ session }: { session: AuthSession }): React.JSX.Elemen
       </p>
 
       <div className="deploy-tip-box" style={{ marginBottom: 'var(--spacing-md)' }}>
-        <strong>📦 Dependencies:</strong> You only need <code>ethers</code> for cryptographic signing:
+        <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <Package01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Dependencies:
+        </strong> You only need <code>ethers</code> for cryptographic signing:
         <CodeBlock code="npm install ethers" />
         The GhostBroker API is plain HTTP + WebSocket — no SDK required.
       </div>
 
       <CodeBlock code={`import { Wallet } from "ethers";
 
-// ─── Configuration ───────────────────────────────────────────
+// [CONFIG] Configuration
 const GHOSTBROKER_URL = "${window.location.origin}";
 const AGENT_DID = "${session.institution.t3TenantDid}";
-const AGENT_KEY = "0x...";  // ⚠️ Store in env vars / secrets manager
+const AGENT_KEY = "0x...";  // Store securely in env vars / secrets manager
 
 const agent = new Wallet(AGENT_KEY);
 
-// ─── Authenticate with DID Challenge-Response ───────────────
+// [AUTH] Authenticate with DID Challenge-Response
 async function authenticate() {
   // 1. Request a cryptographic challenge
   const { challengeId, challenge } = await fetch(
@@ -293,7 +376,6 @@ async function authenticate() {
   ).then(r => r.json());
 
   // 2. Sign the challenge with your agent's private key
-  //    (signMessage applies EIP-191 personal_sign wrapping automatically)
   const signature = await agent.signMessage(challenge);
 
   // 3. Verify signature and get session token
@@ -311,7 +393,7 @@ async function authenticate() {
   return token;
 }
 
-// ─── Listen for Settlement Events ────────────────────────────
+// [TELEMETRY] Listen for Settlement Events
 function listen(token: string) {
   const ws = new WebSocket(
     \`\${GHOSTBROKER_URL.replace("http", "ws")}/ws/telemetry\`
@@ -319,18 +401,18 @@ function listen(token: string) {
 
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: "subscribe", sessionToken: token }));
-    console.log("📡 Connected to telemetry stream");
+    console.log("[TELEMETRY] Connected to telemetry stream");
   };
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === "settlement_executed") {
-      console.log("🎯 Trade settled!", msg);
+      console.log("[SETTLEMENT] Trade settled!", msg);
     }
   };
 }
 
-// ─── Submit an Encrypted Intent ──────────────────────────────
+// [INTENT] Submit an Encrypted Intent
 async function submitIntent(token: string, encrypted: object) {
   const res = await fetch(\`\${GHOSTBROKER_URL}/api/agents/intents\`, {
     method: "POST",
@@ -346,24 +428,23 @@ async function submitIntent(token: string, encrypted: object) {
   return res.json();
 }
 
-// ─── Run ─────────────────────────────────────────────────────
+// [RUN] Run
 async function main() {
-  console.log("🔐 Authenticating...");
+  console.log("[AUTH] Authenticating...");
   const token = await authenticate();
-  console.log("✅ Authenticated — session acquired");
+  console.log("[AUTH] Authenticated — session acquired");
 
   listen(token);
 
-  // Example: submit a buy intent
-  // const intent = await submitIntent(token, { asset: "BTC", side: "buy", ... });
-
-  console.log("🤖 Agent ready — waiting for matches...");
+  console.log("[AGENT] Agent ready — waiting for matches...");
 }
 
 main().catch(console.error);`} />
 
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
-        <strong>⚙️ Customize:</strong> Replace the <code>AGENT_KEY</code> with your actual private key, then run:
+        <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <Settings01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Customize:
+        </strong> Replace the <code>AGENT_KEY</code> with your actual private key, then run:
         <CodeBlock code="npm install ethers && npx tsx agent.ts" />
       </div>
     </div>
@@ -432,15 +513,19 @@ docker compose up -d
 docker compose logs -f trading-agent`} />
 
       <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-lg)' }}>
-        <div className="deploy-info-header">☁️ Deployment Options</div>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <CloudIcon size={16} style={{ color: 'var(--color-accent)' }} /> Deployment Options
+        </div>
         <ul className="deploy-info-list">
           <li><strong>Your own VM</strong> — Any cloud provider (AWS EC2, GCP Compute, Azure VM, DigitalOcean)</li>
           <li><strong>Kubernetes</strong> — Deploy as a Deployment with secrets for private keys</li>
           <li><strong>Serverless</strong> — Not recommended; agents need persistent WebSocket connections</li>
         </ul>
-        <p style={{ marginTop: 'var(--spacing-md)', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-          ⚠️ <strong>Security:</strong> Never hardcode private keys. Use a secrets manager (HashiCorp Vault, AWS Secrets Manager, 
-          or Docker secrets).
+        <p style={{ marginTop: 'var(--spacing-md)', fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <AlertCircleIcon size={14} style={{ color: 'var(--color-error)' }} />
+          <span>
+            <strong>Security:</strong> Never hardcode private keys. Use a secrets manager (HashiCorp Vault, AWS Secrets Manager, or Docker secrets).
+          </span>
         </p>
       </div>
     </div>
@@ -457,28 +542,36 @@ function MonitorStep(): React.JSX.Element {
 
       <div className="deploy-monitor-grid">
         <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon">🟢</div>
+          <div className="deploy-monitor-icon">
+            <Plug01Icon size={24} style={{ color: 'var(--color-success)' }} />
+          </div>
           <div className="deploy-monitor-title">Connection Status</div>
           <div className="deploy-monitor-desc">
             Real-time telemetry link indicator. Shows whether your agent's WebSocket connection is active.
           </div>
         </div>
         <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon">📊</div>
+          <div className="deploy-monitor-icon">
+            <Chart01Icon size={24} style={{ color: 'var(--color-accent)' }} />
+          </div>
           <div className="deploy-monitor-title">Activity Feed</div>
           <div className="deploy-monitor-desc">
             Live stream of agent events: authentication, intent submission, settlement confirmations.
           </div>
         </div>
         <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon">🔗</div>
+          <div className="deploy-monitor-icon">
+            <Link01Icon size={24} style={{ color: 'var(--color-accent)' }} />
+          </div>
           <div className="deploy-monitor-title">Connected Agents</div>
           <div className="deploy-monitor-desc">
             Grid of all admitted agents for your institution with status badges.
           </div>
         </div>
         <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon">📜</div>
+          <div className="deploy-monitor-icon">
+            <ScrollIcon size={24} style={{ color: 'var(--color-accent)' }} />
+          </div>
           <div className="deploy-monitor-title">Trade History</div>
           <div className="deploy-monitor-desc">
             Completed trades with encrypted audit receipts. Decrypt individual receipts for regulatory proof.
@@ -487,28 +580,46 @@ function MonitorStep(): React.JSX.Element {
       </div>
 
       <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-lg)' }}>
-        <div className="deploy-info-header">🚫 What You Cannot Do (By Design)</div>
-        <ul className="deploy-info-list">
-          <li>❌ View other institutions' intents, orders, or positions</li>
-          <li>❌ Modify or cancel an agent's submitted intent</li>
-          <li>❌ Access the sealed matching core or settlement logic</li>
-          <li>❌ Decrypt receipts not belonging to your institution</li>
-          <li>❌ Intervene in active trades — the enclave is autonomous</li>
+        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <CancelCircleIcon size={16} style={{ color: 'var(--color-error)' }} /> What You Cannot Do (By Design)
+        </div>
+        <ul className="deploy-info-list no-bullet">
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+            <span>View other institutions' intents, orders, or positions</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+            <span>Modify or cancel an agent's submitted intent</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+            <span>Access the sealed matching core or settlement logic</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+            <span>Decrypt receipts not belonging to your institution</span>
+          </li>
+          <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <CancelCircleIcon size={14} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+            <span>Intervene in active trades — the enclave is autonomous</span>
+          </li>
         </ul>
       </div>
 
       <div style={{ marginTop: 'var(--spacing-lg)', textAlign: 'center', padding: 'var(--spacing-lg)' }}>
-        <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-md)' }}>
-          ✅ Your agent is now part of the GhostBroker dark pool. 
-          All matching and settlement happens automatically inside the secure enclave.
+        <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+          <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)' }} /> Your agent is now part of the GhostBroker dark pool. All matching and settlement happens automatically inside the secure enclave.
         </p>
-        <button type="button" className="btn btn-primary" onClick={() => window.location.hash = '#/dashboard'}>
-          🔭 Return to Observatory Console
+        <button type="button" className="btn btn-primary" onClick={() => window.location.hash = '#/dashboard'} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <EyeIcon size={14} /> Return to Observatory Console
         </button>
       </div>
 
       <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)', textAlign: 'center' }}>
-        💡 Allow <strong>~30 seconds</strong> after deployment for the first heartbeat to appear on the dashboard.
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <Idea01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Allow <strong>~30 seconds</strong> after deployment for the first heartbeat to appear on the dashboard.
+        </span>
       </div>
     </div>
   );

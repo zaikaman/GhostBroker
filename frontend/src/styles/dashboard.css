@@ -635,10 +635,7 @@
   font-size: 1.4rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  background: linear-gradient(135deg, #FFFFFF 0%, var(--color-accent) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--color-text-primary);
   margin-bottom: 2px;
 }
 
@@ -1325,3 +1322,90 @@
   color: var(--color-text-secondary);
   line-height: 1.6;
 }
+
+.deploy-info-list.no-bullet li::before {
+  display: none;
+}
+
+.deploy-info-list.no-bullet li {
+  padding-left: 0;
+}
+
+/* Glassmorphism styling overrides for deploy layout components inside dashboard-v2-container */
+.dashboard-v2-container .deploy-header,
+.dashboard-v2-container .deploy-steps-indicator,
+.dashboard-v2-container .deploy-content,
+.dashboard-v2-container .deploy-info-card,
+.dashboard-v2-container .deploy-tip-box,
+.dashboard-v2-container .deploy-nav,
+.dashboard-v2-container .deploy-arch-diagram,
+.dashboard-v2-container .deploy-flow-diagram,
+.dashboard-v2-container .deploy-flow-step,
+.dashboard-v2-container .deploy-code-block,
+.dashboard-v2-container .deploy-monitor-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.01) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: none !important;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 12px 35px rgba(0, 0, 0, 0.6) !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.dashboard-v2-container .deploy-header::before,
+.dashboard-v2-container .deploy-steps-indicator::before,
+.dashboard-v2-container .deploy-content::before,
+.dashboard-v2-container .deploy-info-card::before,
+.dashboard-v2-container .deploy-tip-box::before,
+.dashboard-v2-container .deploy-nav::before,
+.dashboard-v2-container .deploy-arch-diagram::before,
+.dashboard-v2-container .deploy-flow-diagram::before,
+.dashboard-v2-container .deploy-flow-step::before,
+.dashboard-v2-container .deploy-code-block::before,
+.dashboard-v2-container .deploy-monitor-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.2px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.01) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Ensure positioning context for content copy */
+.dashboard-v2-container .deploy-layout {
+  position: relative;
+  z-index: 10;
+  padding-top: 2rem !important;
+}
+
+.dashboard-v2-container .deploy-step-title {
+  color: #ffffff;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.dashboard-v2-container .deploy-step-desc {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.dashboard-v2-container .deploy-info-header {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.dashboard-v2-container .deploy-code-header {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.dashboard-v2-container .deploy-code-body {
+  color: rgba(255, 255, 255, 0.85);
+}
+
