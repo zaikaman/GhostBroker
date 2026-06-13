@@ -26,7 +26,8 @@ import {
   Link01Icon,
   AlertCircleIcon,
   ScrollIcon,
-  LockIcon
+  LockIcon,
+  RocketIcon
 } from 'hugeicons-react';
 
 function AgentDeployView({ session }: { session: AuthSession }): React.JSX.Element {
@@ -208,9 +209,9 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
               type="button"
               className="btn btn-secondary"
               onClick={() => navigate('/deploy')}
-              style={{ fontSize: '0.7rem', padding: '4px 10px', fontFamily: 'var(--font-mono)' }}
+              style={{ fontSize: '0.7rem', padding: '4px 10px', fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
-              🚀 Deploy Agent
+              <RocketIcon size={12} /> Deploy Agent
             </button>
           </div>
         </div>
