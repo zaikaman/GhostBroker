@@ -150,6 +150,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
   const matchingOrchestrator = new MatchingOrchestrator(
     matchContractClient,
     settlementService,
+    telemetryBus,
   );
 
   return {

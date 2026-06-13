@@ -46,4 +46,6 @@ export interface PendingIntent {
   side: "buy" | "sell";
   quantity: number;
   price: number;
+  /** When this intent was added to the pending queue */
+  sealedAt: string;
 }

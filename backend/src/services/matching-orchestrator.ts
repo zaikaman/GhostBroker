@@ -5,6 +5,12 @@ import type {
   SettlementService,
 } from "./settlement.service.js";
 import type { PendingIntent } from "../models/hidden-intent.js";
+import type { TelemetryBus } from "./telemetry-bus.js";
+
+/** Default TTL for pending intents: 5 minutes */
+const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
+/** Default interval for periodic cleanup sweeps: 30 seconds */
+const DEFAULT_CLEANUP_INTERVAL_MS = 30 * 1000;
 
 /**
  * Orchestrates intent matching and settlement.
@@ -13,18 +19,39 @@ import type { PendingIntent } from "../models/hidden-intent.js";
  * it tries to match it against pending intents from other institutions with
  * the same asset and opposite side. On match, it calls the TEE match contract
  * and triggers settlement.
+ *
+ * Pending intents that expire (TTL) are automatically evicted.
  */
 export class MatchingOrchestrator {
-  private readonly pendingIntents: PendingIntent[] = [];
   private readonly matchClient: MatchContractClient;
   private readonly settlementService: SettlementService;
+  private readonly telemetryBus: TelemetryBus;
+  private readonly intentTtlMs: number;
+  private readonly cleanupTimer: ReturnType<typeof setInterval>;
+  private pendingIntents: PendingIntent[] = [];
+  private evictedCount = 0;
 
   public constructor(
     matchClient: MatchContractClient,
     settlementService: SettlementService,
+    telemetryBus: TelemetryBus,
+    intentTtlMs: number = DEFAULT_INTENT_TTL_MS,
+    cleanupIntervalMs: number = DEFAULT_CLEANUP_INTERVAL_MS,
   ) {
     this.matchClient = matchClient;
     this.settlementService = settlementService;
+    this.telemetryBus = telemetryBus;
+    this.intentTtlMs = intentTtlMs;
+
+    // Start periodic cleanup sweep
+    this.cleanupTimer = setInterval(
+      () => this.evictExpired(),
+      cleanupIntervalMs,
+    );
+    // Allow the process to exit even if this interval is still active
+    if (this.cleanupTimer && typeof this.cleanupTimer === "object" && "unref" in this.cleanupTimer) {
+      (this.cleanupTimer as NodeJS.Timeout).unref();
+    }
   }
 
   /**
@@ -32,6 +59,8 @@ export class MatchingOrchestrator {
    * Adds to the pending queue and attempts to find a match.
    */
   public async onIntentSealed(intent: PendingIntent): Promise<void> {
+    // Sweep expired intents before adding the new one
+    this.evictExpired();
     this.pendingIntents.push(intent);
 
     // Try to match against each pending intent from other institutions
@@ -117,5 +146,50 @@ export class MatchingOrchestrator {
    */
   public pendingCount(): number {
     return this.pendingIntents.length;
+  }
+
+  /**
+   * Stop the periodic cleanup timer.
+   * Call this to release resources when the orchestrator is no longer needed.
+   */
+  public stop(): void {
+    clearInterval(this.cleanupTimer);
+  }
+
+  /**
+   * Get total number of intents evicted due to expiry.
+   */
+  public getEvictedCount(): number {
+    return this.evictedCount;
+  }
+
+  /**
+   * Remove intents that have exceeded the TTL.
+   * Called automatically on each onIntentSealed.
+   */
+  private evictExpired(): void {
+    const cutoff = Date.now() - this.intentTtlMs;
+    const evicted: PendingIntent[] = [];
+    this.pendingIntents = this.pendingIntents.filter((intent) => {
+      const isExpired = new Date(intent.sealedAt).getTime() <= cutoff;
+      if (isExpired) {
+        evicted.push(intent);
+      }
+      return !isExpired;
+    });
+
+    // Publish telemetry events for evicted intents
+    for (const expired of evicted) {
+      this.telemetryBus.publish({
+        institutionId: expired.institutionId,
+        type: "telemetry.processing.changed",
+        phase: "intent_expired",
+        severity: "warning",
+        correlationRef: expired.correlationRef,
+        agentId: expired.agentDid,
+      });
+    }
+
+    this.evictedCount += evicted.length;
   }
 }

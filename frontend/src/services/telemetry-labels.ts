@@ -107,6 +107,11 @@ const PHASE_LABELS: Record<TelemetryPhase, TelemetryLabelInfo> = {
     description: 'The secure hardware enclave is currently offline.',
     statusType: 'error',
   },
+  intent_expired: {
+    label: 'Intent Expired',
+    description: 'Unmatched intent TTL exceeded. Removed from pending queue without execution.',
+    statusType: 'warning',
+  },
 };
 
 /**

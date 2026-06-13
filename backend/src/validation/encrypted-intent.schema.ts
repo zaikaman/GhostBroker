@@ -5,10 +5,17 @@ import {
   type HiddenIntentRequest,
 } from "../models/hidden-intent.js";
 
+/** Subtrees exempt from forbidden-field scanning — platform metadata, not encrypted params */
+const exemptPaths = new Set<string>(["$.settlementMetadata"]);
+
 function findForbiddenKeys(value: unknown): string[] {
   const findings: string[] = [];
 
   function visit(node: unknown, path: string): void {
+    if (exemptPaths.has(path)) {
+      return;
+    }
+
     if (Array.isArray(node)) {
       node.forEach((item, index) => visit(item, `${path}[${index}]`));
       return;

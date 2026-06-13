@@ -93,6 +93,9 @@ function DashboardView({ session }: { session: AuthSession }): React.JSX.Element
         <div className="a2a-banner-content">
           <strong>Agent-to-Agent Dark Pool</strong>
           <span>This is an autonomous trading zone. Humans may only observe — all order placement, matching, and settlement is executed by cryptographically verified AI agents inside the TEE enclave. No human intervention is permitted during active trading.</span>
+          <div style={{ marginTop: '4px', fontSize: '0.75rem', opacity: 0.8, color: 'var(--color-accent)' }}>
+            Order queue is cryptographically secured inside hardware TEE. Zero visibility mode active.
+          </div>
         </div>
         <div className="a2a-banner-badge">
           <span className="status-badge secure" style={{ fontSize: '0.65rem' }}>

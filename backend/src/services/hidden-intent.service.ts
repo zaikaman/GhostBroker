@@ -79,6 +79,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         side: request.settlementMetadata.side,
         quantity: request.settlementMetadata.quantity,
         price: request.settlementMetadata.price,
+        sealedAt: sealed.sealedAt,
       }).catch((error: unknown) => {
         // Matching/settlement failures are non-blocking — intent is already sealed
         console.error(
