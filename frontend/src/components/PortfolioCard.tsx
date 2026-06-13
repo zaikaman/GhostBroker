@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../services/api-client';
+import { usePortfolioTelemetry } from '../hooks/usePortfolioTelemetry';
 import {
   Wallet01Icon,
   BitcoinIcon,
@@ -7,7 +8,8 @@ import {
   Dollar01Icon,
   DatabaseIcon,
   LockIcon,
-  AlertCircleIcon
+  AlertCircleIcon,
+  Refresh01Icon
 } from 'hugeicons-react';
 
 export interface PortfolioHolding {
@@ -45,25 +47,33 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  const { refreshKey, refresh } = usePortfolioTelemetry();
+
+  const fetchPortfolio = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await apiClient.getPortfolio(institutionId);
+      setPortfolio(data);
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to load portfolio');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [institutionId]);
+
   useEffect(() => {
     let cancelled = false;
 
-    async function fetchPortfolio() {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await apiClient.getPortfolio(institutionId);
-        if (!cancelled) setPortfolio(data);
-      } catch (err: any) {
-        if (!cancelled) setError(err.message ?? 'Failed to load portfolio');
-      } finally {
-        if (!cancelled) setIsLoading(false);
+    fetchPortfolio().catch(() => {
+      if (!cancelled) {
+        setError('Failed to load portfolio');
+        setIsLoading(false);
       }
-    }
+    });
 
-    fetchPortfolio();
     return () => { cancelled = true; };
-  }, [institutionId]);
+  }, [fetchPortfolio, refreshKey]);
 
   const formatBalance = (value: number, asset: string) => {
     if (isStableAsset(asset)) {
@@ -99,11 +109,25 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-lg)', gap: 'var(--spacing-sm)' }}>
         <AlertCircleIcon size={24} style={{ color: 'var(--color-error)' }} />
         <div style={{ fontSize: '0.8rem' }}>Portfolio unavailable</div>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={refresh}
+          style={{ fontSize: '0.7rem', padding: '4px 12px', fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+        >
+          <Refresh01Icon size={12} /> Retry
+        </button>
       </div>
     );
   }
 
-  if (!portfolio || portfolio.holdings.length === 0) {
+  const filteredHoldings = portfolio
+    ? portfolio.holdings.filter((holding) =>
+        ['SEPOLIAETH', 'WBTC', 'USDC'].includes(holding.assetCode.toUpperCase())
+      )
+    : [];
+
+  if (!portfolio || filteredHoldings.length === 0) {
     return (
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-xl)', gap: 'var(--spacing-sm)' }}>
         <Wallet01Icon size={32} style={{ opacity: 0.5, color: 'var(--color-text-muted)' }} />
@@ -119,14 +143,27 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
 
   return (
     <div className="card">
-      <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Mirrored Portfolio
-      </h2>
-      {/* <div style={{ marginBottom: 'var(--spacing-sm)', fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-sm)' }}>
+        <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+          <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Mirrored Portfolio
+        </h2>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={refresh}
+          disabled={isLoading}
+          style={{ fontSize: '0.7rem', padding: '4px 10px', fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: '4px', opacity: isLoading ? 0.5 : 1 }}
+          title="Refresh portfolio"
+        >
+          <Refresh01Icon size={12} style={isLoading ? { animation: 'spin 1s linear infinite' } : undefined} />
+          {isLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+      <div style={{ marginBottom: 'var(--spacing-sm)', fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
         Tradeable Sepolia assets mirrored from custody or a signed snapshot.
-      </div> */}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
-        {portfolio.holdings.map((holding) => (
+        {filteredHoldings.map((holding) => (
           <div
             key={holding.assetCode}
             style={{

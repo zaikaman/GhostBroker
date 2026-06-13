@@ -82,6 +82,11 @@ const PHASE_LABELS: Record<TelemetryPhase, TelemetryLabelInfo> = {
     description: 'Atomic transfer complete. Token balances updated.',
     statusType: 'success',
   },
+  portfolio_updated: {
+    label: 'Portfolio Updated',
+    description: 'Portfolio balances refreshed after settlement execution.',
+    statusType: 'info',
+  },
   receipt_available: {
     label: 'Audit Receipt Generated',
     description: 'Verifiable cryptographic receipt issued by secure enclave.',

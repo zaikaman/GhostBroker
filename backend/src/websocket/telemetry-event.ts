@@ -2,7 +2,8 @@ export type TelemetryEventType =
   | "telemetry.connection.changed"
   | "telemetry.agent.changed"
   | "telemetry.processing.changed"
-  | "telemetry.error.changed";
+  | "telemetry.error.changed"
+  | "telemetry.portfolio.changed";
 
 export type TelemetrySeverity = "info" | "warning" | "error";
 
@@ -22,6 +23,7 @@ export type TelemetryPhase =
   | "encrypted_evaluation"
   | "settlement_pending"
   | "settlement_finalized"
+  | "portfolio_updated"
   | "receipt_available"
   | "authorization_failed"
   | "token_metering_failed"

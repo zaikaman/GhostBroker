@@ -188,6 +188,22 @@ export class SettlementService {
           quantity: request.quantity,
           price: request.executionPrice,
         });
+
+        // Notify both institutions that their portfolio has been updated
+        this.telemetryBus.publish({
+          institutionId: request.matchOutcome.buyerInstitutionId,
+          type: "telemetry.portfolio.changed",
+          phase: "portfolio_updated",
+          severity: "info",
+          correlationRef,
+        });
+        this.telemetryBus.publish({
+          institutionId: request.matchOutcome.sellerInstitutionId,
+          type: "telemetry.portfolio.changed",
+          phase: "portfolio_updated",
+          severity: "info",
+          correlationRef,
+        });
       }
 
       await this.emitAudit("balance", command, correlationRef);

@@ -2,7 +2,8 @@ export type TelemetryEventType =
   | 'telemetry.connection.changed'
   | 'telemetry.agent.changed'
   | 'telemetry.processing.changed'
-  | 'telemetry.error.changed';
+  | 'telemetry.error.changed'
+  | 'telemetry.portfolio.changed';
 
 export type TelemetryPhase =
   | 'backend_connected'
@@ -20,6 +21,7 @@ export type TelemetryPhase =
   | 'encrypted_evaluation'
   | 'settlement_pending'
   | 'settlement_finalized'
+  | 'portfolio_updated'
   | 'receipt_available'
   | 'authorization_failed'
   | 'token_metering_failed'
@@ -260,7 +262,8 @@ export class TelemetryClient {
       (o.type === 'telemetry.connection.changed' ||
         o.type === 'telemetry.agent.changed' ||
         o.type === 'telemetry.processing.changed' ||
-        o.type === 'telemetry.error.changed') &&
+        o.type === 'telemetry.error.changed' ||
+        o.type === 'telemetry.portfolio.changed') &&
       typeof o.phase === 'string' &&
       (o.severity === 'info' || o.severity === 'warning' || o.severity === 'error') &&
       typeof o.timestamp === 'string'

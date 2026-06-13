@@ -297,6 +297,11 @@
   animation: pulse-animation 2s infinite;
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @keyframes pulse-animation {
   0% {
     transform: scale(0.9);

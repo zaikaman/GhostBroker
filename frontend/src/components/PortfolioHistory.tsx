@@ -122,7 +122,11 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
     );
   }
 
-  if (history.length === 0) {
+  const filteredHistory = history.filter((entry) =>
+    ['SEPOLIAETH', 'WBTC', 'USDC'].includes(entry.assetCode.toUpperCase())
+  );
+
+  if (filteredHistory.length === 0) {
     return (
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 'var(--spacing-xl)', textAlign: 'center', minHeight: '160px', gap: 'var(--spacing-sm)' }}>
         <ScrollIcon size={28} style={{ color: 'var(--color-text-muted)', opacity: 0.4 }} />
@@ -144,7 +148,7 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
         <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Balance Change History
       </h3>
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
-        {history.map((entry) => {
+        {filteredHistory.map((entry) => {
           const typeInfo = CHANGE_TYPE_LABELS[entry.changeType] ?? { label: entry.changeType, icon: <AlertCircleIcon size={12} />, color: 'var(--color-text-muted)' };
           return (
             <div
