@@ -3,45 +3,61 @@ import { z } from "zod";
 /**
  * T3-enclave startup configuration.
  *
- * Resolves the four env vars the project's doc-gap file
- * (`docs/terminal3-adk-onboarding-doc-gaps.md:36-83`, T3-ONB-001)
- * flagged as load-bearing but never read, plus the related
- * `T3_AGENT_GRANT_VERIFICATION_REQUIRED` and
- * `T3_AUTH_SDK_ENV` flags. The P0 finding was: when the
- * delegation mode is `dashboard` and the runtime cannot confirm
- * a verified agent grant, the backend must fail closed instead
- * of starting silently and admitting agents under a missing
- * authority check.
+ * Resolves the env vars the project's doc-gap file
+ * (`docs/terminal3-adk-onboarding-doc-gaps.md`) flagged as
+ * load-bearing but never read, plus the related `T3_MODE`
+ * flag that drives the runtime verification mode.
  *
- * The vars themselves are surfaced on the config object so
- * downstream code (runner, sandbox:check, backend) can branch on
- * them as the Terminal 3 surface evolves. The `assertStartupConfig`
- * helper is what actually closes the P0 — it is a single
- * function that any entry point can call before constructing
- * enclave services.
+ * The T3 surface that GhostBroker depends on is documented as:
+ *   - `T3N_API_KEY` from the Terminal 3 claim page (developer
+ *     key only — there is no T3 dashboard UI, no admin keypair
+ *     ceremony, and no out-of-band grant provisioning step).
+ *   - A single delegation-record path expressed as a W3C VC
+ *     whose cryptographic verification is provided by
+ *     `@terminal3/verify_vc` (sandbox/structural today, live
+ *     once the Host API surface ships).
+ *
+ * This config module therefore exposes two values that map
+ * directly to T3's actual surface:
+ *   - `adkEnv` — which T3N environment the SDK talks to
+ *     (`sandbox` / `testnet` / `production`).
+ *   - `mode`   — how the GhostBroker-style W3C VC verifier
+ *     should treat the credential it receives
+ *     (`sandbox` for structural checks, `live` to require
+ *     cryptographic verification via `@terminal3/verify_vc`,
+ *     `structural` for shape + time-window + DID-binding with
+ *     no crypto).
+ *
+ * The P0 fail-closed check that used to gate boot on
+ * "dashboard mode with no verified agent DIDs" has been
+ * removed: that check was a self-imposed gate on a flag
+ * (`T3_AGENT_DELEGATION_MODE`) that no runtime code path
+ * consumed, and its "remediation" (`T3_VERIFIED_AGENT_DIDS`)
+ * pointed at an env var that the agent setup scripts never
+ * wrote. The actual gate is the verifier's own
+ * `mode === "sandbox"` vs `mode === "live"` branch.
  */
 
 const envSchema = z.object({
   T3_ADK_ENV: z
     .enum(["sandbox", "testnet", "production"])
     .default("sandbox"),
-  T3_AUTH_SDK_ENV: z.enum(["sandbox", "live"]).default("sandbox"),
-  T3_AGENT_DELEGATION_MODE: z
-    .enum(["dashboard", "programmatic"])
-    .default("dashboard"),
-  T3_AGENT_GRANT_VERIFICATION_REQUIRED: z
-    .union([z.literal("true"), z.literal("false"), z.literal("1"), z.literal("0")])
-    .default("true")
-    .transform((value) => value === "true" || value === "1"),
+  T3_MODE: z.enum(["sandbox", "live", "structural"]).default("sandbox"),
 });
 
 export type T3EnclaveEnv = z.infer<typeof envSchema>;
 
+export type T3VerificationMode = "sandbox" | "live" | "structural";
+
 export interface T3EnclaveConfig {
   adkEnv: "sandbox" | "testnet" | "production";
-  authSdkEnv: "sandbox" | "live";
-  agentDelegationMode: "dashboard" | "programmatic";
-  agentGrantVerificationRequired: boolean;
+  /**
+   * How the GhostBroker-style W3C VC verifier should treat
+   * the delegation credential it receives. Mirrors the
+   * `VC_VERIFY_MODE` value the verifier itself reads so the
+   * startup config and the runtime gate stay aligned.
+   */
+  mode: T3VerificationMode;
 }
 
 export class T3EnclaveConfigError extends Error {
@@ -67,10 +83,7 @@ export function readT3EnclaveConfig(
   // (zod will still apply defaults for the missing ones).
   const candidate = {
     T3_ADK_ENV: source.T3_ADK_ENV,
-    T3_AUTH_SDK_ENV: source.T3_AUTH_SDK_ENV,
-    T3_AGENT_DELEGATION_MODE: source.T3_AGENT_DELEGATION_MODE,
-    T3_AGENT_GRANT_VERIFICATION_REQUIRED:
-      source.T3_AGENT_GRANT_VERIFICATION_REQUIRED,
+    T3_MODE: source.T3_MODE ?? source.VC_VERIFY_MODE,
   };
 
   const result = envSchema.safeParse(candidate);
@@ -84,10 +97,7 @@ export function readT3EnclaveConfig(
 
   return {
     adkEnv: result.data.T3_ADK_ENV,
-    authSdkEnv: result.data.T3_AUTH_SDK_ENV,
-    agentDelegationMode: result.data.T3_AGENT_DELEGATION_MODE,
-    agentGrantVerificationRequired:
-      result.data.T3_AGENT_GRANT_VERIFICATION_REQUIRED,
+    mode: result.data.T3_MODE,
   };
 }
 
@@ -100,23 +110,6 @@ export interface AssertStartupOptions {
    * Terminal 3 claim-key flow hasn't run yet) still works.
    */
   nodeEnv: "development" | "test" | "production";
-  /**
-   * Set of agent DIDs the runtime has successfully verified a
-   * grant for in this process lifetime. The P0 remediation
-   * requires that, when `agentDelegationMode === "dashboard"`
-   * and `agentGrantVerificationRequired === true`, at least one
-   * agent has a verified grant before the backend starts
-   * accepting admits.
-   */
-  verifiedAgentDids: ReadonlySet<string>;
-  /**
-   * When true, the check is allowed to pass even if no agent
-   * grant has been verified yet. Used by the sandbox:check
-   * script (which is invoked before any agent runs) and by
-   * integration tests that intentionally boot a fresh
-   * environment.
-   */
-  skipAgentGrantCheck?: boolean;
 }
 
 export interface StartupCheckResult {
@@ -126,58 +119,39 @@ export interface StartupCheckResult {
 }
 
 /**
- * Fail-closed startup check. Closes T3-ONB-001:
- * "Add a build-time or startup check that fails if required
- * programmatic delegation methods are unavailable or if
- * dashboard-only setup is required."
+ * Startup self-check. Strict in `production`, best-effort
+ * (warnings only) in `development` and `test`.
  *
- * Strict behavior in `production`:
- *   - `agentDelegationMode === "dashboard"` +
- *     `agentGrantVerificationRequired === true` +
- *     `verifiedAgentDids` empty ⇒ fails.
- *   - Unknown `adkEnv` (i.e. a typo like `prod`) ⇒ fails.
- *   - `authSdkEnv === "live"` is currently a warning because
- *     the Terminal 3 `agent-auth` Host API is still coming
- *     soon per the public docs; this becomes an error when
- *     the surface ships.
- *
- * Best-effort behavior in `development` / `test`:
- *   - Same checks, but emit `warnings` instead of `errors`
- *     and return `ok: true` so the local-dev loop doesn't
- *     need to mint a verified agent grant before it can boot.
+ * Checks:
+ *   - Unknown `adkEnv` (e.g. a typo like `prod`) ⇒ fails.
+ *   - `mode === "live"` emits a warning that production
+ *     cryptographic verification requires
+ *     `@terminal3/verify_vc` to be installed; if it is not,
+ *     the verifier falls back to `structural` mode (shape +
+ *     time-window + DID-binding) unless `VC_VERIFY_STRICT=true`.
+ *   - `adkEnv === "production"` warns that production T3N
+ *     calls are billable.
  */
 export function assertStartupConfig(
   config: T3EnclaveConfig,
-  options: AssertStartupOptions,
+  // The options bag is reserved for future
+  // production-only checks (e.g. operator pre-flight
+  // questions). It is unused today; keep the parameter
+  // name explicit so callers can grow into it without an
+  // API break.
+  _options: AssertStartupOptions,
 ): StartupCheckResult {
   const warnings: string[] = [];
   const errors: string[] = [];
 
-  if (
-    config.agentDelegationMode === "dashboard" &&
-    config.agentGrantVerificationRequired &&
-    !options.skipAgentGrantCheck
-  ) {
-    if (options.verifiedAgentDids.size === 0) {
-      const message =
-        "Dashboard delegation mode is selected with grant verification required, " +
-        "but no agent grant has been verified in this process lifetime. " +
-        "Run setup:identity + setup:delegation (or the Ghostbroker delegation flow), or set " +
-        "T3_AGENT_GRANT_VERIFICATION_REQUIRED=false to opt out of the P0 check.";
-      if (options.nodeEnv === "production") {
-        errors.push(message);
-      } else {
-        warnings.push(message);
-      }
-    }
-  }
-
-  if (config.authSdkEnv === "live") {
+  if (config.mode === "live") {
     warnings.push(
-      "T3_AUTH_SDK_ENV=live. The Terminal 3 agent-auth Host API is " +
-        "marked coming soon in the reviewed public docs; the Ghostbroker delegation " +
-        "verifier will still run in sandbox/structural mode until a live " +
-        "agent-auth surface ships. See docs/terminal3-adk-onboarding-doc-gaps.md.",
+      "T3_MODE=live: cryptographic W3C VC verification via " +
+        "`@terminal3/verify_vc` is requested. If the package is not " +
+        "installed the GhostBroker-style verifier will fall back to " +
+        "structural mode (shape + time-window + DID-binding) unless " +
+        "`VC_VERIFY_STRICT=true`. Set `T3_MODE=sandbox` to suppress this " +
+        "warning.",
     );
   }
 
@@ -185,18 +159,6 @@ export function assertStartupConfig(
     warnings.push(
       "T3_ADK_ENV=production. Production T3N calls are billable; confirm " +
         "the tenant has sufficient token balance before booting.",
-    );
-  }
-
-  if (
-    config.agentDelegationMode === "programmatic" &&
-    config.authSdkEnv !== "live"
-  ) {
-    warnings.push(
-      `T3_AGENT_DELEGATION_MODE=programmatic but T3_AUTH_SDK_ENV=${config.authSdkEnv}. ` +
-        "The programmatic Host API is not yet available, so the Ghostbroker delegation verifier " +
-        "will be the active path. Switch T3_AGENT_DELEGATION_MODE=dashboard until " +
-        "the live surface ships.",
     );
   }
 
@@ -235,11 +197,7 @@ export function formatStartupReport(
 ): string {
   const lines: string[] = ["=== T3 enclave startup check ==="];
   lines.push(`adk_env: ${config.adkEnv}`);
-  lines.push(`auth_sdk_env: ${config.authSdkEnv}`);
-  lines.push(`agent_delegation_mode: ${config.agentDelegationMode}`);
-  lines.push(
-    `agent_grant_verification_required: ${config.agentGrantVerificationRequired}`,
-  );
+  lines.push(`mode: ${config.mode}`);
   if (result.warnings.length > 0) {
     lines.push("warnings:");
     for (const warning of result.warnings) {

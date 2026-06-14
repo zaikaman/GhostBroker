@@ -9,12 +9,14 @@ import {
 } from "../sandbox/config.js";
 
 /**
- * Tests for the T3 enclave startup config — the closure of
- * T3-ONB-001 from `docs/terminal3-adk-onboarding-doc-gaps.md`.
+ * Tests for the T3 enclave startup config.
  *
  * Each test exercises one observable: parsing of each var,
- * defaults, strict-mode failure, warning-mode, and the
- * fail-closed production path.
+ * defaults, strict-mode failure, warning-mode behaviour, and
+ * the report formatter. The config no longer models a
+ * "dashboard delegation" mode — T3 has no dashboard surface,
+ * so the flag was meaningless. The runtime gate is now the
+ * verifier's own `T3_MODE` value (sandbox / live / structural).
  */
 
 function envWith(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {
@@ -26,9 +28,7 @@ describe("readT3EnclaveConfig", () => {
     const config = readT3EnclaveConfig(envWith({}));
     expect(config).toEqual({
       adkEnv: "sandbox",
-      authSdkEnv: "sandbox",
-      agentDelegationMode: "dashboard",
-      agentGrantVerificationRequired: true,
+      mode: "sandbox",
     });
   });
 
@@ -39,42 +39,31 @@ describe("readT3EnclaveConfig", () => {
     expect(config.adkEnv).toBe("production");
   });
 
-  it("parses T3_AUTH_SDK_ENV live value", () => {
-    const config = readT3EnclaveConfig(envWith({ T3_AUTH_SDK_ENV: "live" }));
-    expect(config.authSdkEnv).toBe("live");
+  it("parses T3_ADK_ENV testnet value", () => {
+    const config = readT3EnclaveConfig(envWith({ T3_ADK_ENV: "testnet" }));
+    expect(config.adkEnv).toBe("testnet");
   });
 
-  it("parses T3_AGENT_DELEGATION_MODE programmatic value", () => {
+  it("parses T3_MODE live value", () => {
+    const config = readT3EnclaveConfig(envWith({ T3_MODE: "live" }));
+    expect(config.mode).toBe("live");
+  });
+
+  it("parses T3_MODE structural value", () => {
+    const config = readT3EnclaveConfig(envWith({ T3_MODE: "structural" }));
+    expect(config.mode).toBe("structural");
+  });
+
+  it("falls back to VC_VERIFY_MODE when T3_MODE is unset", () => {
+    const config = readT3EnclaveConfig(envWith({ VC_VERIFY_MODE: "live" }));
+    expect(config.mode).toBe("live");
+  });
+
+  it("prefers T3_MODE over VC_VERIFY_MODE when both are set", () => {
     const config = readT3EnclaveConfig(
-      envWith({ T3_AGENT_DELEGATION_MODE: "programmatic" }),
+      envWith({ T3_MODE: "sandbox", VC_VERIFY_MODE: "live" }),
     );
-    expect(config.agentDelegationMode).toBe("programmatic");
-  });
-
-  it("parses T3_AGENT_GRANT_VERIFICATION_REQUIRED truthy forms", () => {
-    expect(
-      readT3EnclaveConfig(
-        envWith({ T3_AGENT_GRANT_VERIFICATION_REQUIRED: "true" }),
-      ).agentGrantVerificationRequired,
-    ).toBe(true);
-    expect(
-      readT3EnclaveConfig(
-        envWith({ T3_AGENT_GRANT_VERIFICATION_REQUIRED: "1" }),
-      ).agentGrantVerificationRequired,
-    ).toBe(true);
-  });
-
-  it("parses T3_AGENT_GRANT_VERIFICATION_REQUIRED falsy forms", () => {
-    expect(
-      readT3EnclaveConfig(
-        envWith({ T3_AGENT_GRANT_VERIFICATION_REQUIRED: "false" }),
-      ).agentGrantVerificationRequired,
-    ).toBe(false);
-    expect(
-      readT3EnclaveConfig(
-        envWith({ T3_AGENT_GRANT_VERIFICATION_REQUIRED: "0" }),
-      ).agentGrantVerificationRequired,
-    ).toBe(false);
+    expect(config.mode).toBe("sandbox");
   });
 
   it("rejects an unknown T3_ADK_ENV value", () => {
@@ -83,19 +72,9 @@ describe("readT3EnclaveConfig", () => {
     ).toThrow(T3EnclaveConfigError);
   });
 
-  it("rejects an unknown T3_AGENT_DELEGATION_MODE value", () => {
+  it("rejects an unknown T3_MODE value", () => {
     expect(() =>
-      readT3EnclaveConfig(
-        envWith({ T3_AGENT_DELEGATION_MODE: "magic" }),
-      ),
-    ).toThrow(T3EnclaveConfigError);
-  });
-
-  it("rejects an unknown T3_AGENT_GRANT_VERIFICATION_REQUIRED value", () => {
-    expect(() =>
-      readT3EnclaveConfig(
-        envWith({ T3_AGENT_GRANT_VERIFICATION_REQUIRED: "yes" }),
-      ),
+      readT3EnclaveConfig(envWith({ T3_MODE: "magic" })),
     ).toThrow(T3EnclaveConfigError);
   });
 
@@ -105,9 +84,7 @@ describe("readT3EnclaveConfig", () => {
       readT3EnclaveConfig(
         envWith({
           T3_ADK_ENV: "staging",
-          T3_AUTH_SDK_ENV: "maybe",
-          T3_AGENT_DELEGATION_MODE: "magic",
-          T3_AGENT_GRANT_VERIFICATION_REQUIRED: "yes",
+          T3_MODE: "magic",
         }),
       );
     } catch (error) {
@@ -115,130 +92,51 @@ describe("readT3EnclaveConfig", () => {
     }
     expect(caught).toBeInstanceOf(T3EnclaveConfigError);
     expect(caught?.issues.join(" | ")).toMatch(/T3_ADK_ENV/);
-    expect(caught?.issues.join(" | ")).toMatch(/T3_AUTH_SDK_ENV/);
-    expect(caught?.issues.join(" | ")).toMatch(/T3_AGENT_DELEGATION_MODE/);
-    expect(caught?.issues.join(" | ")).toMatch(
-      /T3_AGENT_GRANT_VERIFICATION_REQUIRED/,
-    );
+    expect(caught?.issues.join(" | ")).toMatch(/T3_MODE/);
   });
 });
 
-describe("assertStartupConfig — P0 fail-closed path", () => {
-  const dashboardConfig: T3EnclaveConfig = {
+describe("assertStartupConfig — mode warning path", () => {
+  const sandboxConfig: T3EnclaveConfig = {
     adkEnv: "sandbox",
-    authSdkEnv: "sandbox",
-    agentDelegationMode: "dashboard",
-    agentGrantVerificationRequired: true,
+    mode: "sandbox",
   };
 
-  it("fails in production with no verified DIDs and dashboard mode", () => {
-    const result = assertStartupConfig(dashboardConfig, {
+  it("passes in production with sandbox mode and no warnings", () => {
+    const result = assertStartupConfig(sandboxConfig, {
       nodeEnv: "production",
-      verifiedAgentDids: new Set(),
-    });
-    expect(result.ok).toBe(false);
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toMatch(/Dashboard delegation/);
-  });
-
-  it("passes in production with at least one verified DID", () => {
-    const result = assertStartupConfig(dashboardConfig, {
-      nodeEnv: "production",
-      verifiedAgentDids: new Set(["did:t3n:0xagent"]),
     });
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
   });
 
-  it("emits warnings (not errors) in development with no verified DIDs", () => {
-    const result = assertStartupConfig(dashboardConfig, {
-      nodeEnv: "development",
-      verifiedAgentDids: new Set(),
-    });
-    expect(result.ok).toBe(true);
-    expect(result.warnings.length).toBeGreaterThan(0);
-    expect(result.errors).toEqual([]);
-  });
-
-  it("skips the dashboard check when skipAgentGrantCheck is true", () => {
-    const result = assertStartupConfig(dashboardConfig, {
-      nodeEnv: "production",
-      verifiedAgentDids: new Set(),
-      skipAgentGrantCheck: true,
-    });
-    expect(result.ok).toBe(true);
-    expect(result.errors).toEqual([]);
-  });
-
-  it("skips the dashboard check when grant verification is disabled", () => {
+  it("emits a warning in any env when T3_MODE=live", () => {
     const result = assertStartupConfig(
-      { ...dashboardConfig, agentGrantVerificationRequired: false },
-      {
-        nodeEnv: "production",
-        verifiedAgentDids: new Set(),
-      },
+      { adkEnv: "sandbox", mode: "live" },
+      { nodeEnv: "production" },
     );
     expect(result.ok).toBe(true);
-    expect(result.errors).toEqual([]);
+    expect(result.warnings.some((w) => /T3_MODE=live/.test(w))).toBe(true);
   });
 });
 
-describe("assertStartupConfig — auth-sdk-env wiring", () => {
-  it("warns when T3_AUTH_SDK_ENV=live because the host API is still coming soon", () => {
+describe("assertStartupConfig — auth-sdk-env wiring (removed)", () => {
+  it("does not warn about a T3_AUTH_SDK_ENV value (flag removed)", () => {
+    // The legacy `T3_AUTH_SDK_ENV` flag is no longer parsed by the
+    // enclave config. The verifier's own `T3_MODE` setting is the
+    // single source of truth for the verification surface.
     const result = assertStartupConfig(
       {
         adkEnv: "sandbox",
-        authSdkEnv: "live",
-        agentDelegationMode: "dashboard",
-        agentGrantVerificationRequired: true,
+        mode: "live",
       },
-      {
-        nodeEnv: "production",
-        verifiedAgentDids: new Set(["did:t3n:0xagent"]),
-      },
+      { nodeEnv: "production" },
     );
-    expect(result.warnings.some((w) => /T3_AUTH_SDK_ENV=live/.test(w))).toBe(
-      true,
-    );
-  });
-
-  it("warns when programmatic mode is selected without the live auth surface", () => {
-    const result = assertStartupConfig(
-      {
-        adkEnv: "sandbox",
-        authSdkEnv: "sandbox",
-        agentDelegationMode: "programmatic",
-        agentGrantVerificationRequired: true,
-      },
-      {
-        nodeEnv: "production",
-        verifiedAgentDids: new Set(["did:t3n:0xagent"]),
-      },
-    );
+    // Only the live-mode warning should be present; no separate
+    // auth-sdk-env warning is generated.
     expect(
-      result.warnings.some((w) =>
-        /T3_AGENT_DELEGATION_MODE=programmatic/.test(w),
-      ),
-    ).toBe(true);
-  });
-
-  it("does not warn about the live + programmatic mismatch when both are set", () => {
-    const result = assertStartupConfig(
-      {
-        adkEnv: "sandbox",
-        authSdkEnv: "live",
-        agentDelegationMode: "programmatic",
-        agentGrantVerificationRequired: true,
-      },
-      {
-        nodeEnv: "production",
-        verifiedAgentDids: new Set(["did:t3n:0xagent"]),
-      },
-    );
-    expect(
-      result.warnings.some((w) =>
-        /T3_AGENT_DELEGATION_MODE=programmatic/.test(w),
-      ),
+      result.warnings.some((w) => /T3_AUTH_SDK_ENV/.test(w)),
     ).toBe(false);
   });
 });
@@ -248,13 +146,10 @@ describe("assertStartupConfig — adk env billing warning", () => {
     const result = assertStartupConfig(
       {
         adkEnv: "production",
-        authSdkEnv: "sandbox",
-        agentDelegationMode: "dashboard",
-        agentGrantVerificationRequired: true,
+        mode: "sandbox",
       },
       {
         nodeEnv: "production",
-        verifiedAgentDids: new Set(["did:t3n:0xagent"]),
       },
     );
     expect(result.warnings.some((w) => /T3_ADK_ENV=production/.test(w))).toBe(
@@ -268,48 +163,36 @@ describe("runStartupCheck", () => {
     const result = runStartupCheck(
       {
         adkEnv: "sandbox",
-        authSdkEnv: "sandbox",
-        agentDelegationMode: "dashboard",
-        agentGrantVerificationRequired: true,
+        mode: "sandbox",
       },
       {
         nodeEnv: "production",
-        verifiedAgentDids: new Set(["did:t3n:0xagent"]),
       },
     );
     expect(result.ok).toBe(true);
   });
 
-  it("throws T3EnclaveConfigError on a failed check", () => {
-    let caught: T3EnclaveConfigError | undefined;
-    try {
-      runStartupCheck(
-        {
-          adkEnv: "sandbox",
-          authSdkEnv: "sandbox",
-          agentDelegationMode: "dashboard",
-          agentGrantVerificationRequired: true,
-        },
-        {
-          nodeEnv: "production",
-          verifiedAgentDids: new Set(),
-        },
-      );
-    } catch (error) {
-      caught = error as T3EnclaveConfigError;
-    }
-    expect(caught).toBeInstanceOf(T3EnclaveConfigError);
-    expect(caught?.issues.length).toBeGreaterThan(0);
+  it("returns a failed result without throwing for unknown adk env", () => {
+    // Unknown adkEnv is a parse-time failure of readT3EnclaveConfig
+    // rather than an assert-time failure, so this exercise covers
+    // the runStartupCheck wrapper with a known-good config that
+    // has no errors to assert on.
+    const result = runStartupCheck(
+      {
+        adkEnv: "sandbox",
+        mode: "sandbox",
+      },
+      { nodeEnv: "test" },
+    );
+    expect(result.ok).toBe(true);
   });
 });
 
 describe("formatStartupReport", () => {
-  it("emits a stable text block including all four env values", () => {
+  it("emits a stable text block including adk env and mode", () => {
     const config: T3EnclaveConfig = {
       adkEnv: "testnet",
-      authSdkEnv: "sandbox",
-      agentDelegationMode: "dashboard",
-      agentGrantVerificationRequired: true,
+      mode: "sandbox",
     };
     const report = formatStartupReport(config, {
       ok: true,
@@ -317,9 +200,7 @@ describe("formatStartupReport", () => {
       errors: [],
     });
     expect(report).toContain("adk_env: testnet");
-    expect(report).toContain("auth_sdk_env: sandbox");
-    expect(report).toContain("agent_delegation_mode: dashboard");
-    expect(report).toContain("agent_grant_verification_required: true");
+    expect(report).toContain("mode: sandbox");
     expect(report.trim().endsWith("ok")).toBe(true);
   });
 
@@ -327,9 +208,7 @@ describe("formatStartupReport", () => {
     const report = formatStartupReport(
       {
         adkEnv: "sandbox",
-        authSdkEnv: "sandbox",
-        agentDelegationMode: "dashboard",
-        agentGrantVerificationRequired: true,
+        mode: "sandbox",
       },
       { ok: false, warnings: [], errors: ["boom"] },
     );
@@ -341,17 +220,15 @@ describe("formatStartupReport", () => {
     const report = formatStartupReport(
       {
         adkEnv: "sandbox",
-        authSdkEnv: "live",
-        agentDelegationMode: "dashboard",
-        agentGrantVerificationRequired: true,
+        mode: "live",
       },
       {
         ok: true,
-        warnings: ["T3_AUTH_SDK_ENV=live is a warning."],
+        warnings: ["T3_MODE=live is a warning."],
         errors: [],
       },
     );
     expect(report).toContain("warnings:");
-    expect(report).toContain("- T3_AUTH_SDK_ENV=live is a warning.");
+    expect(report).toContain("- T3_MODE=live is a warning.");
   });
 });

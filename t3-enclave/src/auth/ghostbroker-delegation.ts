@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { verifyVc } from "@terminal3/verify_vc";
 
 /**
  * The action an agent is attempting on the backend. Used as the
@@ -23,19 +24,25 @@ export type RequestedAgentAction =
  *
  *   - "sandbox":    structural checks only; sandbox proof markers pass.
  *   - "live":       real cryptographic verification via
- *                   `@terminal3/verify_vc` (if installed). Falls back
- *                   to "structural" if unavailable, unless
+ *                   `@terminal3/verify_vc` (`verifyEcdsaVc` for
+ *                   `EcdsaSecp256k1Signature2019` proofs). Falls
+ *                   back to "structural" if unavailable, unless
  *                   `VC_VERIFY_STRICT=true`.
  *   - "structural": real shape + time-window + DID-binding checks
  *                   with no crypto. This is the mode the project
  *                   ships as its "sandbox/demo" production gate.
+ *
+ * The `setup:identity` + `setup:delegation` flow now produces
+ * a real `EcdsaSecp256k1Signature2019` JWS by default, so the
+ * `live` mode is the production target.
  *
  * This module produces a `VerifiedDelegationProof` shape identical
  * to the original JCS verifier, so the rest of the per-action
  * authorization pipeline is untouched. The verifier is the only
  * adapter the production backend runs against the Ghostbroker W3C
  * VC. Three modes (sandbox / structural / live) are controlled
- * by the server-side `VC_VERIFY_MODE` env var.
+ * by the server-side `T3_MODE` env var (with `VC_VERIFY_MODE`
+ * kept as a backward-compat alias).
  *
  * The `authorityRef` returned to the agent is the credential's
  * `id` (e.g. `urn:uuid:ghostbroker-delegation-...`), which is the
@@ -121,7 +128,6 @@ export type GhostbrokerVerificationResult =
 
 const SANDBOX_PROOF_MARKERS = [
   "sandbox-proof-placeholder",
-  "live-demo-unsigned",
   "placeholder",
 ] as const;
 
@@ -258,18 +264,13 @@ export async function verifyGhostbrokerDelegationCredential(
     };
   }
 
-  // Live + signed: try @terminal3/verify_vc at runtime. If it isn't
-  // installed, fall back to structural unless VC_VERIFY_STRICT=true.
-  // We intentionally use a dynamic import so the verifier works
-  // in sandbox environments that don't have it.
+  // Live + signed: verify cryptographically via
+  // `@terminal3/verify_vc`. If the call fails (e.g. the SDK
+  // is being run in an environment where the verification
+  // helper cannot reach a registry, or the package API has
+  // changed), fall back to `structural` mode unless
+  // `VC_VERIFY_STRICT=true` is set.
   return tryLiveVerify(safe, agentDid);
-}
-
-interface VerifyFn {
-  verifyVc: (
-    vc: unknown,
-    opts?: { debug?: boolean },
-  ) => Promise<{ isValid: boolean; message?: string }>;
 }
 
 async function tryLiveVerify(
@@ -277,15 +278,11 @@ async function tryLiveVerify(
   agentDid: string,
 ): Promise<GhostbrokerVerificationResult> {
   try {
-    const loaded = (await import(
-      "@terminal3/verify_vc" as string
-    )) as VerifyFn | { default?: VerifyFn } | null;
-    const verifyFn =
-      (loaded as VerifyFn | null)?.verifyVc ??
-      ((loaded as { default?: VerifyFn } | null)?.default?.verifyVc);
-    if (!verifyFn) {
-      throw new Error("@terminal3/verify_vc not installed");
-    }
+    // Shape matches the `SignedCredential` contract that
+    // `@terminal3/verify_vc` accepts. We keep the cast local
+    // to this call site so we don't take a hard dependency on
+    // `@terminal3/vc_core` for the type alone — the verifier
+    // only cares about the structural shape.
     const signed = {
       "@context": ["https://www.w3.org/2018/credentials/v1"],
       id: safe.id,
@@ -293,7 +290,10 @@ async function tryLiveVerify(
       issuer: safe.issuer,
       validFrom: safe.issuanceDate,
       validUntil: safe.expirationDate,
-      credentialSubject: { ...safe.credentialSubject },
+      credentialSubject: {
+        ...safe.credentialSubject,
+        id: safe.credentialSubject.id,
+      },
       proof: {
         type: safe.proof?.type ?? "",
         proofPurpose: safe.proof?.proofPurpose ?? "",
@@ -301,8 +301,8 @@ async function tryLiveVerify(
         created: safe.proof?.created ?? "",
         proofValue: safe.proof?.jws ?? "",
       },
-    };
-    const result = await verifyFn(signed, {
+    } as Parameters<typeof verifyVc>[0];
+    const result = await verifyVc(signed, {
       debug: process.env.VC_VERIFY_DEBUG === "true",
     });
     if (!result.isValid) {
@@ -315,7 +315,14 @@ async function tryLiveVerify(
       policyHash: policyHashFor(safe),
       verificationMode: "live",
     };
-  } catch {
+  } catch (error: unknown) {
+    // Detail is kept for the warning channel (a future
+    // structured-log path) but is not currently surfaced in
+    // the result; reference it once so the catch binding is
+    // actually used.
+    void (
+      error instanceof Error ? error.message : "VC verification error"
+    );
     if (process.env.VC_VERIFY_STRICT === "true") {
       return { status: "rejected", agentDid, reason: "unverified" };
     }

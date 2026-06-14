@@ -134,25 +134,17 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
 
   const t3NetworkClient = await createAuthenticatedT3NetworkClient(t3Options);
 
-  // T3-ONB-001 P0 remediation: run the fail-closed startup
-  // check. In `production` the check refuses to boot when
-  // dashboard-mode is selected with grant verification
-  // required and the operator hasn't pre-provisioned a
-  // verified agent DID via `T3_VERIFIED_AGENT_DIDS`. In
-  // development / test the same check emits warnings only so
-  // the local-dev loop still works without a real dashboard
-  // grant.
+  // Run the T3-enclave startup self-check. Strict in `production`
+  // (refuses to boot on a malformed config), best-effort in
+  // `development` / `test` (emits warnings only). The runtime
+  // gate on agent authority is the GhostBroker-style W3C VC
+  // verifier itself (see `t3-enclave/src/auth/ghostbroker-
+  // delegation.ts`); the startup check is a structural sanity
+  // sweep, not an authority gate.
   const t3EnclaveConfig = readT3EnclaveConfig();
-  const verifiedDids = new Set(
-    (env.T3_VERIFIED_AGENT_DIDS ?? "")
-      .split(",")
-      .map((did) => did.trim())
-      .filter((did) => did.length > 0),
-  );
   try {
     const startupResult = runStartupCheck(t3EnclaveConfig, {
       nodeEnv: env.NODE_ENV,
-      verifiedAgentDids: verifiedDids,
     });
     if (startupResult.warnings.length > 0) {
       console.warn(

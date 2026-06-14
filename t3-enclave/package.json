@@ -16,6 +16,7 @@
   "dependencies": {
     "@noble/curves": "^2.2.0",
     "@terminal3/t3n-sdk": "^3.5.2",
+    "@terminal3/verify_vc": "^0.0.38",
     "zod": "^4.4.3"
   },
   "devDependencies": {

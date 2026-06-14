@@ -128,10 +128,9 @@ async function main(): Promise<void> {
     minimumTokenBalance,
   );
 
-  // Run the new fail-closed P0 startup check (T3-ONB-001). The
-  // CLI surfaces the result instead of throwing so operators can
-  // see the warnings; the backend wrapper uses the same function
-  // and does throw.
+  // Run the startup self-check. The CLI surfaces the result
+  // instead of throwing so operators can see the warnings; the
+  // backend wrapper uses the same function and does throw.
   const startupConfig = readT3EnclaveConfig();
   const startupResult = runStartupCheck(startupConfig, {
     nodeEnv: (process.env.NODE_ENV as
@@ -139,8 +138,6 @@ async function main(): Promise<void> {
       | "test"
       | "production"
       | undefined) ?? "development",
-    verifiedAgentDids: new Set<string>(),
-    skipAgentGrantCheck: true,
   });
 
   console.log(
@@ -156,10 +153,8 @@ async function main(): Promise<void> {
         tokenBalanceAvailable: balance.available.toString(),
         tokenBalanceMinimum: balance.minimumRequired.toString(),
         startupCheck: {
-          authSdkEnv: startupConfig.authSdkEnv,
-          agentDelegationMode: startupConfig.agentDelegationMode,
-          agentGrantVerificationRequired:
-            startupConfig.agentGrantVerificationRequired,
+          adkEnv: startupConfig.adkEnv,
+          mode: startupConfig.mode,
           ok: startupResult.ok,
           warnings: startupResult.warnings,
           errors: startupResult.errors,
