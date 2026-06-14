@@ -125,7 +125,11 @@ export class PortfolioService {
       throw new PublicError("validation_failed", 400);
     }
 
-    const institutionId = adjustments[0]!.institutionId;
+    const firstAdjustment = adjustments[0];
+    if (!firstAdjustment) {
+      throw new PublicError("validation_failed", 400);
+    }
+    const institutionId = firstAdjustment.institutionId;
 
     // Verify all adjustments belong to the same institution
     for (const adj of adjustments) {
@@ -252,7 +256,7 @@ export class PortfolioService {
    */
   public async syncPortfolioSnapshot(params: {
     institutionId: string;
-    holdings: ReadonlyArray<PortfolioSnapshotHolding>;
+    holdings: readonly PortfolioSnapshotHolding[];
     sourceRef?: string;
     observedAt?: string;
   }): Promise<Portfolio> {
@@ -450,7 +454,7 @@ export class PortfolioService {
         // error message. Format:
         //   "insufficient available balance for USDC: requested 1000, available 500"
         const match = /available (-?\d+(?:\.\d+)?)/.exec(error.message);
-        const available = match ? Number.parseFloat(match[1]!) : 0;
+        const available = match && match[1] ? Number.parseFloat(match[1]) : 0;
         throw new InsufficientBalanceError(
           assetCode.toUpperCase(),
           amount,

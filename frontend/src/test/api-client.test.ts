@@ -1,6 +1,12 @@
 import { apiClient } from '../services/api-client';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
+type FetchMock = ReturnType<typeof vi.fn>;
+
+function asFetchMock(fetchMock: typeof global.fetch): FetchMock {
+  return fetchMock as unknown as FetchMock;
+}
+
 describe('apiClient Services', () => {
   const originalFetch = global.fetch;
 
@@ -36,10 +42,10 @@ describe('apiClient Services', () => {
       ],
     };
 
-    (global.fetch as any).mockResolvedValueOnce({
+    asFetchMock(global.fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => mockResponse,
-    });
+    } as Response);
 
     const result = await apiClient.getCompletedTrades('2026-06-11T00:00:00Z');
 
@@ -58,11 +64,11 @@ describe('apiClient Services', () => {
   it('getCompletedTrades sends no auth header when there is no session', async () => {
     localStorage.clear();
 
-    (global.fetch as any).mockResolvedValueOnce({
+    asFetchMock(global.fetch).mockResolvedValueOnce({
       ok: false,
       status: 401,
       json: async () => ({ code: 'authorization_failed' }),
-    });
+    } as Response);
 
     await expect(apiClient.getCompletedTrades()).rejects.toMatchObject({
       status: 401,

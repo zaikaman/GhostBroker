@@ -35,7 +35,9 @@ describe("IntentClient", () => {
 
     expect(result).toEqual(SAMPLE_RESPONSE);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0]!;
+    const firstCall = fetchSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [url, init] = firstCall ?? [];
     expect(url).toBe("https://api.example.com/api/agents/intents");
     const reqInit = init as RequestInit;
     expect(reqInit.method).toBe("POST");
@@ -48,7 +50,9 @@ describe("IntentClient", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockJsonResponse(SAMPLE_RESPONSE));
     const client = new IntentClient("https://api.example.com/");
     await client.submitIntent(SAMPLE_REQUEST, "tok");
-    const [url] = fetchSpy.mock.calls[0]!;
+    const firstCall = fetchSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [url] = firstCall ?? [];
     expect(url).toBe("https://api.example.com/api/agents/intents");
   });
 

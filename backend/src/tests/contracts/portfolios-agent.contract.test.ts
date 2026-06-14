@@ -89,7 +89,7 @@ class StubOrchestrator {
   public intents: PendingIntent[] = [];
   public listPendingIntents(
     params: { institutionId: string; agentDid?: string },
-  ): ReadonlyArray<PendingIntent> {
+  ): readonly PendingIntent[] {
     return this.intents.filter(
       (i) =>
         i.institutionId === params.institutionId &&

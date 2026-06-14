@@ -35,7 +35,9 @@ describe("TradesClient", () => {
     const result = await client.getCompletedTrades("gb_session_xyz");
 
     expect(result).toEqual({ items: [SAMPLE_TRADE] });
-    const [url, init] = fetchSpy.mock.calls[0]!;
+    const firstCall = fetchSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [url, init] = firstCall ?? [];
     expect(url).toBe("https://api.example.com/api/trades/completed");
     const reqInit = init as RequestInit;
     expect(reqInit.method).toBe("GET");
@@ -53,7 +55,9 @@ describe("TradesClient", () => {
       to: "2026-06-15T00:00:00.000Z",
     });
 
-    const [url] = fetchSpy.mock.calls[0]!;
+    const firstCall = fetchSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [url] = firstCall ?? [];
     const parsed = new URL(url as string);
     expect(parsed.pathname).toBe("/api/trades/completed");
     expect(parsed.searchParams.get("from")).toBe("2026-06-01T00:00:00.000Z");
@@ -68,7 +72,9 @@ describe("TradesClient", () => {
     const client = new TradesClient("https://api.example.com");
     await client.getCompletedTrades("tok");
 
-    const [url] = fetchSpy.mock.calls[0]!;
+    const firstCall = fetchSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [url] = firstCall ?? [];
     const parsed = new URL(url as string);
     expect(parsed.search).toBe("");
   });

@@ -41,7 +41,9 @@ describe("AuthClient", () => {
 
       expect(session).toEqual(SAMPLE_SESSION);
       expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [url, init] = fetchSpy.mock.calls[0]!;
+      const firstCall = fetchSpy.mock.calls[0];
+      expect(firstCall).toBeDefined();
+      const [url, init] = firstCall ?? [];
       expect(url).toBe("https://api.example.com/api/auth/api-key");
       const reqInit = init as RequestInit;
       expect(reqInit.method).toBe("POST");
@@ -55,7 +57,9 @@ describe("AuthClient", () => {
       const client = new AuthClient({ baseUrl: "https://api.example.com/" });
       await client.authenticateWithApiKey("gbk_test");
 
-      const [url] = fetchSpy.mock.calls[0]!;
+      const firstCall = fetchSpy.mock.calls[0];
+      expect(firstCall).toBeDefined();
+      const [url] = firstCall ?? [];
       expect(url).toBe("https://api.example.com/api/auth/api-key");
     });
 

@@ -173,7 +173,8 @@ export class MatchingOrchestrator {
 
     // Try to match against each pending intent from other institutions
     for (let i = 0; i < this.pendingIntents.length; i++) {
-      const other = this.pendingIntents[i]!;
+      const other = this.pendingIntents[i];
+      if (!other) continue;
       if (other.intentHandle === intent.intentHandle) continue;
       if (other.institutionId === intent.institutionId) continue;
       if (other.assetCode !== intent.assetCode) continue;
@@ -646,7 +647,7 @@ export class MatchingOrchestrator {
   public listPendingIntents(params: {
     institutionId: string;
     agentDid?: string;
-  }): ReadonlyArray<PendingIntent> {
+  }): readonly PendingIntent[] {
     return this.pendingIntents.filter((intent) => {
       if (intent.institutionId !== params.institutionId) {
         return false;

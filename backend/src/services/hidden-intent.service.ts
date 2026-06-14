@@ -48,7 +48,7 @@ export interface HiddenIntentSubmissionService {
   listPendingIntents(params: {
     institutionId: string;
     agentDid?: string;
-  }): ReadonlyArray<PendingIntent>;
+  }): readonly PendingIntent[];
 }
 
 export class HiddenIntentService implements HiddenIntentSubmissionService {
@@ -379,7 +379,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   public listPendingIntents(params: {
     institutionId: string;
     agentDid?: string;
-  }): ReadonlyArray<PendingIntent> {
+  }): readonly PendingIntent[] {
     if (!this.matchingOrchestrator) {
       return [];
     }

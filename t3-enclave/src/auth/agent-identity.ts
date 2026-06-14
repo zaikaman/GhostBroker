@@ -37,11 +37,11 @@ function normalizeAddress(value: string): string | undefined {
 
 function addressFromDid(did: string): string | undefined {
   const match = /^did:t3n?:((?:wallet:)?0x[0-9a-f]{40})$/iu.exec(did.trim());
-  if (!match) {
+  if (!match || !match[1]) {
     return undefined;
   }
 
-  return normalizeAddress(match[1]!.replace(/^wallet:/iu, ""));
+  return normalizeAddress(match[1].replace(/^wallet:/iu, ""));
 }
 
 function decodeSignature(signature: string): Uint8Array | undefined {

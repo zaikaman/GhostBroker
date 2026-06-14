@@ -164,7 +164,10 @@ describe("orphan-lock restart safety", () => {
     );
     expect(portfolio.holdings[0]?.locked).toBe(4_500_000);
     expect(lockClient.rows).toHaveLength(1);
-    const refBeforeRestart = lockClient.rows[0]!;
+    const refBeforeRestart = lockClient.rows[0];
+    if (!refBeforeRestart) {
+      throw new Error("expected the seeded lock ref to be present");
+    }
 
     // === Phase 2: process restart. Discard the orchestrator and
     // service; build fresh ones. The lockClient and

@@ -89,9 +89,10 @@ export function verifyOperatorSessionToken(
     return undefined;
   }
 
-  const header = parts[0]!;
-  const payload = parts[1]!;
-  const signature = parts[2]!;
+  const [header, payload, signature] = parts;
+  if (!header || !payload || !signature) {
+    return undefined;
+  }
   const expected = sign(`${header}.${payload}`, secret);
   const expectedBytes = Buffer.from(expected);
   const actualBytes = Buffer.from(signature);

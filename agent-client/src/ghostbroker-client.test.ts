@@ -78,7 +78,9 @@ describe("GhostBrokerClient", () => {
 
       client.telemetry.connect();
       expect(WebSocketMock).toHaveBeenCalledTimes(1);
-      const wsUrl = WebSocketMock.mock.calls[0]![0] as string;
+      const wsCall = WebSocketMock.mock.calls[0];
+      expect(wsCall).toBeDefined();
+      const wsUrl = (wsCall ?? [])[0] as string;
       expect(wsUrl).toContain(`/ws/telemetry?institutionId=${encodeURIComponent(SAMPLE_SESSION.institution.id)}`);
     });
 
@@ -169,7 +171,9 @@ describe("GhostBrokerClient", () => {
         authorityRef: "t3-delegation:xyz",
       });
 
-      const [admitUrl, admitInit] = fetchSpy.mock.calls[1]!;
+      const admitCall = fetchSpy.mock.calls[1];
+      expect(admitCall).toBeDefined();
+      const [admitUrl, admitInit] = admitCall ?? [];
       expect(admitUrl).toBe("https://api.example.com/api/agents/admit");
       const init = admitInit as RequestInit;
       expect(init.method).toBe("POST");
@@ -200,7 +204,9 @@ describe("GhostBrokerClient", () => {
       };
       await client.submitIntent(intent);
 
-      const [url, init] = fetchSpy.mock.calls[1]!;
+      const intentCall = fetchSpy.mock.calls[1];
+      expect(intentCall).toBeDefined();
+      const [url, init] = intentCall ?? [];
       expect(url).toBe("https://api.example.com/api/agents/intents");
       expect((init as RequestInit & { headers: Record<string, string> }).headers.Authorization).toBe(
         `Bearer ${SAMPLE_SESSION.token}`,

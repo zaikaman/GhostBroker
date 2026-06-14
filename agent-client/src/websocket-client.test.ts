@@ -27,8 +27,12 @@ function stubWebSocket(): { ctor: ReturnType<typeof vi.fn>; getLast: () => WsHan
     public onmessage: WsHandle["onmessage"] = null;
     public close = vi.fn();
     public constructor(_url: string) {
-      lastWs = this;
+      // Use `WsMock` as the array element type so we don't have to
+      // alias `this` to a local variable (the @typescript-eslint/no-this-alias
+      // rule flags any `const x = this` pattern, but typed push/pop via
+      // `allInstances` works because the array element type matches).
       allInstances.push(this);
+      lastWs = allInstances[allInstances.length - 1] ?? null;
     }
   }
 
@@ -72,7 +76,9 @@ describe("TelemetryClient", () => {
     const client = new TelemetryClient("https://api.example.com", "inst_1");
     client.connect();
     expect(ctor).toHaveBeenCalledTimes(1);
-    expect(ctor.mock.calls[0]![0]).toBe(
+    const ctorCall = ctor.mock.calls[0];
+    expect(ctorCall).toBeDefined();
+    expect((ctorCall ?? [])[0]).toBe(
       "wss://api.example.com/ws/telemetry?institutionId=inst_1",
     );
   });
@@ -81,7 +87,9 @@ describe("TelemetryClient", () => {
     const { ctor } = stubWebSocket();
     const client = new TelemetryClient("http://localhost:3001", "inst_1");
     client.connect();
-    expect(ctor.mock.calls[0]![0]).toBe(
+    const ctorCall = ctor.mock.calls[0];
+    expect(ctorCall).toBeDefined();
+    expect((ctorCall ?? [])[0]).toBe(
       "ws://localhost:3001/ws/telemetry?institutionId=inst_1",
     );
   });
@@ -90,7 +98,9 @@ describe("TelemetryClient", () => {
     const { ctor } = stubWebSocket();
     const client = new TelemetryClient("https://api.example.com", "id with space/slash");
     client.connect();
-    expect(ctor.mock.calls[0]![0]).toBe(
+    const ctorCall = ctor.mock.calls[0];
+    expect(ctorCall).toBeDefined();
+    expect((ctorCall ?? [])[0]).toBe(
       "wss://api.example.com/ws/telemetry?institutionId=id%20with%20space%2Fslash",
     );
   });
@@ -100,7 +110,9 @@ describe("TelemetryClient", () => {
     const client = new TelemetryClient("https://api.example.com", "first");
     client.setInstitutionId("second");
     client.connect();
-    expect(ctor.mock.calls[0]![0]).toBe(
+    const ctorCall = ctor.mock.calls[0];
+    expect(ctorCall).toBeDefined();
+    expect((ctorCall ?? [])[0]).toBe(
       "wss://api.example.com/ws/telemetry?institutionId=second",
     );
   });

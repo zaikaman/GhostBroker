@@ -78,7 +78,9 @@ async function main(): Promise<void> {
   const baseUrl = requireEnv("GHOSTBROKER_URL");
   const apiKey = requireEnv("GHOSTBROKER_API_KEY");
   const agentDid = requireEnv("AGENT_DID");
-  const institutionId = requireEnv("INSTITUTION_ID");
+  // INSTITUTION_ID is intentionally not read here: the authenticated
+  // session exposes the canonical institution id via `session.institution.id`,
+  // which is what we wire into every proof and request below.
   const policyHash = requireEnv("POLICY_HASH");
   const credentialJcsBase64 = requireEnv("CREDENTIAL_JCS_BASE64");
   const adminPrivateKey = hexToBytes(requireEnv("ADMIN_PRIVATE_KEY"));

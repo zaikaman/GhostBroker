@@ -74,7 +74,7 @@ export interface IntentLockRepository {
    * The orphan-lock janitor calls this with `now() - TTL` to
    * recover from process restarts.
    */
-  findOlderThan(timestamp: Date): Promise<ReadonlyArray<IntentLock>>;
+  findOlderThan(timestamp: Date): Promise<readonly IntentLock[]>;
 
   /**
    * Find all lock references for a given institution, optionally
@@ -84,7 +84,7 @@ export interface IntentLockRepository {
   findByInstitution(
     institutionId: string,
     agentDid?: string,
-  ): Promise<ReadonlyArray<IntentLock>>;
+  ): Promise<readonly IntentLock[]>;
 }
 
 export class SupabaseIntentLockRepository implements IntentLockRepository {
@@ -148,7 +148,7 @@ export class SupabaseIntentLockRepository implements IntentLockRepository {
 
   public async findOlderThan(
     timestamp: Date,
-  ): Promise<ReadonlyArray<IntentLock>> {
+  ): Promise<readonly IntentLock[]> {
     const { data, error } = await this.client
       .from("intent_locks")
       .select("*")
@@ -165,7 +165,7 @@ export class SupabaseIntentLockRepository implements IntentLockRepository {
   public async findByInstitution(
     institutionId: string,
     agentDid?: string,
-  ): Promise<ReadonlyArray<IntentLock>> {
+  ): Promise<readonly IntentLock[]> {
     let query = this.client
       .from("intent_locks")
       .select("*")

@@ -2,6 +2,7 @@ import type {
   IntentLock,
   IntentLockRecord,
 } from "../../models/intent-lock.js";
+import type { SupabaseIntentLockRepository } from "../../services/intent-lock-repository.js";
 
 /**
  * Captured call into the in-memory intent_locks client. Tests
@@ -17,6 +18,8 @@ export interface IntentLockCall {
   parameters?: unknown;
   result?: unknown;
 }
+
+type CreateInput = Parameters<SupabaseIntentLockRepository["create"]>[0];
 
 /**
  * In-memory implementation of `IntentLockRepository` for
@@ -56,9 +59,7 @@ export class InMemoryIntentLockClient {
   }
 
   public async create(
-    input: Parameters<
-      typeof import("../../services/intent-lock-repository.js").SupabaseIntentLockRepository.prototype.create
-    >[0],
+    input: CreateInput,
   ): Promise<IntentLock> {
     if (
       this.rows.some((r) => r.intent_handle === input.intentHandle)
@@ -116,7 +117,7 @@ export class InMemoryIntentLockClient {
 
   public async findOlderThan(
     timestamp: Date,
-  ): Promise<ReadonlyArray<IntentLock>> {
+  ): Promise<readonly IntentLock[]> {
     const cutoff = timestamp.getTime();
     const matches = this.rows
       .filter((r) => new Date(r.created_at).getTime() < cutoff)
@@ -145,7 +146,7 @@ export class InMemoryIntentLockClient {
   public async findByInstitution(
     institutionId: string,
     agentDid?: string,
-  ): Promise<ReadonlyArray<IntentLock>> {
+  ): Promise<readonly IntentLock[]> {
     const matches = this.rows
       .filter((r) => {
         if (r.institution_id !== institutionId) return false;

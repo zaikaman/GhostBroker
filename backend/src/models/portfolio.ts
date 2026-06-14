@@ -53,8 +53,12 @@ export function portfolioFromRecords(
   if (records.length === 0) {
     return { institutionId: "", holdings: [] };
   }
+  const first = records[0];
+  if (!first) {
+    return { institutionId: "", holdings: [] };
+  }
   return {
-    institutionId: records[0]!.institution_id,
+    institutionId: first.institution_id,
     holdings: records.map((r) => ({
       assetCode: r.asset_code,
       balance: Number.parseFloat(r.balance),

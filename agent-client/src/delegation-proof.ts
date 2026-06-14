@@ -6,7 +6,6 @@ import {
   ethRecoverEip191,
   buildInvocationPreimage,
   NONCE_LEN,
-  REQUEST_HASH_LEN,
   VC_ID_LEN,
   AGENT_PUBKEY_LEN,
   buildDelegationCredential,
@@ -181,6 +180,28 @@ function parseCredential(credentialJcs: Uint8Array) {
  * verification in t3-enclave/src/auth/delegation-credential.ts.
  */
 export class DelegationProofBuilder {
+  /**
+   * The wire-format version identifier of the proofs this builder
+   * emits. Exposed as a readonly instance field so the class has
+   * non-static state and is not flagged as static-only.
+   */
+  public readonly version: string = "ghostbroker.delegation-proof/1";
+
+  /**
+   * Construct a new builder. The class is stateless beyond the
+   * readonly `version` field; the constructor is implicit.
+   */
+
+  /**
+   * Build a complete delegation proof. Delegates to the static
+   * {@link DelegationProofBuilder.build} implementation.
+   */
+  public async build(
+    options: DelegationProofOptions,
+  ): Promise<SignedDelegationProof> {
+    return DelegationProofBuilder.build(options);
+  }
+
   /**
    * Build a complete delegation proof.
    */

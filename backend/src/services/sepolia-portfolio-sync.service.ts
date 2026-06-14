@@ -153,7 +153,7 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
    */
   private async fetchLiveBalances(
     walletAddress: string,
-  ): Promise<Array<{ assetCode: string; balance: number }>> {
+  ): Promise<{ assetCode: string; balance: number }[]> {
     const addr = normalizeAddress(walletAddress);
 
     const [nativeBalance, wbtcBalance, usdcBalance] = await Promise.all([

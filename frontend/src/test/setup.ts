@@ -1,12 +1,18 @@
 import "@testing-library/jest-dom/vitest";
 
+interface WebSocketCloseEvent {
+  code: number;
+  reason: string;
+  wasClean: boolean;
+}
+
 class MockWebSocket {
   public url: string;
-  public readyState: number = 0; // CONNECTING
+  public readyState = 0; // CONNECTING
   public onopen: (() => void) | null = null;
-  public onclose: ((event: any) => void) | null = null;
-  public onerror: ((event: any) => void) | null = null;
-  public onmessage: ((event: any) => void) | null = null;
+  public onclose: ((event: WebSocketCloseEvent) => void) | null = null;
+  public onerror: ((event: Event) => void) | null = null;
+  public onmessage: ((event: MessageEvent) => void) | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -19,7 +25,10 @@ class MockWebSocket {
     }, 10);
   }
 
-  public send(_data: string): void {}
+  public send(_data: string): void {
+    // No-op: tests don't exercise send, but the WebSocket interface
+    // requires the method to exist.
+  }
   public close(): void {
     this.readyState = 3; // CLOSED
     if (this.onclose) {
@@ -28,5 +37,5 @@ class MockWebSocket {
   }
 }
 
-global.WebSocket = MockWebSocket as any;
+global.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 

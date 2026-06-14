@@ -31,7 +31,9 @@ describe("ReceiptClient", () => {
     const result = await client.getReceipt("uuid/with spaces", "gb_session_xyz");
 
     expect(result).toEqual(SAMPLE_RECEIPT);
-    const [url, init] = fetchSpy.mock.calls[0]!;
+    const firstCall = fetchSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [url, init] = firstCall ?? [];
     // encodeURIComponent turns spaces into %20 and slashes into %2F.
     expect(url).toBe("https://api.example.com/api/receipts/uuid%2Fwith%20spaces");
     const reqInit = init as RequestInit;

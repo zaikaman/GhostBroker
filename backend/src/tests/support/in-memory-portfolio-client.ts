@@ -31,7 +31,7 @@ export function makePortfolioRecord(params: {
 
 export class InMemoryPortfolioClient {
   public readonly portfolios: PortfolioRecord[];
-  public readonly historyInserts: Array<Record<string, unknown>> = [];
+  public readonly historyInserts: Record<string, unknown>[] = [];
   public readonly rpcCalls: PortfolioRpcCall[] = [];
 
   public constructor(portfolios: PortfolioRecord[] = []) {

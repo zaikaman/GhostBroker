@@ -39,6 +39,14 @@ function readT3Environment(value: string | undefined): Environment {
   throw new Error("T3N_ENV must be either testnet or production.");
 }
 
+function requireEnv(key: string): string {
+  const value = process.env[key];
+  if (!value || value.trim().length === 0) {
+    throw new Error(`Missing required env var: ${key}`);
+  }
+  return value;
+}
+
 function readEnv(): SandboxCheckEnv {
   loadLocalEnv();
 
@@ -52,12 +60,12 @@ function readEnv(): SandboxCheckEnv {
   }
 
   const env: SandboxCheckEnv = {
-    T3N_API_KEY: process.env.T3N_API_KEY!,
+    T3N_API_KEY: requireEnv("T3N_API_KEY"),
     T3N_ENV: readT3Environment(process.env.T3N_ENV),
-    T3_SANDBOX_TOKEN_ACCOUNT: process.env.T3_SANDBOX_TOKEN_ACCOUNT!,
+    T3_SANDBOX_TOKEN_ACCOUNT: requireEnv("T3_SANDBOX_TOKEN_ACCOUNT"),
     T3_MINIMUM_TOKEN_BALANCE: process.env.T3_MINIMUM_TOKEN_BALANCE ?? "1",
-    T3_ADK_ENV: process.env.T3_ADK_ENV!,
-    T3_PRIVATE_MAP_PREFIX: process.env.T3_PRIVATE_MAP_PREFIX!,
+    T3_ADK_ENV: requireEnv("T3_ADK_ENV"),
+    T3_PRIVATE_MAP_PREFIX: requireEnv("T3_PRIVATE_MAP_PREFIX"),
   };
 
   if (process.env.T3_NETWORK_URL) {
@@ -81,8 +89,10 @@ function parseMinimumTokenBalance(value: string): bigint {
 
     return minimum;
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `T3_MINIMUM_TOKEN_BALANCE must be a non-negative integer: ${(error as Error).message}`,
+      `T3_MINIMUM_TOKEN_BALANCE must be a non-negative integer: ${detail}`,
+      { cause: error },
     );
   }
 }

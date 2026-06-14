@@ -6,13 +6,13 @@ import { DidAuthService } from "../../services/auth.service.js";
 
 describe("DidAuthService wallet auth", () => {
   it("creates institution and issues session with connected wallet metadata", async () => {
-    const createdInstitutions: Array<{
+    const createdInstitutions: {
       legalName: string;
       displayName: string;
       settlementProfileRef: string;
       t3TenantDid: string;
       metadata: Readonly<Record<string, unknown>>;
-    }> = [];
+    }[] = [];
 
     const institutions: AuthInstitutionRepository = {
       findByTenantDid: async () => null,
