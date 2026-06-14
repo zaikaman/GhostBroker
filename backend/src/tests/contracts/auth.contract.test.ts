@@ -42,6 +42,9 @@ describe("DID authentication contract", () => {
       verifyChallenge: async () => {
         throw new Error("not used");
       },
+      authenticateWithApiKey: async () => {
+        throw new Error("not used");
+      },
     };
     const app = createApp(buildBackendTestEnv(), buildServices(authService));
 
@@ -71,6 +74,9 @@ describe("DID authentication contract", () => {
           t3TenantDid: "did:t3:0x0000000000000000000000000000000000000301",
         },
       }),
+      authenticateWithApiKey: async () => {
+        throw new Error("not used");
+      },
     };
     const app = createApp(buildBackendTestEnv(), buildServices(authService));
 

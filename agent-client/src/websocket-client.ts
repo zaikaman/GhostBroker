@@ -15,7 +15,7 @@ export class TelemetryClient {
   private ws: WebSocket | null = null;
   private status: TelemetryConnectionStatus = "disconnected";
   private readonly baseUrl: string;
-  private readonly institutionId: string;
+  private institutionId: string;
   private reconnectAttempts = 0;
   private maxReconnectDelay = 30000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -26,6 +26,14 @@ export class TelemetryClient {
   public constructor(baseUrl: string, institutionId: string) {
     // Convert http(s) to ws(s) for WebSocket URL
     this.baseUrl = baseUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:").replace(/\/$/, "");
+    this.institutionId = institutionId;
+  }
+
+  /**
+   * Set the institution ID used in the telemetry WebSocket query string.
+   * Safe to call at any time; the new value applies on the next (re)connect.
+   */
+  public setInstitutionId(institutionId: string): void {
     this.institutionId = institutionId;
   }
 

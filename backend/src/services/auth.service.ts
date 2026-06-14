@@ -10,6 +10,7 @@ import type {
 import type { Institution } from "../models/institution.js";
 import { createOpaqueId, issueOperatorSessionToken } from "../auth/session-token.js";
 import type { WalletPortfolioSyncService } from "./sepolia-portfolio-sync.service.js";
+import type { ApiKeyManagementService } from "./api-key.service.js";
 
 interface ChallengeRecord {
   did: string;
@@ -20,6 +21,7 @@ interface ChallengeRecord {
 
 export interface AuthInstitutionRepository {
   findByTenantDid(did: string): Promise<Institution | null>;
+  findById(id: string): Promise<Institution | null>;
   createInstitution(value: {
     legalName: string;
     displayName: string;
@@ -32,6 +34,7 @@ export interface AuthInstitutionRepository {
 export interface AuthSessionService {
   createChallenge(did: string): Promise<AuthChallengeResponse>;
   verifyChallenge(request: AuthVerifyRequest): Promise<AuthSessionResponse>;
+  authenticateWithApiKey(apiKey: string): Promise<AuthSessionResponse>;
 }
 
 function hash(value: string): string {
@@ -57,11 +60,13 @@ export class DidAuthService implements AuthSessionService {
     institutions: AuthInstitutionRepository;
     identityVerifier: AgentIdentityVerifier;
     walletPortfolioSyncService?: WalletPortfolioSyncService;
+    apiKeyService: ApiKeyManagementService;
     sessionSecret: string;
   }) {
     this.institutions = params.institutions;
     this.identityVerifier = params.identityVerifier;
     this.walletPortfolioSyncService = params.walletPortfolioSyncService;
+    this.apiKeyService = params.apiKeyService;
     this.sessionSecret = params.sessionSecret;
   }
 
@@ -69,6 +74,7 @@ export class DidAuthService implements AuthSessionService {
   private readonly institutions: AuthInstitutionRepository;
   private readonly identityVerifier: AgentIdentityVerifier;
   private readonly walletPortfolioSyncService: WalletPortfolioSyncService | undefined;
+  private readonly apiKeyService: ApiKeyManagementService;
   private readonly sessionSecret: string;
 
   private async findOrCreateInstitution(did: string): Promise<Institution> {
@@ -217,6 +223,42 @@ export class DidAuthService implements AuthSessionService {
     }
 
     const token = issueOperatorSessionToken(tokenParams);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 8 * 1000).toISOString();
+
+    return {
+      token,
+      expiresAt,
+      institution: {
+        id: institution.id,
+        displayName: institution.displayName,
+        t3TenantDid: institution.t3TenantDid,
+      },
+    };
+  }
+
+  public async authenticateWithApiKey(apiKey: string): Promise<AuthSessionResponse> {
+    const key = await this.apiKeyService.findKeyByToken(apiKey);
+
+    if (!key) {
+      throw new PublicError("authorization_failed", 401);
+    }
+
+    const institution = await this.institutions.findById(key.institutionId);
+
+    if (!institution) {
+      throw new PublicError("authorization_failed", 401);
+    }
+
+    if (institution.status !== "active") {
+      throw new PublicError("authorization_failed", 401);
+    }
+
+    const token = issueOperatorSessionToken({
+      secret: this.sessionSecret,
+      did: `apikey:${key.id}`,
+      institutionId: institution.id,
+    });
+
     const expiresAt = new Date(Date.now() + 60 * 60 * 8 * 1000).toISOString();
 
     return {

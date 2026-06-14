@@ -212,6 +212,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
       ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
+      apiKeyService: new ApiKeyService(apiKeyRepository),
       sessionSecret:
         env.AUTH_SESSION_SECRET ??
         "development-only-auth-session-secret-change-before-production",

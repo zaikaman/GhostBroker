@@ -1,5 +1,6 @@
 import type { AgentIdentityVerifier } from "@ghostbroker/t3-enclave";
 import { describe, expect, it } from "vitest";
+import type { ApiKeyManagementService } from "../../services/api-key.service.js";
 import type { AuthInstitutionRepository } from "../../services/auth.service.js";
 import { DidAuthService } from "../../services/auth.service.js";
 
@@ -15,6 +16,7 @@ describe("DidAuthService wallet auth", () => {
 
     const institutions: AuthInstitutionRepository = {
       findByTenantDid: async () => null,
+      findById: async () => null,
       createInstitution: async (value) => {
         createdInstitutions.push(value);
         return {
@@ -39,9 +41,14 @@ describe("DidAuthService wallet auth", () => {
       }),
     } as AgentIdentityVerifier;
 
+    const apiKeyService = {
+      findKeyByToken: async () => null,
+    } as unknown as ApiKeyManagementService;
+
     const authService = new DidAuthService({
       institutions,
       identityVerifier,
+      apiKeyService,
       sessionSecret: "development-only-auth-session-secret-change-before-production",
     });
 

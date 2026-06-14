@@ -70,11 +70,11 @@ if (!GHOSTBROKER_API_KEY || !OPENAI_API_KEY) {
 }
 
 // ── Clients ─────────────────────────────────────────────────────────────
+// The SDK exchanges the API key for an 8-hour session token on the first
+// call and wires the institution ID into the telemetry WebSocket filter.
 
-const ghost = new GhostBrokerClient({
-  baseUrl: BASE_URL,
-  token: GHOSTBROKER_API_KEY,
-});
+const ghost = new GhostBrokerClient({ baseUrl: BASE_URL });
+await ghost.authenticateWithApiKey(GHOSTBROKER_API_KEY);
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
@@ -531,7 +531,7 @@ function AuthenticateStep(): React.JSX.Element {
     <div className="deploy-step-content">
       <h2 className="deploy-step-title">Agent Authentication</h2>
       <p className="deploy-step-desc">
-        Agents authenticate using a persistent API key. No DID challenge-response flow is needed — just include the key as a Bearer token on every request.
+        Agents authenticate by exchanging a persistent API key for an 8-hour session token. The SDK does this for you on the first call — your agent code never has to send the raw key on the wire after that.
       </p>
 
       <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-lg)' }}>
@@ -539,23 +539,28 @@ function AuthenticateStep(): React.JSX.Element {
           <Key01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Authenticate with API Keys
         </div>
         <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-sm)' }}>
-          Your agent authenticates using a persistent API key. Generate one from the <strong>API Keys</strong> panel on the dashboard, then use it directly.
+          Your agent authenticates using a persistent API key. Generate one from the <strong>API Keys</strong> panel on the dashboard, then exchange it for a session:
         </p>
-        <CodeBlock code={`# Generate a key from the dashboard, then use it to admit your agent:
-curl -s ${API_BASE_URL}/api/agents/admit \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer gbk_<your_key>" \
+        <CodeBlock code={`# 1. Exchange the API key for an 8-hour session token.
+SESSION=$(curl -s ${API_BASE_URL}/api/auth/api-key \\
+  -H "Content-Type: application/json" \\
+  -d '{"apiKey":"'"$GHOSTBROKER_API_KEY"'"}' | jq -r .token)
+
+# 2. Use the session token to admit your agent:
+curl -s ${API_BASE_URL}/api/agents/admit \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer $SESSION" \\
   -d '{
     "institutionId": "...",
     "agentDid": "did:t3n:0xYourAgentAddress",
     "authorityProof": "..."
   }' | jq .
 
-# To submit a trading intent:
-curl -s ${API_BASE_URL}/api/agents/intents \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer gbk_<your_key>" \
+# 3. To submit a trading intent (same Bearer):
+curl -s ${API_BASE_URL}/api/agents/intents \\
+  -X POST \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer $SESSION" \\
   -d '{
     "institutionId": "...",
     "agentDid": "did:t3n:0xYourAgentAddress",
@@ -564,7 +569,7 @@ curl -s ${API_BASE_URL}/api/agents/intents \
   }' | jq .`} />
         <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-sm)' }}>
           <span style={{ fontSize: '0.75rem' }}>
-            <strong>No expiry.</strong> API keys are persistent until revoked. No DID challenge, no 8-hour session token renewal.
+            <strong>Keys are persistent; sessions are not.</strong> The API key never expires unless you revoke it from the dashboard. The session token expires after 8 hours — the SDK handles re-authentication transparently.
           </span>
         </div>
       </div>

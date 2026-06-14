@@ -16,7 +16,14 @@ import { GhostBrokerApiError } from "./errors.js";
 
 export interface GhostBrokerClientConfig {
   baseUrl: string;
+  /**
+   * Pre-existing session token. If supplied you should also supply
+   * `institutionId` so the telemetry WebSocket can be filtered server-side.
+   * For new agents, prefer `await client.authenticateWithApiKey(...)` which
+   * fills in both fields in a single call.
+   */
   token?: string;
+  institutionId?: string;
 }
 
 /**
@@ -26,22 +33,29 @@ export interface GhostBrokerClientConfig {
  * authentication, admission, intent submission, trade history,
  * receipts, and telemetry.
  *
- * @example
+ * @example Recommended: API key (no DID challenge)
  * ```typescript
- * const client = new GhostBrokerClient({ baseUrl: 'https://ghostbroker-api.herokuapp.com' });
+ * const client = new GhostBrokerClient({ baseUrl: 'https://api.ghostbroker.io' });
+ * const session = await client.authenticateWithApiKey(process.env.GHOSTBROKER_API_KEY!);
+ * // client.token and client.telemetry are now wired automatically
+ * ```
  *
- * // Authenticate
- * const session = await client.authenticate(did, signer);
+ * @example Alternative: DID challenge-response
+ * ```typescript
+ * const client = new GhostBrokerClient({ baseUrl: 'https://api.ghostbroker.io' });
+ * const session = await client.authenticate(did, async (challenge) => {
+ *   const signature = await wallet.signMessage(challenge);
+ *   return { signature, walletAddress: wallet.address };
+ * });
+ * ```
  *
- * // Admit agent
- * const admission = await client.admitAgent({ ... });
- *
- * // Submit intent
- * const intent = await client.intents.submitIntent({ ... }, session.token);
- *
- * // Listen for settlement
- * const unsub = client.telemetry.onSettled((ref) => console.log('Settled:', ref));
- * client.telemetry.connect();
+ * @example Pre-existing session
+ * ```typescript
+ * const client = new GhostBrokerClient({
+ *   baseUrl: 'https://api.ghostbroker.io',
+ *   token: cachedSessionToken,
+ *   institutionId: cachedInstitutionId,
+ * });
  * ```
  */
 export class GhostBrokerClient {
@@ -51,8 +65,8 @@ export class GhostBrokerClient {
   public readonly receipts: ReceiptClient;
   public readonly telemetry: TelemetryClient;
   public token: string | undefined;
-  private readonly baseUrl: string;
   private institutionId: string | undefined;
+  private readonly baseUrl: string;
 
   public constructor(config: GhostBrokerClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
@@ -60,33 +74,49 @@ export class GhostBrokerClient {
     this.intents = new IntentClient(this.baseUrl);
     this.trades = new TradesClient(this.baseUrl);
     this.receipts = new ReceiptClient(this.baseUrl);
-    this.telemetry = new TelemetryClient(this.baseUrl, "");
+    this.telemetry = new TelemetryClient(this.baseUrl, config.institutionId ?? "");
     this.token = config.token;
+    this.institutionId = config.institutionId;
   }
 
   /**
-   * Authenticate with the GhostBroker API.
-   * Stores the token and updates the telemetry client with the institution ID.
+   * Authenticate with the GhostBroker API via a DID challenge-response flow.
+   * Stores the returned session token and wires the institution ID into the
+   * telemetry client so the WebSocket stream is filtered correctly.
    */
   public async authenticate(
     did: string,
     signer: (challenge: string) => Promise<{ signature: string; walletAddress?: string }>,
   ): Promise<AuthSession> {
     const session = await this.auth.authenticate(did, signer);
+    this.applySession(session);
+    return session;
+  }
+
+  /**
+   * Authenticate with the GhostBroker API using a persistent API key.
+   *
+   * The agent exchanges the key for a standard session token (8h) and the
+   * returned institution info is wired into the telemetry client. The raw
+   * API key is never stored on the client — only the issued session token.
+   */
+  public async authenticateWithApiKey(apiKey: string): Promise<AuthSession> {
+    const session = await this.auth.authenticateWithApiKey(apiKey);
+    this.applySession(session);
+    return session;
+  }
+
+  private applySession(session: AuthSession): void {
     this.token = session.token;
     this.institutionId = session.institution.id;
-    // Recreate telemetry client with proper institution ID
-    Object.assign(this, {
-      telemetry: new TelemetryClient(this.baseUrl, this.institutionId!),
-    });
-    return session;
+    this.telemetry.setInstitutionId(session.institution.id);
   }
 
   /**
    * Admit an autonomous agent after verifying delegation proof.
    */
   public async admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission> {
-    if (!this.token) throw new GhostBrokerApiError(401, "authorization_failed", "Not authenticated. Call authenticate() first.");
+    if (!this.token) throw new GhostBrokerApiError(401, "authorization_failed", "Not authenticated. Call authenticate() or authenticateWithApiKey() first.");
 
     const response = await fetch(`${this.baseUrl}/api/agents/admit`, {
       method: "POST",

@@ -12,8 +12,13 @@ export const authVerifyRequestSchema = z.object({
   walletAddress: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
 });
 
+export const authApiKeyRequestSchema = z.object({
+  apiKey: z.string().trim().min(1).max(512),
+});
+
 export type AuthChallengeRequest = z.infer<typeof authChallengeRequestSchema>;
 export type AuthVerifyRequest = z.infer<typeof authVerifyRequestSchema>;
+export type AuthApiKeyRequest = z.infer<typeof authApiKeyRequestSchema>;
 
 export interface AuthChallengeResponse {
   challengeId: string;

@@ -24,6 +24,7 @@ describe("institution onboarding", () => {
           settlementProfileRef: value.settlementProfileRef,
         }),
       findByTenantDid: async () => null,
+      findById: async () => null,
     };
     const service = new InstitutionService(repository, didRegistry);
 

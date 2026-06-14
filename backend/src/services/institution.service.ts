@@ -32,6 +32,7 @@ export interface InstitutionRepository {
     metadata: Readonly<Record<string, unknown>>;
   }): Promise<Institution>;
   findByTenantDid(did: string): Promise<Institution | null>;
+  findById(id: string): Promise<Institution | null>;
 }
 
 export interface InstitutionManagementService {
@@ -82,6 +83,20 @@ export class SupabaseInstitutionRepository implements InstitutionRepository {
       .from("institutions")
       .select("*")
       .eq("t3_tenant_did", did)
+      .maybeSingle();
+
+    if (error) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
+
+    return data ? institutionFromRecord(data) : null;
+  }
+
+  public async findById(id: string): Promise<Institution | null> {
+    const { data, error } = await this.client
+      .from("institutions")
+      .select("*")
+      .eq("id", id)
       .maybeSingle();
 
     if (error) {
