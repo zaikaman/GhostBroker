@@ -21,6 +21,13 @@ export interface SettlementExecutionRequest {
   matchOutcome: OpaqueMatchOutcome;
   buyerAgentDid: string;
   sellerAgentDid: string;
+  /**
+   * Boundbuyer W3C VCs for the buyer and seller agents. The
+   * settlement command builder re-verifies both with the boundbuyer
+   * verifier before issuing the settlement instruction.
+   */
+  buyerDelegationCredential: unknown;
+  sellerDelegationCredential: unknown;
   encryptedTradeFields: {
     assetCodeCiphertext: string;
     quantityCiphertext: string;
@@ -170,6 +177,8 @@ export class SettlementService {
         matchOutcome: request.matchOutcome,
         buyerAgentDid: request.buyerAgentDid,
         sellerAgentDid: request.sellerAgentDid,
+        buyerDelegationCredential: request.buyerDelegationCredential,
+        sellerDelegationCredential: request.sellerDelegationCredential,
       });
       await this.emitAudit("match", command, correlationRef);
       const persisted = await this.repository.persistCompletedSettlement({

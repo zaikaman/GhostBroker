@@ -1,5 +1,15 @@
 import { z } from "zod";
-import type { RequestedAgentAction } from "./agent-auth-client.js";
+
+/**
+ * The action an agent is attempting on the backend. Used as the
+ * discriminator across the agent authorization surface
+ * (admit / intent.submit / settlement.execute). The boundbuyer
+ * verifier passes this through unchanged.
+ */
+export type RequestedAgentAction =
+  | "agent.admit"
+  | "intent.submit"
+  | "settlement.execute";
 
 /**
  * Boundbuyer-style W3C Verifiable Credential verifier.
@@ -20,15 +30,15 @@ import type { RequestedAgentAction } from "./agent-auth-client.js";
  *                   as its "sandbox/demo" production gate.
  *
  * This module produces a `VerifiedDelegationProof` shape identical
- * to `verifySignedDelegationProof`, so the rest of the
- * `T3AgentAuthorizationFacade` pipeline is untouched. The
- * `DashboardDelegationAgentAuthClient` adapter routes requests with
- * a `delegationCredential` field to this verifier; everything else
- * keeps going through the JCS proof path.
+ * to the original JCS verifier, so the rest of the per-action
+ * authorization pipeline is untouched. The verifier is the only
+ * adapter the production backend runs against the boundbuyer W3C
+ * VC. Three modes (sandbox / structural / live) are controlled
+ * by the server-side `VC_VERIFY_MODE` env var.
  *
  * The `authorityRef` returned to the agent is the credential's
  * `id` (e.g. `urn:uuid:ghostbroker-delegation-...`), which is the
- * same opaque-reference shape the existing path produces.
+ * same opaque-reference shape the original path produced.
  */
 
 const purchaseCategorySchema = z.enum([
@@ -69,7 +79,7 @@ export type BoundbuyerDelegationCredential = z.infer<typeof boundbuyerDelegation
 export type BoundbuyerVerificationMode = "sandbox" | "live" | "structural";
 
 export interface BoundbuyerVerificationRequest {
-  credential: BoundbuyerDelegationCredential;
+  credential: unknown;
   institutionId: string;
   agentDid: string;
   /**

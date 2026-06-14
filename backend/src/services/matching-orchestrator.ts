@@ -311,6 +311,8 @@ export class MatchingOrchestrator {
           matchOutcome: outcome,
           buyerAgentDid: buyIntent.agentDid,
           sellerAgentDid: sellIntent.agentDid,
+          buyerDelegationCredential: buyIntent.delegationCredential,
+          sellerDelegationCredential: sellIntent.delegationCredential,
           encryptedTradeFields: {
             assetCodeCiphertext: buyIntent.encryptedEnvelope,
             quantityCiphertext: buyIntent.encryptedEnvelope,

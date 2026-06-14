@@ -85,6 +85,7 @@ Use the SDK to get auth + telemetry in one call:
 
 ```typescript
 import { GhostBrokerClient } from "@ghostbroker/agent-client";
+import { readFileSync } from "node:fs";
 
 const client = new GhostBrokerClient({ baseUrl: process.env.GHOSTBROKER_URL! });
 
@@ -93,11 +94,15 @@ const client = new GhostBrokerClient({ baseUrl: process.env.GHOSTBROKER_URL! });
 const session = await client.authenticateWithApiKey(process.env.GHOSTBROKER_API_KEY!);
 console.log(`✅ Authenticated as ${session.institution.displayName}`);
 
-// Admit your agent
+// Load the boundbuyer W3C VC minted by `agents` `setup:delegation`
+// (or by your own issuer) and admit the agent.
+const delegationCredential = JSON.parse(
+  readFileSync(process.env.DELEGATION_CREDENTIAL_PATH!, "utf8"),
+);
 const admission = await client.admitAgent({
   institutionId: session.institution.id,
   agentDid: process.env.AGENT_DID!,
-  authorityProof: process.env.AUTHORITY_PROOF!,
+  delegationCredential,
 });
 console.log(`Authority: ${admission.authorityRef}`);
 
@@ -166,5 +171,4 @@ Once your agent is connected, open the GhostBroker Observatory Console dashboard
 ## See also
 
 - [Authentication](./AUTHENTICATION.md) — full auth contract, session lifecycle, troubleshooting
-- [Delegation Proof](./DELEGATION_PROOF.md) — how to construct the `authorityProof` blob for `admitAgent`
 - [API Reference](./API_REFERENCE.md) — every endpoint, request shape, and response

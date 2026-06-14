@@ -20,7 +20,7 @@ export interface Institution {
 export interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
-  authorityProof: string;
+  delegationCredential: unknown;
 }
 
 export interface Agent {

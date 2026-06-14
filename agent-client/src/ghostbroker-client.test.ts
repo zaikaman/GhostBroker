@@ -133,7 +133,27 @@ describe("GhostBrokerClient", () => {
       const request: AdmitAgentRequest = {
         institutionId: SAMPLE_SESSION.institution.id,
         agentDid: "did:t3n:0xAgentAddress",
-        authorityProof: "{}",
+        delegationCredential: {
+          id: "urn:uuid:test",
+          type: ["VerifiableCredential", "GhostBrokerDelegation"],
+          issuer: "did:t3n:0xTest",
+          issuanceDate: "2026-01-01T00:00:00.000Z",
+          expirationDate: "2027-01-01T00:00:00.000Z",
+          credentialSubject: {
+            id: "did:t3n:0xTest",
+            agentDid: "did:t3n:0xAgentAddress",
+            maxSpendUsd: 1000,
+            allowedCategories: ["software"],
+            purpose: "test",
+          },
+          proof: {
+            type: "JsonWebSignature2020",
+            created: "2026-01-01T00:00:00.000Z",
+            proofPurpose: "assertionMethod",
+            verificationMethod: "did:t3n:0xTest#key-1",
+            jws: "live-demo-unsigned",
+          },
+        },
       };
       let caught: unknown;
       try {
@@ -153,7 +173,7 @@ describe("GhostBrokerClient", () => {
           mockJsonResponse({
             agentDid: "did:t3n:0xAgentAddress",
             status: "admitted",
-            authorityRef: "t3-delegation:xyz",
+            authorityRef: "boundbuyer-delegation:urn:uuid:test",
           } satisfies AgentAdmission),
         );
 
@@ -163,13 +183,13 @@ describe("GhostBrokerClient", () => {
       const admission = await client.admitAgent({
         institutionId: SAMPLE_SESSION.institution.id,
         agentDid: "did:t3n:0xAgentAddress",
-        authorityProof: "{}",
+        delegationCredential: { id: "urn:uuid:test" },
       });
 
       expect(admission).toEqual({
         agentDid: "did:t3n:0xAgentAddress",
         status: "admitted",
-        authorityRef: "t3-delegation:xyz",
+        authorityRef: "boundbuyer-delegation:urn:uuid:test",
       });
 
       const admitCall = fetchSpy.mock.calls[1];

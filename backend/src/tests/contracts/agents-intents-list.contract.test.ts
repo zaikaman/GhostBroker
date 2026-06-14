@@ -45,6 +45,7 @@ const sampleIntent: PendingIntent = {
   // Private fields — these must NOT appear in the response.
   encryptedEnvelope: "t3env.ciphertext.secret",
   authorityRef: "authority:secret",
+  delegationCredential: { id: "vc-list-1", issuer: "did:t3n:list" },
   assetCode: "WBTC",
   side: "buy",
   quantity: 100,

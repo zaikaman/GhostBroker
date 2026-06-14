@@ -1,9 +1,4 @@
 export { AuthClient, type AuthClientConfig } from "./auth-client.js";
-export {
-  DelegationProofBuilder,
-  type DelegationProofOptions,
-  type SignedDelegationProof,
-} from "./delegation-proof.js";
 export { IntentClient } from "./intent-client.js";
 export { TradesClient } from "./trades-client.js";
 export { ReceiptClient } from "./receipt-client.js";

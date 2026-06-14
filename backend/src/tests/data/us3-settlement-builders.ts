@@ -59,6 +59,8 @@ export function buildSettlementExecutionRequest(
     },
     buyerAgentDid: "did:t3n:agent:buyer-us3",
     sellerAgentDid: "did:t3n:agent:seller-us3",
+    buyerDelegationCredential: { id: "buyer-vc", issuer: "did:t3n:buyer" },
+    sellerDelegationCredential: { id: "seller-vc", issuer: "did:t3n:seller" },
     encryptedTradeFields: {
       assetCodeCiphertext: "t3cipher.asset.us3",
       quantityCiphertext: "t3cipher.quantity.us3",

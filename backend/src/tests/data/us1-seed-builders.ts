@@ -63,7 +63,28 @@ export function buildAdmitAgentRequest(
   return {
     institutionId: us1OperatorInstitutionId,
     agentDid: us1AgentDid,
-    authorityProof: "proof:dashboard-grant",
+    delegationCredential: {
+      id: "urn:uuid:ghostbroker-delegation-us1-test",
+      type: ["VerifiableCredential", "GhostBrokerDelegation"],
+      issuer: "did:t3n:0x0000000000000000000000000000000000000099",
+      issuanceDate: "2026-01-01T00:00:00.000Z",
+      expirationDate: "2027-01-01T00:00:00.000Z",
+      credentialSubject: {
+        id: "did:t3n:0x0000000000000000000000000000000000000099",
+        agentDid: us1AgentDid,
+        maxSpendUsd: 1000,
+        allowedCategories: ["software"],
+        purpose: "test",
+      },
+      proof: {
+        type: "JsonWebSignature2020",
+        created: "2026-01-01T00:00:00.000Z",
+        proofPurpose: "assertionMethod",
+        verificationMethod:
+          "did:t3n:0x0000000000000000000000000000000000000099#key-1",
+        jws: "live-demo-unsigned",
+      },
+    },
     ...overrides,
   };
 }

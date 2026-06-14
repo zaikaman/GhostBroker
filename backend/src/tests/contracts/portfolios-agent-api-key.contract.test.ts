@@ -72,6 +72,7 @@ const buyIntent: PendingIntent = {
   executionRef: "t3exec_buy_apikey_1",
   encryptedEnvelope: "t3env.ciphertext.buy.apikey",
   authorityRef: "authority:buy:apikey:1",
+  delegationCredential: { id: "vc-buy-apikey", issuer: "did:t3n:apikey" },
   assetCode: "WBTC",
   side: "buy",
   quantity: 1,

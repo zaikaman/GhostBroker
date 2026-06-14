@@ -20,22 +20,20 @@ The repository is a four-package monorepo:
 ## Terminal 3 Agent Auth SDK integration
 
 The headline integration is the per-action authority verifier in
-[`t3-enclave/src/auth/delegation-credential.ts`](../t3-enclave/src/auth/delegation-credential.ts).
-It verifies signed Terminal 3 delegation VCs end-to-end:
+[`t3-enclave/src/auth/boundbuyer-delegation.ts`](../t3-enclave/src/auth/boundbuyer-delegation.ts).
+It verifies boundbuyer-style W3C Verifiable Credentials end-to-end:
 
-- **Cryptography**: `secp256k1` (EIP-191) user signature, then `secp256k1` agent signature over a typed invocation preimage built from the credential's `vc_id`, a per-request nonce, and a request hash.
-- **Authority reference**: every verification produces a `t3-delegation:<vc-id>` reference; the agent must echo this back on every privileged action, and the backend re-asserts equality on each call.
-- **Function scoping**: the credential lists which actions the agent is authorized for (`agent.admit`, `intent.submit`, `settlement.execute`). Requests for unlisted actions are rejected as `over_scoped`.
-- **Time windowing**: `not_before_secs` / `not_after_secs` are checked against the verifier's clock; expired or not-yet-valid credentials are rejected as `expired`.
+- **Shape + time window + DID binding**: every VC must have an `id`, `issuer`, `credentialSubject.agentDid`, `issuanceDate`/`expirationDate`, and a `proof` object. The verifier checks all of these.
+- **Agent-binding**: the credential's `credentialSubject.agentDid` must match the agent DID on the request.
 - **Revocation**: the verifier accepts a `revokedAuthorityRefs` set, sourced from `AuthorityRevocationRepository` before every check. Revoked references are rejected as `revoked`.
-- **Canonicalisation**: the credential body is JCS-canonicalised and compared byte-for-byte against the supplied canonical form, so a tampered credential cannot pass even with valid signatures.
+- **Cryptographic verification** (live mode only): the verifier calls `@terminal3/verify_vc` at runtime if it's installed. Otherwise it falls back to `structural` checks (unless `VC_VERIFY_STRICT=true`).
+- **Authority reference**: every verification produces a `boundbuyer-delegation:<vc-id>` reference; the agent must echo this back on every privileged action, and the backend re-asserts equality on each call.
 
-The verifier is the **fast path** when the proof is locally valid; if local verification fails, it falls through to a live `POST /agent-delegations/verify` call on the Terminal 3 network
-([`t3-enclave/src/auth/agent-auth-client.ts`](../t3-enclave/src/auth/agent-auth-client.ts)). The same facade is used by **every** backend service that performs a privileged action — `AgentService.admitAgent`, `HiddenIntentService.submitIntent`, `HiddenIntentService.cancelIntent` (yes, twice — once for the cancel-and-revoke race), and `SettlementCommandBuilder.build` — all calling the **same** `T3AgentAuthorizationFacade` singleton with the right `requestedAction` for the action. See [`backend/src/auth/agent-authz.ts`](../backend/src/auth/agent-authz.ts) and the composition root in [`backend/src/app.ts`](../backend/src/app.ts).
+The same facade is used by **every** backend service that performs a privileged action — `AgentService.admitAgent`, `HiddenIntentService.submitIntent`, `HiddenIntentService.cancelIntent`, and `SettlementCommandBuilder.build` — all calling the **same** `T3AgentAuthorizationFacade` singleton with the right `requestedAction` for the action. The VC is persisted on the agent record at admit time, so submit / cancel / settlement re-verify the same credential without the agent having to resend it. See [`backend/src/auth/agent-authz.ts`](../backend/src/auth/agent-authz.ts) and the composition root in [`backend/src/app.ts`](../backend/src/app.ts).
 
 Tests for the verifier live in
-[`t3-enclave/src/tests/auth-delegation-credential.test.ts`](../t3-enclave/src/tests/auth-delegation-credential.test.ts)
-and cover valid proof, scope mismatch, expiry, signature tampering, and revoked-authority rejection.
+[`t3-enclave/src/tests/auth-agent-client.test.ts`](../t3-enclave/src/tests/auth-agent-client.test.ts)
+and cover valid VC, stale `authorityRef`, and expired-credential rejection.
 
 ## Two-tier auth architecture
 
@@ -44,7 +42,7 @@ The auth model is layered to match the Agent Auth SDK's design intent:
 | Layer | Credential | Consumer | Purpose |
 |---|---|---|---|
 | **Session** | `gbk_…` persistent API key → 8-hour JWT | External agent SDK | Authenticate the agent to the backend across reconnects, restarts, and long-running deploys |
-| **Authority** | Signed Terminal 3 delegation VC (`t3-delegation:<vc-id>`) | Every privileged action | Authorize *this specific* action against institution policy, with function-scope, time-window, and revocation checks |
+| **Authority** | Boundbuyer W3C Verifiable Credential (`boundbuyer-delegation:<vc-id>`) | Every privileged action | Authorize *this specific* action against institution policy, with shape, time-window, DID-binding, and revocation checks |
 
 The two are complementary, not alternatives. The API key answers *"which institution does this agent belong to?"*; the delegation VC answers *"is this agent authorized to do this right now, for this action, against this policy?"* This is the same separation the Terminal 3 docs use for the [seed API key pattern](https://docs.terminal3.io/developers/adk/tips/seed-api-key), applied to the agent side of the boundary. Agents exchange the key at `POST /api/auth/api-key`, then present the signed VC on every privileged call.
 

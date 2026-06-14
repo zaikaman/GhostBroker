@@ -86,7 +86,11 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     context: HiddenIntentSubmissionContext,
   ): Promise<HiddenIntentAccepted> {
     this.publish(request, context.correlationRef, "intent_received");
-    await this.assertAuthority(request);
+    const delegationCredential = await this.loadDelegationCredential(
+      request.institutionId,
+      request.agentDid,
+    );
+    await this.assertAuthority(request, delegationCredential);
 
     const sealed = await this.blindIntentClient.sealIntent({
       institutionId: request.institutionId,
@@ -139,6 +143,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         executionRef: sealed.executionRef,
         encryptedEnvelope: request.encryptedIntentEnvelope,
         authorityRef: request.authorityRef,
+        delegationCredential: delegationCredential ?? null,
         assetCode: request.settlementMetadata.assetCode,
         side: request.settlementMetadata.side,
         quantity: request.settlementMetadata.quantity,
@@ -272,38 +277,76 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     };
   }
 
-  private async assertAuthority(request: HiddenIntentRequest): Promise<void> {
+  private async assertAuthority(
+    request: HiddenIntentRequest,
+    delegationCredential: unknown,
+  ): Promise<void> {
     const revokedAuthorityRefs =
       await this.revocations.listRevokedAuthorityRefs(
         request.institutionId,
         request.agentDid,
       );
+
+    // Re-verify the boundbuyer VC the agent was admitted with.
+    // The VC is persisted in the agent record's metadata at admit
+    // time (see `AgentService.admitAgent` and
+    // `SupabaseAgentRepository.create`). Without this, the intent
+    // submit path would try to JCS-parse the opaque `authorityRef`
+    // string and reject the agent on every submit.
     const verificationRequest: AgentDelegationVerificationRequest = {
       institutionId: request.institutionId,
       agentDid: request.agentDid,
-      authorityProof: request.authorityRef,
+      authorityRef: request.authorityRef,
+      delegationCredential,
       requestedAction: "intent.submit",
       revokedAuthorityRefs,
     };
     const verification =
       await this.authorization.verifyAgentAuthority(verificationRequest);
 
-    if (
-      verification.status !== "verified" ||
-      verification.authorityRef !== request.authorityRef
-    ) {
+    if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
+    }
+  }
+
+  /**
+   * Look up the boundbuyer VC persisted at admit time. Returns
+   * `null` if the agent record is missing or has no credential —
+   * the verifier will then reject as `unverified` / `malformed`.
+   */
+  private async loadDelegationCredential(
+    institutionId: string,
+    agentDid: string,
+  ): Promise<unknown> {
+    if (!this.agentRepository) {
+      return null;
+    }
+    try {
+      const agent = await this.agentRepository.findByAgentDid(
+        institutionId,
+        agentDid,
+      );
+      if (!agent) {
+        return null;
+      }
+      const credential = (
+        agent.metadata as Record<string, unknown> | null
+      )?.["delegation_credential"];
+      return credential ?? null;
+    } catch {
+      return null;
     }
   }
 
   public async cancelIntent(
     request: CancelIntentRequest,
   ): Promise<IntentCancelled | null> {
-    // Re-verify the agent's authority proof is still valid for this
+    // Re-verify the agent's boundbuyer VC is still valid for this
     // institution/agent pair. This catches the case where the
     // delegation was revoked after the intent was submitted.
     //
-    // Note: we do NOT also look up the agent's DB record. The
+    // Note: we do NOT also look up the agent's DB record for the
+    // revocations list (that's already fetched below). The
     // revocation flow already cascades through
     // `MatchingOrchestrator.removeIntentsByAgent`, which removes
     // revoked agents' pending intents from the queue. By the time a
@@ -318,21 +361,25 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         request.institutionId,
         request.agentDid,
       );
+
+    const delegationCredential = await this.loadDelegationCredential(
+      request.institutionId,
+      request.agentDid,
+    );
+
     const verification =
       await this.authorization.verifyAgentAuthority({
         institutionId: request.institutionId,
         agentDid: request.agentDid,
-        authorityProof: request.authorityRef,
+        authorityRef: request.authorityRef,
+        delegationCredential,
         // Same requested action as submission — the proof is
         // for the same scope of capabilities.
         requestedAction: "intent.submit",
         revokedAuthorityRefs,
       });
 
-    if (
-      verification.status !== "verified" ||
-      verification.authorityRef !== request.authorityRef
-    ) {
+    if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }
 

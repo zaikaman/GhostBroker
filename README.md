@@ -1,21 +1,18 @@
 # GhostBroker
+# GhostBroker
 
 GhostBroker is an institutional dark pool platform composed of a Vite React dashboard, an Express REST/WebSocket API, Supabase PostgreSQL migrations, and a dedicated Terminal 3 enclave package for confidential agent execution.
-
 ## Headline: Terminal 3 Agent Auth SDK integration
 
-GhostBroker integrates the **Terminal 3 Agent Auth SDK** for per-action authority verification. Every agent admission, every intent submission, and every settlement re-verifies a Terminal 3 delegation credential against institution policy. The integration lives in [`t3-enclave/src/auth/delegation-credential.ts`](t3-enclave/src/auth/delegation-credential.ts), which verifies signed delegation VCs end-to-end:
+GhostBroker integrates the **Terminal 3 Agent Auth SDK** for per-action authority verification. Every agent admission, every intent submission, and every settlement re-verifies a boundbuyer-style W3C Verifiable Credential — the only credential format the live T3N onboarding surface mints — against institution policy. The integration lives in [`t3-enclave/src/auth/boundbuyer-delegation.ts`](t3-enclave/src/auth/boundbuyer-delegation.ts), which runs in three modes (`sandbox` / `structural` / `live`) controlled by the server-side `VC_VERIFY_MODE` env var:
 
-- **Cryptography**: `secp256k1` (EIP-191) user signature + `secp256k1` agent signature over a typed invocation preimage.
-- **Authority reference**: every verification produces a `t3-delegation:<vc-id>` reference that the agent must echo back on every privileged action.
-- **Function scoping**: the credential lists which actions the agent is authorized for (`agent.admit`, `intent.submit`, `settlement.execute`). Requests for unlisted actions are rejected as `over_scoped`.
-- **Time windowing**: `not_before_secs` / `not_after_secs` are checked against the verifier's clock; expired or not-yet-valid credentials are rejected.
-- **Revocation**: the verifier accepts a `revokedAuthorityRefs` set; revoked references are rejected before signature verification even runs.
-- **Canonicalisation**: the credential body is JCS-canonicalised and compared byte-for-byte against the supplied canonical form, so a tampered credential cannot pass.
+- **Shape + time window + DID binding**: every VC must have an `id`, `issuer`, `credentialSubject.agentDid`, `issuanceDate`/`expirationDate`, and a `proof` object. The verifier checks all of these.
+- **Agent-binding**: the credential's `credentialSubject.agentDid` must match the agent DID on the request.
+- **Revocation**: the verifier accepts a `revokedAuthorityRefs` set; revoked references are rejected before any further check.
+- **Cryptographic verification** (live mode only): the verifier calls `@terminal3/verify_vc` at runtime if it's installed. Otherwise it falls back to `structural` checks (unless `VC_VERIFY_STRICT=true`).
+- **Per-action re-verification**: every privileged action (`admit`, `submitIntent`, `cancelIntent`, `settlement.execute`) re-runs the verifier with the VC the agent was admitted with. The agent echoes the `authorityRef` (e.g. `boundbuyer-delegation:<vc-id>`) on every call, and the backend confirms the credential is still the same one on file. See [`backend/src/auth/agent-authz.ts`](backend/src/auth/agent-authz.ts) and the composition root in [`backend/src/app.ts`](backend/src/app.ts) for the wiring.
 
-The verifier is the **fast path** when the proof is locally valid; if local verification fails, the verifier falls through to a live `POST /agent-delegations/verify` call on the Terminal 3 network (`agent-auth-client.ts`). This is the same facade used by every backend service — `AgentService.admitAgent`, `HiddenIntentService.submitIntent`, `HiddenIntentService.cancelIntent`, and `SettlementCommandBuilder.build` all call the **same** `T3AgentAuthorizationFacade` singleton, each with the right `requestedAction` for the action. See [`backend/src/auth/agent-authz.ts`](backend/src/auth/agent-authz.ts) and [`backend/src/app.ts`](backend/src/app.ts) (composition root) for the wiring.
-
-Auth is layered: agents hold a persistent `gbk_…` API key to establish a session with the backend (exchanged at `POST /api/auth/api-key` for an 8-hour JWT — see [`agent-client/`](agent-client/) and [`docs/agent-integration/AUTHENTICATION.md`](docs/agent-integration/AUTHENTICATION.md) for the external agent developer experience); on every privileged action they then present a signed Terminal 3 delegation VC. The persistent key is the *session* credential, the signed VC is the *authority* credential. This is the separation the Terminal 3 docs use for the ["seed API key"](https://docs.terminal3.io/developers/adk/tips/seed-api-key) pattern, applied to the agent side of the boundary.
+Auth is layered: agents hold a persistent `gbk_…` API key to establish a session with the backend (exchanged at `POST /api/auth/api-key` for an 8-hour JWT — see [`agent-client/`](agent-client/) and [`docs/agent-integration/AUTHENTICATION.md`](docs/agent-integration/AUTHENTICATION.md) for the external agent developer experience); on every privileged action they then re-verify their boundbuyer W3C VC. The persistent key is the *session* credential, the boundbuyer VC is the *authority* credential. This is the separation the Terminal 3 docs use for the ["seed API key"](https://docs.terminal3.io/developers/adk/tips/seed-api-key) pattern, applied to the agent side of the boundary.
 
 ## Workspace Layout
 

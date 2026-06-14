@@ -62,7 +62,7 @@ const GHOSTBROKER_API_KEY = process.env.GHOSTBROKER_API_KEY!;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 const INSTITUTION_ID = process.env.INSTITUTION_ID!;
 const AGENT_DID = process.env.AGENT_DID!;
-const AUTHORITY_PROOF = process.env.AUTHORITY_PROOF!;
+const DELEGATION_CREDENTIAL = process.env.DELEGATION_CREDENTIAL!;
 const BASE_URL = process.env.GHOSTBROKER_BASE_URL ?? "${API_BASE_URL}";
 
 if (!GHOSTBROKER_API_KEY || !OPENAI_API_KEY) {
@@ -132,7 +132,7 @@ async function runAgentLoop() {
   const admission = await ghost.admitAgent({
     institutionId: INSTITUTION_ID,
     agentDid: AGENT_DID,
-    authorityProof: AUTHORITY_PROOF,
+    delegationCredential: DELEGATION_CREDENTIAL,
   });
   authorityRef = admission.authorityRef;
   console.log("[AGENT] Admitted. Authority ref:", authorityRef);
@@ -225,7 +225,7 @@ services:
       - OPENAI_API_KEY=${'${OPENAI_API_KEY}'}  # Your OpenAI API key
       - INSTITUTION_ID=${'${INSTITUTION_ID}'}
       - AGENT_DID=did:t3n:0xYourAgentAddress
-      - AUTHORITY_PROOF=${'${AUTHORITY_PROOF}'}  # T3N delegation credential
+      - DELEGATION_CREDENTIAL=${'${DELEGATION_CREDENTIAL}'}  # boundbuyer W3C VC (JSON)
     logging:
       driver: "json-file"
       options:
@@ -239,7 +239,7 @@ echo "GHOSTBROKER_API_KEY=gbk_..." > .env
 echo "OPENAI_API_KEY=sk-..." >> .env
 echo "INSTITUTION_ID=..." >> .env
 echo "AGENT_DID=did:t3n:0xYourAgentAddress" >> .env
-echo "AUTHORITY_PROOF=..." >> .env
+echo "DELEGATION_CREDENTIAL='{\"id\":\"urn:uuid:...\",...}'" >> .env
 
 # Build and run
 docker compose up -d
@@ -553,7 +553,7 @@ curl -s ${API_BASE_URL}/api/agents/admit \\
   -d '{
     "institutionId": "...",
     "agentDid": "did:t3n:0xYourAgentAddress",
-    "authorityProof": "..."
+    "delegationCredential": { ... }
   }' | jq .
 
 # 3. To submit a trading intent (same Bearer):

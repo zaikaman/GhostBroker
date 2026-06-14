@@ -16,57 +16,84 @@ class DelegationClient implements T3NetworkClient {
   }
 }
 
-const request = {
+const vc = {
+  id: "urn:uuid:ghostbroker-delegation-test",
+  type: ["VerifiableCredential", "GhostBrokerDelegation"],
+  issuer: "did:t3n:0x0000000000000000000000000000000000000099",
+  issuanceDate: "2026-01-01T00:00:00.000Z",
+  expirationDate: "2027-01-01T00:00:00.000Z",
+  credentialSubject: {
+    id: "did:t3n:0x0000000000000000000000000000000000000099",
+    agentDid: "did:t3n:agent:us1-authorized",
+    maxSpendUsd: 1000,
+    allowedCategories: ["software"],
+    purpose: "test",
+  },
+  proof: {
+    type: "JsonWebSignature2020",
+    created: "2026-01-01T00:00:00.000Z",
+    proofPurpose: "assertionMethod",
+    verificationMethod: "did:t3n:0x0000000000000000000000000000000000000099#key-1",
+    jws: "live-demo-unsigned",
+  },
+};
+
+const baseRequest = {
   institutionId: "00000000-0000-4000-8000-000000000101",
   agentDid: "did:t3n:agent:us1-authorized",
-  authorityProof: "proof:dashboard-grant",
+  authorityRef: "boundbuyer-delegation:urn:uuid:ghostbroker-delegation-test",
   requestedAction: "agent.admit" as const,
+  delegationCredential: vc,
 };
 
 describe("T3 agent delegation adapter", () => {
-  it("accepts dashboard-provisioned grants returned by Terminal 3", async () => {
+  it("accepts boundbuyer-style delegation VCs", async () => {
     const client = new DashboardDelegationAgentAuthClient(
-      new DelegationClient(200, {
-        status: "verified",
-        agentDid: request.agentDid,
-        authorityRef: "authority:verified",
-        policyHash: "policy:verified",
-      }),
+      new DelegationClient(200, { status: "verified" }),
     );
 
-    await expect(client.verifyDelegation(request)).resolves.toEqual({
+    await expect(client.verifyDelegation(baseRequest)).resolves.toEqual({
       status: "verified",
-      agentDid: request.agentDid,
-      authorityRef: "authority:verified",
-      policyHash: "policy:verified",
+      agentDid: baseRequest.agentDid,
+      authorityRef: baseRequest.authorityRef,
+      policyHash: expect.stringContaining(baseRequest.agentDid) as string,
     });
   });
 
-  it("passes through programmatic rejection reasons when available", async () => {
+  it("rejects a stale authorityRef that does not match the VC", async () => {
     const client = new DashboardDelegationAgentAuthClient(
-      new DelegationClient(200, {
-        status: "rejected",
-        agentDid: request.agentDid,
-        reason: "revoked",
+      new DelegationClient(200, { status: "verified" }),
+    );
+
+    await expect(
+      client.verifyDelegation({
+        ...baseRequest,
+        authorityRef: "boundbuyer-delegation:urn:uuid:different-credential",
       }),
-    );
-
-    await expect(client.verifyDelegation(request)).resolves.toEqual({
+    ).resolves.toEqual({
       status: "rejected",
-      agentDid: request.agentDid,
-      reason: "revoked",
+      agentDid: baseRequest.agentDid,
+      reason: "over_scoped",
     });
   });
 
-  it("fails closed when grant verification is unavailable", async () => {
+  it("rejects an expired VC", async () => {
     const client = new DashboardDelegationAgentAuthClient(
-      new DelegationClient(503, { code: "service_unavailable" }),
+      new DelegationClient(200, { status: "verified" }),
     );
 
-    await expect(client.verifyDelegation(request)).resolves.toEqual({
+    await expect(
+      client.verifyDelegation({
+        ...baseRequest,
+        delegationCredential: {
+          ...vc,
+          expirationDate: "2024-01-01T00:00:00.000Z",
+        },
+      }),
+    ).resolves.toEqual({
       status: "rejected",
-      agentDid: request.agentDid,
-      reason: "unverified",
+      agentDid: baseRequest.agentDid,
+      reason: "expired",
     });
   });
 });

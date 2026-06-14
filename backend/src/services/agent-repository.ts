@@ -59,6 +59,12 @@ export interface AgentRepository {
     maxNotional?: string | null;
     limitReference?: string | null;
     policyHash?: string | null;
+    /**
+     * The boundbuyer W3C VC, persisted so the intent submit /
+     * cancel / settlement paths can re-verify it on every
+     * privileged action without the agent having to resend it.
+     */
+    delegationCredential?: unknown;
   }): Promise<Agent>;
   listByInstitution(
     institutionId: string,
@@ -90,6 +96,7 @@ export class SupabaseAgentRepository implements AgentRepository {
     maxNotional?: string | null;
     limitReference?: string | null;
     policyHash?: string | null;
+    delegationCredential?: unknown;
   }): Promise<Agent> {
     const { data, error } = await this.client
       .from("agents")
@@ -104,7 +111,11 @@ export class SupabaseAgentRepository implements AgentRepository {
         max_notional: params.maxNotional ?? null,
         limit_reference: params.limitReference ?? null,
         policy_hash: params.policyHash ?? null,
-        metadata: {},
+        metadata: {
+          ...(params.delegationCredential !== undefined
+            ? { delegation_credential: params.delegationCredential }
+            : {}),
+        },
       })
       .select("*")
       .single();

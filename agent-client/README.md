@@ -11,7 +11,7 @@ GhostBroker is an agent-to-agent (A2A) dark pool: humans observe, agents trade. 
 
 - **One import.** `import { GhostBrokerClient } from "@ghostbroker/agent-client"` — auth, admission, intents, trades, receipts, and telemetry are all on the same client.
 - **One auth call.** Exchange a persistent API key for a session in one method; the SDK wires the rest.
-- **No crypto on the agent path.** Keys are persistent. Signatures are not.
+- **No crypto on the agent path.** Keys are persistent. VCs are minted by `setup:delegation` and the agent only re-sends the credential on admit; the backend re-verifies on every privileged action.
 - **Typed end to end.** Every request and response is a TypeScript interface; every error is a `GhostBrokerApiError` with a stable `code`.
 
 ---
@@ -28,7 +28,6 @@ GhostBroker is an agent-to-agent (A2A) dark pool: humans observe, agents trade. 
 - [Real-time telemetry](#real-time-telemetry)
 - [Error handling](#error-handling)
 - [API reference](#api-reference)
-- [Examples](#examples)
 - [Configuration reference](#configuration-reference)
 - [Security](#security)
 - [Support](#support)
@@ -81,7 +80,8 @@ See [`.npmrc.example`](./.npmrc.example) for a copy-pasteable `.npmrc`.
 ## Quickstart
 
 ```typescript
-import { GhostBrokerClient, DelegationProofBuilder } from "@ghostbroker/agent-client";
+import { GhostBrokerClient } from "@ghostbroker/agent-client";
+import { readFileSync } from "node:fs";
 
 // 1. Construct the client
 const client = new GhostBrokerClient({
@@ -96,21 +96,16 @@ const session = await client.authenticateWithApiKey(
 
 console.log(`Authenticated as ${session.institution.displayName}`);
 
-// 3. Admit the agent
-const proof = await DelegationProofBuilder.build({
-  institutionId: session.institution.id,
-  agentDid: process.env.AGENT_DID!,
-  requestedAction: "agent.admit",
-  policyHash: process.env.POLICY_HASH!,
-  credentialJcsBase64: process.env.CREDENTIAL_JCS_BASE64!,
-  adminPrivateKey: hexToBytes(process.env.ADMIN_PRIVATE_KEY!),
-  agentPrivateKey: hexToBytes(process.env.AGENT_PRIVATE_KEY!),
-});
-
+// 3. Admit the agent. The boundbuyer W3C VC is the only credential
+//    the agent ever sends; the backend persists it on the agent
+//    record and re-verifies it on submit / cancel / settlement.
+const delegationCredential = JSON.parse(
+  readFileSync(process.env.DELEGATION_CREDENTIAL_PATH!, "utf8"),
+);
 const admission = await client.admitAgent({
   institutionId: session.institution.id,
   agentDid: process.env.AGENT_DID!,
-  authorityProof: DelegationProofBuilder.serialize(proof),
+  delegationCredential,
 });
 
 console.log(`Admitted. Authority ref: ${admission.authorityRef}`);
@@ -132,7 +127,9 @@ client.telemetry.onSettled((correlationRef) => {
 client.telemetry.connect();
 ```
 
-A copy-pasteable, runnable version of this is in [`examples/buyer-agent.ts`](./examples/buyer-agent.ts).
+A working end-to-end smoke test of this flow lives in the
+[`agents/`](https://github.com/zaikaman/GhostBroker/blob/main/agents) workspace
+of the GhostBroker repo (`agents/src/run-loop.ts`).
 
 ---
 
@@ -171,31 +168,33 @@ For the full auth contract, see [`docs/agent-integration/AUTHENTICATION.md`](htt
 
 ## Admitting an agent
 
-After authenticating, an agent must be admitted once per session (or whenever the delegation credential rotates). The `authorityProof` is a Terminal 3 delegation proof that the server verifies against the dashboard-issued credential.
+After authenticating, an agent must be admitted once per session (or
+whenever the delegation credential rotates). The `delegationCredential`
+is a boundbuyer-style W3C Verifiable Credential — the credential
+format the live T3N onboarding surface mints. The agent re-sends the
+VC only on admit; the backend persists it on the agent record and
+re-verifies it on every privileged action.
 
 ```typescript
-import { DelegationProofBuilder } from "@ghostbroker/agent-client";
+import { readFileSync } from "node:fs";
 
-const proof = await DelegationProofBuilder.build({
-  institutionId: session.institution.id,
-  agentDid: "did:t3n:0xYourAgentAddress",
-  requestedAction: "agent.admit",
-  policyHash: "sha256:...",      // hash of the policy you were granted
-  credentialJcsBase64: process.env.CREDENTIAL_JCS_BASE64!,
-  adminPrivateKey: hexToBytes(process.env.ADMIN_PRIVATE_KEY!),
-  agentPrivateKey: hexToBytes(process.env.AGENT_PRIVATE_KEY!),
-});
+const delegationCredential = JSON.parse(
+  readFileSync(process.env.DELEGATION_CREDENTIAL_PATH!, "utf8"),
+);
 
 const admission = await client.admitAgent({
   institutionId: session.institution.id,
   agentDid: "did:t3n:0xYourAgentAddress",
-  authorityProof: DelegationProofBuilder.serialize(proof),
+  delegationCredential,
 });
 
 // admission.authorityRef is what you pass to submitIntent.
 ```
 
-The proof is one-time use per admit. Save the `authorityRef` — you'll pass it on every intent.
+The `authorityRef` returned by the backend looks like
+`boundbuyer-delegation:<vc-id>`. Save it — you'll pass it on every
+intent and the orchestrator will re-verify it against the persisted
+VC.
 
 ---
 
@@ -344,7 +343,7 @@ interface AuthSession {
 interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
-  authorityProof: string;   // JSON-stringified SignedDelegationProof
+  delegationCredential: unknown;   // boundbuyer W3C VC
 }
 interface AgentAdmission {
   agentDid: string;
@@ -452,30 +451,11 @@ interface AuditReceipt {
 | `onError(handler)` | `() => void` | Fires when an event with `type === "telemetry.error.changed"` arrives. |
 | `setInstitutionId(id)` | `void` | Update the institution ID used in the WebSocket query string. Applies on the next (re)connect. |
 
-### `DelegationProofBuilder`
-
-| Method | Returns | Notes |
-|---|---|---|
-| `DelegationProofBuilder.build(options)` | `Promise<SignedDelegationProof>` | Builds a signed proof. See [Admitting an agent](#admitting-an-agent) above. |
-| `DelegationProofBuilder.serialize(proof)` | `string` | JSON-stringifies the proof for use in the `authorityProof` field. |
-
----
-
-## Examples
-
-Runnable examples live in [`examples/`](./examples):
-
-| File | What it does |
-|---|---|
-| [`examples/buyer-agent.ts`](./examples/buyer-agent.ts) | Connects, admits, submits a buy intent, listens for settlement via telemetry. |
-| [`examples/seller-agent.ts`](./examples/seller-agent.ts) | Same shape, but submits a sell intent and polls for trades. |
-| [`examples/README.md`](./examples/README.md) | Step-by-step setup, env vars, and how to run each example. |
-
 ---
 
 ## Configuration reference
 
-The SDK is configured entirely by constructor arguments and the values you pass at runtime. The canonical list of environment variables used in the examples:
+The SDK is configured entirely by constructor arguments and the values you pass at runtime. The canonical list of environment variables used by the `agents/` workspace:
 
 | Variable | Required by | Description |
 |---|---|---|
@@ -483,10 +463,7 @@ The SDK is configured entirely by constructor arguments and the values you pass 
 | `GHOSTBROKER_API_KEY` | all | Persistent API key from the dashboard. |
 | `AGENT_DID` | admit + intents | Stable DID for this agent. |
 | `INSTITUTION_ID` | admit + intents | Institution ID from the dashboard. |
-| `POLICY_HASH` | admit | `sha256:…` of the granted policy. |
-| `CREDENTIAL_JCS_BASE64` | admit | Base64url Terminal 3 delegation credential. |
-| `ADMIN_PRIVATE_KEY` | admit | 32-byte secp256k1 private key, hex, `0x`-prefixed. |
-| `AGENT_PRIVATE_KEY` | admit | 32-byte secp256k1 private key, hex, `0x`-prefixed. |
+| `DELEGATION_CREDENTIAL_PATH` | admit | Path to the boundbuyer W3C VC (e.g. `output/delegations/agent_delegation.json`). |
 | `ENCRYPTED_INTENT_ENVELOPE` | submit | Produced by the TEE enclave runner; not generated by the SDK. |
 
 See [`.env.example`](./.env.example) for a copy-pasteable template.
@@ -497,7 +474,7 @@ See [`.env.example`](./.env.example) for a copy-pasteable template.
 
 - **Treat the API key as a secret.** Anyone with the key can submit intents on behalf of your institution until you revoke it. Store it in a secrets manager (AWS Secrets Manager, HashiCorp Vault, environment-injected secret, etc.). Never commit it. Never log it.
 - **The session token is short-lived (8 hours) and lower-privilege than the key** — if leaked, rotate the API key to invalidate all active sessions.
-- **The delegation credential + admin private key authorize admission** of an agent. Rotate the admin key if you suspect compromise; rotate the credential from the dashboard.
+- **The delegation credential authorizes admission and every subsequent privileged action.** Re-mint it (`npm run setup:delegation` from the `agents/` workspace) if you suspect compromise; the backend re-verifies on every call.
 - **Telemetry events can leak operational metadata** (event types, settlement timing). Treat them as internal.
 - For vulnerability reports, see [SECURITY.md](./SECURITY.md).
 

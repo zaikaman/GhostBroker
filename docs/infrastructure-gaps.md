@@ -25,10 +25,10 @@ GhostBroker has strong **cryptographic primitives** (DID auth, delegation proofs
 
 ### Agent Admission
 
-- `POST /api/agents/admit` — Verifies a Terminal3 delegation credential (cryptographic proof that a wallet authorized an agent)
-- Delegation proof verification in `t3-enclave/src/auth/delegation-credential.ts`
+- `POST /api/agents/admit` — Verifies a boundbuyer-style W3C delegation VC (the credential format the live T3N onboarding surface mints)
+- Delegation VC verification in `t3-enclave/src/auth/boundbuyer-delegation.ts` (sandbox / structural / live modes, server-side `VC_VERIFY_MODE`)
 - Authority claims model in `t3-enclave/src/auth/authority-claims.ts` (instrumentScope, directionScope, maxNotionalMinorUnits)
-- Agent-side builder: `agent-client/src/delegation-proof.ts`
+- The agent SDK no longer ships a separate delegation-proof builder — the boundbuyer VC is loaded from disk (e.g. `output/delegations/agent_delegation.json`) and passed straight into `client.admitAgent({...delegationCredential})`. See `agents/src/delegation.ts` for the on-disk format.
 
 ### Hidden Intent Submission & Matching
 
@@ -55,7 +55,7 @@ GhostBroker has strong **cryptographic primitives** (DID auth, delegation proofs
 
 - `GhostBrokerClient` — Unified client (`agent-client/src/ghostbroker-client.ts`)
 - `AuthClient`, `IntentClient`, `TradesClient`, `ReceiptClient`, `TelemetryClient`
-- `DelegationProofBuilder` — Builds signed delegation proofs
+- The single admit call: `client.admitAgent({institutionId, agentDid, delegationCredential})` — the boundbuyer W3C VC is the only credential the agent ever sends.
 
 ---
 
@@ -422,7 +422,7 @@ This was the planned order; all items are now ✅ Resolved.
 | Agent service | `backend/src/services/agent.service.ts` |
 | Agent authz | `backend/src/auth/agent-authz.ts` |
 | Operator auth | `backend/src/auth/operator-auth.ts`, `backend/src/auth/session-token.ts` |
-| Delegation proof verification | `t3-enclave/src/auth/delegation-credential.ts` |
+| Boundbuyer delegation verification | `t3-enclave/src/auth/boundbuyer-delegation.ts` |
 | Authority claims | `t3-enclave/src/auth/authority-claims.ts` |
 | Agent identity | `t3-enclave/src/auth/agent-identity.ts` |
 | Matching orchestrator | `backend/src/services/matching-orchestrator.ts` |
@@ -433,7 +433,7 @@ This was the planned order; all items are now ✅ Resolved.
 | App wiring | `backend/src/app.ts` |
 | Agent SDK client | `agent-client/src/ghostbroker-client.ts` |
 | Agent SDK types | `agent-client/src/types.ts` |
-| Delegation proof builder | `agent-client/src/delegation-proof.ts` |
+| Agent-side delegation setup | `agents/src/delegation.ts` (`setup:delegation` CLI) |
 | DB schema | `database/schema.sql` |
 | Portfolio lock/release migration | `database/migrations/010_portfolio_lock_release.sql` |
 | Intent-locks table migration | `database/migrations/011_create_intent_locks.sql` |

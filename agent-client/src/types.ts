@@ -18,25 +18,15 @@ export interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
   /**
-   * One of two authority proof shapes:
-   *   - the JCS delegation proof built by
-   *     `@ghostbroker/agent-client.DelegationProofBuilder` (the
-   *     "production" T3 Smart VC flow), OR
-   *   - a serialized boundbuyer-style W3C Verifiable Credential,
-   *     supplied via the sibling `delegationCredential` field.
-   *
-   * Exactly one of `authorityProof` or `delegationCredential` must
-   * be present.
+   * Boundbuyer-style W3C Verifiable Credential that authorizes
+   * this agent to act on behalf of the institution. The backend
+   * runs it through `t3-enclave/src/auth/boundbuyer-delegation.ts`
+   * and persists it on the agent record at admit time, so the
+   * intent submit / cancel / settlement paths can re-verify it
+   * on every privileged action without the agent having to
+   * resend it.
    */
-  authorityProof: string;
-  /**
-   * Boundbuyer-style W3C VC for the admit step. The backend runs
-   * this through `t3-enclave/src/auth/boundbuyer-delegation.ts`,
-   * which is a port of the boundbuyer BUIDL's verifier. The
-   * verifier's three modes (sandbox / live / structural) are
-   * controlled server-side by the `VC_VERIFY_MODE` env var.
-   */
-  delegationCredential?: unknown;
+  delegationCredential: unknown;
 }
 
 export interface EncryptedIntentRequest {

@@ -17,13 +17,11 @@ import { verifyDelegationCredential } from "./vc-verifier.js";
 /**
  * Shared loop runtime for the buyer and seller.
  *
- * The boundbuyer flow replaces the JCS proof from the original
- * implementation. The agent boots from an on-disk identity file
- * (DID + keypair, produced by `setup:identity`) and an on-disk
- * W3C Verifiable Credential (produced by `setup:delegation`),
- * passes the VC to the server's boundbuyer verifier, and then
- * submits encrypted intents through the regular matching
- * pipeline.
+ * The agent boots from an on-disk identity file (DID + keypair,
+ * produced by `setup:identity`) and an on-disk W3C Verifiable
+ * Credential (produced by `setup:delegation`), passes the VC to
+ * the server's boundbuyer verifier, and then submits encrypted
+ * intents through the regular matching pipeline.
  */
 
 export interface AgentRunOptions {
@@ -93,10 +91,15 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   }
   log(side, `✓ Authenticated as ${session.institution.displayName} (${session.institution.id})`);
 
-  // Admit via the boundbuyer path.
+  // Admit via the boundbuyer path. The VC was loaded from disk by
+  // `loadDelegationCredential` and re-verified locally by
+  // `verifyDelegationCredential` above. The backend runs the same
+  // verifier server-side and persists the VC on the agent record
+  // so submit / cancel / settlement can re-verify it on every
+  // privileged action.
   let admission: AgentAdmission;
   try {
-    admission = await client.admitAgentWithDelegationCredential({
+    admission = await client.admitAgent({
       institutionId: session.institution.id,
       agentDid: identity.did,
       delegationCredential: delegation,

@@ -18,19 +18,16 @@ export const authorityLimitsSchema = z.object({
 export const admitAgentRequestSchema = z.object({
   institutionId: z.string().uuid(),
   agentDid: agentDidSchema,
-  authorityProof: z.string().trim().min(1).max(8192),
   /**
-   * Boundbuyer-style W3C Verifiable Credential. When present, the
-   * backend runs it through the boundbuyer verifier instead of the
-   * JCS proof path. The two are mutually exclusive — exactly one of
-   * `authorityProof` (which can be a placeholder) or
-   * `delegationCredential` (the actual VC) is expected. The
-   * `authorityProof` field is still required by the zod schema so
-   * the frontend's existing payload shape doesn't break; the agent
-   * may send an empty string when supplying a `delegationCredential`.
+   * Boundbuyer-style W3C Verifiable Credential. The backend runs
+   * this through `t3-enclave/src/auth/boundbuyer-delegation.ts`
+   * to verify the agent is authorized for this institution.
+   * The credential is persisted on the agent record at admit
+   * time so the intent submit / cancel / settlement paths can
+   * re-verify it on every privileged action.
    */
+  delegationCredential: z.unknown(),
   limits: authorityLimitsSchema.optional(),
-  delegationCredential: z.unknown().optional(),
 });
 
 export type AdmitAgentRequest = z.infer<typeof admitAgentRequestSchema>;

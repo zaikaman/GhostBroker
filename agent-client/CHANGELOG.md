@@ -7,7 +7,6 @@ All notable changes to `@ghostbroker/agent-client` are documented here. The form
 ### Added
 - `LICENSE` (MIT), `SECURITY.md`, `CHANGELOG.md`, `.env.example`, `.npmrc.example`, `.gitignore`.
 - `README.md` with installation, quickstart, full API reference, error-handling patterns, and configuration reference.
-- Runnable examples in `examples/`: `buyer-agent.ts`, `seller-agent.ts`, `examples/README.md`.
 - Unit test suite for the public surface (`vitest`).
 - `PortfolioClient` — agent-side read access to the institution's
   portfolio, exposed as `client.getAgentPortfolio({institutionId,
@@ -17,6 +16,14 @@ All notable changes to `@ghostbroker/agent-client` are documented here. The form
   `holding.balance - holding.locked` to size the LLM's intent; the
   orchestrator's balance-lock check at submit time is the real
   authority.
+
+### Removed
+- `DelegationProofBuilder` and the JCS-prove admit path. The boundbuyer
+  W3C VC is the only credential the live T3N onboarding surface mints;
+  `client.admitAgent({institutionId, agentDid, delegationCredential})`
+  is the only admit shape. The `examples/buyer-agent.ts` /
+  `examples/seller-agent.ts` JCS-prove walkthroughs are gone — the
+  `agents/` workspace is the canonical end-to-end smoke test.
 
 ## [0.2.0] - 2026-06-14
 

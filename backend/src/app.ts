@@ -65,7 +65,6 @@ import {
 import { IntentLockJanitor } from "./services/intent-lock-janitor.js";
 import {
   AdkTenantDidRegistry,
-  DashboardDelegationAgentAuthClient,
   SandboxTokenBalanceClient,
   SettlementCommandBuilder,
   T3BlindIntentClient,
@@ -183,9 +182,12 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     supabase as never,
   );
 
-  const authorizationFacade = new T3AgentAuthorizationFacade(
-    new DashboardDelegationAgentAuthClient(t3NetworkClient),
-  );
+  // Boundbuyer-only authorization facade. No live network client
+  // is needed — the verifier runs entirely from the VC the agent
+  // supplies. The T3N SDK still powers the identity / handshake
+  // / blind-intent / match-contract surfaces, but the authorization
+  // gate is local + sandbox/structural by default.
+  const authorizationFacade = new T3AgentAuthorizationFacade();
   const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
   const portfolioService = new PortfolioService(
     supabase as never,

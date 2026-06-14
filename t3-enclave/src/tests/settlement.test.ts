@@ -19,15 +19,20 @@ const outcome: OpaqueMatchOutcome = {
   status: "matched",
 };
 
+const buyerVc = { id: "buyer-vc", issuer: "did:t3n:buyer" };
+const sellerVc = { id: "seller-vc", issuer: "did:t3n:seller" };
+
 class Verifier implements SettlementAuthorityVerifier {
   public constructor(private readonly status: "verified" | "rejected") {}
 
-  public async verifyAgentAuthority(request: Parameters<SettlementAuthorityVerifier["verifyAgentAuthority"]>[0]) {
+  public async verifyAgentAuthority(
+    request: Parameters<SettlementAuthorityVerifier["verifyAgentAuthority"]>[0],
+  ) {
     if (this.status === "verified") {
       return {
         status: "verified" as const,
         agentDid: request.agentDid,
-        authorityRef: request.authorityProof,
+        authorityRef: request.authorityRef,
         policyHash: "policy:us3",
       };
     }
@@ -49,6 +54,8 @@ describe("settlement command builder", () => {
         matchOutcome: outcome,
         buyerAgentDid: "did:t3n:agent:buyer-us3",
         sellerAgentDid: "did:t3n:agent:seller-us3",
+        buyerDelegationCredential: buyerVc,
+        sellerDelegationCredential: sellerVc,
         now: new Date("2026-06-12T00:00:00.000Z"),
       }),
     ).resolves.toMatchObject({
@@ -72,6 +79,8 @@ describe("settlement command builder", () => {
         matchOutcome: outcome,
         buyerAgentDid: "did:t3n:agent:buyer-us3",
         sellerAgentDid: "did:t3n:agent:seller-us3",
+        buyerDelegationCredential: buyerVc,
+        sellerDelegationCredential: sellerVc,
         now: new Date("2026-06-12T00:00:00.000Z"),
       }),
     ).rejects.toBeInstanceOf(SettlementAuthorityError);
@@ -85,6 +94,8 @@ describe("settlement command builder", () => {
         matchOutcome: outcome,
         buyerAgentDid: "did:t3n:agent:buyer-us3",
         sellerAgentDid: "did:t3n:agent:seller-us3",
+        buyerDelegationCredential: buyerVc,
+        sellerDelegationCredential: sellerVc,
         now: new Date("2026-06-14T00:00:00.000Z"),
       }),
     ).rejects.toBeInstanceOf(SettlementExpiredIntentError);

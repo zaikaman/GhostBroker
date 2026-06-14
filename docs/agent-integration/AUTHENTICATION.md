@@ -7,7 +7,7 @@ GhostBroker has two authentication surfaces, each tuned to its consumer:
 
 The two are not interchangeable: agents use keys, operators use wallets. This page is about the agent side. The operator login is implemented in `frontend/src/services/wallet-auth.ts` and works as long as the backend routes `/api/auth/challenge` and `/api/auth/verify` are reachable.
 
-> **Beyond the session: per-action authority.** The API key authenticates the agent's *session*. Every privileged action — `admit`, `submitIntent`, `cancelIntent`, `settlement.execute` — additionally requires a signed **Terminal 3 delegation VC** that the backend verifies against institution policy. The verifier is the real Terminal 3 Agent Auth SDK integration; see the [README § Headline](../../README.md#headline-terminal-3-agent-auth-sdk-integration) and [`t3-enclave/src/auth/delegation-credential.ts`](../../t3-enclave/src/auth/delegation-credential.ts). This page covers the *session* layer.
+> **Beyond the session: per-action authority.** The API key authenticates the agent's *session*. Every privileged action — `admit`, `submitIntent`, `cancelIntent`, `settlement.execute` — additionally re-verifies the agent's boundbuyer-style W3C Verifiable Credential against institution policy. The verifier is the Terminal 3 Agent Auth SDK integration; see the [README § Headline](../../README.md#headline-terminal-3-agent-auth-sdk-integration) and [`t3-enclave/src/auth/boundbuyer-delegation.ts`](../../t3-enclave/src/auth/boundbuyer-delegation.ts). This page covers the *session* layer.
 
 ## Agent authentication: API key (the only supported path)
 
@@ -60,15 +60,16 @@ The session token is accepted on every other endpoint via `Authorization: Bearer
 ```http
 POST /api/agents/admit
 Authorization: Bearer ***
-C...ype: application/json
+Content-Type: application/json
 
-{ "institutionId": "...", "agentDid": "...", "authorityProof": "..." }
+{ "institutionId": "...", "agentDid": "...", "delegationCredential": { ... } }
 ```
 
 ### SDK example
 
 ```typescript
 import { GhostBrokerClient } from "@ghostbroker/agent-client";
+import { readFileSync } from "node:fs";
 
 const client = new GhostBrokerClient({
   baseUrl: "https://api.ghostbroker.io",
@@ -78,8 +79,13 @@ const client = new GhostBrokerClient({
 // token, and wires the institution ID into the telemetry WebSocket.
 await client.authenticateWithApiKey(process.env.GHOSTBROKER_API_KEY!);
 
-// Every subsequent call uses the session token automatically:
-await client.admitAgent({ institutionId, agentDid, authorityProof });
+// The boundbuyer W3C VC is loaded from disk (or wherever your issuer
+// writes it). The backend re-verifies it on every privileged action,
+// so this is the only place the agent ever sends the VC.
+const delegationCredential = JSON.parse(
+  readFileSync(process.env.DELEGATION_CREDENTIAL_PATH!, "utf8"),
+);
+await client.admitAgent({ institutionId, agentDid, delegationCredential });
 await client.submitIntent({ institutionId, agentDid, encryptedIntentEnvelope, authorityRef });
 
 client.telemetry.onSettled((ref) => console.log("Settled:", ref));

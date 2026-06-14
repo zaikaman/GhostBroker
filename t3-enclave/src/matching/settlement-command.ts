@@ -6,6 +6,14 @@ import type {
 import type { OpaqueMatchOutcome } from "./match-contract-client.js";
 
 export interface SettlementAuthorityVerifier {
+  /**
+   * Re-verify the agent's boundbuyer W3C VC for the action the
+   * settlement is about to perform. The verifier needs the
+   * `delegationCredential` (the boundbuyer VC persisted at admit
+   * time) and the `authorityRef` the agent echoed back on submit,
+   * to confirm the agent is presenting the same credential it
+   * was admitted with.
+   */
   verifyAgentAuthority(
     request: AgentDelegationVerificationRequest,
   ): Promise<AgentDelegationVerificationResult>;
@@ -15,6 +23,8 @@ export interface SettlementCommandRequest {
   matchOutcome: OpaqueMatchOutcome;
   buyerAgentDid: string;
   sellerAgentDid: string;
+  buyerDelegationCredential: unknown;
+  sellerDelegationCredential: unknown;
   revokedBuyerAuthorityRefs?: ReadonlySet<string>;
   revokedSellerAuthorityRefs?: ReadonlySet<string>;
   now?: Date;
@@ -64,16 +74,22 @@ export class SettlementCommandBuilder {
       this.authorityVerifier.verifyAgentAuthority({
         institutionId: request.matchOutcome.buyerInstitutionId,
         agentDid: request.buyerAgentDid,
-        authorityProof: request.matchOutcome.buyerAuthorityRef,
+        authorityRef: request.matchOutcome.buyerAuthorityRef,
+        delegationCredential: request.buyerDelegationCredential,
         requestedAction: "settlement.execute",
-        revokedAuthorityRefs: request.revokedBuyerAuthorityRefs ?? new Set(),
+        ...(request.revokedBuyerAuthorityRefs !== undefined
+          ? { revokedAuthorityRefs: request.revokedBuyerAuthorityRefs }
+          : {}),
       }),
       this.authorityVerifier.verifyAgentAuthority({
         institutionId: request.matchOutcome.sellerInstitutionId,
         agentDid: request.sellerAgentDid,
-        authorityProof: request.matchOutcome.sellerAuthorityRef,
+        authorityRef: request.matchOutcome.sellerAuthorityRef,
+        delegationCredential: request.sellerDelegationCredential,
         requestedAction: "settlement.execute",
-        revokedAuthorityRefs: request.revokedSellerAuthorityRefs ?? new Set(),
+        ...(request.revokedSellerAuthorityRefs !== undefined
+          ? { revokedAuthorityRefs: request.revokedSellerAuthorityRefs }
+        : {}),
       }),
     ]);
 
