@@ -176,7 +176,9 @@ function DashboardView({
       case 'enclaves':
         return (
           <div className="dashboard-grid-enclaves" style={{ animation: 'fadeIn 0.3s ease' }}>
-            <div style={{ gridColumn: '1 / -1' }}><AgentsPanel /></div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <AgentsPanel onNavigateToDeveloperKeys={() => handleTabChange('developer')} />
+            </div>
             <div className="enclaves-main" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               {agents.length === 0 && (
                 <div className="deploy-onboarding-hero" style={{ margin: 0 }}>

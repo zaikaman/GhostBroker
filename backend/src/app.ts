@@ -28,6 +28,7 @@ import {
   type ApiKeyManagementService,
 } from "./services/api-key.service.js";
 import { createApiKeysRouter } from "./api/api-keys.routes.js";
+import { createDevTokenRouter } from "./api/dev-token.routes.js";
 import {
   InstitutionService,
   SupabaseInstitutionRepository,
@@ -234,6 +235,13 @@ export function createApp(
   app.use("/api", createHealthRouter(env));
   if (services.authService) {
     app.use("/api", createAuthRouter(services.authService));
+  }
+  // Dev-only token minting endpoint for Playwright E2E tests and local
+  // development. Never mount in production — this issues real signed JWTs
+  // for an arbitrary institutionId with no DID challenge, which would
+  // bypass the wallet-auth security model.
+  if (env.NODE_ENV !== "production") {
+    app.use("/api", createDevTokenRouter(env));
   }
   app.use("/api", createInstitutionsRouter(services.institutionService));
   app.use(

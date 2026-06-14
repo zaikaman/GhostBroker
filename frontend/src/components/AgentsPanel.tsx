@@ -11,7 +11,11 @@ import {
   Refresh01Icon,
 } from 'hugeicons-react';
 
-export function AgentsPanel(): React.JSX.Element {
+export interface AgentsPanelProps {
+  onNavigateToDeveloperKeys?: () => void;
+}
+
+export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): React.JSX.Element {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -346,7 +350,11 @@ export function AgentsPanel(): React.JSX.Element {
             <strong style={{ color: 'var(--color-text-primary)' }}>{apiKeys.length}</strong> API key{apiKeys.length !== 1 ? 's' : ''} available for agent authentication.{' '}
             <a
               href="#"
-              onClick={(e) => { e.preventDefault(); setError(null); }}
+              onClick={(e) => {
+                e.preventDefault();
+                setError(null);
+                onNavigateToDeveloperKeys?.();
+              }}
               style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}
             >
               Manage keys in Developer Keys tab →

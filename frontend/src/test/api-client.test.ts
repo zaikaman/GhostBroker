@@ -13,8 +13,16 @@ describe('apiClient Services', () => {
     global.fetch = originalFetch;
   });
 
-  it('getCompletedTrades issues GET with operator authentication headers', async () => {
-    apiClient.setOperatorContext('inst_123', 'op_456');
+  it('getCompletedTrades issues GET with bearer authorization header when a session is present', async () => {
+    apiClient.setAuthSession({
+      token: 'real.jwt.token',
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      institution: {
+        id: 'inst_123',
+        displayName: 'Northstar Capital',
+        t3TenantDid: 'did:t3n:tenant:northstar',
+      },
+    });
 
     const mockResponse = {
       items: [
@@ -40,12 +48,36 @@ describe('apiClient Services', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           'Accept': 'application/json',
-          'x-operator-institution-id': 'inst_123',
-          'x-operator-id': 'op_456',
+          'Authorization': 'Bearer real.jwt.token',
         }),
       })
     );
     expect(result).toEqual(mockResponse);
+  });
+
+  it('getCompletedTrades sends no auth header when there is no session', async () => {
+    localStorage.clear();
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ code: 'authorization_failed' }),
+    });
+
+    await expect(apiClient.getCompletedTrades()).rejects.toMatchObject({
+      status: 401,
+      code: 'authorization_failed',
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/trades/completed'),
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          Authorization: expect.anything(),
+        }),
+      })
+    );
   });
 
   it('retries portfolio requests once after clearing a stale auth session', async () => {
@@ -81,13 +113,14 @@ describe('apiClient Services', () => {
         }),
       })
     );
+    // After the 401, the session is cleared and the retry must not
+    // fabricate a synthetic Authorization header.
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
       expect.stringContaining('/api/portfolios/inst_123'),
       expect.objectContaining({
-        headers: expect.objectContaining({
-          'x-operator-institution-id': 'inst_123',
-          'x-operator-id': 'did:did:t3n:tenant:northstar',
+        headers: expect.not.objectContaining({
+          Authorization: expect.anything(),
         }),
       })
     );
@@ -122,8 +155,16 @@ describe('apiClient Services', () => {
     expect(result).toEqual({ items: [] });
   });
 
-  it('getReceipt issues GET to /api/receipts/:id with operator headers', async () => {
-    apiClient.setOperatorContext('inst_123', 'op_456');
+  it('getReceipt issues GET to /api/receipts/:id with bearer authorization when a session is present', async () => {
+    apiClient.setAuthSession({
+      token: 'real.jwt.token',
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      institution: {
+        id: 'inst_123',
+        displayName: 'Northstar Capital',
+        t3TenantDid: 'did:t3n:tenant:northstar',
+      },
+    });
 
     const mockReceipt = {
       id: 'receipt_1',
@@ -146,8 +187,7 @@ describe('apiClient Services', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           'Accept': 'application/json',
-          'x-operator-institution-id': 'inst_123',
-          'x-operator-id': 'op_456',
+          'Authorization': 'Bearer real.jwt.token',
         }),
       })
     );

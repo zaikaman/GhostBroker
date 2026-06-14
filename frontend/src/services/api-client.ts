@@ -172,12 +172,11 @@ const getOperatorHeaders = (): Record<string, string> => {
     };
   }
 
-  const institutionId = localStorage.getItem('x-operator-institution-id') || '00000000-0000-4000-8000-000000000301';
-  const operatorId = localStorage.getItem('x-operator-id') || 'operator:unattributed';
-  return {
-    'x-operator-institution-id': institutionId,
-    'x-operator-id': operatorId,
-  };
+  // No valid bearer token available. Sending the operator identity headers
+  // without a real signed JWT would always result in a 401 from the backend.
+  // Return an empty header map so the request fails fast with a clear,
+  // unauthenticated error instead of looping on a stale token.
+  return {};
 };
 
 function buildOperatorRequestInit(init: RequestInit = {}): RequestInit {
@@ -285,21 +284,10 @@ export const apiClient = {
       }
     }
 
-    // E2E / Development local-storage bypass (no MetaMask wallet in headless Playwright tests)
-    const instId = localStorage.getItem('x-operator-institution-id');
-    const opId = localStorage.getItem('x-operator-id');
-    if (instId && opId) {
-      return {
-        token: 'e2e-bypass-token',
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-        institution: {
-          id: instId,
-          displayName: instId === '00000000-0000-4000-8000-000000000301' ? 'Northstar Capital' : 'Operator Console',
-          t3TenantDid: opId.startsWith('did:') ? opId : `did:t3n:e2e:${opId}`,
-        },
-      };
-    }
-
+    // No valid session. Never fabricate a synthetic session with a fake
+    // `e2e-bypass-token` — the backend has no way to validate it and every
+    // authenticated request would fail with 401. Callers must use the real
+    // DID challenge/verify flow (wallet auth) to obtain a signed JWT.
     return null;
   },
 
