@@ -1,0 +1,12 @@
+# Sample .npmrc — drop this into your project root (next to package.json)
+# to install @ghostbroker/agent-client from GitHub Packages.
+
+@ghostbroker:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+
+# The SDK is published as a public package, so the token only needs
+# `read:packages` scope. If you'd rather not use a GitHub token, you
+# can install directly from the local checkout instead:
+#
+#   npm install ../path/to/GhostBroker/agent-client
+#
