@@ -44,6 +44,10 @@ describe("POST /api/agents/intents contract", () => {
           intentHandle: "intent_opaque_us2",
           state: "intent_sealed",
         }),
+        cancelIntent: async () => {
+          throw new Error("not used");
+        },
+        listPendingIntents: () => [],
       }),
     );
 

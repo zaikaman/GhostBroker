@@ -25,8 +25,12 @@ const services: BackendServices = {
   },
   hiddenIntentService: {
     submitIntent: async () => {
-      throw new Error("plaintext request should not reach service");
+      throw new Error("not used");
     },
+    cancelIntent: async () => {
+      throw new Error("not used");
+    },
+    listPendingIntents: () => [],
   },
   portfolioService: {} as never,
   apiKeyService: {} as never,

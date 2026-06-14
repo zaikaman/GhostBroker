@@ -1,12 +1,60 @@
 import { Router } from "express";
+import { z } from "zod";
 import { requireOperatorAuth } from "../auth/operator-auth.js";
 import { logger } from "../logging/logger.js";
+import type { MatchingOrchestrator } from "../services/matching-orchestrator.js";
 import type { PortfolioService } from "../services/portfolio.service.js";
 import type { WalletPortfolioSyncService } from "../services/sepolia-portfolio-sync.service.js";
+import { agentDidSchema } from "../models/agent.js";
+
+const portfoliosQuerySchema = z.object({
+  agentDid: agentDidSchema.optional(),
+});
+
+/**
+ * View of a single locked reservation, returned in the agent-level
+ * portfolio payload. Mirrors the orchestrator's
+ * `lockDescriptorFor` calculation: a buy intent locks
+ * `quantity * price` units of the settlement asset; a sell intent
+ * locks `quantity` units of the traded asset.
+ */
+interface PendingReservationView {
+  intentHandle: string;
+  assetCode: string;
+  amount: number;
+  side: "buy" | "sell";
+  quantity: number;
+  price: number;
+}
+
+function reservationFor(
+  intent: { intentHandle: string; assetCode: string; side: "buy" | "sell"; quantity: number; price: number },
+  settlementAssetCode: string,
+): PendingReservationView {
+  if (intent.side === "buy") {
+    return {
+      intentHandle: intent.intentHandle,
+      assetCode: settlementAssetCode,
+      amount: intent.quantity * intent.price,
+      side: intent.side,
+      quantity: intent.quantity,
+      price: intent.price,
+    };
+  }
+  return {
+    intentHandle: intent.intentHandle,
+    assetCode: intent.assetCode,
+    amount: intent.quantity,
+    side: intent.side,
+    quantity: intent.quantity,
+    price: intent.price,
+  };
+}
 
 export function createPortfoliosRouter(
   portfolioService: PortfolioService,
   walletPortfolioSyncService?: WalletPortfolioSyncService,
+  matchingOrchestrator?: MatchingOrchestrator,
 ): Router {
   const router = Router();
 
@@ -20,6 +68,49 @@ export function createPortfoliosRouter(
         response.status(403).json({
           code: "authorization_failed",
           message: "You can only view your own institution's portfolio.",
+        });
+        return;
+      }
+
+      // Parse the optional agentDid query parameter. When present,
+      // we return an agent-level projection of the institution's
+      // portfolio: DB-only (no wallet sync, since the agent does
+      // not own the wallet), plus the orchestrator's pending
+      // reservations for that agent.
+      const queryParsed = portfoliosQuerySchema.safeParse(request.query);
+      if (!queryParsed.success) {
+        response.status(400).json({
+          code: "validation_failed",
+          message: "Invalid query parameters.",
+        });
+        return;
+      }
+      const { agentDid } = queryParsed.data;
+
+      if (agentDid) {
+        // Agent-level view: DB-only, augmented with the agent's
+        // current reservations.
+        const portfolio = await portfolioService.getPortfolio(institutionId);
+
+        const pendingIntents = matchingOrchestrator
+          ? matchingOrchestrator.listPendingIntents({
+              institutionId,
+              agentDid,
+            })
+          : [];
+
+        const settlementAssetCode =
+          matchingOrchestrator?.settlementAssetCode ?? "USDC";
+
+        const reservations: PendingReservationView[] = pendingIntents.map(
+          (intent) => reservationFor(intent, settlementAssetCode),
+        );
+
+        response.status(200).json({
+          institutionId,
+          agentDid,
+          holdings: portfolio.holdings,
+          pendingReservations: reservations,
         });
         return;
       }

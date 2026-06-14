@@ -30,7 +30,8 @@ export type TelemetryPhase =
   | "settlement_failed"
   | "service_unavailable"
   | "intent_expired"
-  | "intent_cancelled";
+  | "intent_cancelled"
+  | "intent_lock_released";
 
 export interface TelemetryEvent {
   eventId: string;

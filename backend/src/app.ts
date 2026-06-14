@@ -59,6 +59,11 @@ import { SepoliaEtherscanPortfolioSyncService, type WalletPortfolioSyncService }
 import { MatchingOrchestrator } from "./services/matching-orchestrator.js";
 import { telemetryBus } from "./services/telemetry-bus.js";
 import {
+  SupabaseIntentLockRepository,
+  type IntentLockRepository,
+} from "./services/intent-lock-repository.js";
+import { IntentLockJanitor } from "./services/intent-lock-janitor.js";
+import {
   AdkTenantDidRegistry,
   DashboardDelegationAgentAuthClient,
   SandboxTokenBalanceClient,
@@ -106,6 +111,9 @@ export interface BackendServices {
   receiptService?: ReceiptService;
   authService?: AuthSessionService;
   apiKeyService: ApiKeyManagementService;
+  matchingOrchestrator?: MatchingOrchestrator;
+  intentLockRepository?: IntentLockRepository;
+  intentLockJanitor?: IntentLockJanitor;
 }
 
 async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
@@ -131,6 +139,9 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     new SupabaseAuthorityRevocationRepository(supabase as never);
 
   const apiKeyRepository = new SupabaseApiKeyRepository(supabase as never);
+  const intentLockRepository = new SupabaseIntentLockRepository(
+    supabase as never,
+  );
 
   const authorizationFacade = new T3AgentAuthorizationFacade(
     new DashboardDelegationAgentAuthClient(t3NetworkClient),
@@ -180,6 +191,20 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     telemetryBus,
     portfolioService,
     env.SETTLEMENT_ASSET_CODE,
+    undefined, // intentTtlMs
+    undefined, // cleanupIntervalMs
+    intentLockRepository,
+  );
+
+  // The orphan-lock janitor: runs every 30s in production, finds
+  // lock refs older than the intent TTL, and releases the
+  // corresponding `portfolios.locked` amount. This is the
+  // recovery path for process restarts that would otherwise
+  // strand reservations.
+  const intentLockJanitor = new IntentLockJanitor(
+    intentLockRepository,
+    portfolioService,
+    { telemetryBus },
   );
 
   return {
@@ -202,6 +227,8 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
       authorityRevocationRepository,
       matchingOrchestrator,
       new SupabaseAgentRepository(supabase as never),
+      portfolioService,
+      intentLockRepository,
     ),
     settlementService,
     tradeHistoryService: new TradeHistoryService(
@@ -209,6 +236,9 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     ),
     receiptService: new ReceiptService(new SupabaseReceiptRepository(supabase as never)),
     apiKeyService: new ApiKeyService(apiKeyRepository),
+    matchingOrchestrator,
+    intentLockRepository,
+    intentLockJanitor,
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
@@ -247,7 +277,11 @@ export function createApp(
   app.use(
     "/api",
     operatorAuthMiddleware(env),
-    createPortfoliosRouter(services.portfolioService, services.walletPortfolioSyncService),
+    createPortfoliosRouter(
+      services.portfolioService,
+      services.walletPortfolioSyncService,
+      services.matchingOrchestrator,
+    ),
   );
   app.use(
     "/api",

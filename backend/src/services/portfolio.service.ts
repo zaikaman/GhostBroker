@@ -413,4 +413,94 @@ export class PortfolioService {
     return (data ?? []).map(portfolioHistoryFromRecord).slice(0, limit);
   }
 
+  /**
+   * Lock a portion of an institution's available balance for a
+   * pending trading intent. The lock amount is added to
+   * `portfolios.locked`; the institution's *available* balance
+   * (balance - locked) is reduced by the same amount.
+   *
+   * Available balance is computed at the database level inside the
+   * `portfolio_lock_balance` RPC, which holds a row-level lock via
+   * `SELECT ... FOR UPDATE` to make this safe against concurrent
+   * locks. If the institution's available balance is below the
+   * requested amount, the RPC raises and this method throws
+   * `InsufficientBalanceError` so callers can convert it to a
+   * 403 `authorization_failed` response.
+   */
+  public async lockBalance(
+    institutionId: string,
+    assetCode: string,
+    amount: number,
+  ): Promise<void> {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new PublicError("validation_failed", 400);
+    }
+
+    const { error } = await (
+      this.client as unknown as RpcQuery<undefined>
+    ).rpc("portfolio_lock_balance", {
+      p_institution_id: institutionId,
+      p_asset_code: assetCode.toUpperCase(),
+      p_amount: amount.toString(),
+    });
+
+    if (error) {
+      if (error.message?.includes("insufficient available balance")) {
+        // Best-effort parse the available amount from the SQL
+        // error message. Format:
+        //   "insufficient available balance for USDC: requested 1000, available 500"
+        const match = /available (-?\d+(?:\.\d+)?)/.exec(error.message);
+        const available = match ? Number.parseFloat(match[1]!) : 0;
+        throw new InsufficientBalanceError(
+          assetCode.toUpperCase(),
+          amount,
+          available,
+        );
+      }
+      throw new PublicError("service_unavailable", 503, error);
+    }
+  }
+
+  /**
+   * Release a previously-locked balance reservation. Best-effort:
+   * errors are logged but never thrown to the caller, because the
+   * caller (the matching orchestrator) has already committed to the
+   * in-memory state change (intent removed from queue) and cannot
+   * roll it back.
+   *
+   * Safe under concurrent / duplicate calls: the SQL function
+   * clamps `locked = GREATEST(locked - amount, 0)`, so calling
+   * `releaseBalance` twice with the same amount is a no-op on the
+   * second call rather than an error.
+   */
+  public async releaseBalance(
+    institutionId: string,
+    assetCode: string,
+    amount: number,
+  ): Promise<void> {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+
+    try {
+      const { error } = await (
+        this.client as unknown as RpcQuery<undefined>
+      ).rpc("portfolio_release_balance", {
+        p_institution_id: institutionId,
+        p_asset_code: assetCode.toUpperCase(),
+        p_amount: amount.toString(),
+      });
+
+      if (error) {
+        console.error(
+          `[PortfolioService] Failed to release ${amount} ${assetCode} for ${institutionId}: ${error.message}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `[PortfolioService] Release threw for ${amount} ${assetCode} on ${institutionId}:`,
+        error,
+      );
+    }
+  }
 }

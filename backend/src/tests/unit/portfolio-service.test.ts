@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { PortfolioService } from "../../services/portfolio.service.js";
+import {
+  InsufficientBalanceError,
+  PortfolioService,
+} from "../../services/portfolio.service.js";
 import {
   InMemoryPortfolioClient,
   makePortfolioRecord,
@@ -116,6 +119,121 @@ describe("portfolio service", () => {
         { assetCode: "USDC", balance: 200, locked: 0 },
         { assetCode: "WBTC", balance: 3, locked: 0 },
       ],
+    });
+  });
+
+  describe("lockBalance / releaseBalance", () => {
+    const lockInstitutionId = "00000000-0000-4000-8000-000000000501";
+
+    it("locks available balance and exposes it in getPortfolio", async () => {
+      const client = new InMemoryPortfolioClient([
+        makePortfolioRecord({
+          institutionId: lockInstitutionId,
+          assetCode: "USDC",
+          balance: 1000,
+        }),
+      ]);
+      const service = new PortfolioService(client as never, "USDC");
+
+      await service.lockBalance(lockInstitutionId, "USDC", 400);
+
+      const portfolio = await service.getPortfolio(lockInstitutionId);
+      expect(portfolio.holdings).toEqual([
+        { assetCode: "USDC", balance: 1000, locked: 400 },
+      ]);
+    });
+
+    it("rejects a lock that exceeds available balance", async () => {
+      const client = new InMemoryPortfolioClient([
+        makePortfolioRecord({
+          institutionId: lockInstitutionId,
+          assetCode: "USDC",
+          balance: 100,
+          locked: 0,
+        }),
+      ]);
+      const service = new PortfolioService(client as never, "USDC");
+
+      await expect(
+        service.lockBalance(lockInstitutionId, "USDC", 200),
+      ).rejects.toBeInstanceOf(InsufficientBalanceError);
+    });
+
+    it("accumulates locks (second lock sees the first)", async () => {
+      const client = new InMemoryPortfolioClient([
+        makePortfolioRecord({
+          institutionId: lockInstitutionId,
+          assetCode: "USDC",
+          balance: 1000,
+        }),
+      ]);
+      const service = new PortfolioService(client as never, "USDC");
+
+      await service.lockBalance(lockInstitutionId, "USDC", 300);
+      await service.lockBalance(lockInstitutionId, "USDC", 400);
+
+      // Available balance is now 1000 - 700 = 300, so a third lock
+      // for 500 must be rejected.
+      await expect(
+        service.lockBalance(lockInstitutionId, "USDC", 500),
+      ).rejects.toBeInstanceOf(InsufficientBalanceError);
+
+      const portfolio = await service.getPortfolio(lockInstitutionId);
+      expect(portfolio.holdings[0]).toEqual({
+        assetCode: "USDC",
+        balance: 1000,
+        locked: 700,
+      });
+    });
+
+    it("releases locks and restores available balance", async () => {
+      const client = new InMemoryPortfolioClient([
+        makePortfolioRecord({
+          institutionId: lockInstitutionId,
+          assetCode: "USDC",
+          balance: 1000,
+        }),
+      ]);
+      const service = new PortfolioService(client as never, "USDC");
+
+      await service.lockBalance(lockInstitutionId, "USDC", 600);
+      await service.releaseBalance(lockInstitutionId, "USDC", 200);
+
+      const portfolio = await service.getPortfolio(lockInstitutionId);
+      expect(portfolio.holdings[0]).toEqual({
+        assetCode: "USDC",
+        balance: 1000,
+        locked: 400,
+      });
+    });
+
+    it("clamps release at zero (no negative locks)", async () => {
+      const client = new InMemoryPortfolioClient([
+        makePortfolioRecord({
+          institutionId: lockInstitutionId,
+          assetCode: "USDC",
+          balance: 1000,
+        }),
+      ]);
+      const service = new PortfolioService(client as never, "USDC");
+
+      // Release more than was locked — should clamp at zero.
+      await service.releaseBalance(lockInstitutionId, "USDC", 5000);
+
+      const portfolio = await service.getPortfolio(lockInstitutionId);
+      expect(portfolio.holdings[0]).toEqual({
+        assetCode: "USDC",
+        balance: 1000,
+        locked: 0,
+      });
+    });
+
+    it("is a no-op on a portfolio row that does not exist", async () => {
+      const client = new InMemoryPortfolioClient();
+      const service = new PortfolioService(client as never, "USDC");
+
+      // Should not throw.
+      await service.releaseBalance(lockInstitutionId, "USDC", 100);
     });
   });
 });

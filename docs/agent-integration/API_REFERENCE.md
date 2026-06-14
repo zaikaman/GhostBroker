@@ -154,6 +154,139 @@ Submit an encrypted hidden trading intent.
 **Requirements**:
 - `encryptedIntentEnvelope` must be 32–32768 characters, base64url-encoded
 - No plaintext trading fields (`asset`, `side`, `quantity`, `price`) allowed in request body
+- A balance reservation is acquired on the institution's available balance before the 202 is returned. If the institution has insufficient available balance (considering all other pending intents), the response is **403 `authorization_failed`** and no intent is queued.
+
+---
+
+## `POST /api/agents/intents/cancel`
+
+Cancel a previously submitted intent that is still pending in the matching orchestrator.
+
+**Auth**: Bearer token
+
+**Request Body**:
+
+```json
+{
+  "institutionId": "550e8400-e29b-41d4-a716-446655440000",
+  "agentDid": "did:t3n:0xAgentAddress",
+  "intentHandle": "intent_abc123def456...",
+  "authorityRef": "t3-delegation:abc123..."
+}
+```
+
+**Response** (200):
+
+```json
+{
+  "intentHandle": "intent_abc123def456...",
+  "state": "intent_cancelled"
+}
+```
+
+**Errors**:
+- `400 validation_failed` — body missing required fields
+- `401 authorization_failed` — missing or invalid bearer token
+- `403 authorization_failed` — caller's agentDid does not own the intent, or authority proof is invalid/revoked
+- `404 not_found` — the intent handle is not in the pending queue (already matched, expired, never existed, or owned by a different agent)
+
+> The cancel does not reverse a settled trade. It only removes the intent from the matching queue and releases the balance lock. Cancellation is agent-initiated; operators who need to invalidate an agent's pending intents should use `POST /api/agents/:id/revoke` instead.
+
+---
+
+## `GET /api/agents/intents`
+
+List the institution's currently-pending intents. The list is always institution-scoped (from the bearer token) and never crosses institutions.
+
+**Auth**: Bearer token
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentDid` | DID | No | Filter to a single agent's pending intents |
+
+**Response** (200):
+
+```json
+{
+  "intents": [
+    {
+      "intentHandle": "intent_abc123def456...",
+      "correlationRef": "opaque_ref",
+      "agentDid": "did:t3n:0xAgentAddress",
+      "assetCode": "WBTC",
+      "side": "buy",
+      "quantity": 100,
+      "price": 45000,
+      "sealedAt": "2026-06-14T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Errors**:
+- `400 validation_failed` — `agentDid` is malformed
+- `401 authorization_failed` — missing or invalid bearer token
+
+> The view strips the encrypted envelope, the authority reference, and the agent's authority limits. These are private to the matching engine; exposing them through this endpoint could reveal authorization policies.
+
+---
+
+## `GET /api/portfolios/{institutionId}`
+
+Retrieve the institution's portfolio.
+
+**Auth**: Bearer token
+**Path Parameter**: `institutionId` — UUID of the institution (must match the bearer token's institution)
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentDid` | DID | No | When present, returns the agent-level view (DB-only, with pending reservations for that agent) instead of the operator view (which may include live wallet sync) |
+
+**Response (operator view, no `agentDid`)** (200):
+
+```json
+{
+  "institutionId": "550e8400-e29b-41d4-a716-446655440000",
+  "holdings": [
+    { "assetCode": "USDC", "balance": 1000000, "locked": 0 },
+    { "assetCode": "WBTC", "balance": 5, "locked": 0 }
+  ]
+}
+```
+
+**Response (agent view, with `agentDid`)** (200):
+
+```json
+{
+  "institutionId": "550e8400-e29b-41d4-a716-446655440000",
+  "agentDid": "did:t3n:0xAgentAddress",
+  "holdings": [
+    { "assetCode": "USDC", "balance": 1000000, "locked": 100000 },
+    { "assetCode": "WBTC", "balance": 5, "locked": 0 }
+  ],
+  "pendingReservations": [
+    {
+      "intentHandle": "intent_buy_1",
+      "assetCode": "USDC",
+      "amount": 100000,
+      "side": "buy",
+      "quantity": 2,
+      "price": 50000
+    }
+  ]
+}
+```
+
+**Errors**:
+- `400 validation_failed` — `agentDid` is malformed
+- `401 authorization_failed` — missing or invalid bearer token
+- `403 authorization_failed` — querying another institution's portfolio
+
+> Each holding's `balance` is the institution's total balance; `locked` is the portion reserved by pending intents; the agent's *available* balance is `balance - locked`. Reservations are automatically released on cancel, agent revocation, intent expiry, and (implicitly) on settlement.
 
 ---
 

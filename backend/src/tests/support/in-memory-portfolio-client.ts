@@ -100,6 +100,21 @@ export class InMemoryPortfolioClient {
       return { data: null, error: null };
     }
 
+    if (functionName === "portfolio_lock_balance") {
+      const amount = Number(parameters.p_amount ?? 0);
+      const result = this.applyLock(institutionId, assetCode, amount);
+      if (result) {
+        return result;
+      }
+      return { data: null, error: null };
+    }
+
+    if (functionName === "portfolio_release_balance") {
+      const amount = Number(parameters.p_amount ?? 0);
+      this.applyRelease(institutionId, assetCode, amount);
+      return { data: null, error: null };
+    }
+
     return {
       data: null,
       error: new Error(`Unexpected RPC: ${functionName}`),
@@ -162,5 +177,77 @@ export class InMemoryPortfolioClient {
       balance: nextBalance.toString(),
       locked: nextLocked.toString(),
     });
+  }
+
+  /**
+   * Apply a lock increment. Returns an error result if available
+   * balance is insufficient. Otherwise, atomically increments
+   * `locked` and returns null.
+   */
+  private applyLock(
+    institutionId: string,
+    assetCode: string,
+    amount: number,
+  ): { data: null; error: Error } | null {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return {
+        data: null,
+        error: new Error(`lock amount must be positive, got ${amount}`),
+      };
+    }
+
+    let record = this.portfolios.find(
+      (r) =>
+        r.institution_id === institutionId && r.asset_code === assetCode,
+    );
+
+    if (!record) {
+      record = {
+        id: `${institutionId}:${assetCode}`,
+        institution_id: institutionId,
+        asset_code: assetCode,
+        balance: "0",
+        locked: "0",
+      };
+      this.portfolios.push(record);
+    }
+
+    const balance = Number(record.balance);
+    const locked = Number(record.locked);
+    const available = balance - locked;
+
+    if (available < amount) {
+      return {
+        data: null,
+        error: new Error(
+          `insufficient available balance for ${assetCode}: requested ${amount}, available ${available}`,
+        ),
+      };
+    }
+
+    record.locked = (locked + amount).toString();
+    return null;
+  }
+
+  private applyRelease(
+    institutionId: string,
+    assetCode: string,
+    amount: number,
+  ): void {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+
+    const record = this.portfolios.find(
+      (r) =>
+        r.institution_id === institutionId && r.asset_code === assetCode,
+    );
+
+    if (!record) {
+      return;
+    }
+
+    const locked = Number(record.locked);
+    record.locked = Math.max(locked - amount, 0).toString();
   }
 }

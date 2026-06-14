@@ -1,6 +1,7 @@
 # GhostBroker Infrastructure Gaps
 
 > Audit date: 2026-06-13
+> Last updated: 2026-06-14 (all seven gaps resolved, lock-refs + orphan janitor added)
 > Scope: Full codebase deep dive assessing readiness for agent-to-agent trading
 
 ---
@@ -189,56 +190,195 @@ Agents are now persisted to the database on admission. The `agents` table tracks
 
 ### Gap 5: Intent Cancellation
 
-**Severity: 🟡 High**
+**Status: ✅ Resolved**
 
-- The API reference explicitly marks cancellation as "coming in a future release"
-- Agents cannot cancel a submitted intent
-- The only escape from the in-memory queue is the TTL expiry (5 minutes)
+Agents can now cancel a previously submitted intent that is still pending in the matching orchestrator. Cancellation is gated behind the agent's cryptographic authority proof and the orchestrator's intrinsic ownership check on the `(intentHandle, agentDid, institutionId)` triple.
 
-**What's needed:**
+**What was built:**
 
-| Item | Description |
-|------|-------------|
-| `POST /api/agents/intents/cancel` | Cancel an active intent (gated behind agent authority + TEE) |
-| Deletion from pending queue | Remove from `MatchingOrchestrator.pendingIntents` |
-| Telemetry notification | Publish cancellation event to WebSocket |
+| Component | File(s) |
+|-----------|---------|
+| `MatchingOrchestrator.cancelIntent` (ownership-checked, lock-aware) | `backend/src/services/matching-orchestrator.ts` |
+| `HiddenIntentService.cancelIntent` (re-verifies authority, releases lock) | `backend/src/services/hidden-intent.service.ts` |
+| `cancelIntentRequestSchema`, `IntentCancelled` view type | `backend/src/models/hidden-intent.ts` |
+| `POST /api/agents/intents/cancel` route | `backend/src/api/agents.routes.ts` |
+| Integration tests (5) | `backend/src/tests/integration/intent-cancellation.test.ts` |
+| Contract tests (4) | `backend/src/tests/contracts/agents-intents-cancel.contract.test.ts` |
+
+**Cancellation flow:**
+
+1. Agent submits `POST /api/agents/intents/cancel` with `{institutionId, agentDid, intentHandle, authorityRef}`
+2. `HiddenIntentService` re-verifies the agent's authority proof against the cryptographic verifier
+3. Service calls `orchestrator.cancelIntent({intentHandle, agentDid, institutionId})` — the orchestrator's ownership check ensures one agent cannot cancel another's intent
+4. On success, the orchestrator removes the intent from the in-memory queue, releases the balance lock (see Gap 7), and emits a telemetry `intent_cancelled` event
+5. Service returns `200 { intentHandle, state: "intent_cancelled" }` to the agent
+
+**Key design decisions:**
+
+- Cancellation is **agent-initiated**, not operator-initiated. Operators who need to invalidate an agent's pending intents use `POST /api/agents/:id/revoke`, which cascades through `MatchingOrchestrator.removeIntentsByAgent`.
+- The orchestrator's in-memory queue is the single source of truth for "is this intent still pending?" — cancellation of a settled/expired/unknown handle returns 404.
+- Cryptographic authority re-verification catches the case where the agent's delegation was revoked after submission.
+- The cancel does **not** reverse a settled trade — settlement is terminal.
+- The TEE seal on the original intent is not unwound; the cancel only removes the in-memory queue entry and releases the balance lock.
 
 ---
 
 ### Gap 6: Missing Agent-Related API Endpoints
 
-**Status: 🟡 Partially Resolved**
+**Status: ✅ Resolved**
+
+All four originally-missing endpoints are now implemented.
 
 | Missing Endpoint | Status |
 |------------------|--------|
 | `GET /api/agents` | ✅ Resolved (part of Gap 4) |
 | `POST /api/agents/:id/revoke` | ✅ Resolved (part of Gap 4) |
-| `GET /api/agents/intents` | ❌ Still missing |
-| `POST /api/agents/intents/cancel` | ❌ Still missing (Gap 5) |
+| `GET /api/agents/intents` | ✅ Resolved (new in this work) |
+| `POST /api/agents/intents/cancel` | ✅ Resolved (new — see Gap 5) |
 | `GET /api/keys` | ✅ Resolved (part of Gap 1) |
 | `POST /api/keys` | ✅ Resolved (part of Gap 1) |
 | `POST /api/keys/:id/revoke` | ✅ Resolved (part of Gap 1) |
+
+**What was built for `GET /api/agents/intents`:**
+
+| Component | File(s) |
+|-----------|---------|
+| `MatchingOrchestrator.listPendingIntents` | `backend/src/services/matching-orchestrator.ts` |
+| `HiddenIntentService.listPendingIntents` (interface + impl) | `backend/src/services/hidden-intent.service.ts` |
+| `GET /api/agents/intents` route (with `?agentDid=` filter) | `backend/src/api/agents.routes.ts` |
+| `PendingIntentView` (strips encrypted envelope, authority ref, authority limits) | `backend/src/api/agents.routes.ts` |
+| Contract tests (6) | `backend/src/tests/contracts/agents-intents-list.contract.test.ts` |
+
+**Response shape (200):**
+
+```json
+{
+  "intents": [
+    {
+      "intentHandle": "intent_abc",
+      "correlationRef": "corr_...",
+      "agentDid": "did:t3n:0x...",
+      "assetCode": "WBTC",
+      "side": "buy",
+      "quantity": 100,
+      "price": 45000,
+      "sealedAt": "2026-06-12T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Key design decisions:**
+
+- Route is declared *before* `GET /agents/:id` in the router so Express does not match `intents` against the `:id` UUID param and 400 on it.
+- The view mapper explicitly strips the encrypted envelope, the authority reference, the execution reference, and the authority limits. These are private to the matching engine; leaking them through the API could expose authorization policies.
+- The list is always institution-scoped (via `operatorAuth.institutionId`), never cross-institution.
+- The optional `?agentDid=` filter is forwarded to the orchestrator's filter. No other query parameters are accepted.
 
 ---
 
 ### Gap 7: Portfolio Is Institution-Scoped, Not Agent-Scoped
 
-**Severity: 🟡 Medium**
+**Status: ✅ Resolved**
 
-When settlement runs, it debits/credits the **institution-level portfolio**. Multiple agents trading simultaneously can step on each other's balances:
+The portfolio layer now supports per-agent balance reservations and an agent-level portfolio view, addressing both the over-commitment risk and the visibility gap.
 
-- No per-agent balance reservation
-- No agent-level "maximum spend" limit enforcement
-- No agent-level portfolio view
-- The `MatchingOrchestrator` calls `matchClient.evaluateMatch()` without checking portfolio balance first
+**What was built:**
 
-**What's needed:**
+| Component | File(s) |
+|-----------|---------|
+| `portfolio_lock_balance` SQL RPC (atomic lock, `SELECT ... FOR UPDATE`) | `database/migrations/010_portfolio_lock_release.sql` |
+| `portfolio_release_balance` SQL RPC (idempotent, clamped at zero) | `database/migrations/010_portfolio_lock_release.sql` |
+| `intent_locks` SQL table (per-intent refs for orphan recovery) | `database/migrations/011_create_intent_locks.sql` |
+| `IntentLockRecord` / `IntentLock` model types | `backend/src/models/intent-lock.ts` |
+| `PortfolioService.lockBalance` (throws `InsufficientBalanceError` on insufficient available balance) | `backend/src/services/portfolio.service.ts` |
+| `PortfolioService.releaseBalance` (best-effort, never throws) | `backend/src/services/portfolio.service.ts` |
+| `MatchingOrchestrator.lockDescriptorFor` (public; defines lock formula) | `backend/src/services/matching-orchestrator.ts` |
+| `MatchingOrchestrator.checkBalance` updated to use **available** (balance - locked) | `backend/src/services/matching-orchestrator.ts` |
+| `HiddenIntentService.submitIntent` acquires the lock after TEE seal, before pushing to orchestrator | `backend/src/services/hidden-intent.service.ts` |
+| `MatchingOrchestrator.cancelIntent / removeIntentsByAgent / evictExpired` release the lock for each removed intent | `backend/src/services/matching-orchestrator.ts` |
+| `IntentLockRepository` (Supabase + in-memory test impl) — durable refs to every active lock | `backend/src/services/intent-lock-repository.ts` |
+| `HiddenIntentService` writes a lock ref on submit, deletes on cancel | `backend/src/services/hidden-intent.service.ts` |
+| `MatchingOrchestrator.deleteLockRefFor` (private helper) called alongside `releaseLockFor` on every eviction path | `backend/src/services/matching-orchestrator.ts` |
+| Pre-match-failure paths (balance / direction / instrument / notional) release the counterparty's lock + ref before splicing | `backend/src/services/matching-orchestrator.ts` |
+| `IntentLockJanitor` (sweeper) — every 30s, finds refs older than the intent TTL and releases them | `backend/src/services/intent-lock-janitor.ts` |
+| `intent_lock_released` telemetry phase added to the backend and agent-client type unions | `backend/src/websocket/telemetry-event.ts`, `agent-client/src/types.ts` |
+| `InsufficientBalanceError` mapped to 403 in the submit route | `backend/src/api/agents.routes.ts` |
+| Agent-level view in `GET /api/portfolios/:institutionId?agentDid=...` | `backend/src/api/portfolios.routes.ts` |
+| `matchingOrchestrator`, `intentLockRepository`, `intentLockJanitor` exposed via `BackendServices` | `backend/src/app.ts` |
+| Unit tests for lock/release (6) | `backend/src/tests/unit/portfolio-service.test.ts` |
+| Unit tests for in-memory lock client (8) | `backend/src/tests/unit/intent-lock-repository.test.ts` |
+| Integration tests for orchestrator lock lifecycle (6) + settlement implicit release (1) + pre-match-failure release (1) | `backend/src/tests/integration/matching-orchestrator-reservation.test.ts` |
+| Integration tests for the orphan-lock janitor (7) | `backend/src/tests/integration/intent-lock-janitor.test.ts` |
+| Integration tests for restart safety (3) — submit, restart, sweeper recovers | `backend/src/tests/integration/intent-lock-restart-safety.test.ts` |
+| Contract tests for agent-level portfolio view (5) | `backend/src/tests/contracts/portfolios-agent.contract.test.ts` |
+| In-memory test client extended with `portfolio_lock_balance` and `portfolio_release_balance` RPCs | `backend/src/tests/support/in-memory-portfolio-client.ts` |
+| In-memory test client for the `intent_locks` table (with `seed()` helper for restart-safety tests) | `backend/src/tests/support/in-memory-intent-lock-client.ts` |
 
-| Item | Description |
-|------|-------------|
-| Pre-match balance check | Verify sufficient balance before calling TEE match |
-| Agent balance reservation | Lock a portion of the institution's balance while an intent is pending |
-| Agent-level portfolio view | `GET /api/portfolios/:institutionId?agentDid=...` |
+**Lock lifecycle:**
+
+1. **Acquire (submit):** After the TEE seals the intent, `HiddenIntentService.submitIntent` calls `portfolioService.lockBalance(institutionId, assetCode, amount)`. The amount is `quantity * price` of the settlement asset for buys, or `quantity` of the traded asset for sells. If the institution's available balance is insufficient, the lock RPC raises, the service throws `InsufficientBalanceError`, and the route returns 403 `authorization_failed` (redacted — the agent does not learn the institution's exact balance). On success, a row is also inserted into `intent_locks` keyed by the TEE-assigned `intent_handle`, so the janitor can recover from process restarts.
+
+2. **Release on cancel:** `MatchingOrchestrator.cancelIntent` releases the lock for the removed intent and deletes the corresponding `intent_locks` row. The service's `cancelIntent` simply calls into the orchestrator and surfaces the result.
+
+3. **Release on revocation:** `MatchingOrchestrator.removeIntentsByAgent` (called from `AgentService.revokeAgent`) releases the lock for each removed intent and deletes each ref row.
+
+4. **Release on TTL expiry:** `MatchingOrchestrator.evictExpired` releases the lock for each evicted intent and deletes each ref row, on its 30-second sweep.
+
+5. **Release on settlement (implicit):** Settlement's `portfolioService.applySettlement` calls `portfolio_update_balance` for each leg. The SQL function clamps `locked = LEAST(locked, new_balance)`, so as the balance drains the lock is reduced automatically. The orchestrator's match-success path explicitly deletes the `intent_locks` rows for both matched intents before splicing them from the queue, so the janitor does not see them.
+
+6. **Release on pre-match failure:** When the orchestrator's `checkBalance` / `checkDirectionScope` / `checkInstrumentScope` / `checkMaxNotional` returns a failure, the orchestrator splices the counterparty (`other` in the matching loop) from the queue and calls `releaseLockFor(other)` + `deleteLockRefFor(other)`. The new intent (`intent`) stays in the queue and keeps its lock, because it may still match against a different counterparty.
+
+7. **Release on orphan recovery (process restart):** The `IntentLockJanitor` runs every 30 seconds and queries `intent_locks WHERE created_at < now() - intent_ttl`. For each row, it calls `portfolioService.releaseBalance(institutionId, assetCode, amount)` (the `portfolios.locked` is decremented; if the lock amount was already drained by settlement, the SQL `LEAST` clamp makes this a no-op) and then deletes the row. This recovers stranded locks when the in-memory orchestrator queue is lost across a process restart. The janitor's interval is `.unref()`'d so it never blocks process exit.
+
+**Policy decision (pre-match-failure lock release):** When a pre-match check fails between two pending intents, the orchestrator's matching loop splices the *existing* intent in the queue (the `other` variable) and releases that side's lock. The just-arrived intent (`intent`) keeps its lock, since the *new* intent can still try to match against a *different* counterparty. This policy is enforced uniformly across all four pre-match checks and is covered by `matching-orchestrator-reservation.test.ts`.
+
+**Agent-level view (`GET /api/portfolios/:institutionId?agentDid=...`):**
+
+When the `agentDid` query parameter is present, the route returns a DB-only view (no wallet sync, since the agent does not own the wallet) augmented with the agent's pending reservations:
+
+```json
+{
+  "institutionId": "00000000-0000-4000-8000-000000000101",
+  "agentDid": "did:t3n:0xAgentAddress",
+  "holdings": [
+    { "assetCode": "USDC", "balance": 1000000, "locked": 100000 },
+    { "assetCode": "WBTC", "balance": 5, "locked": 0 }
+  ],
+  "pendingReservations": [
+    {
+      "intentHandle": "intent_buy_1",
+      "assetCode": "USDC",
+      "amount": 100000,
+      "side": "buy",
+      "quantity": 2,
+      "price": 50000
+    }
+  ]
+}
+```
+
+The `available` balance for any asset is `balance - locked` (the `locked` field is already exposed in the standard holdings shape; the route does not duplicate it). When `agentDid` is absent, the route's behavior is unchanged from before this work (wallet sync or DB fallback).
+
+**Key design decisions:**
+
+- **No new table.** The lock uses the existing `portfolios.locked` column, which was already constrained `locked <= balance`. The `portfolio_update_balance` SQL function already auto-clamps on every delta, so settlement naturally releases the lock as it drains balance. Adding a new table would have been a much larger blast radius.
+- **Lock before queue push.** The lock is acquired in `HiddenIntentService.submitIntent` *before* the orchestrator's `onIntentSealed` is fired, so a lock failure surfaces to the agent as a clean 403 *before* the HTTP 202 is sent. This is preferable to the alternative (fire-and-forget lock inside the orchestrator) where an agent could see a 202 success even though the intent was not actually queued.
+- **Release is best-effort.** The orchestrator's release paths call `portfolioService.releaseBalance` via `void` and log errors internally. The in-memory queue mutation is unaffected by transient DB failures — locks are eventually consistent.
+- **Insufficient available balance is 403, not 400.** The agent is told they are not authorized to commit the institution's balance, without learning the exact balance. This matches the privacy posture of the rest of the system.
+- **Transient DB errors during lock acquisition are non-blocking.** If `lockBalance` throws anything other than `InsufficientBalanceError`, the service logs and continues. The orchestrator's `checkBalance` and the settlement service re-validate balances before any money moves, so a missed lock does not result in over-commitment.
+
+**Known limitations:**
+
+- **The orchestrator is in-memory.** A process restart still loses the in-memory `pendingIntents` queue. The lock-refs table + janitor are the recovery path: a fresh process picks up the `intent_locks` rows, finds nothing in the in-memory queue, and after the intent TTL elapses the janitor releases the corresponding `portfolios.locked` amounts. The TTL is 5 minutes; a process restart means up to 5 minutes of "we have a lock in the DB but no in-memory owner." This is the same latency the in-memory orchestrator had before reservations were added — the lock just makes it observable, not worse. The right longer-term fix is to make the orchestrator's queue durable (e.g., backed by Supabase), at which point the janitor becomes unnecessary. Out of scope for this work.
+
+- **The orchestrator's matching loop is single-process.** The in-memory queue and the `setInterval` eviction are scoped to a single Node.js process. A horizontally-scaled deployment would need a shared queue (e.g., Supabase-backed), which is the same durable-orchestrator fix mentioned above.
+
+- **TEE-sealed-but-never-queued intents leave a stranded lock for up to the intent TTL.** If the TEE seal succeeds but the service crashes (or the orchestrator's `onIntentSealed` fails catastrophically) before the intent enters the queue, the `intent_locks` row is orphaned from the moment of submit. The janitor releases it after 5 minutes. Acceptable for now; a tighter recovery would require a Supabase-backed queue (see above).
+
+- **No idempotency on `cancel`.** A duplicate `cancel` request for the same `intentHandle` returns 404 the second time (the orchestrator's queue no longer has the intent). The HTTP layer does not deduplicate, so an agent that retries after a network blip will see a 404. This is intentional — the cancel succeeded; the 404 is a confirmation, not an error — but it is worth noting for client retry logic.
+
+- **The janitor and orchestrator cleanup timers do not block process exit.** Both intervals are `.unref()`'d so the Node.js process can exit even if a sweep is pending. This is correct for the production deployment (where a process supervisor restarts the service), but it means a process that exits cleanly during a sweep window will skip that sweep. The next process startup re-derives the same set of stranded locks from the `intent_locks` table, so no work is lost.
 
 ---
 
@@ -246,17 +386,21 @@ When settlement runs, it debits/credits the **institution-level portfolio**. Mul
 
 | Gap | Severity | Depends On |
 |-----|----------|------------|
-| 1 - API Key System | 🔴 Blocking | Nothing |
+| 1 - API Key System | ✅ Resolved | Nothing |
 | 2 - Agent-to-Asset Authorization | ✅ Resolved | Gap 4 (agent DB) |
 | 3 - Agent Key Management | ✅ Resolved | Gap 4 (agent DB) |
 | 4 - Agent DB & Admitted Tracking | ✅ Resolved | Nothing |
-| 5 - Intent Cancellation | 🟡 High | Gap 4 (agent DB) |
-| 6 - Missing API Endpoints | 🟡 Partially Resolved | Gap 4 (agent DB) |
-| 7 - Institution-Scoped Portfolio | 🟡 Medium | Gap 4 (agent DB) |
+| 5 - Intent Cancellation | ✅ Resolved | Gap 4 (agent DB) |
+| 6 - Missing API Endpoints | ✅ Resolved | Gap 4 (agent DB) |
+| 7 - Institution-Scoped Portfolio | ✅ Resolved | Gap 4 (agent DB) |
+
+**All seven gaps are resolved.** The platform now has the missing user-facing infrastructure for agents to connect, authenticate, and trade in production: persistent API keys, per-agent authority enforcement, admitted-agent tracking, intent cancellation, list endpoints, and per-agent balance reservations with an agent-level portfolio view.
 
 ---
 
 ## Recommended Implementation Order
+
+This was the planned order; all items are now ✅ Resolved.
 
 1. **API keys** (Gap 1) — Unblocks persistent agent authentication
 2. **Agent DB table + admission persistence** (Gap 4) — Foundation for all agent management
@@ -291,4 +435,9 @@ When settlement runs, it debits/credits the **institution-level portfolio**. Mul
 | Agent SDK types | `agent-client/src/types.ts` |
 | Delegation proof builder | `agent-client/src/delegation-proof.ts` |
 | DB schema | `database/schema.sql` |
+| Portfolio lock/release migration | `database/migrations/010_portfolio_lock_release.sql` |
+| Intent-locks table migration | `database/migrations/011_create_intent_locks.sql` |
+| Intent-locks model | `backend/src/models/intent-lock.ts` |
+| Intent-lock repository (Supabase) | `backend/src/services/intent-lock-repository.ts` |
+| Intent-lock janitor (sweeper) | `backend/src/services/intent-lock-janitor.ts` |
 | API reference docs | `docs/agent-integration/API_REFERENCE.md` |

@@ -86,7 +86,10 @@ export type TelemetryPhase =
   | "authorization_failed"
   | "token_metering_failed"
   | "settlement_failed"
-  | "service_unavailable";
+  | "service_unavailable"
+  | "intent_expired"
+  | "intent_cancelled"
+  | "intent_lock_released";
 
 export interface TelemetryEvent {
   eventId: string;

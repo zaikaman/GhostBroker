@@ -34,6 +34,32 @@ export interface HiddenIntentAccepted {
   state: HiddenIntentState;
 }
 
+/**
+ * Body for `POST /api/agents/intents/cancel`.
+ *
+ * Cancels a previously submitted intent that is still pending in the
+ * matching orchestrator. The caller is the same agent that submitted
+ * the intent (authenticated via API key). Institution-scope is
+ * enforced and the agent's admission must still be active.
+ *
+ * Operators who need to invalidate an agent's pending intents should
+ * use `POST /api/agents/:id/revoke`, which cascades through
+ * `MatchingOrchestrator.removeIntentsByAgent`.
+ */
+export const cancelIntentRequestSchema = z.object({
+  institutionId: z.string().uuid(),
+  agentDid: agentDidSchema,
+  intentHandle: z.string().trim().min(1).max(256),
+  authorityRef: z.string().trim().min(8).max(512),
+});
+
+export type CancelIntentRequest = z.infer<typeof cancelIntentRequestSchema>;
+
+export interface IntentCancelled {
+  intentHandle: string;
+  state: "intent_cancelled";
+}
+
 export interface PendingIntent {
   correlationRef: string;
   institutionId: string;

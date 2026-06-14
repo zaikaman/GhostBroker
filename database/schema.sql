@@ -104,6 +104,22 @@ CREATE TABLE public.agents (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  instrument_scope ARRAY,
+  direction_scope ARRAY,
+  max_notional numeric DEFAULT NULL::numeric,
+  limit_reference text,
+  policy_hash text,
   CONSTRAINT agents_pkey PRIMARY KEY (id),
   CONSTRAINT agents_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
+);
+CREATE TABLE public.intent_locks (
+  intent_handle text NOT NULL CHECK (intent_handle <> ''::text),
+  institution_id uuid NOT NULL,
+  asset_code text NOT NULL CHECK (asset_code <> ''::text),
+  amount numeric NOT NULL CHECK (amount > 0::numeric),
+  correlation_ref text,
+  agent_did text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT intent_locks_pkey PRIMARY KEY (intent_handle),
+  CONSTRAINT intent_locks_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
 );

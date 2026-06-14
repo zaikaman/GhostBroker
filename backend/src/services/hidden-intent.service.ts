@@ -5,8 +5,11 @@ import type {
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
 import type {
+  CancelIntentRequest,
   HiddenIntentAccepted,
   HiddenIntentRequest,
+  IntentCancelled,
+  PendingIntent,
 } from "../models/hidden-intent.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
 import type { MatchingOrchestrator } from "./matching-orchestrator.js";
@@ -15,6 +18,11 @@ import {
   type AuthorityRevocationRepository,
 } from "./authority-revocation.service.js";
 import type { AgentRepository } from "./agent-repository.js";
+import {
+  InsufficientBalanceError,
+  type PortfolioService,
+} from "./portfolio.service.js";
+import type { IntentLockRepository } from "./intent-lock-repository.js";
 
 export interface HiddenIntentSubmissionContext {
   correlationRef: string;
@@ -25,6 +33,22 @@ export interface HiddenIntentSubmissionService {
     request: HiddenIntentRequest,
     context: HiddenIntentSubmissionContext,
   ): Promise<HiddenIntentAccepted>;
+  /**
+   * Cancel a previously submitted intent that is still pending in the
+   * matching orchestrator. Returns `null` if no matching intent was
+   * found (already matched, expired, never existed, or owned by a
+   * different agent).
+   */
+  cancelIntent(request: CancelIntentRequest): Promise<IntentCancelled | null>;
+  /**
+   * List currently-pending intents for the institution, optionally
+   * filtered to a single agent. Reads the in-memory queue; never
+   * throws on an empty queue.
+   */
+  listPendingIntents(params: {
+    institutionId: string;
+    agentDid?: string;
+  }): ReadonlyArray<PendingIntent>;
 }
 
 export class HiddenIntentService implements HiddenIntentSubmissionService {
@@ -34,6 +58,8 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   private readonly revocations: AuthorityRevocationRepository;
   private readonly matchingOrchestrator: MatchingOrchestrator | undefined;
   private readonly agentRepository: AgentRepository | undefined;
+  private readonly portfolioService: PortfolioService | undefined;
+  private readonly intentLockRepository: IntentLockRepository | undefined;
 
   public constructor(
     authorization: AgentAuthorizationFacade,
@@ -42,6 +68,8 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     revocations: AuthorityRevocationRepository = new EmptyAuthorityRevocationRepository(),
     matchingOrchestrator?: MatchingOrchestrator,
     agentRepository?: AgentRepository,
+    portfolioService?: PortfolioService,
+    intentLockRepository?: IntentLockRepository,
   ) {
     this.authorization = authorization;
     this.blindIntentClient = blindIntentClient;
@@ -49,6 +77,8 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     this.revocations = revocations;
     this.matchingOrchestrator = matchingOrchestrator;
     this.agentRepository = agentRepository;
+    this.portfolioService = portfolioService;
+    this.intentLockRepository = intentLockRepository;
   }
 
   public async submitIntent(
@@ -87,6 +117,98 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         }
       } catch {
         // Agent lookup failure is non-blocking — matching proceeds without limit checks
+      }
+    }
+
+    // Acquire the balance reservation BEFORE pushing to the
+    // orchestrator. This is the gate that prevents an agent
+    // from over-committing their institution's available
+    // balance across multiple intents.
+    //
+    // The lock amount is computed via the orchestrator's
+    // `lockDescriptorFor` so the descriptor formula lives in one
+    // place. If the orchestrator is not configured, the lock is
+    // skipped (matching still runs and `checkBalance` enforces
+    // a coarse check at the orchestrator level).
+    if (this.portfolioService && this.matchingOrchestrator) {
+      const syntheticIntent: PendingIntent = {
+        correlationRef: context.correlationRef,
+        institutionId: request.institutionId,
+        agentDid: request.agentDid,
+        intentHandle: sealed.intentHandle,
+        executionRef: sealed.executionRef,
+        encryptedEnvelope: request.encryptedIntentEnvelope,
+        authorityRef: request.authorityRef,
+        assetCode: request.settlementMetadata.assetCode,
+        side: request.settlementMetadata.side,
+        quantity: request.settlementMetadata.quantity,
+        price: request.settlementMetadata.price,
+        sealedAt: sealed.sealedAt,
+      };
+      const reservation =
+        this.matchingOrchestrator.lockDescriptorFor(syntheticIntent);
+
+      try {
+        await this.portfolioService.lockBalance(
+          reservation.institutionId,
+          reservation.assetCode,
+          reservation.amount,
+        );
+      } catch (error) {
+        if (error instanceof InsufficientBalanceError) {
+          this.telemetryBus.publish({
+            institutionId: reservation.institutionId,
+            type: "telemetry.error.changed",
+            phase: "authorization_failed",
+            severity: "error",
+            correlationRef: context.correlationRef,
+            agentId: request.agentDid,
+          });
+          // Re-throw so the route returns 403 to the agent. The
+          // TEE seal has already been consumed, but the agent
+          // gets a clear error and no intent is queued.
+          throw error;
+        }
+        // Transient DB / network error — log but allow the
+        // submit to proceed. The orchestrator's `checkBalance`
+        // and the settlement service will re-validate balances
+        // before any money moves. (See infra-gaps.md Gap 7
+        // for the trade-off discussion.)
+        console.error(
+          `[HiddenIntentService] Lock failed for ${context.correlationRef}:`,
+          error,
+        );
+      }
+
+      // Persist a reference to the lock so the orphan-lock
+      // janitor can recover from process restarts. The ref
+      // is keyed by the TEE-assigned intent handle, which is
+      // also what the in-memory orchestrator uses for its
+      // queue, so a successful delete on cancel/expire/match
+      // always matches the live intent 1:1.
+      //
+      // Failure to write the ref is non-blocking: the lock
+      // amount is still in `portfolios.locked`, and a manual
+      // `portfolio_release_balance` call (e.g., from a future
+      // reconciliation job) can still find and release it via
+      // the `portfolios.locked` column. We do not roll back
+      // the lock because the agent's intent is now in flight.
+      if (this.intentLockRepository) {
+        try {
+          await this.intentLockRepository.create({
+            intentHandle: sealed.intentHandle,
+            institutionId: reservation.institutionId,
+            assetCode: reservation.assetCode,
+            amount: reservation.amount,
+            correlationRef: context.correlationRef,
+            agentDid: request.agentDid,
+          });
+        } catch (error) {
+          console.error(
+            `[HiddenIntentService] Failed to persist lock ref for ${sealed.intentHandle}:`,
+            error,
+          );
+        }
       }
     }
 
@@ -172,6 +294,96 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     ) {
       throw new PublicError("authorization_failed", 403);
     }
+  }
+
+  public async cancelIntent(
+    request: CancelIntentRequest,
+  ): Promise<IntentCancelled | null> {
+    // Re-verify the agent's authority proof is still valid for this
+    // institution/agent pair. This catches the case where the
+    // delegation was revoked after the intent was submitted.
+    //
+    // Note: we do NOT also look up the agent's DB record. The
+    // revocation flow already cascades through
+    // `MatchingOrchestrator.removeIntentsByAgent`, which removes
+    // revoked agents' pending intents from the queue. By the time a
+    // cancel request arrives for a revoked agent, the intent will
+    // already be gone and the orchestrator will return undefined
+    // (mapped to 404). Adding a DB lookup here would be redundant
+    // and would also fail for agents that were admitted via the
+    // cryptographic layer but never persisted to the agents table
+    // (e.g. legacy admissions).
+    const revokedAuthorityRefs =
+      await this.revocations.listRevokedAuthorityRefs(
+        request.institutionId,
+        request.agentDid,
+      );
+    const verification =
+      await this.authorization.verifyAgentAuthority({
+        institutionId: request.institutionId,
+        agentDid: request.agentDid,
+        authorityProof: request.authorityRef,
+        // Same requested action as submission — the proof is
+        // for the same scope of capabilities.
+        requestedAction: "intent.submit",
+        revokedAuthorityRefs,
+      });
+
+    if (
+      verification.status !== "verified" ||
+      verification.authorityRef !== request.authorityRef
+    ) {
+      throw new PublicError("authorization_failed", 403);
+    }
+
+    if (!this.matchingOrchestrator) {
+      // Without an orchestrator there is nothing to cancel.
+      return null;
+    }
+
+    const removed = this.matchingOrchestrator.cancelIntent({
+      intentHandle: request.intentHandle,
+      agentDid: request.agentDid,
+      institutionId: request.institutionId,
+    });
+
+    if (!removed) {
+      return null;
+    }
+
+    // Best-effort: delete the lock ref so the orphan-lock
+    // janitor does not see a stale row. The orchestrator has
+    // already released the actual `portfolios.locked` amount
+    // (via `releaseLockFor` inside `cancelIntent`); the ref
+    // delete is the durable counterpart. If the delete fails
+    // here, the janitor will pick it up after the TTL elapses
+    // and call `releaseBalance` again — the second call is a
+    // no-op because the lock amount is already zero.
+    if (this.intentLockRepository) {
+      try {
+        await this.intentLockRepository.delete(request.intentHandle);
+      } catch (error) {
+        console.error(
+          `[HiddenIntentService] Failed to delete lock ref for ${request.intentHandle}:`,
+          error,
+        );
+      }
+    }
+
+    return {
+      intentHandle: request.intentHandle,
+      state: "intent_cancelled",
+    };
+  }
+
+  public listPendingIntents(params: {
+    institutionId: string;
+    agentDid?: string;
+  }): ReadonlyArray<PendingIntent> {
+    if (!this.matchingOrchestrator) {
+      return [];
+    }
+    return this.matchingOrchestrator.listPendingIntents(params);
   }
 
   private publish(

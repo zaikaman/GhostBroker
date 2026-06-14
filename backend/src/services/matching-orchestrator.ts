@@ -7,11 +7,26 @@ import type {
 import type { PendingIntent } from "../models/hidden-intent.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
 import type { PortfolioService } from "./portfolio.service.js";
+import type { IntentLockRepository } from "./intent-lock-repository.js";
 
 /** Default TTL for pending intents: 5 minutes */
 const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
 /** Default interval for periodic cleanup sweeps: 30 seconds */
 const DEFAULT_CLEANUP_INTERVAL_MS = 30 * 1000;
+
+/**
+ * A balance reservation is the per-intent lock on an institution's
+ * available balance. The orchestrator holds the lock while the
+ * intent is pending and releases it on cancel, eviction, or
+ * revocation. Settlement releases the lock implicitly via the
+ * `portfolio_update_balance` SQL function, which clamps
+ * `locked = LEAST(locked, new_balance)` as the balance drains.
+ */
+interface BalanceReservation {
+  institutionId: string;
+  assetCode: string;
+  amount: number;
+}
 
 /**
  * Orchestrates intent matching and settlement with pre-match
@@ -32,9 +47,16 @@ export class MatchingOrchestrator {
   private readonly settlementService: SettlementService;
   private readonly telemetryBus: TelemetryBus;
   private readonly portfolioService: PortfolioService | undefined;
-  private readonly settlementAssetCode: string;
+  /**
+   * The asset code used for settlement (typically USDC). Exposed
+   * as read-only so the portfolios route can compute the locked
+   * amount for a buy intent without re-deriving it from the
+   * environment.
+   */
+  public readonly settlementAssetCode: string;
   private readonly intentTtlMs: number;
   private readonly cleanupTimer: ReturnType<typeof setInterval>;
+  private readonly intentLockRepository: IntentLockRepository | undefined;
   private pendingIntents: PendingIntent[] = [];
   private evictedCount = 0;
 
@@ -46,11 +68,13 @@ export class MatchingOrchestrator {
     settlementAssetCode = "USDC",
     intentTtlMs: number = DEFAULT_INTENT_TTL_MS,
     cleanupIntervalMs: number = DEFAULT_CLEANUP_INTERVAL_MS,
+    intentLockRepository?: IntentLockRepository,
   ) {
     this.matchClient = matchClient;
     this.settlementService = settlementService;
     this.telemetryBus = telemetryBus;
     this.portfolioService = portfolioService;
+    this.intentLockRepository = intentLockRepository;
     this.settlementAssetCode = settlementAssetCode;
     this.intentTtlMs = intentTtlMs;
 
@@ -66,8 +90,81 @@ export class MatchingOrchestrator {
   }
 
   /**
-   * Called after an intent has been sealed by the TEE.
-   * Runs pre-match checks, adds to the pending queue, and attempts to find a match.
+   * Compute the balance reservation descriptor for a pending intent.
+   *
+   * - A buy intent locks `quantity * price` units of the
+   *   settlement asset (USDC) at the buyer's institution.
+   * - A sell intent locks `quantity` units of the traded asset
+   *   at the seller's institution.
+   *
+   * Public so that the service layer can acquire the same lock
+   * the orchestrator will later release — keeping the lock
+   * descriptor formula in one place.
+   */
+  public lockDescriptorFor(intent: PendingIntent): BalanceReservation {
+    if (intent.side === "buy") {
+      return {
+        institutionId: intent.institutionId,
+        assetCode: this.settlementAssetCode,
+        amount: intent.quantity * intent.price,
+      };
+    }
+    return {
+      institutionId: intent.institutionId,
+      assetCode: intent.assetCode,
+      amount: intent.quantity,
+    };
+  }
+
+  /**
+   * Release the lock for a single intent. Best-effort: errors
+   * from the portfolio service are logged inside the service and
+   * never thrown, so the orchestrator's own state mutation is
+   * unaffected by transient DB failures.
+   */
+  private releaseLockFor(intent: PendingIntent): void {
+    if (!this.portfolioService) {
+      return;
+    }
+    const reservation = this.lockDescriptorFor(intent);
+    void this.portfolioService.releaseBalance(
+      reservation.institutionId,
+      reservation.assetCode,
+      reservation.amount,
+    );
+  }
+
+  /**
+   * Delete the durable lock ref for a single intent. Best-effort:
+   * the in-memory queue mutation is unaffected by transient DB
+   * failures. If the delete fails, the orphan-lock janitor will
+   * eventually `releaseBalance` the corresponding amount
+   * (clamped at zero, since the actual lock has already been
+   * released) and try to delete the ref again.
+   */
+  private deleteLockRefFor(intent: PendingIntent): void {
+    if (!this.intentLockRepository) {
+      return;
+    }
+    void this.intentLockRepository.delete(intent.intentHandle).catch(
+      (error: unknown) => {
+        console.error(
+          `[MatchingOrchestrator] Failed to delete lock ref for ${intent.intentHandle}:`,
+          error,
+        );
+      },
+    );
+  }
+
+  /**
+   * Called after an intent has been sealed AND the balance lock
+   * has been acquired by the service. Adds the intent to the
+   * pending queue and attempts to find a match.
+   *
+   * Note: lock acquisition lives in `HiddenIntentService.submitIntent`
+   * so that lock failures can be surfaced to the agent as a 403
+   * *before* the HTTP 202 is sent. This method does not need to
+   * lock.
    */
   public async onIntentSealed(intent: PendingIntent): Promise<void> {
     // Sweep expired intents before adding the new one
@@ -113,6 +210,11 @@ export class MatchingOrchestrator {
             correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
             agentId: buyIntent.agentDid,
           });
+          // Pre-match check failed: release the counterparty's
+          // lock + ref so its available balance is restored
+          // immediately, rather than waiting for TTL eviction.
+          this.releaseLockFor(other);
+          this.deleteLockRefFor(other);
           this.pendingIntents.splice(i, 1);
           this.removeIntent(other);
           return;
@@ -133,6 +235,11 @@ export class MatchingOrchestrator {
           correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
           agentId: directionCheck.agentDid,
         });
+        // Pre-match check failed: release the counterparty's
+        // lock + ref so its available balance is restored
+        // immediately, rather than waiting for TTL eviction.
+        this.releaseLockFor(other);
+        this.deleteLockRefFor(other);
         this.pendingIntents.splice(i, 1);
         this.removeIntent(other);
         return;
@@ -152,6 +259,11 @@ export class MatchingOrchestrator {
           correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
           agentId: instrumentCheck.agentDid,
         });
+        // Pre-match check failed: release the counterparty's
+        // lock + ref so its available balance is restored
+        // immediately, rather than waiting for TTL eviction.
+        this.releaseLockFor(other);
+        this.deleteLockRefFor(other);
         this.pendingIntents.splice(i, 1);
         this.removeIntent(other);
         return;
@@ -173,6 +285,11 @@ export class MatchingOrchestrator {
           correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
           agentId: notionalCheck.agentDid,
         });
+        // Pre-match check failed: release the counterparty's
+        // lock + ref so its available balance is restored
+        // immediately, rather than waiting for TTL eviction.
+        this.releaseLockFor(other);
+        this.deleteLockRefFor(other);
         this.pendingIntents.splice(i, 1);
         this.removeIntent(other);
         return;
@@ -226,6 +343,16 @@ export class MatchingOrchestrator {
           `${outcome.outcomeRef}:${randomUUID()}`,
         );
 
+        // Capture refs to the matched intents before we mutate
+        // the queue — we need them to delete the durable lock
+        // refs. Settlement itself releases the `portfolios.locked`
+        // amount implicitly via the SQL clamp in
+        // `portfolio_update_balance`; here we just need to
+        // remove the rows from `intent_locks` so the janitor
+        // does not see them.
+        this.deleteLockRefFor(intent);
+        this.deleteLockRefFor(other);
+
         // Remove matched intents from queue
         this.pendingIntents.splice(i, 1);
         this.removeIntent(other);
@@ -262,14 +389,17 @@ export class MatchingOrchestrator {
     try {
       const totalCost = matchQuantity * matchPrice;
 
-      // Check buyer has enough settlement asset
+      // Check buyer has enough *available* settlement asset
+      // (balance - locked, where locked includes the buy intent's
+      // own reservation).
       const buyerPortfolio = await this.portfolioService.getPortfolio(
         buyIntent.institutionId,
       );
       const buyerCash = buyerPortfolio.holdings.find(
         (h) => h.assetCode === this.settlementAssetCode,
       );
-      if (!buyerCash || buyerCash.balance < totalCost) {
+      const buyerAvailable = (buyerCash?.balance ?? 0) - (buyerCash?.locked ?? 0);
+      if (!buyerCash || buyerAvailable < totalCost) {
         return {
           passed: false,
           side: "buyer",
@@ -277,18 +407,19 @@ export class MatchingOrchestrator {
             buyIntent.institutionId
           } has insufficient ${
             this.settlementAssetCode
-          } balance: has ${buyerCash?.balance ?? 0}, needs ${totalCost}`,
+          } available balance: has ${buyerAvailable}, needs ${totalCost}`,
         };
       }
 
-      // Check seller has enough of the asset
+      // Check seller has enough *available* of the asset
       const sellerPortfolio = await this.portfolioService.getPortfolio(
         sellIntent.institutionId,
       );
       const sellerAsset = sellerPortfolio.holdings.find(
         (h) => h.assetCode === sellIntent.assetCode,
       );
-      if (!sellerAsset || sellerAsset.balance < matchQuantity) {
+      const sellerAvailable = (sellerAsset?.balance ?? 0) - (sellerAsset?.locked ?? 0);
+      if (!sellerAsset || sellerAvailable < matchQuantity) {
         return {
           passed: false,
           side: "seller",
@@ -296,7 +427,7 @@ export class MatchingOrchestrator {
             sellIntent.institutionId
           } has insufficient ${
             sellIntent.assetCode
-          } balance: has ${sellerAsset?.balance ?? 0}, needs ${matchQuantity}`,
+          } available balance: has ${sellerAvailable}, needs ${matchQuantity}`,
         };
       }
 
@@ -411,6 +542,60 @@ export class MatchingOrchestrator {
   }
 
   /**
+   * Cancel a single pending intent by its handle.
+   *
+   * Returns the removed intent if it was present in the queue, or
+   * `undefined` if no matching intent was found (already matched,
+   * already expired, never existed, or owned by a different agent /
+   * institution).
+   *
+   * Only the original submitting agent may cancel. The agent's
+   * authority must still be live (we don't re-verify the cryptographic
+   * proof here — the cancel route does that — but ownership is
+   * enforced by the handle + agentDid + institutionId triple).
+   */
+  public cancelIntent(params: {
+    intentHandle: string;
+    agentDid: string;
+    institutionId: string;
+  }): PendingIntent | undefined {
+    const idx = this.pendingIntents.findIndex(
+      (intent) =>
+        intent.intentHandle === params.intentHandle &&
+        intent.agentDid === params.agentDid &&
+        intent.institutionId === params.institutionId,
+    );
+
+    if (idx < 0) {
+      return undefined;
+    }
+
+    const [removed] = this.pendingIntents.splice(idx, 1);
+
+    if (removed) {
+      // Release the per-intent balance lock. Best-effort: the
+      // releaseBalance call swallows its own errors, so the
+      // in-memory state mutation above stands even if the DB
+      // release fails.
+      this.releaseLockFor(removed);
+      // Delete the durable lock ref so the orphan-lock janitor
+      // does not see a stale row.
+      this.deleteLockRefFor(removed);
+
+      this.telemetryBus.publish({
+        institutionId: removed.institutionId,
+        type: "telemetry.processing.changed",
+        phase: "intent_cancelled",
+        severity: "warning",
+        correlationRef: removed.correlationRef,
+        agentId: removed.agentDid,
+      });
+    }
+
+    return removed;
+  }
+
+  /**
    * Remove all pending intents for a given agent/institution.
    * Used when an agent is revoked — clears their active intents from the queue.
    */
@@ -427,6 +612,11 @@ export class MatchingOrchestrator {
     });
 
     for (const intent of removed) {
+      // Release the per-intent balance lock so the institution's
+      // available balance is restored when the agent is revoked.
+      this.releaseLockFor(intent);
+      this.deleteLockRefFor(intent);
+
       this.telemetryBus.publish({
         institutionId: intent.institutionId,
         type: "telemetry.processing.changed",
@@ -443,6 +633,29 @@ export class MatchingOrchestrator {
    */
   public pendingCount(): number {
     return this.pendingIntents.length;
+  }
+
+  /**
+   * List pending intents for the given institution, optionally
+   * filtered to a single agent. Returns a shallow copy of the
+   * matching records (callers cannot mutate internal queue state).
+   *
+   * This is a synchronous read against the in-memory queue — safe
+   * to call from request handlers.
+   */
+  public listPendingIntents(params: {
+    institutionId: string;
+    agentDid?: string;
+  }): ReadonlyArray<PendingIntent> {
+    return this.pendingIntents.filter((intent) => {
+      if (intent.institutionId !== params.institutionId) {
+        return false;
+      }
+      if (params.agentDid && intent.agentDid !== params.agentDid) {
+        return false;
+      }
+      return true;
+    });
   }
 
   /**
@@ -475,8 +688,13 @@ export class MatchingOrchestrator {
       return !isExpired;
     });
 
-    // Publish telemetry events for evicted intents
+    // Publish telemetry events for evicted intents and release
+    // their balance locks so the institution's available balance
+    // is restored.
     for (const expired of evicted) {
+      this.releaseLockFor(expired);
+      this.deleteLockRefFor(expired);
+
       this.telemetryBus.publish({
         institutionId: expired.institutionId,
         type: "telemetry.processing.changed",

@@ -80,6 +80,9 @@ All events share a common envelope:
 | `settlement_pending` | info | Match found, atomic settlement executing |
 | `settlement_finalized` | success | Settlement complete, balances updated |
 | `receipt_available` | success | Cryptographic audit receipt issued |
+| `intent_cancelled` | warning | Agent cancelled a pending intent before settlement; balance lock released |
+| `intent_expired` | warning | Pending intent exceeded TTL and was evicted from the matching queue; balance lock released |
+| `intent_lock_released` | info | Orphan-lock janitor released a balance reservation whose owning intent was no longer in the in-memory queue (typically: process restart recovery, or a TEE-sealed intent that never made it onto the queue) |
 
 ### `telemetry.error.changed` — Error Buckets
 
