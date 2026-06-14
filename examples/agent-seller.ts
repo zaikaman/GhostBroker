@@ -3,32 +3,37 @@
  * GhostBroker Seller Agent Example
  *
  * This script demonstrates how an institution's autonomous agent
- * connects to GhostBroker, authenticates, submits a sell intent,
- * and monitors for settlement via polling.
+ * connects to GhostBroker, authenticates with an API key, submits a
+ * sell intent, and monitors for settlement via polling.
  *
  * Prerequisites:
- *   - npm install ethers  (for EIP-191 signing in the DID challenge flow)
- *   - Or use your own signing method (e.g., MetaMask, hardware wallet)
+ *   - A GhostBroker API key (generate one from the API Keys panel on
+ *     the dashboard).
  *
  * Usage:
  *   export GHOSTBROKER_URL=http://localhost:3001
+ *   export GHOSTBROKER_API_KEY=gbk_...
  *   export ADMIN_PRIVATE_KEY=0x...
  *   export AGENT_PRIVATE_KEY=0x...
+ *   export CREDENTIAL_JCS_BASE64=...
+ *   export ENCRYPTED_INTENT_ENVELOPE=...
  *   npx tsx examples/agent-seller.ts
  */
 
 import { GhostBrokerClient, DelegationProofBuilder } from "../agent-client/src/index.js";
 
 const GHOSTBROKER_URL = process.env.GHOSTBROKER_URL || "http://localhost:3001";
+const GHOSTBROKER_API_KEY = process.env.GHOSTBROKER_API_KEY;
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 const AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY;
 const CREDENTIAL_JCS = process.env.CREDENTIAL_JCS_BASE64;
 const ENCRYPTED_INTENT = process.env.ENCRYPTED_INTENT_ENVELOPE;
 
 async function main(): Promise<void> {
-  if (!ADMIN_PRIVATE_KEY || !AGENT_PRIVATE_KEY) {
-    console.error("Missing required env vars: ADMIN_PRIVATE_KEY, AGENT_PRIVATE_KEY");
-    console.error("Install ethers: npm install ethers");
+  if (!GHOSTBROKER_API_KEY || !ADMIN_PRIVATE_KEY || !AGENT_PRIVATE_KEY) {
+    console.error(
+      "Missing required env vars: GHOSTBROKER_API_KEY, ADMIN_PRIVATE_KEY, AGENT_PRIVATE_KEY",
+    );
     process.exit(1);
   }
 
@@ -38,19 +43,9 @@ async function main(): Promise<void> {
   // Initialize the unified GhostBroker client
   const client = new GhostBrokerClient({ baseUrl: GHOSTBROKER_URL });
 
-  // Step 1: Authenticate
+  // Step 1: Authenticate by exchanging the API key for an 8-hour session.
   console.log("[Seller Agent] Authenticating with GhostBroker...");
-  const session = await client.authenticate(
-    "did:t3n:0xSellerAgentAddress",
-    async (challenge: string) => {
-      // Uses ethers.js Wallet for EIP-191 personal_sign
-      // Requires: npm install ethers
-      const { Wallet } = await import("ethers");
-      const wallet = new Wallet(ADMIN_PRIVATE_KEY);
-      const signature = await wallet.signMessage(challenge);
-      return { signature, walletAddress: wallet.address };
-    },
-  );
+  const session = await client.authenticateWithApiKey(GHOSTBROKER_API_KEY);
   console.log(`[Seller Agent] Authenticated! Institution: ${session.institution.displayName}`);
 
   // Step 2: Build delegation proof and admit the agent

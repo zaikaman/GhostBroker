@@ -1,95 +1,77 @@
-# Agent Authentication: Connecting to GhostBroker
+# Delegation Proof: Authorizing Your Agent
 
-Before your agent can trade, it must prove its identity and authority to the GhostBroker platform. GhostBroker handles all the cryptographic infrastructure internally — you just need an Ethereum keypair.
+After your agent authenticates with its API key, it must present a **delegation proof** to `POST /api/agents/admit` before it can submit intents. The proof asserts that a human operator (the institution admin) authorized this specific agent, scope, and policy — without giving the agent any signing authority beyond what was granted.
 
-## Overview
+The proof is the `authorityProof` field in `AdmitAgentRequest`. The backend verifies it against the Terminal 3 delegation system before admitting the agent.
 
-Every agent follows a simple challenge-response protocol:
+## Quick example
 
-1. **Request a cryptographic challenge** from GhostBroker
-2. **Sign the challenge** using your agent's private key
-3. **Submit the signed challenge** to verify your identity
-4. **Admit your agent** to start trading
+```typescript
+import { GhostBrokerClient, DelegationProofBuilder } from "@ghostbroker/agent-client";
 
-That's it. No external credential setup, no third-party dashboards, no delegation certificates to manage.
+const client = new GhostBrokerClient({ baseUrl: process.env.GHOSTBROKER_URL! });
+await client.authenticateWithApiKey(process.env.GHOSTBROKER_API_KEY!);
+
+const adminKey = hexToBytes(process.env.ADMIN_PRIVATE_KEY!);
+const agentKey = hexToBytes(process.env.AGENT_PRIVATE_KEY!);
+
+const proof = await DelegationProofBuilder.build({
+  institutionId: session.institution.id,
+  agentDid: process.env.AGENT_DID!,
+  requestedAction: "agent.admit",
+  policyHash: process.env.POLICY_HASH!,  // sha256:… of your policy
+  credentialJcsBase64: process.env.CREDENTIAL_JCS_BASE64!,
+  adminPrivateKey: adminKey,
+  agentPrivateKey: agentKey,
+});
+
+const admission = await client.admitAgent({
+  institutionId: session.institution.id,
+  agentDid: process.env.AGENT_DID!,
+  authorityProof: DelegationProofBuilder.serialize(proof),
+});
+console.log("Admitted:", admission.status, "ref:", admission.authorityRef);
+```
 
 ## Prerequisites
 
-Before connecting your agent, you need:
+Before constructing a proof, you need:
 
-1. **A GhostBroker account** — Your institution is already registered if you can see this dashboard
-2. **An Ethereum keypair** — Generate one with `npx -y ethers@6 wallet create`
-3. **Your Institution DID** — Displayed in the dashboard header (e.g., `did:t3n:0x...`)
+1. **A valid session** — obtained via `client.authenticateWithApiKey(...)` or by passing a cached `(token, institutionId)` pair to the client.
+2. **An admin private key** — the operator's Terminal 3 keypair. Used to sign the proof's admin portion.
+3. **An agent private key** — the agent's own key. Used to sign the agent-acknowledgment portion.
+4. **A delegation credential (JCS)** — a base64url-encoded JSON Canonicalization Scheme blob issued by the dashboard when the operator grants the agent. Stored in `CREDENTIAL_JCS_BASE64`.
+5. **A policy hash** — the SHA-256 of the trading policy the agent is being admitted under, formatted as `sha256:…`.
 
-## Authentication Flow
+## The proof blob
 
-### Step 1: Request a Challenge
-
-```http
-POST /api/auth/challenge
-Content-Type: application/json
-
-{
-  "did": "did:t3n:0xYourInstitutionAddress"
-}
-```
-
-**Response:**
-```json
-{
-  "challengeId": "ch_abc123...",
-  "challenge": "GhostBroker Terminal 3 DID authorization\nDID: did:t3n:0x...\nNonce: ...",
-  "expiresAt": "2026-06-13T12:00:00.000Z"
-}
-```
-
-### Step 2: Sign the Challenge
-
-Sign the challenge string using your agent's private key with EIP-191 (personal_sign):
+`DelegationProofBuilder.build(...)` returns a structured object with the following shape:
 
 ```typescript
-import { Wallet } from "ethers";
-
-const agent = new Wallet("0xYourAgentPrivateKey");
-const signature = await agent.signMessage(challenge);
-```
-
-The `signMessage` method in ethers automatically applies the `\x19Ethereum Signed Message:\n` prefix.
-
-### Step 3: Verify the Signature
-
-```http
-POST /api/auth/verify
-Content-Type: application/json
-
 {
-  "did": "did:t3n:0xYourInstitutionAddress",
-  "challengeId": "ch_abc123...",
-  "signature": "0x...",
-  "walletAddress": "0xYourAgentAddress"
+  version: "ghostbroker.delegation-proof/1",
+  credentialJcs: string;            // base64url
+  userSignature: string;            // 0x… admin signature over the request
+  recoveredUserAddress: string;     // 0x… derived from userSignature
+  agentSignature: string;           // 0x… agent signature over the request
+  nonce: string;
+  requestHash: string;              // 0x… keccak256 of the canonical request
+  request: {
+    institutionId: string;
+    agentDid: string;
+    requestedAction: "agent.admit" | "intent.submit" | "settlement.execute";
+    policyHash: string;
+  };
 }
 ```
 
-**Response:**
-```json
-{
-  "token": "gb_session_abc123...",
-  "expiresAt": "2026-06-13T20:00:00.000Z",
-  "institution": {
-    "id": "uuid-here",
-    "displayName": "Your Institution",
-    "t3TenantDid": "did:t3n:0x..."
-  }
-}
-```
+Call `DelegationProofBuilder.serialize(proof)` to get the JSON string that goes into the `authorityProof` field of the admit request.
 
-### Step 4: Admit Your Agent
-
-Once authenticated, register your agent for trading:
+## The admit call
 
 ```http
 POST /api/agents/admit
-Authorization: Bearer gb_session_abc123...
+Authorization: Bearer ***
 Content-Type: application/json
 
 {
@@ -99,7 +81,8 @@ Content-Type: application/json
 }
 ```
 
-**Success Response:**
+Success response:
+
 ```json
 {
   "agentDid": "did:t3n:0x...",
@@ -108,71 +91,18 @@ Content-Type: application/json
 }
 ```
 
-## Complete Example (TypeScript)
+Save the `authorityRef` — it is the value your agent uses in every subsequent `submitIntent(...)` call.
 
-```typescript
-import { Wallet } from "ethers";
+## Notes
 
-const GHOSTBROKER_URL = "https://your-ghostbroker-instance.com";
-const agent = new Wallet("0xYourAgentPrivateKey");
-
-// 1. Authenticate
-const challengeRes = await fetch(`${GHOSTBROKER_URL}/api/auth/challenge`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ did: agent.address }),
-});
-const { challengeId, challenge } = await challengeRes.json();
-
-const signature = await agent.signMessage(challenge);
-
-const verifyRes = await fetch(`${GHOSTBROKER_URL}/api/auth/verify`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    did: agent.address,
-    challengeId,
-    signature,
-    walletAddress: agent.address,
-  }),
-});
-const { token } = await verifyRes.json();
-
-// 2. Admit agent
-const admitRes = await fetch(`${GHOSTBROKER_URL}/api/agents/admit`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  },
-  body: JSON.stringify({
-    institutionId: "uuid-here",
-    agentDid: agent.address,
-    authorityProof: JSON.stringify({
-      version: "ghostbroker.delegation-proof/1",
-      credentialJcs: "",
-      userSignature: "",
-      recoveredUserAddress: "",
-      agentSignature: "",
-      nonce: "",
-      requestHash: "",
-      request: {
-        institutionId: "uuid-here",
-        agentDid: agent.address,
-        requestedAction: "agent.admit",
-        policyHash: "default",
-      },
-    }),
-  }),
-});
-const admission = await admitRes.json();
-console.log(`Agent admitted: ${admission.status}`);
-```
+- The proof is **one-time use** per admit. To rotate the agent, request a new credential from the dashboard and build a new proof.
+- The proof's signatures are EIP-191 over the canonical request hash. The admin's key signs as the "delegator"; the agent's key signs as the "delegatee".
+- The backend verifies the proof against the dashboard-issued credential before admitting the agent. If the credential was revoked, the admit is rejected with `authorization_failed`.
 
 ## Troubleshooting
 
 | Error | Likely Cause | Fix |
 |-------|-------------|-----|
-| `authorization_failed` on verify | Challenge expired or wrong signature | Request a new challenge and check your private key |
-| `authorization_failed` on admit | DID mismatch or invalid proof | Ensure your agent DID matches the signed address |
-| `service_unavailable` | Platform issue | Check GhostBroker status and retry |
+| `validation_failed` on admit | `authorityProof` is not valid JSON, or the inner request fields are wrong shape | Re-serialize the proof; check that `version`, `credentialJcs`, and all signatures are present |
+| `authorization_failed` on admit | Signature didn't recover to the expected address, or the credential was revoked | Verify the admin and agent keys match the dashboard; re-issue the credential from the dashboard if it was rotated |
+| `not_found` on admit | Institution or agent DID doesn't match the session | Ensure `institutionId` matches the session's `institution.id`; ensure `agentDid` matches the value in the credential |

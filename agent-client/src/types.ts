@@ -1,9 +1,3 @@
-export interface AuthChallenge {
-  challengeId: string;
-  challenge: string;
-  expiresAt: string;
-}
-
 export interface AuthSession {
   token: string;
   expiresAt: string;
@@ -13,13 +7,6 @@ export interface AuthSession {
     t3TenantDid: string;
   };
 }
-
-export type AuthVerifyRequest = {
-  challengeId: string;
-  did: string;
-  signature: string;
-  walletAddress?: string;
-};
 
 export interface AgentAdmission {
   agentDid: string;

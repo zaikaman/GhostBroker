@@ -54,42 +54,15 @@ Create a new institutional profile. Used during onboarding.
 
 ---
 
-## `POST /api/auth/challenge`
+## `POST /api/auth/api-key` (agent authentication)
 
-Request a cryptographic challenge for DID-based authentication.
-
-**Request Body**:
-
-```json
-{
-  "did": "did:t3n:0x1234567890abcdef1234567890abcdef12345678"
-}
-```
-
-**Response** (201):
-
-```json
-{
-  "challengeId": "auth_challenge_abc123...",
-  "challenge": "GhostBroker Terminal 3 DID authorization\nDID: ...",
-  "expiresAt": "2026-06-12T10:05:00.000Z"
-}
-```
-
----
-
-## `POST /api/auth/verify`
-
-Submit a signed challenge to obtain a session token.
+Exchange a persistent API key for an 8-hour session token. This is the only authentication flow supported by the agent SDK.
 
 **Request Body**:
 
 ```json
 {
-  "challengeId": "auth_challenge_abc123...",
-  "did": "did:t3n:0x1234567890abcdef1234567890abcdef12345678",
-  "signature": "0x...",
-  "walletAddress": "0x1234567890abcdef1234567890abcdef12345678"
+  "apiKey": "gbk_..."
 }
 ```
 
@@ -97,15 +70,21 @@ Submit a signed challenge to obtain a session token.
 
 ```json
 {
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "expiresAt": "2026-06-12T18:00:00.000Z",
+  "token": "gb_session_abc123...",
+  "expiresAt": "2026-06-14T20:00:00.000Z",
   "institution": {
     "id": "550e8400-e29b-41d4-a716-446655440000",
-    "displayName": "Wallet 0x123456",
-    "t3TenantDid": "did:t3n:0x1234567890abcdef1234567890abcdef12345678"
+    "displayName": "JPMorgan",
+    "t3TenantDid": "did:t3n:0x..."
   }
 }
 ```
+
+**Errors**:
+- `400 validation_failed` — body missing `apiKey` or `apiKey` is empty
+- `401 authorization_failed` — the key is unknown, revoked, or malformed
+
+> **Note on `/api/auth/challenge` and `/api/auth/verify`**: those routes exist for the dashboard's operator login (Web3 wallet → session). Agents should not call them — use `/api/auth/api-key` instead. See [Authentication](./AUTHENTICATION.md) for details.
 
 ---
 
@@ -113,7 +92,7 @@ Submit a signed challenge to obtain a session token.
 
 Admit an autonomous agent after verifying its delegation credential.
 
-**Auth**: Bearer token (from `/api/auth/verify`)
+**Auth**: Bearer token (from `/api/auth/api-key`)
 
 **Request Body**:
 
@@ -202,7 +181,7 @@ List completed trades for the authenticated institution.
       "assetCodeCiphertext": "t3cipher.abc...sealed",
       "quantityCiphertext": "t3cipher.def...sealed",
       "executionPriceCiphertext": "t3cipher.ghi...sealed",
-      "settledAt": "2026-06-12T10:00:00.000Z",
+      "settledAt": "2026-06-14T10:00:00.000Z",
       "settlementStatus": "settled",
       "receiptIds": ["uuid-of-receipt"]
     }
@@ -258,7 +237,7 @@ Real-time telemetry WebSocket for agent monitoring.
   "type": "telemetry.agent.changed",
   "phase": "agent_verified",
   "severity": "info",
-  "timestamp": "2026-06-12T10:00:00.000Z",
+  "timestamp": "2026-06-14T10:00:00.000Z",
   "correlationRef": "opaque_ref",
   "agentId": "did:t3n:0x..."
 }
@@ -273,7 +252,7 @@ Real-time telemetry WebSocket for agent monitoring.
 All authenticated requests require:
 
 ```
-Authorization: Bearer <jwt-token>
+Authorization: Bearer ***
 Accept: application/json
 ```
 

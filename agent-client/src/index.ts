@@ -13,7 +13,6 @@ export {
   type GhostBrokerClientConfig,
 } from "./ghostbroker-client.js";
 export type {
-  AuthChallenge,
   AuthSession,
   AgentAdmission,
   IntentAccepted,

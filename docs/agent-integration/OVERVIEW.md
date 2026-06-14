@@ -11,7 +11,7 @@ GhostBroker is a **privacy-preserving institutional dark pool** built on confide
 GhostBroker is designed for institutions that want autonomous agents to trade directly with each other:
 
 - **Institutions deploy agents**, not traders
-- **Agents authenticate and trade**, using cryptographic signing (EIP-191 / secp256k1)
+- **Agents authenticate with persistent API keys** — no per-request signing
 - **Humans watch only** — the Observatory Console is strictly read-only
 - **The enclave enforces** — even platform operators cannot view active orders, modify intents, or intervene in matching
 
@@ -23,22 +23,22 @@ This is enforced at the architecture level: the sealed matching core runs inside
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Agent Lifecycle                            │
 │                                                                 │
-│   Sign Up ──► Get Credentials ──► Authenticate ──► Admit ──► Trade    │
-│   (Done)        (Dashboard)       (DID Challenge)   (Verify)   (Submit Intents) │
+│   Sign Up ──► Get Credentials ──► Authenticate ──► Admit ──► Trade   │
+│   (Done)        (Dashboard)       (API key)       (Prove)   (Submit Intents) │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 1. Sign Up (Already Complete)
-Your institution is already registered on GhostBroker. Your DID and institution ID are shown in the dashboard.
+Your institution is already registered on GhostBroker. Your institution ID is shown in the dashboard.
 
 ### 2. Get Credentials
-Generate an Ethereum keypair for your agent. The agent will use this keypair to sign authentication challenges.
+Generate an **API key** for your agent from the **API Keys** panel on the dashboard. The key is persistent until you revoke it.
 
-### 3. Authenticate (DID Challenge-Response)
-Your agent proves its identity by signing a cryptographic challenge with its private key. GhostBroker verifies the signature and issues a session token.
+### 3. Authenticate (API key exchange)
+Your agent exchanges the API key for an 8-hour session token via `POST /api/auth/api-key`. The SDK does this in one call: `await client.authenticateWithApiKey(GHOSTBROKER_API_KEY)`.
 
 ### 4. Admit Agent
-The agent is registered with GhostBroker and authorized to submit trading intents.
+The agent is registered with GhostBroker and authorized to submit trading intents. Requires a delegation proof — see [Delegation Proof](./DELEGATION_PROOF.md).
 
 ### 5. Submit Intents & Trade
 The agent submits encrypted trading intents. The enclave matches compatible intents, executes settlement, and generates encrypted audit receipts.
@@ -49,21 +49,22 @@ All API endpoints are served from your GhostBroker instance base URL.
 
 | Endpoint | Method | Purpose | Human Access? |
 |----------|--------|---------|--------------|
-| `/api/auth/challenge` | POST | Request a cryptographic challenge | No — agents only |
-| `/api/auth/verify` | POST | Verify signed challenge, get session | No — agents only |
+| `/api/auth/api-key` | POST | Exchange API key for session | No — agents only |
 | `/api/agents/admit` | POST | Register agent for trading | No — agents only |
 | `/api/agents/intents` | POST | Submit encrypted trading intent | No — agents only |
 | `/api/trades/completed` | GET | Retrieve trade history | Yes — read-only dashboard |
 | `/api/receipts/:id` | GET | Retrieve encrypted receipt | Yes — read-only dashboard |
 | `WS /ws/telemetry` | WebSocket | Real-time agent activity stream | Yes — read-only dashboard |
 
+> The dashboard uses `/api/auth/challenge` + `/api/auth/verify` for **operator** login. Agents should not call those routes — use `/api/auth/api-key` instead.
+
 Agents interact programmatically. Humans interact through the Observatory Console dashboard.
 
 ## What You Need to Connect
 
-1. **A GhostBroker Account** — Already provisioned. Your DID and institution ID are in the dashboard.
-2. **An Ethereum Keypair** — Generate with `npx -y ethers@6 wallet create`. The private key signs authentication challenges.
-3. **Node.js 20+** — Runtime for the agent (or any language that speaks HTTP/WebSocket).
+1. **A GhostBroker Account** — Already provisioned. Your institution ID is in the dashboard.
+2. **An API key** — Generate from the **API Keys** panel on the dashboard. Store it in your agent's secrets manager.
+3. **Node.js 20+** (or any language with HTTP + WebSocket) — Runtime for the agent.
 
 ## Observatory Console (Dashboard)
 

@@ -33,20 +33,11 @@ export interface GhostBrokerClientConfig {
  * authentication, admission, intent submission, trade history,
  * receipts, and telemetry.
  *
- * @example Recommended: API key (no DID challenge)
+ * @example Recommended: API key exchange
  * ```typescript
  * const client = new GhostBrokerClient({ baseUrl: 'https://api.ghostbroker.io' });
  * const session = await client.authenticateWithApiKey(process.env.GHOSTBROKER_API_KEY!);
  * // client.token and client.telemetry are now wired automatically
- * ```
- *
- * @example Alternative: DID challenge-response
- * ```typescript
- * const client = new GhostBrokerClient({ baseUrl: 'https://api.ghostbroker.io' });
- * const session = await client.authenticate(did, async (challenge) => {
- *   const signature = await wallet.signMessage(challenge);
- *   return { signature, walletAddress: wallet.address };
- * });
  * ```
  *
  * @example Pre-existing session
@@ -80,25 +71,10 @@ export class GhostBrokerClient {
   }
 
   /**
-   * Authenticate with the GhostBroker API via a DID challenge-response flow.
-   * Stores the returned session token and wires the institution ID into the
-   * telemetry client so the WebSocket stream is filtered correctly.
-   */
-  public async authenticate(
-    did: string,
-    signer: (challenge: string) => Promise<{ signature: string; walletAddress?: string }>,
-  ): Promise<AuthSession> {
-    const session = await this.auth.authenticate(did, signer);
-    this.applySession(session);
-    return session;
-  }
-
-  /**
-   * Authenticate with the GhostBroker API using a persistent API key.
-   *
-   * The agent exchanges the key for a standard session token (8h) and the
-   * returned institution info is wired into the telemetry client. The raw
-   * API key is never stored on the client — only the issued session token.
+   * Authenticate with the GhostBroker API by exchanging a persistent API
+   * key for an 8-hour session token. The returned institution info is
+   * wired into the telemetry client so the WebSocket stream is filtered
+   * correctly. The raw API key is never stored on the client.
    */
   public async authenticateWithApiKey(apiKey: string): Promise<AuthSession> {
     const session = await this.auth.authenticateWithApiKey(apiKey);

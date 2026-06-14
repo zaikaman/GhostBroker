@@ -19,33 +19,21 @@ All API errors return a consistent JSON format:
 
 ## Authorization Failure Details
 
-### On Challenge (`POST /api/auth/challenge`)
+### On API Key Exchange (`POST /api/auth/api-key`)
 
 ```json
 {
   "code": "authorization_failed",
-  "message": "DID not recognized or institution not active."
-}
-```
-
-**Cause**: The DID doesn't match any registered institution, or the institution is suspended.
-**Fix**: Check that you're using the correct DID from the dashboard.
-
-### On Verify (`POST /api/auth/verify`)
-
-```json
-{
-  "code": "authorization_failed",
-  "message": "Challenge expired, invalid, or signature doesn't match."
+  "message": "The requested action is not authorized."
 }
 ```
 
 **Causes**:
-1. Challenge expired — challenges are valid for 5 minutes
-2. Wrong signature — the signature doesn't match the expected signer
-3. Wrong challenge ID — the challenge was already consumed or doesn't exist
+1. The API key is unknown (typo or stale)
+2. The API key was revoked from the dashboard
+3. The key is malformed (e.g. missing the `gbk_` prefix)
 
-**Fix**: Request a new challenge and ensure the correct private key is used to sign.
+**Fix**: Generate a new API key from the **API Keys** panel on the dashboard and update your agent's secrets store.
 
 ### On Admit (`POST /api/agents/admit`)
 
@@ -58,9 +46,9 @@ All API errors return a consistent JSON format:
 
 **Causes**:
 - Agent DID doesn't match the authenticated session
-- Authority proof is malformed or invalid
+- Authority proof is malformed, expired, or the underlying credential was revoked
 
-**Fix**: Ensure the agent DID matches the signing address and regenerate the authority proof.
+**Fix**: Ensure the agent DID matches the session, and re-issue the delegation credential from the dashboard if it was rotated. See [Delegation Proof](./DELEGATION_PROOF.md) for the proof shape.
 
 ## WebSocket Errors
 
@@ -88,12 +76,11 @@ All API errors return a consistent JSON format:
 Before contacting support, verify:
 
 1. [ ] Is your API base URL correct?
-2. [ ] Is your DID correct (from the dashboard)?
-3. [ ] Is your private key loaded correctly?
-4. [ ] Is your session token still valid (not expired)?
-5. [ ] Are you including the `Authorization: Bearer` header?
-6. [ ] Is the request body valid JSON?
-7. [ ] Is your agent's network connectivity working?
+2. [ ] Is your API key loaded correctly from your secrets store?
+3. [ ] Is your session token still valid (not expired — 8 hour TTL)?
+4. [ ] Are you including the `Authorization: Bearer` header?
+5. [ ] Is the request body valid JSON?
+6. [ ] Is your agent's network connectivity working?
 
 ## Common curl Debugging
 
@@ -101,10 +88,8 @@ Before contacting support, verify:
 # Test platform connectivity
 curl -s https://your-instance.com/api/health
 
-# Test authentication flow
-CHALLENGE=$(curl -s -X POST https://your-instance.com/api/auth/challenge \
+# Test API key exchange
+curl -s -X POST https://your-instance.com/api/auth/api-key \
   -H "Content-Type: application/json" \
-  -d '{"did": "did:t3n:0x..."}')
-
-echo "$CHALLENGE" | jq .
+  -d '{"apiKey": "gbk_..."}'
 ```

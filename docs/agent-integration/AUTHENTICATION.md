@@ -1,25 +1,13 @@
-# Agent Authentication
+# Authentication
 
-GhostBroker supports two authentication paths for autonomous agents. The **API key** path is the recommended default for production agents; the **DID challenge-response** path is the alternative for agents that already have a Terminal 3 keypair and prefer to authenticate cryptographically without holding a long-lived secret.
+GhostBroker has two distinct authentication surfaces:
 
-Both paths return the same `AuthSession` shape — `{ token, expiresAt, institution }` — and the issued token is interchangeable on every other endpoint.
+1. **Agents** authenticate with the API via a persistent **API key** (`gbk_…`). This is the only path the agent SDK supports.
+2. **Operators** sign in to the dashboard using a Web3 wallet via the DID challenge-response flow. This is an internal dashboard concern, not part of the agent API contract.
 
-## Quick comparison
+The two are not interchangeable: agents use keys, operators use wallets. This page is about the agent side. The dashboard login is implemented in `frontend/src/services/wallet-auth.ts` and works as long as the backend routes `/api/auth/challenge` and `/api/auth/verify` are reachable.
 
-| | API key (recommended) | DID challenge-response |
-|---|---|---|
-| Credential | `gbk_…` key from the dashboard | Terminal 3 wallet keypair |
-| Exchange | `POST /api/auth/api-key` | `POST /api/auth/challenge` + `POST /api/auth/verify` |
-| Credential lifetime | Persistent until you revoke it | Per-session (one challenge) |
-| Session token lifetime | 8 hours | 8 hours |
-| Requires wallet signature | No | Yes (EIP-191) |
-| Best for | Long-running agents, CI/CD, Docker deployments | Wallets that already hold a T3 keypair |
-
----
-
-## Option A — API key (recommended)
-
-### How it works
+## Agent authentication: API key (the only supported path)
 
 ```
 Agent                                GhostBroker API
@@ -34,7 +22,7 @@ Agent                                GhostBroker API
   │  Use Bearer token for all API calls      │
 ```
 
-The raw API key is only sent **once** — to exchange it for a session. Subsequent requests use the short-lived session token, so the key never has to be carried on the wire again until the session expires (8 hours).
+The raw API key is sent **once** — to exchange it for a session token. Subsequent requests carry the short-lived session token, so the key never has to be on the wire again until the session expires (8 hours).
 
 ### Prerequisites
 
@@ -65,14 +53,12 @@ Response:
 }
 ```
 
-The session token is the same shape as the DID-flow token and is accepted on every other endpoint via `Authorization: Bearer <token>`.
-
-### Step 2: Use the session token
+The session token is accepted on every other endpoint via `Authorization: Bearer *** Step 2: Use the session token
 
 ```http
 POST /api/agents/admit
 Authorization: Bearer ***
-Content-Type: application/json
+C...ype: application/json
 
 { "institutionId": "...", "agentDid": "...", "authorityProof": "..." }
 ```
@@ -98,127 +84,7 @@ client.telemetry.onSettled((ref) => console.log("Settled:", ref));
 client.telemetry.connect();
 ```
 
-### Session lifecycle
-
-- **Key**: persistent until revoked from the dashboard.
-- **Session**: 8 hours. The SDK does not auto-refresh — your code should re-invoke `authenticateWithApiKey()` on 401 responses. The next call exchanges the same key for a fresh session.
-
----
-
-## Option B — DID challenge-response (alternative)
-
-Use this path if your agent already holds a Terminal 3 keypair and you want a credential flow that does not require a long-lived API secret.
-
-### How it works
-
-```
-Agent                              GhostBroker API
-  │                                      │
-  │  1. POST /api/auth/challenge         │
-  │  { "did": "..." }                    │
-  │─────────────────────────────────────►│
-  │                                      │
-  │  ← { challengeId, challenge, exp }   │
-  │◄─────────────────────────────────────│
-  │                                      │
-  │  2. Sign challenge with private key  │
-  │     (EIP-191 personal_sign)          │
-  │                                      │
-  │  3. POST /api/auth/verify            │
-  │  { challengeId, signature, ... }     │
-  │─────────────────────────────────────►│
-  │                                      │
-  │  ← { token, expiresAt, institution } │
-  │◄─────────────────────────────────────│
-  │                                      │
-  │  4. Use Bearer token for all calls   │
-```
-
-### Prerequisites
-
-- A Terminal 3 Ethereum keypair (private key + address)
-- Your institution's DID (shown in the dashboard)
-- `ethers` v6 (or any EIP-191 compatible signing library)
-
-### Step 1: Request a challenge
-
-```http
-POST /api/auth/challenge
-Content-Type: application/json
-
-{ "did": "did:t3n:0xYourInstitutionAddress" }
-```
-
-Response:
-```json
-{
-  "challengeId": "ch_abc123",
-  "challenge": "GhostBroker Terminal 3 DID authorization\nDID: did:t3n:0x...\nNonce: ...",
-  "expiresAt": "2026-06-14T12:00:00.000Z"
-}
-```
-
-### Step 2: Sign the challenge
-
-```typescript
-import { Wallet } from "ethers";
-
-const agent = new Wallet("0xYourAgentPrivateKey");
-const signature = await agent.signMessage(challenge);
-// signMessage automatically applies EIP-191 personal_sign wrapping
-```
-
-### Step 3: Verify the signature
-
-```http
-POST /api/auth/verify
-Content-Type: application/json
-
-{
-  "did": "did:t3n:0xYourInstitutionAddress",
-  "challengeId": "ch_abc123",
-  "signature": "0x...",
-  "walletAddress": "0xYourAgentAddress"
-}
-```
-
-Response:
-```json
-{
-  "token": "gb_session_abc123",
-  "expiresAt": "2026-06-14T20:00:00.000Z",
-  "institution": {
-    "id": "uuid-here",
-    "displayName": "Your Institution",
-    "t3TenantDid": "did:t3n:0x..."
-  }
-}
-```
-
-### SDK example
-
-```typescript
-import { Wallet } from "ethers";
-import { GhostBrokerClient } from "@ghostbroker/agent-client";
-
-const wallet = new Wallet(process.env.AGENT_PRIVATE_KEY!);
-
-const client = new GhostBrokerClient({ baseUrl: "https://api.ghostbroker.io" });
-
-await client.authenticate(wallet.address, async (challenge) => ({
-  signature: await wallet.signMessage(challenge),
-  walletAddress: wallet.address,
-}));
-```
-
-### Session lifecycle
-
-- **Credential**: ephemeral (the keypair is yours, but the challenge is one-time).
-- **Session**: 8 hours. Re-run the challenge/verify flow to get a new session.
-
----
-
-## Pre-existing session
+### Pre-existing session
 
 If you already have a session token (e.g. a long-running agent that has persisted it to disk), you can hand it to the client directly. The optional `institutionId` wires the telemetry WebSocket filter correctly without an extra round-trip.
 
@@ -230,6 +96,25 @@ const client = new GhostBrokerClient({
 });
 ```
 
+### Session lifecycle
+
+- **Key**: persistent until revoked from the dashboard.
+- **Session**: 8 hours. The SDK does not auto-refresh — your code should re-invoke `authenticateWithApiKey()` on 401 responses. The next call exchanges the same key for a fresh session.
+
+---
+
+## Operator dashboard login (internal)
+
+The Observatory Console at `/` requires the operator to sign in with a Web3 wallet. The flow is the Terminal 3 DID challenge-response:
+
+1. The dashboard requests a challenge for the operator's DID via `POST /api/auth/challenge`.
+2. The browser calls `personal_sign` on the wallet.
+3. The signed challenge is posted to `POST /api/auth/verify`, which returns a session token.
+
+This path is **not** exposed by the agent SDK. Agents should never call it — use the API key flow above. The backend routes are kept available only because the dashboard needs them.
+
+> **Why is this here?** The DID routes are part of the backend's HTTP surface for legacy/compatibility reasons. New agent code should always use `/api/auth/api-key`. If you are writing an agent, you can ignore this section.
+
 ---
 
 ## Troubleshooting
@@ -238,11 +123,10 @@ const client = new GhostBrokerClient({
 |-------|-------|-----|
 | `400 validation_failed` (api-key) | Missing `apiKey` in body, or empty string | Ensure body is `{ "apiKey": "gbk_..." }` with a non-empty key |
 | `401 authorization_failed` (api-key) | Unknown, revoked, or malformed key | Generate a new key from the dashboard API Keys panel |
-| `401 authorization_failed` (challenge) | DID not recognized | Verify your DID matches the one in the dashboard |
-| `401 authorization_failed` (verify) | Challenge expired (5 min TTL) or wrong signature | Request a new challenge; ensure your signer uses EIP-191 personal_sign |
-| `403 authorization_failed` (verify) | Identity verifier rejected the signature | Confirm the wallet is the one bound to the DID |
-| Token rejected mid-session | Session token expired (8h TTL) | Re-run the authentication flow; for the API key path, call `client.authenticateWithApiKey()` again with the same key |
-| Telemetry WebSocket receives nothing | `institutionId` is empty | Always pass `institutionId` from the session, or call `authenticate()` / `authenticateWithApiKey()` to populate it |
+| `401 authorization_failed` (dashboard login) | Wallet signature didn't match the challenge | Ensure the wallet holds the address shown in the dashboard; try disconnecting and reconnecting the wallet |
+| `403 authorization_failed` (dashboard login) | Identity verifier rejected the signature | Confirm the wallet is the one bound to the institution |
+| Token rejected mid-session | Session token expired (8h TTL) | Re-run `client.authenticateWithApiKey()` with the same key |
+| Telemetry WebSocket receives nothing | `institutionId` is empty | Always pass `institutionId` from the session, or call `authenticateWithApiKey()` to populate it |
 
 ## See also
 
