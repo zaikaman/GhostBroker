@@ -17,7 +17,26 @@ export interface AgentAdmission {
 export interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
+  /**
+   * One of two authority proof shapes:
+   *   - the JCS delegation proof built by
+   *     `@ghostbroker/agent-client.DelegationProofBuilder` (the
+   *     "production" T3 Smart VC flow), OR
+   *   - a serialized boundbuyer-style W3C Verifiable Credential,
+   *     supplied via the sibling `delegationCredential` field.
+   *
+   * Exactly one of `authorityProof` or `delegationCredential` must
+   * be present.
+   */
   authorityProof: string;
+  /**
+   * Boundbuyer-style W3C VC for the admit step. The backend runs
+   * this through `t3-enclave/src/auth/boundbuyer-delegation.ts`,
+   * which is a port of the boundbuyer BUIDL's verifier. The
+   * verifier's three modes (sandbox / live / structural) are
+   * controlled server-side by the `VC_VERIFY_MODE` env var.
+   */
+  delegationCredential?: unknown;
 }
 
 export interface EncryptedIntentRequest {
@@ -25,6 +44,24 @@ export interface EncryptedIntentRequest {
   agentDid: string;
   encryptedIntentEnvelope: string;
   authorityRef: string;
+  /**
+   * Optional plain-text settlement metadata. The backend's intent route
+   * accepts this as a sibling of the encrypted envelope — the orchestrator
+   * reads `assetCode`/`side`/`quantity`/`price` from this block, and the
+   * encrypted envelope carries the TEE-sealed commitment. The
+   * `$.settlementMetadata` path is exempt from the forbidden-fields scan
+   * (see `backend/src/validation/encrypted-intent.schema.ts`).
+   *
+   * The agent path that doesn't go through a TEE can pass this directly;
+   * production T3-enclave flows will seal the equivalent parameters in
+   * the envelope and may leave this block absent.
+   */
+  settlementMetadata?: {
+    assetCode: string;
+    side: "buy" | "sell";
+    quantity: number;
+    price: number;
+  };
 }
 
 export interface IntentAccepted {

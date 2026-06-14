@@ -750,3 +750,128 @@ These guardrails should be treated as non-negotiable until Terminal 3 fills the 
 ## Bottom Line
 
 Terminal 3 ADK/T3N documentation gives enough confidence to design GhostBroker around T3 as a confidential execution layer, but not enough to directly implement fully automated production agent onboarding without further confirmation. The docs show dashboard-based AI agent delegation, while the contract-level `agent-auth` Host API interface and adjacent identity/permission capabilities are marked `Coming soon`. GhostBroker should proceed with a strict `t3-enclave/` adapter boundary, production startup capability checks, and no fake authority or local mock substitute.
+
+---
+
+### T3-ONB-007: Agent Delegation Credential Model Differs Between Published BUIDLs
+
+**Severity**: P0
+**Category**: Onboarding blocker / agent deployment
+**Affected docs**: T3N DIDs, ADK overview, "Delegate Access to AI Agents"
+**Date filed**: 2026-06-14 (updated 2026-06-14 after the first end-to-end agent run)
+
+**What I found**
+
+The public T3 documentation implies a dashboard-driven delegation flow
+("enter an Agent DID, select a TEE contract, optionally select functions,
+optionally configure allowed hosts"). There is **no T3 dashboard** in
+practice. The only T3 onboarding surface a developer gets is the claim
+page at `https://www.terminal3.io/claim-page`, which issues a single
+`T3N_API_KEY`. Everything else (agent DID, delegation credential) is
+derived from that key at runtime.
+
+The GhostBroker agent-stack (this repo, `agents/` workspace) was
+built against a different credential model: a JCS-shaped T3 Smart VC
+constructed by the `@terminal3/t3n-sdk` `buildDelegationCredential`
+helper, with `user_did` / `agent_pubkey` / `vc_id` / `not_before_secs`
+fields, signed by an admin and an agent secp256k1 key. That model
+requires 5+ env vars (`CREDENTIAL_JCS_BASE64`, `POLICY_HASH`,
+`ADMIN_PRIVATE_KEY`, `AGENT_PRIVATE_KEY`, `AGENT_DID`) and a manual
+keypair generation step that is not documented anywhere.
+
+The only working live T3 integration reference in the T3 ecosystem
+is the boundbuyer BUIDL (a separate project from the same Terminal 3
+hackathon). Boundbuyer models the delegation as a **W3C Verifiable
+Credential JSON-LD** with `issuer` / `credentialSubject` /
+`proof.jws` fields, a budget, and a category allowlist. The agent's
+identity is a derived `did:t3n:0x<eth-address>` from a real
+`T3nClient.handshake()` + `client.authenticate()` round-trip, and
+the only T3 secret needed is `T3N_API_KEY`. The credential is signed
+locally (with a demo `jws` marker in sandbox/structural mode) and
+persisted to disk.
+
+**Why this matters for GhostBroker**
+
+The agents in this repo can run end-to-end against the live T3N
+network using the **boundbuyer flow** with one T3 secret
+(`T3N_API_KEY`). The JCS-prove flow requires 5+ secrets and a
+non-documented key-generation step, and the JCS verifier in
+`t3-enclave` is gated behind a `verifySignedDelegationProof` helper
+that expects the Smart VC shape — which is not what the live
+network actually issues today.
+
+The two paths are now both supported on the server side: the JCS
+path remains the production target (and is what the existing
+`T3AgentAuthorizationFacade.verifyAgentAuthority()` does), and the
+boundbuyer path is the new `verifyBoundbuyerAuthority()` on the same
+facade. The agent SDK exposes both:
+`client.admitAgent({authorityProof})` (JCS) and
+`client.admitAgentWithDelegationCredential({delegationCredential})`
+(boundbuyer). The agents in `agents/` use the boundbuyer flow.
+
+**Impact**
+
+- A new agent developer can run a smoke test today with **one**
+  T3 secret (`T3N_API_KEY`) instead of five.
+- A bounty reviewer can verify the integration end-to-end by:
+  1. `npm run setup:identity` — calls the live T3N network, writes
+     a real `did:t3n:0x...` to disk.
+  2. `npm run setup:delegation` — mints a W3C VC to disk.
+  3. `npm run buyer` and `npm run seller` — submit, match, settle.
+- The JCS path still exists for production deployments that have a
+  real T3 issuer; the boundbuyer path is the demo/sandbox path.
+
+**Recommended fix for docs**
+
+Add a single page titled **"Agent onboarding — what you actually get
+from Terminal 3"** with:
+
+- A clear statement: there is no T3 dashboard. The onboarding surface
+  is the `T3N_API_KEY` from the claim page.
+- A diagram of the boundbuyer flow: claim key → T3N handshake → DID →
+  W3C VC → bound to DID → agent authenticates → submits intents.
+- The wire format of the W3C VC (with a JSON example), the demo `jws`
+  marker, and the three verifier modes (`sandbox` / `structural` /
+  `live`).
+- A mapping table: which of the public T3 docs sections describe
+  Smart VCs (the JCS shape), which describe the boundbuyer flow,
+  and which describe the JCS prove (the one developers actually run).
+- A note that the Smart VC shape is reserved for when Terminal 3
+  ships a programmatic delegation issuer; until then, the
+  boundbuyer shape is what works.
+
+**Recommended implementation action**
+
+- Keep the boundbuyer verifier in `t3-enclave` as a strict
+  superset of the JCS verifier. Both paths are wired into the
+  same `T3AgentAuthorizationFacade`.
+- The JCS path's `verifyAgentAuthority()` is the production
+  target. The boundbuyer path's `verifyBoundbuyerAuthority()`
+  is the smoke-test gate. Tests for both should pass.
+- Add a CLI helper that, given a fresh `T3N_API_KEY`, mints a
+  boundbuyer-style delegation VC and a real agent DID in one
+  step. (This already exists — `npm run setup:identity` and
+  `npm run setup:delegation` cover both halves. A combined
+  `setup:all` would be a one-line addition.)
+- Keep `agents/README.md` as the de-facto onboarding doc until
+  Terminal 3 publishes a canonical page.
+
+**Verification**
+
+A new agent developer with the README and a fresh
+`gbk_…` + `T3N_API_KEY` can:
+
+1. `npm install` at the repo root.
+2. `cp agents/.env.example agents/.env` and fill in the two keys.
+3. `npm run setup:identity` — see a real `did:t3n:0x...` printed.
+4. `npm run setup:delegation` — see a real VC written to disk.
+5. `npm run buyer` and `npm run seller` in two terminals.
+6. Observe: buyer + seller submit intents → match → settle →
+   receipt available. **No T3 dashboard, no Smart VC issuer, no
+   secret sprawl.** The full smoke test takes ~5 minutes once
+   the two T3 keys are in `.env`.
+
+Once the above is true, the on-the-page path from `git clone` to
+a running two-agent smoke test against live T3 is complete.
+
+---

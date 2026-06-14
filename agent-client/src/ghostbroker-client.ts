@@ -124,6 +124,68 @@ export class GhostBrokerClient {
   }
 
   /**
+   * Submit an encrypted hidden trading intent, including the optional
+   * plaintext settlement metadata block. Prefer this in agent code that
+   * does not have a T3 enclave runner in front of it: the orchestrator
+   * reads `assetCode`/`side`/`quantity`/`price` from the metadata block
+   * and the encrypted envelope carries the sealed commitment.
+   */
+  public async submitEncryptedIntent(
+    request: EncryptedIntentRequest,
+  ): Promise<IntentAccepted> {
+    return this.intents.submitEncryptedIntent(request, this.token ?? "");
+  }
+
+  /**
+   * Admit the agent using a boundbuyer-style W3C Verifiable Credential
+   * instead of a JCS `authorityProof`. The credential is the JSON
+   * object that the boundbuyer BUIDL's `setup-delegation.ts` script
+   * mints; the server runs it through the boundbuyer verifier
+   * (`t3-enclave/src/auth/boundbuyer-delegation.ts`).
+   *
+   * This is the recommended admit path for agents using the
+   * boundbuyer T3 onboarding flow. Returns the same
+   * `AgentAdmission` shape as `admitAgent`.
+   */
+  public async admitAgentWithDelegationCredential(
+    request: Omit<AdmitAgentRequest, "authorityProof"> & {
+      delegationCredential: unknown;
+    },
+  ): Promise<AgentAdmission> {
+    if (!this.token) {
+      throw new GhostBrokerApiError(
+        401,
+        "authorization_failed",
+        "Not authenticated. Call authenticate() or authenticateWithApiKey() first.",
+      );
+    }
+    const response = await fetch(`${this.baseUrl}/api/agents/admit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${this.token}`,
+      },
+      body: JSON.stringify({
+        ...request,
+        // The server requires `authorityProof` to be a non-empty
+        // string. The boundbuyer path ignores its contents; we send
+        // a short marker so the schema accepts the body.
+        authorityProof: `boundbuyer-delegation:${(request.delegationCredential as { id?: string }).id ?? "unknown"}`,
+      }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { code?: string; message?: string };
+      throw new GhostBrokerApiError(
+        response.status,
+        (body.code as GhostBrokerApiError["code"]) || "request_failed",
+        body.message || `HTTP ${response.status}`,
+      );
+    }
+    return response.json() as Promise<AgentAdmission>;
+  }
+
+  /**
    * Get completed trades for the authenticated institution.
    */
   public async getCompletedTrades(filter?: {

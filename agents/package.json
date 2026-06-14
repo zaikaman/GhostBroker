@@ -1,0 +1,32 @@
+{
+  "name": "@ghostbroker/agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Groq-powered buyer and seller agents for the GhostBroker dark pool. Loop agents that call the LLM on each tick to decide whether to submit an encrypted intent.",
+  "type": "module",
+  "main": "dist/buyer-agent.js",
+  "scripts": {
+    "setup:identity": "tsx src/scripts/setup-identity.ts",
+    "setup:delegation": "tsx src/scripts/setup-delegation.ts",
+    "buyer": "tsx src/buyer-agent.ts",
+    "seller": "tsx src/seller-agent.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ghostbroker/agent-client": "file:../agent-client",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.0.0",
+    "@terminal3/t3n-sdk": "^3.5.2",
+    "groq-sdk": "^0.7.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

@@ -13,6 +13,7 @@ import {
   type AuthorityRevocationRepository,
 } from "./authority-revocation.service.js";
 import type { MatchingOrchestrator } from "./matching-orchestrator.js";
+import type { BoundbuyerDelegationCredential } from "@ghostbroker/t3-enclave";
 
 export interface AgentAdmissionService {
   admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission>;
@@ -52,6 +53,40 @@ export class AgentService implements AgentManagementService {
         request.institutionId,
         request.agentDid,
       );
+
+    // Boundbuyer-style W3C VC path: when the request carries a
+    // `delegationCredential`, route it through the boundbuyer
+    // verifier instead of the JCS proof. The two paths are mutually
+    // exclusive — exactly one of `authorityProof` or
+    // `delegationCredential` is expected on a well-formed request.
+    if (request.delegationCredential !== undefined && request.delegationCredential !== null) {
+      if (!this.authorization.verifyBoundbuyerAuthority) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          "Boundbuyer-style delegation credentials are not enabled on this server.",
+        );
+      }
+      const verification = await this.authorization.verifyBoundbuyerAuthority({
+        credential: request.delegationCredential as BoundbuyerDelegationCredential,
+        institutionId: request.institutionId,
+        agentDid: request.agentDid,
+        requestedAction: "agent.admit",
+        revokedAuthorityRefs,
+      });
+
+      if (verification.status !== "verified") {
+        throw new PublicError("authorization_failed", 403);
+      }
+
+      return this.persistAdmittedAgent({
+        request,
+        authorityRef: verification.authorityRef,
+        policyHash: verification.policyHash,
+      });
+    }
+
+    // JCS proof path (the original flow).
     const verification = await this.authorization.verifyAgentAuthority({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
@@ -64,16 +99,33 @@ export class AgentService implements AgentManagementService {
       throw new PublicError("authorization_failed", 403);
     }
 
-    // Persist the admission to the database with authority limits
+    return this.persistAdmittedAgent({
+      request,
+      authorityRef: verification.authorityRef,
+      policyHash: verification.policyHash,
+    });
+  }
+
+  /**
+   * Shared persistence path for both admit flows. Writes the agent
+   * record with the authority limits and returns the public
+   * `AgentAdmission` shape.
+   */
+  private async persistAdmittedAgent(input: {
+    request: AdmitAgentRequest;
+    authorityRef: string;
+    policyHash: string;
+  }): Promise<AgentAdmission> {
+    const { request, authorityRef, policyHash } = input;
     const agent = await this.repository.create({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
-      authorityRef: verification.authorityRef,
+      authorityRef,
       instrumentScope: request.limits?.instrumentScope ?? null,
       directionScope: request.limits?.directionScope ?? null,
       maxNotional: request.limits?.maxNotional ?? null,
       limitReference: request.limits?.limitReference ?? null,
-      policyHash: request.limits?.policyHash ?? verification.policyHash,
+      policyHash,
     });
 
     return {

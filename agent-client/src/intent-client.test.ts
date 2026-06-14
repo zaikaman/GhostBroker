@@ -56,6 +56,39 @@ describe("IntentClient", () => {
     expect(url).toBe("https://api.example.com/api/agents/intents");
   });
 
+  it("submitEncryptedIntent posts settlementMetadata to the backend", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockJsonResponse(SAMPLE_RESPONSE));
+
+    const client = new IntentClient("https://api.example.com");
+    const result = await client.submitEncryptedIntent(
+      {
+        ...SAMPLE_REQUEST,
+        settlementMetadata: {
+          assetCode: "WBTC",
+          side: "buy",
+          quantity: 1,
+          price: 70_000,
+        },
+      },
+      "tok",
+    );
+
+    expect(result).toEqual(SAMPLE_RESPONSE);
+    const firstCall = fetchSpy.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const [, init] = firstCall ?? [];
+    const reqInit = init as RequestInit;
+    expect(JSON.parse(reqInit.body as string)).toEqual({
+      ...SAMPLE_REQUEST,
+      settlementMetadata: {
+        assetCode: "WBTC",
+        side: "buy",
+        quantity: 1,
+        price: 70_000,
+      },
+    });
+  });
+
   it("throws a GhostBrokerApiError on a 4xx response", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockJsonResponse(
