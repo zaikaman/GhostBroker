@@ -1,21 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-
-export type RoutePath = '/' | '/dashboard' | '/settings' | '/auth' | '/deploy';
-
-interface RouterContextType {
-  currentPath: string;
-  navigate: (path: RoutePath) => void;
-}
-
-const RouterContext = createContext<RouterContextType | undefined>(undefined);
-
-export function useRouter(): RouterContextType {
-  const context = useContext(RouterContext);
-  if (!context) {
-    throw new Error('useRouter must be used within a RouterProvider');
-  }
-  return context;
-}
+import React, { useState, useEffect } from 'react';
+import { RouterContext, useRouter, type RoutePath } from './use-router.js';
 
 interface RouterProviderProps {
   children: React.ReactNode;

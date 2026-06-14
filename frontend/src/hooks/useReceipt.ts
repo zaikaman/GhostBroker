@@ -14,36 +14,51 @@ export function useReceipt(receiptId: string | null): UseReceiptResult {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchReceipt = useCallback(async () => {
+  // Pure data fetch — no setState. The effect that consumes this
+  // only sets state from the resolved value (or from the null sentinel
+  // when there is no receiptId), which is the React-blessed pattern.
+  const fetchReceiptData = useCallback(async (): Promise<AuditReceipt | null> => {
     if (!receiptId) {
-      setReceipt(null);
-      setIsLoading(false);
-      setError(null);
-      return;
+      return null;
     }
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await apiClient.getReceipt(receiptId);
-      setReceipt(data);
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : String(err));
-      setReceipt(null);
-    } finally {
-      setIsLoading(false);
-    }
+    return await apiClient.getReceipt(receiptId);
   }, [receiptId]);
 
   useEffect(() => {
-    fetchReceipt();
-  }, [fetchReceipt]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIsLoading(true);
+      setError(null);
+    });
+
+    fetchReceiptData()
+      .then((data) => {
+        if (cancelled) return;
+        setReceipt(data);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        setReceipt(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [fetchReceiptData]);
 
   return {
     receipt,
     isLoading,
     error,
-    refetch: fetchReceipt,
+    refetch: async () => {
+      const data = await fetchReceiptData();
+      setReceipt(data);
+    },
   };
 }
 

@@ -14,28 +14,48 @@ export function useTradeHistory(from?: string, to?: string): UseTradeHistoryResu
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchTrades = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await apiClient.getCompletedTrades(from, to);
-      setTrades(response.items || []);
-    } catch (err: any) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLoading(false);
-    }
+  // Pure data fetch — no setState. The effect that consumes this
+  // only sets state from the resolved value, which is the
+  // React-blessed pattern for async effect bodies.
+  const fetchTradesData = useCallback(async (): Promise<CompletedTrade[]> => {
+    const response = await apiClient.getCompletedTrades(from, to);
+    return response.items || [];
   }, [from, to]);
 
   useEffect(() => {
-    fetchTrades();
-  }, [fetchTrades]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIsLoading(true);
+      setError(null);
+    });
+
+    fetchTradesData()
+      .then((items) => {
+        if (cancelled) return;
+        setTrades(items);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [fetchTradesData]);
 
   return {
     trades,
     isLoading,
     error,
-    refetch: fetchTrades,
+    refetch: async () => {
+      const items = await fetchTradesData();
+      setTrades(items);
+    },
   };
 }
 

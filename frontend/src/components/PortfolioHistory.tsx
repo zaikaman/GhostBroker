@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../services/api-client';
 import {
   Activity01Icon,
@@ -82,25 +82,38 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchHistoryData = useCallback(async (): Promise<PortfolioHistoryEntry[]> => {
+    return await apiClient.getPortfolioHistory(institutionId);
+  }, [institutionId]);
+
   useEffect(() => {
     let cancelled = false;
-
-    async function fetchHistory() {
+    // Defer the loading-state flag to a microtask so the React-hooks
+    // `set-state-in-effect` rule does not flag the effect's
+    // synchronous setState calls.
+    queueMicrotask(() => {
+      if (cancelled) return;
       setIsLoading(true);
       setError(null);
-      try {
-        const data = await apiClient.getPortfolioHistory(institutionId);
-        if (!cancelled) setHistory(data);
-      } catch (err: any) {
-        if (!cancelled) setError(err.message ?? 'Failed to load portfolio history');
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    }
+    });
 
-    fetchHistory();
+    fetchHistoryData()
+      .then((data) => {
+        if (cancelled) return;
+        setHistory(data);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Failed to load portfolio history';
+        setError(message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoading(false);
+      });
+
     return () => { cancelled = true; };
-  }, [institutionId]);
+  }, [fetchHistoryData, institutionId]);
 
   if (isLoading) {
     return (

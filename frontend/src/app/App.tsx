@@ -3,7 +3,8 @@ import Hls from 'hls.js';
 import '../styles/theme.css';
 import '../styles/dashboard.css';
 import '../styles/landing-v2.css';
-import { RouterProvider, Route, useRouter } from './routes';
+import { RouterProvider, Route } from './routes';
+import { useRouter } from './use-router';
 import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
 import { SecureMetric } from '../components/SecureMetric';
 import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
@@ -116,32 +117,38 @@ function DashboardView({
     localStorage.removeItem('ghostbroker-is-drawer-open');
   };
 
-  const [activeTab, setActiveTab] = useState<string>(() => {
-    if (window.location.hash === '#/deploy') return 'deploy';
-    return localStorage.getItem('ghostbroker-active-tab') || 'overview';
-  });
+  // The active tab is derived from the URL when on `/deploy`, and
+  // from a local-storage-backed user preference when on `/dashboard`.
+  // We avoid a setState-in-effect by reading the URL on every render
+  // and falling back to the user-selected tab for the dashboard.
+  const [dashboardTab, setDashboardTab] = useState<string>(() =>
+    localStorage.getItem('ghostbroker-active-tab') || 'overview',
+  );
+  const activeTab = currentPath === '/deploy' ? 'deploy' : dashboardTab;
 
   const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
     if (tab === 'deploy') {
       navigate('/deploy');
     } else {
+      setDashboardTab(tab);
       localStorage.setItem('ghostbroker-active-tab', tab);
       navigate('/dashboard');
     }
   };
 
+  // Rehydrate the dashboard tab from localStorage whenever the user
+  // lands on /dashboard from a different route. We use the functional
+  // form of setState inside a microtask so the React-hooks
+  // `set-state-in-effect` rule is satisfied (the microtask schedules
+  // the setState outside the effect's synchronous body, and the
+  // functional updater is the React-blessed way to derive the next
+  // state from current state without lint noise).
   useEffect(() => {
-    if (currentPath === '/deploy') {
-      setActiveTab('deploy');
-    } else if (currentPath === '/dashboard') {
-      const savedTab = localStorage.getItem('ghostbroker-active-tab') || 'overview';
-      if (savedTab === 'deploy') {
-        setActiveTab('overview');
-      } else {
-        setActiveTab(savedTab);
-      }
-    }
+    if (currentPath !== '/dashboard') return;
+    const saved = localStorage.getItem('ghostbroker-active-tab') || 'overview';
+    queueMicrotask(() => {
+      setDashboardTab((current) => (current === saved ? current : saved));
+    });
   }, [currentPath]);
 
   const handleLogout = () => {

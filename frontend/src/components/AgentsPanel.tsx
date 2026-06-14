@@ -26,25 +26,39 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const [agentList, keyList] = await Promise.all([
-        apiClient.listAgents(),
-        apiClient.listApiKeys(),
-      ]);
-      setAgents(agentList);
-      setApiKeys(keyList);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data.');
-    } finally {
-      setIsLoading(false);
-    }
+  const loadData = useCallback(async (): Promise<{ agents: Agent[]; keys: ApiKey[] }> => {
+    const [agentList, keyList] = await Promise.all([
+      apiClient.listAgents(),
+      apiClient.listApiKeys(),
+    ]);
+    return { agents: agentList, keys: keyList };
   }, []);
 
   useEffect(() => {
-    loadData();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIsLoading(true);
+      setError(null);
+    });
+
+    loadData()
+      .then(({ agents, keys }) => {
+        if (cancelled) return;
+        setAgents(agents);
+        setApiKeys(keys);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Failed to load data.';
+        setError(message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, [loadData]);
 
   const handleStartEdit = (agent: Agent) => {

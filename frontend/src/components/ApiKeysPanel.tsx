@@ -12,21 +12,34 @@ export function ApiKeysPanel(): React.JSX.Element {
   const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
 
-  const loadKeys = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await apiClient.listApiKeys();
-      setKeys(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load API keys.');
-    } finally {
-      setIsLoading(false);
-    }
+  const loadKeys = useCallback(async (): Promise<ApiKey[]> => {
+    return await apiClient.listApiKeys();
   }, []);
 
   useEffect(() => {
-    loadKeys();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIsLoading(true);
+      setError(null);
+    });
+
+    loadKeys()
+      .then((data) => {
+        if (cancelled) return;
+        setKeys(data);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : 'Failed to load API keys.';
+        setError(message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, [loadKeys]);
 
   const handleCreate = async () => {

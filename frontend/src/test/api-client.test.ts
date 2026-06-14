@@ -97,8 +97,8 @@ describe('apiClient Services', () => {
       },
     });
 
-    (global.fetch as any)
-      .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) })
+    asFetchMock(global.fetch)
+      .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) } as Response)
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -106,7 +106,7 @@ describe('apiClient Services', () => {
           institutionId: 'inst_123',
           holdings: [],
         }),
-      });
+      } as Response);
 
     const result = await apiClient.getPortfolio('inst_123');
 
@@ -147,13 +147,13 @@ describe('apiClient Services', () => {
       },
     });
 
-    (global.fetch as any)
-      .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) })
+    asFetchMock(global.fetch)
+      .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({}) } as Response)
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({ items: [] }),
-      });
+      } as Response);
 
     const result = await apiClient.getCompletedTrades('2026-06-11T00:00:00Z');
 
@@ -181,10 +181,10 @@ describe('apiClient Services', () => {
       t3AttestationRef: 't3_attest',
     };
 
-    (global.fetch as any).mockResolvedValueOnce({
+    asFetchMock(global.fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => mockReceipt,
-    });
+    } as Response);
 
     const result = await apiClient.getReceipt('receipt_1');
 

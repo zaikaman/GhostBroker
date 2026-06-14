@@ -761,8 +761,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
   const goNext = () => {
     const nextIndex = stepIndex + 1;
-    if (nextIndex < STEPS.length) {
-      const nextStep = STEPS[nextIndex]!;
+    const nextStep = STEPS[nextIndex];
+    if (nextStep) {
       setCurrentStep(nextStep.id);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -770,8 +770,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
   const goPrev = () => {
     const prevIndex = stepIndex - 1;
-    if (prevIndex >= 0) {
-      const prevStep = STEPS[prevIndex]!;
+    const prevStep = STEPS[prevIndex];
+    if (prevStep) {
       setCurrentStep(prevStep.id);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
