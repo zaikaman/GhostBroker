@@ -18,17 +18,13 @@
     "CHANGELOG.md",
     "SECURITY.md"
   ],
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
-  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zaikaman/GhostBroker.git",
-    "directory": "agent-client"
+    "url": "git+https://github.com/zaikaman/ghostbroker-agent.git"
   },
-  "homepage": "https://github.com/zaikaman/GhostBroker/tree/main/agent-client",
+  "homepage": "https://github.com/zaikaman/ghostbroker-agent#readme",
   "bugs": {
-    "url": "https://github.com/zaikaman/GhostBroker/issues",
+    "url": "https://github.com/zaikaman/ghostbroker-agent/issues",
     "email": "security@ghostbroker.io"
   },
   "keywords": [
