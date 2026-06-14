@@ -9,6 +9,14 @@ All notable changes to `@ghostbroker/agent-client` are documented here. The form
 - `README.md` with installation, quickstart, full API reference, error-handling patterns, and configuration reference.
 - Runnable examples in `examples/`: `buyer-agent.ts`, `seller-agent.ts`, `examples/README.md`.
 - Unit test suite for the public surface (`vitest`).
+- `PortfolioClient` — agent-side read access to the institution's
+  portfolio, exposed as `client.getAgentPortfolio({institutionId,
+  agentDid})` and as the standalone `client.portfolio.getPortfolio(...)`
+  method. Returns `{institutionId, agentDid, holdings, pendingReservations}`
+  via `GET /api/portfolios/:institutionId?agentDid=...`. Use
+  `holding.balance - holding.locked` to size the LLM's intent; the
+  orchestrator's balance-lock check at submit time is the real
+  authority.
 
 ## [0.2.0] - 2026-06-14
 

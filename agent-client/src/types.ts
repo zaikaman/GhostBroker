@@ -89,6 +89,53 @@ export interface AuditReceipt {
   t3AttestationRef: string;
 }
 
+/**
+ * A single holding in the institution's portfolio. `balance` is the
+ * current `portfolios.balance` column; `locked` is the current
+ * `portfolios.locked` column. The available balance for trading is
+ * `balance - locked` — that is what the agent should size intents
+ * against. The orchestrator's balance-lock check is the real
+ * authority on whether a submit will succeed, so an agent that
+ * reads these values is informational, not authoritative.
+ */
+export interface PortfolioHolding {
+  assetCode: string;
+  balance: number;
+  locked: number;
+}
+
+/**
+ * A reservation currently held against a single pending intent.
+ * Mirrors the orchestrator's `lockDescriptorFor` calculation:
+ *  - buy intent → reserves `quantity * price` units of the
+ *    settlement asset (USDC by default),
+ *  - sell intent → reserves `quantity` units of the traded asset.
+ *
+ * Subtracting `amount` from the matching holding's available
+ * balance yields the institution's free balance for new intents.
+ */
+export interface PendingReservation {
+  intentHandle: string;
+  assetCode: string;
+  amount: number;
+  side: "buy" | "sell";
+  quantity: number;
+  price: number;
+}
+
+/**
+ * The agent-level portfolio view, returned by
+ * `PortfolioClient.getPortfolio(...)`. The view is institution-
+ * scoped and (when `agentDid` is supplied) filtered to a single
+ * agent's pending reservations.
+ */
+export interface AgentPortfolio {
+  institutionId: string;
+  agentDid: string;
+  holdings: PortfolioHolding[];
+  pendingReservations: PendingReservation[];
+}
+
 export interface Institution {
   id: string;
   legalName: string;

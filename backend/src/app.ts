@@ -276,7 +276,7 @@ export function createApp(
   app.use("/api", createInstitutionsRouter(services.institutionService));
   app.use(
     "/api",
-    operatorAuthMiddleware(env),
+    operatorAuthMiddleware(env, services.apiKeyService),
     createPortfoliosRouter(
       services.portfolioService,
       services.walletPortfolioSyncService,

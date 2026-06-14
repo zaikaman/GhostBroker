@@ -7,6 +7,10 @@ export {
 export { IntentClient } from "./intent-client.js";
 export { TradesClient } from "./trades-client.js";
 export { ReceiptClient } from "./receipt-client.js";
+export {
+  PortfolioClient,
+  type AgentPortfolioRequest,
+} from "./portfolio-client.js";
 export { TelemetryClient } from "./websocket-client.js";
 export {
   GhostBrokerClient,
@@ -18,6 +22,9 @@ export type {
   IntentAccepted,
   CompletedTrade,
   AuditReceipt,
+  AgentPortfolio,
+  PortfolioHolding,
+  PendingReservation,
   TelemetryEvent,
   RedactedErrorCode,
   Institution,

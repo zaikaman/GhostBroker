@@ -37,6 +37,7 @@ describe("GhostBrokerClient", () => {
       expect(client.intents).toBeDefined();
       expect(client.trades).toBeDefined();
       expect(client.receipts).toBeDefined();
+      expect(client.portfolio).toBeDefined();
       expect(client.telemetry).toBeDefined();
     });
 
@@ -208,6 +209,62 @@ describe("GhostBrokerClient", () => {
       expect(intentCall).toBeDefined();
       const [url, init] = intentCall ?? [];
       expect(url).toBe("https://api.example.com/api/agents/intents");
+      expect((init as RequestInit & { headers: Record<string, string> }).headers.Authorization).toBe(
+        `Bearer ${SAMPLE_SESSION.token}`,
+      );
+    });
+  });
+
+  describe("getAgentPortfolio", () => {
+    it("throws GhostBrokerApiError(401) if not authenticated", async () => {
+      const client = new GhostBrokerClient({ baseUrl: "https://api.example.com" });
+      let caught: unknown;
+      try {
+        await client.getAgentPortfolio({
+          institutionId: SAMPLE_SESSION.institution.id,
+          agentDid: "did:t3n:0xAgentAddress",
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect((caught as Error).message).toMatch(/Not authenticated/i);
+    });
+
+    it("GETs /api/portfolios/:institutionId?agentDid=... with the session token", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(mockJsonResponse(SAMPLE_SESSION))
+        .mockResolvedValueOnce(
+          mockJsonResponse({
+            institutionId: SAMPLE_SESSION.institution.id,
+            agentDid: "did:t3n:0xAgentAddress",
+            holdings: [{ assetCode: "USDC", balance: 1_000_000, locked: 0 }],
+            pendingReservations: [],
+          }),
+        );
+
+      const client = new GhostBrokerClient({ baseUrl: "https://api.example.com" });
+      await client.authenticateWithApiKey("gbk_test");
+
+      const portfolio = await client.getAgentPortfolio({
+        institutionId: SAMPLE_SESSION.institution.id,
+        agentDid: "did:t3n:0xAgentAddress",
+      });
+
+      expect(portfolio).toEqual({
+        institutionId: SAMPLE_SESSION.institution.id,
+        agentDid: "did:t3n:0xAgentAddress",
+        holdings: [{ assetCode: "USDC", balance: 1_000_000, locked: 0 }],
+        pendingReservations: [],
+      });
+
+      const portfolioCall = fetchSpy.mock.calls[1];
+      expect(portfolioCall).toBeDefined();
+      const [url, init] = portfolioCall ?? [];
+      const parsed = new URL(url as string);
+      expect(parsed.pathname).toBe(`/api/portfolios/${SAMPLE_SESSION.institution.id}`);
+      expect(parsed.searchParams.get("agentDid")).toBe("did:t3n:0xAgentAddress");
       expect((init as RequestInit & { headers: Record<string, string> }).headers.Authorization).toBe(
         `Bearer ${SAMPLE_SESSION.token}`,
       );

@@ -136,10 +136,13 @@ returns 403 unless you provide a real signed VC from a T3 issuer.
 Every `TICK_INTERVAL_MS` the agent:
 
 1. Reads its own completed-trade count from `/api/trades/completed`.
-2. Reads its own available USDC / WBTC from env (the SDK does not
-   expose a portfolio endpoint to agents — see the README §
-   "Why the agent can't read its own portfolio" in
-   `agents/README.md` for why).
+2. Reads its own portfolio from `client.getAgentPortfolio(...)`
+   (`GET /api/portfolios/{institutionId}?agentDid=...`). The
+   response includes `holdings` (per-asset `balance` and `locked`)
+   and `pendingReservations` (the agent's own in-flight locks).
+   Available USDC / WBTC is computed as
+   `holdings[i].balance - holdings[i].locked`. The LLM prompt is
+   fed these live numbers on every tick.
 3. Sends a structured prompt to Groq. The system message forces
    JSON output (`{action, quantity, price, reasoning}`). The user
    message contains the agent's current context (side, reference
@@ -159,6 +162,25 @@ Every `TICK_INTERVAL_MS` the agent:
 The agent exits cleanly on settlement, on `MAX_TICKS`, on SIGINT, or
 on the LLM choosing `"abort"`.
 
+### Portfolio read fallback
+
+The portfolio read is the agent's **primary** balance source, but
+it's a network call and can fail (transient 503, session timeout,
+backend down). The run loop handles this in three layers:
+
+1. **Live read succeeds** — the LLM sees the freshest
+   `balance - locked` for each holding.
+2. **Live read fails, env vars are set** (`AGENT_AVAILABLE_USDC` /
+   `AGENT_AVAILABLE_WBTC`) — the loop logs a warning and falls back
+   to the env values so the agent can keep running with a stale
+   hint. **The orchestrator's balance-lock check is still the real
+   authority on whether a submit will succeed.**
+3. **Live read fails, env vars are unset** — the loop logs a warning
+   and feeds `0` available to the LLM. The agent waits until the
+   SDK recovers. This is the safe default; the env vars are an
+   opt-in for operators who explicitly want the agent to keep
+   trading during backend hiccups.
+
 ## Privacy boundary
 
 This is the privacy boundary, called out for completeness so a reader
@@ -169,38 +191,10 @@ of the agent code knows what's intentionally missing:
   and the public reference price.
 - **The T3 enclave's internal state.** The agents submit encrypted
   envelopes and read the public telemetry phases.
-- **Operator dashboard data.** The agent-client SDK does not expose
-  `getPortfolio` to agents — see below.
-
-## Why the agent can't read its own portfolio
-
-The `@ghostbroker/agent-client` SDK (v0.2.0) does not expose a
-portfolio endpoint to agents. The route
-`GET /api/portfolios/{institutionId}` exists on the backend, but
-its route registration is gated behind the operator-auth middleware
-in `backend/src/api/portfolios.routes.ts`, and the agent SDK has no
-`getPortfolio` method. This is intentional: in the A2A model the
-agent is a sealed trading actor, and portfolio reads are an
-operator-side concern.
-
-For the smoke test this means the agent does not have a live balance
-read. The LLM gets its available balance from the env vars
-`AGENT_AVAILABLE_USDC` and `AGENT_AVAILABLE_WBTC`. The orchestrator's
-balance-lock check is the real authority on whether a submit will
-succeed; the env values only feed the LLM's reasoning.
-
-If you want to make the portfolio read agent-accessible, the
-smallest possible change is:
-
-1. Add a `getPortfolio(institutionId)` method to
-   `agent-client/src/portfolio-client.ts` (new file).
-2. Export it from `agent-client/src/index.ts` and wire it through
-   `GhostBrokerClient`.
-3. Reuse the existing `/api/portfolios/{institutionId}` route — it
-   already accepts an agent session; only the SDK is missing.
-
-That is a 30-line change and outside the scope of this smoke test,
-so it is left as a follow-up.
+- **Operator dashboard data.** The agent-client SDK only exposes
+  `getAgentPortfolio` to the agent's own institution; the operator
+  dashboard surfaces (full portfolio history, wallet-synced
+  balances) are not part of the agent's read surface.
 
 ## Troubleshooting
 
@@ -269,10 +263,13 @@ it more room.
 
 The orchestrator rejected the submit because the institution's
 available USDC or WBTC is below the implied notional. The LLM
-prompt tells the LLM the available balance, but if you set
-`AGENT_AVAILABLE_USDC` to a stale value the LLM will commit to a
-notional that the orchestrator won't accept. Update the env vars
-to the institution's actual balance.
+prompt gets the available balance from `client.getAgentPortfolio(...)`
+each tick, but if the SDK call is failing the loop falls back to
+the env-var values. Update `AGENT_AVAILABLE_USDC` / `AGENT_AVAILABLE_WBTC`
+to the institution's actual balance, or set the institution's
+actual portfolio in the database so the live read returns the
+correct numbers. The orchestrator's balance-lock check is the real
+authority on whether a submit will succeed.
 
 ## Test, lint, typecheck
 

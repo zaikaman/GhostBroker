@@ -1,6 +1,7 @@
 import {
   GhostBrokerClient,
   GhostBrokerApiError,
+  type AgentPortfolio,
   type AuthSession,
   type AgentAdmission,
   type CompletedTrade,
@@ -113,6 +114,44 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   }
   log(side, `✓ Admitted. Authority ref: ${admission.authorityRef}`);
 
+  // Read the live portfolio via the SDK. This is the agent's
+  // primary balance source. If the call fails (e.g. transient
+  // 503), we log a warning and fall back to the optional
+  // AGENT_AVAILABLE_USDC / AGENT_AVAILABLE_WBTC env vars. The
+  // orchestrator's balance-lock check is the real authority on
+  // whether a submit will succeed; this read is informational.
+  let livePortfolio: AgentPortfolio | undefined;
+  try {
+    livePortfolio = await client.getAgentPortfolio({
+      institutionId: session.institution.id,
+      agentDid: identity.did,
+    });
+    const usdcHolding = livePortfolio.holdings.find((h) => h.assetCode === "USDC");
+    const wbtcHolding = livePortfolio.holdings.find((h) => h.assetCode === "WBTC");
+    log(
+      side,
+      `✓ Portfolio: USDC ${usdcHolding ? usdcHolding.balance - usdcHolding.locked : 0} available ` +
+        `(held ${usdcHolding?.balance ?? 0}, locked ${usdcHolding?.locked ?? 0}); ` +
+        `WBTC ${wbtcHolding ? wbtcHolding.balance - wbtcHolding.locked : 0} available; ` +
+        `${livePortfolio.pendingReservations.length} pending reservation(s)`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (env.AGENT_AVAILABLE_USDC === undefined || env.AGENT_AVAILABLE_WBTC === undefined) {
+      log(
+        side,
+        `⚠ Portfolio read failed (${message}). No AGENT_AVAILABLE_* fallback set; ` +
+          "the LLM will see 0 available and wait until the SDK recovers.",
+      );
+    } else {
+      log(
+        side,
+        `⚠ Portfolio read failed (${message}). Using env fallback: ` +
+          `USDC=${env.AGENT_AVAILABLE_USDC}, WBTC=${env.AGENT_AVAILABLE_WBTC}.`,
+      );
+    }
+  }
+
   // Wire telemetry.
   client.telemetry.onMessage((event) => logTelemetry(side, event));
   client.telemetry.onError((phase, ref) =>
@@ -146,12 +185,28 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     }
 
     const { items: trades } = await readTrades(client, side);
+    // Refetch the portfolio on every tick so the LLM sees the
+    // post-settlement balance and any new reservation amounts.
+    // A failure here is non-fatal — `availableBalances` falls
+    // back to the env vars or 0.
+    if (client.token) {
+      try {
+        livePortfolio = await client.getAgentPortfolio({
+          institutionId: session.institution.id,
+          agentDid: identity.did,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log(side, `⚠ portfolio refresh failed on tick ${tick}: ${message}`);
+      }
+    }
     const ctx = buildDecisionContext({
       side,
       env,
       completedTradeCount: trades.length,
       tickNumber: tick,
       lastOutcome,
+      livePortfolio,
     });
 
     let decision: Decision;
@@ -298,18 +353,50 @@ interface BuildContextInput {
   completedTradeCount: number;
   tickNumber: number;
   lastOutcome: string;
+  livePortfolio: AgentPortfolio | undefined;
+}
+
+/**
+ * Resolve the USDC / WBTC balances the LLM should see this tick.
+ *
+ * Order of preference:
+ *  1. Live portfolio from `client.getAgentPortfolio(...)` — the
+ *     freshest source, with `balance - locked` per holding.
+ *  2. Env-var fallback (`AGENT_AVAILABLE_USDC` /
+ *     `AGENT_AVAILABLE_WBTC`) — only used when the SDK call
+ *     failed.
+ *  3. 0 — the LLM sees "0 available" and waits, which is the safe
+ *     default when both the SDK and the env are silent.
+ */
+function availableBalances(
+  portfolio: AgentPortfolio | undefined,
+  env: AgentEnv,
+): { usdc: number; wbtc: number } {
+  if (portfolio) {
+    const usdcHolding = portfolio.holdings.find((h) => h.assetCode === "USDC");
+    const wbtcHolding = portfolio.holdings.find((h) => h.assetCode === "WBTC");
+    return {
+      usdc: usdcHolding ? Math.max(0, usdcHolding.balance - usdcHolding.locked) : 0,
+      wbtc: wbtcHolding ? Math.max(0, wbtcHolding.balance - wbtcHolding.locked) : 0,
+    };
+  }
+  return {
+    usdc: env.AGENT_AVAILABLE_USDC ?? 0,
+    wbtc: env.AGENT_AVAILABLE_WBTC ?? 0,
+  };
 }
 
 function buildDecisionContext(input: BuildContextInput) {
-  const { side, env, completedTradeCount, tickNumber, lastOutcome } = input;
+  const { side, env, completedTradeCount, tickNumber, lastOutcome, livePortfolio } = input;
+  const { usdc, wbtc } = availableBalances(livePortfolio, env);
   return {
     side,
     referencePriceUsdcPerWbtc: env.REFERENCE_PRICE_USDC_PER_WBTC,
     priceBandBps: env.PRICE_BAND_BPS,
     quantityMinWbtc: env.QUANTITY_MIN_WBTC,
     quantityMaxWbtc: env.QUANTITY_MAX_WBTC,
-    availableUsdc: env.AGENT_AVAILABLE_USDC,
-    availableWbtc: env.AGENT_AVAILABLE_WBTC,
+    availableUsdc: usdc,
+    availableWbtc: wbtc,
     completedTradeCount,
     tickNumber,
     maxTicks: env.MAX_TICKS,

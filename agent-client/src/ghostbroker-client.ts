@@ -3,6 +3,7 @@ import { IntentClient } from "./intent-client.js";
 import { TradesClient } from "./trades-client.js";
 import { ReceiptClient } from "./receipt-client.js";
 import { TelemetryClient } from "./websocket-client.js";
+import { PortfolioClient } from "./portfolio-client.js";
 import type {
   AuthSession,
   AdmitAgentRequest,
@@ -11,6 +12,7 @@ import type {
   IntentAccepted,
   CompletedTrade,
   AuditReceipt,
+  AgentPortfolio,
 } from "./types.js";
 import { GhostBrokerApiError } from "./errors.js";
 
@@ -54,6 +56,7 @@ export class GhostBrokerClient {
   public readonly intents: IntentClient;
   public readonly trades: TradesClient;
   public readonly receipts: ReceiptClient;
+  public readonly portfolio: PortfolioClient;
   public readonly telemetry: TelemetryClient;
   public token: string | undefined;
   private institutionId: string | undefined;
@@ -65,6 +68,7 @@ export class GhostBrokerClient {
     this.intents = new IntentClient(this.baseUrl);
     this.trades = new TradesClient(this.baseUrl);
     this.receipts = new ReceiptClient(this.baseUrl);
+    this.portfolio = new PortfolioClient(this.baseUrl);
     this.telemetry = new TelemetryClient(this.baseUrl, config.institutionId ?? "");
     this.token = config.token;
     this.institutionId = config.institutionId;
@@ -200,5 +204,36 @@ export class GhostBrokerClient {
    */
   public async getReceipt(receiptId: string): Promise<AuditReceipt> {
     return this.receipts.getReceipt(receiptId, this.token ?? "");
+  }
+
+  /**
+   * Read the authenticated institution's portfolio, filtered to a
+   * single agent's pending reservations.
+   *
+   * The session token is the one obtained from
+   * `authenticateWithApiKey(...)` (or supplied at construction
+   * time). The agent DID is the DID minted by the identity-setup
+   * step on the agent side. The backend enforces 403 when the
+   * institution on the path does not match the session's
+   * institution.
+   *
+   * The returned view is informational: the orchestrator's
+   * balance-lock check at submit time is the real authority on
+   * whether an intent will be accepted. Use
+   * `holding.balance - holding.locked` to compute available
+   * balance for sizing the LLM's decision.
+   */
+  public async getAgentPortfolio(request: {
+    institutionId: string;
+    agentDid: string;
+  }): Promise<AgentPortfolio> {
+    if (!this.token) {
+      throw new GhostBrokerApiError(
+        401,
+        "authorization_failed",
+        "Not authenticated. Call authenticate() or authenticateWithApiKey() first.",
+      );
+    }
+    return this.portfolio.getPortfolio(request, this.token);
   }
 }

@@ -115,15 +115,24 @@ export const agentEnvSchema = z.object({
   DRY_RUN: z.boolean().default(false),
 
   /**
-   * The agent's current available balances. The agent-client SDK
-   * (v0.2.0) does not expose a portfolio read to agents — portfolio
-   * reads are operator-only. For an autonomous agent we therefore
-   * pass the available balances via env so the LLM has fresh
-   * context each tick. The orchestrator's balance-lock check is
-   * the real authority on whether a submit will succeed.
+   * Optional fallback balances for the LLM prompt. The agent's
+   * primary balance source is `client.getAgentPortfolio(...)`,
+   * which returns the live `portfolios.balance - locked` for each
+   * holding. The LLM is fed the live numbers on every tick.
+   *
+   * These env vars are used **only** when the SDK call fails (e.g.
+   * transient 503 from the backend) so the loop can keep running
+   * with a stale-but-finite balance instead of forcing a hard
+   * "0 available" through to the LLM. Leaving them unset means a
+   * 503 results in 0-available context — the LLM is told it can't
+   * trade until the SDK recovers, which is the safe default.
+   *
+   * The orchestrator's balance-lock check is the real authority
+   * on whether a submit will succeed; the LLM is just a sizing
+   * hint.
    */
-  AGENT_AVAILABLE_USDC: z.number().nonnegative().default(10_000),
-  AGENT_AVAILABLE_WBTC: z.number().nonnegative().default(10),
+  AGENT_AVAILABLE_USDC: z.coerce.number().nonnegative().optional(),
+  AGENT_AVAILABLE_WBTC: z.coerce.number().nonnegative().optional(),
 });
 
 export type AgentEnv = z.infer<typeof agentEnvSchema>;
@@ -147,8 +156,12 @@ export function loadAgentEnv(): AgentEnv {
     TICK_INTERVAL_MS: numberEnv("TICK_INTERVAL_MS", 15_000),
     MAX_TICKS: numberEnv("MAX_TICKS", 40),
     DRY_RUN: booleanEnv("DRY_RUN", false),
-    AGENT_AVAILABLE_USDC: numberEnv("AGENT_AVAILABLE_USDC", 10_000),
-    AGENT_AVAILABLE_WBTC: numberEnv("AGENT_AVAILABLE_WBTC", 10),
+    AGENT_AVAILABLE_USDC: process.env.AGENT_AVAILABLE_USDC === undefined || process.env.AGENT_AVAILABLE_USDC === ""
+      ? undefined
+      : Number(process.env.AGENT_AVAILABLE_USDC),
+    AGENT_AVAILABLE_WBTC: process.env.AGENT_AVAILABLE_WBTC === undefined || process.env.AGENT_AVAILABLE_WBTC === ""
+      ? undefined
+      : Number(process.env.AGENT_AVAILABLE_WBTC),
   });
   if (!parsed.success) {
     console.error("✗ Invalid environment:");

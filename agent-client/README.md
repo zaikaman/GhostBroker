@@ -387,6 +387,46 @@ interface CompletedTrade {
 }
 ```
 
+### `client.getAgentPortfolio(request): Promise<AgentPortfolio>`
+
+Read the authenticated institution's portfolio, filtered to a
+single agent's pending reservations. Backed by
+`GET /api/portfolios/:institutionId?agentDid=...` on the
+backend.
+
+```typescript
+interface AgentPortfolioRequest {
+  institutionId: string;          // must match the session's institution
+  agentDid: string;               // agent DID, e.g. from `setup:identity`
+}
+interface AgentPortfolio {
+  institutionId: string;
+  agentDid: string;
+  holdings: PortfolioHolding[];   // per-asset { balance, locked }
+  pendingReservations: PendingReservation[];
+}
+interface PortfolioHolding {
+  assetCode: string;
+  balance: number;                // current `portfolios.balance`
+  locked: number;                 // current `portfolios.locked`
+}
+interface PendingReservation {
+  intentHandle: string;
+  assetCode: string;              // USDC for buys, asset code for sells
+  amount: number;                 // USDC: quantity * price; asset: quantity
+  side: "buy" | "sell";
+  quantity: number;
+  price: number;
+}
+```
+
+The read is **informational** — the orchestrator's balance-lock
+check at submit time is the real authority. Compute available
+balance as `holding.balance - holding.locked`. Throws
+`GhostBrokerApiError` with code `authorization_failed` on 401/403
+(missing or wrong-institution session) and `validation_failed` on
+400 (malformed `agentDid`).
+
 ### `client.getReceipt(receiptId): Promise<AuditReceipt>`
 
 ```typescript
