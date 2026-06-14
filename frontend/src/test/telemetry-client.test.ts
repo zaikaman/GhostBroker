@@ -6,6 +6,14 @@ interface TestCloseEvent {
   reason: string;
 }
 
+// Minimal subset of MessageEvent — the tests only construct
+// `onmessage` calls with `{ data: <string> }`, so the loose
+// interface keeps the test code ergonomic without resorting
+// to `any` or building a full MessageEvent.
+interface TestMessageEvent {
+  data: string;
+}
+
 let currentWs: TestWebSocket | null = null;
 const closeSpy = vi.fn();
 const sendSpy = vi.fn();
@@ -14,7 +22,7 @@ class TestWebSocket {
   onopen: (() => void) | null = null;
   onclose: ((event: TestCloseEvent) => void) | null = null;
   onerror: ((err: Event) => void) | null = null;
-  onmessage: ((event: MessageEvent) => void) | null = null;
+  onmessage: ((event: TestMessageEvent) => void) | null = null;
   url: string;
 
   constructor(url: string) {
