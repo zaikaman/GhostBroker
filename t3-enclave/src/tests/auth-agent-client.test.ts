@@ -56,8 +56,27 @@ describe("T3 agent delegation adapter", () => {
       status: "verified",
       agentDid: baseRequest.agentDid,
       authorityRef: baseRequest.authorityRef,
-      policyHash: expect.stringContaining(baseRequest.agentDid) as string,
+      policyHash:
+        "7b88a2ae04139e3ed85f17567a4b7c27a38933ecbbb04067cd106620488bf146",
     });
+  });
+
+  it("produces a stable sha256 policy hash for the same VC", async () => {
+    const client = new DashboardDelegationAgentAuthClient(
+      new DelegationClient(200, { status: "verified" }),
+    );
+
+    const first = await client.verifyDelegation(baseRequest);
+    const second = await client.verifyDelegation(baseRequest);
+    const hex64 = /^[0-9a-f]{64}$/u;
+
+    expect(first.status).toBe("verified");
+    expect(second.status).toBe("verified");
+    if (first.status !== "verified" || second.status !== "verified") {
+      throw new Error("unreachable: expected verified status");
+    }
+    expect(first.policyHash).toBe(second.policyHash);
+    expect(first.policyHash).toMatch(hex64);
   });
 
   it("rejects a stale authorityRef that does not match the VC", async () => {

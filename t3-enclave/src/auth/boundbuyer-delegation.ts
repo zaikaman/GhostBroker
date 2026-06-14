@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 /**
@@ -147,14 +148,41 @@ function hasSandboxProof(credential: BoundbuyerDelegationCredential): boolean {
   return SANDBOX_PROOF_MARKERS.some((marker) => proofValue.includes(marker));
 }
 
+function canonicalize(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalize(item)).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    return `{${entries
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalize(child)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
 function policyHashFor(credential: BoundbuyerDelegationCredential): string {
-  // The boundbuyer VC doesn't carry a policy hash; the closest
-  // stable identifier is the credential's own `id` plus the
-  // issuer's DID. We compose a sha256-style fingerprint the same
-  // way the rest of GhostBroker formats `policyHash` (the admit
-  // route stores it on the agent record).
-  const stable = `${credential.id}::${credential.issuer}::${credential.credentialSubject.agentDid}`;
-  return stable;
+  // The boundbuyer VC doesn't carry a policy hash, so we derive a
+  // stable sha256 hex fingerprint from the canonicalized
+  // credential. This matches the shape produced by
+  // `computeAuthorityPolicyHash` in `authority-claims.ts`, so the
+  // downstream `policyHash` field means the same thing whichever
+  // verifier produced it: a sha256 hex digest of the canonical
+  // authority-bearing payload, suitable for equality checks,
+  // DB indexing, and UI display.
+  const fingerprint = canonicalize({
+    id: credential.id,
+    type: credential.type,
+    issuer: credential.issuer,
+    issuanceDate: credential.issuanceDate,
+    expirationDate: credential.expirationDate,
+    credentialSubject: credential.credentialSubject,
+  });
+  return createHash("sha256").update(fingerprint).digest("hex");
 }
 
 function authorityRefFor(credential: BoundbuyerDelegationCredential): string {
