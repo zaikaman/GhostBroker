@@ -162,7 +162,7 @@ export function assertStartupConfig(
       const message =
         "Dashboard delegation mode is selected with grant verification required, " +
         "but no agent grant has been verified in this process lifetime. " +
-        "Run setup:identity + setup:delegation (or the boundbuyer flow), or set " +
+        "Run setup:identity + setup:delegation (or the Ghostbroker delegation flow), or set " +
         "T3_AGENT_GRANT_VERIFICATION_REQUIRED=false to opt out of the P0 check.";
       if (options.nodeEnv === "production") {
         errors.push(message);
@@ -175,7 +175,7 @@ export function assertStartupConfig(
   if (config.authSdkEnv === "live") {
     warnings.push(
       "T3_AUTH_SDK_ENV=live. The Terminal 3 agent-auth Host API is " +
-        "marked coming soon in the reviewed public docs; the boundbuyer " +
+        "marked coming soon in the reviewed public docs; the Ghostbroker delegation " +
         "verifier will still run in sandbox/structural mode until a live " +
         "agent-auth surface ships. See docs/terminal3-adk-onboarding-doc-gaps.md.",
     );
@@ -194,7 +194,7 @@ export function assertStartupConfig(
   ) {
     warnings.push(
       `T3_AGENT_DELEGATION_MODE=programmatic but T3_AUTH_SDK_ENV=${config.authSdkEnv}. ` +
-        "The programmatic Host API is not yet available, so the boundbuyer verifier " +
+        "The programmatic Host API is not yet available, so the Ghostbroker delegation verifier " +
         "will be the active path. Switch T3_AGENT_DELEGATION_MODE=dashboard until " +
         "the live surface ships.",
     );

@@ -19,8 +19,8 @@ export const admitAgentRequestSchema = z.object({
   institutionId: z.string().uuid(),
   agentDid: agentDidSchema,
   /**
-   * Boundbuyer-style W3C Verifiable Credential. The backend runs
-   * this through `t3-enclave/src/auth/boundbuyer-delegation.ts`
+   * Ghostbroker-style W3C Verifiable Credential. The backend runs
+   * this through `t3-enclave/src/auth/ghostbroker-delegation.ts`
    * to verify the agent is authorized for this institution.
    * The credential is persisted on the agent record at admit
    * time so the intent submit / cancel / settlement paths can

@@ -18,9 +18,9 @@ export interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
   /**
-   * Boundbuyer-style W3C Verifiable Credential that authorizes
+   * Ghostbroker-style W3C Verifiable Credential that authorizes
    * this agent to act on behalf of the institution. The backend
-   * runs it through `t3-enclave/src/auth/boundbuyer-delegation.ts`
+   * runs it through `t3-enclave/src/auth/ghostbroker-delegation.ts`
    * and persists it on the agent record at admit time, so the
    * intent submit / cancel / settlement paths can re-verify it
    * on every privileged action without the agent having to

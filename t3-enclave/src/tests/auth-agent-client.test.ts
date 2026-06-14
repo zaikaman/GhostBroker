@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DashboardDelegationAgentAuthClient } from "../auth/agent-auth-client.js";
+import { GhostbrokerDelegationAgentAuthClient } from "../auth/agent-auth-client.js";
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
 
 class DelegationClient implements T3NetworkClient {
@@ -41,14 +41,14 @@ const vc = {
 const baseRequest = {
   institutionId: "00000000-0000-4000-8000-000000000101",
   agentDid: "did:t3n:agent:us1-authorized",
-  authorityRef: "boundbuyer-delegation:urn:uuid:ghostbroker-delegation-test",
+  authorityRef: "ghostbroker-delegation:urn:uuid:ghostbroker-delegation-test",
   requestedAction: "agent.admit" as const,
   delegationCredential: vc,
 };
 
 describe("T3 agent delegation adapter", () => {
-  it("accepts boundbuyer-style delegation VCs", async () => {
-    const client = new DashboardDelegationAgentAuthClient(
+  it("accepts Ghostbroker-style delegation VCs", async () => {
+    const client = new GhostbrokerDelegationAgentAuthClient(
       new DelegationClient(200, { status: "verified" }),
     );
 
@@ -62,7 +62,7 @@ describe("T3 agent delegation adapter", () => {
   });
 
   it("produces a stable sha256 policy hash for the same VC", async () => {
-    const client = new DashboardDelegationAgentAuthClient(
+    const client = new GhostbrokerDelegationAgentAuthClient(
       new DelegationClient(200, { status: "verified" }),
     );
 
@@ -80,14 +80,14 @@ describe("T3 agent delegation adapter", () => {
   });
 
   it("rejects a stale authorityRef that does not match the VC", async () => {
-    const client = new DashboardDelegationAgentAuthClient(
+    const client = new GhostbrokerDelegationAgentAuthClient(
       new DelegationClient(200, { status: "verified" }),
     );
 
     await expect(
       client.verifyDelegation({
         ...baseRequest,
-        authorityRef: "boundbuyer-delegation:urn:uuid:different-credential",
+        authorityRef: "ghostbroker-delegation:urn:uuid:different-credential",
       }),
     ).resolves.toEqual({
       status: "rejected",
@@ -97,7 +97,7 @@ describe("T3 agent delegation adapter", () => {
   });
 
   it("rejects an expired VC", async () => {
-    const client = new DashboardDelegationAgentAuthClient(
+    const client = new GhostbrokerDelegationAgentAuthClient(
       new DelegationClient(200, { status: "verified" }),
     );
 

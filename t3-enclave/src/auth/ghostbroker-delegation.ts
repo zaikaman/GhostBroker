@@ -4,8 +4,8 @@ import { z } from "zod";
 /**
  * The action an agent is attempting on the backend. Used as the
  * discriminator across the agent authorization surface
- * (admit / intent.submit / settlement.execute). The boundbuyer
- * verifier passes this through unchanged.
+ * (admit / intent.submit / settlement.execute). The
+ * Ghostbroker delegation verifier passes this through unchanged.
  */
 export type RequestedAgentAction =
   | "agent.admit"
@@ -13,13 +13,13 @@ export type RequestedAgentAction =
   | "settlement.execute";
 
 /**
- * Boundbuyer-style W3C Verifiable Credential verifier.
+ * Ghostbroker-style W3C Verifiable Credential verifier for an
+ * agent's delegation.
  *
- * Ported from `boundbuyer/src/auth/vc-verifier.ts`. The boundbuyer
- * BUIDL is the only published live reference for "what Terminal 3
- * actually gives you today" — its verifier accepts a W3C JSON-LD VC
- * with `issuer`, `credentialSubject`, and `proof.jws`, and runs in
- * one of three modes:
+ * This is the project's own W3C JSON-LD VC verifier for the
+ * delegation a buyer institution issues to its agent. The
+ * verifier accepts a VC with `issuer`, `credentialSubject`, and
+ * `proof.jws`, and runs in one of three modes:
  *
  *   - "sandbox":    structural checks only; sandbox proof markers pass.
  *   - "live":       real cryptographic verification via
@@ -27,13 +27,13 @@ export type RequestedAgentAction =
  *                   to "structural" if unavailable, unless
  *                   `VC_VERIFY_STRICT=true`.
  *   - "structural": real shape + time-window + DID-binding checks
- *                   with no crypto. This is the mode boundbuyer ships
- *                   as its "sandbox/demo" production gate.
+ *                   with no crypto. This is the mode the project
+ *                   ships as its "sandbox/demo" production gate.
  *
  * This module produces a `VerifiedDelegationProof` shape identical
  * to the original JCS verifier, so the rest of the per-action
  * authorization pipeline is untouched. The verifier is the only
- * adapter the production backend runs against the boundbuyer W3C
+ * adapter the production backend runs against the Ghostbroker W3C
  * VC. Three modes (sandbox / structural / live) are controlled
  * by the server-side `VC_VERIFY_MODE` env var.
  *
@@ -50,7 +50,7 @@ const purchaseCategorySchema = z.enum([
   "travel",
 ]);
 
-export const boundbuyerDelegationSchema = z.object({
+export const ghostbrokerDelegationSchema = z.object({
   id: z.string().min(1),
   type: z.array(z.string()).min(1),
   issuer: z.string().min(1),
@@ -75,16 +75,16 @@ export const boundbuyerDelegationSchema = z.object({
     .optional(),
 });
 
-export type BoundbuyerDelegationCredential = z.infer<typeof boundbuyerDelegationSchema>;
+export type GhostbrokerDelegationCredential = z.infer<typeof ghostbrokerDelegationSchema>;
 
-export type BoundbuyerVerificationMode = "sandbox" | "live" | "structural";
+export type GhostbrokerVerificationMode = "sandbox" | "live" | "structural";
 
-export interface BoundbuyerVerificationRequest {
+export interface GhostbrokerVerificationRequest {
   credential: unknown;
   institutionId: string;
   agentDid: string;
   /**
-   * The action the agent is attempting. The boundbuyer VC encodes
+   * The action the agent is attempting. The Ghostbroker VC encodes
    * its own action set (the `maxSpendUsd` and `allowedCategories`),
    * so the requested action here is informational — the verifier
    * confirms the credential binds to the agent, not the action.
@@ -95,15 +95,15 @@ export interface BoundbuyerVerificationRequest {
   now?: Date;
 }
 
-export interface VerifiedBoundbuyerDelegation {
+export interface VerifiedGhostbrokerDelegation {
   status: "verified";
   agentDid: string;
   authorityRef: string;
   policyHash: string;
-  verificationMode: BoundbuyerVerificationMode;
+  verificationMode: GhostbrokerVerificationMode;
 }
 
-export interface RejectedBoundbuyerDelegation {
+export interface RejectedGhostbrokerDelegation {
   status: "rejected";
   agentDid: string;
   reason:
@@ -115,9 +115,9 @@ export interface RejectedBoundbuyerDelegation {
     | "demo_proof_in_live_mode";
 }
 
-export type BoundbuyerVerificationResult =
-  | VerifiedBoundbuyerDelegation
-  | RejectedBoundbuyerDelegation;
+export type GhostbrokerVerificationResult =
+  | VerifiedGhostbrokerDelegation
+  | RejectedGhostbrokerDelegation;
 
 const SANDBOX_PROOF_MARKERS = [
   "sandbox-proof-placeholder",
@@ -125,14 +125,14 @@ const SANDBOX_PROOF_MARKERS = [
   "placeholder",
 ] as const;
 
-function getModeFromEnv(): BoundbuyerVerificationMode {
+function getModeFromEnv(): GhostbrokerVerificationMode {
   const raw = process.env.VC_VERIFY_MODE?.trim().toLowerCase();
   if (raw === "live" || raw === "structural") return raw;
   return "sandbox";
 }
 
 function isDelegationActive(
-  credential: BoundbuyerDelegationCredential,
+  credential: GhostbrokerDelegationCredential,
   now: Date,
 ): boolean {
   const issued = new Date(credential.issuanceDate);
@@ -143,7 +143,7 @@ function isDelegationActive(
   return now >= issued && now <= expires;
 }
 
-function hasSandboxProof(credential: BoundbuyerDelegationCredential): boolean {
+function hasSandboxProof(credential: GhostbrokerDelegationCredential): boolean {
   const proofValue = credential.proof?.jws ?? "";
   return SANDBOX_PROOF_MARKERS.some((marker) => proofValue.includes(marker));
 }
@@ -165,8 +165,8 @@ function canonicalize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function policyHashFor(credential: BoundbuyerDelegationCredential): string {
-  // The boundbuyer VC doesn't carry a policy hash, so we derive a
+function policyHashFor(credential: GhostbrokerDelegationCredential): string {
+  // The Ghostbroker VC doesn't carry a policy hash, so we derive a
   // stable sha256 hex fingerprint from the canonicalized
   // credential. This matches the shape produced by
   // `computeAuthorityPolicyHash` in `authority-claims.ts`, so the
@@ -185,23 +185,23 @@ function policyHashFor(credential: BoundbuyerDelegationCredential): string {
   return createHash("sha256").update(fingerprint).digest("hex");
 }
 
-function authorityRefFor(credential: BoundbuyerDelegationCredential): string {
-  return `boundbuyer-delegation:${credential.id}`;
+function authorityRefFor(credential: GhostbrokerDelegationCredential): string {
+  return `ghostbroker-delegation:${credential.id}`;
 }
 
 /**
- * Verify a boundbuyer-style W3C VC. Returns a discriminated union
+ * Verify a Ghostbroker-style W3C VC. Returns a discriminated union
  * shaped to match `verifySignedDelegationProof`'s output so the
  * facade can consume either verifier's result interchangeably.
  */
-export async function verifyBoundbuyerDelegationCredential(
-  request: BoundbuyerVerificationRequest,
-  mode: BoundbuyerVerificationMode = getModeFromEnv(),
-): Promise<BoundbuyerVerificationResult> {
+export async function verifyGhostbrokerDelegationCredential(
+  request: GhostbrokerVerificationRequest,
+  mode: GhostbrokerVerificationMode = getModeFromEnv(),
+): Promise<GhostbrokerVerificationResult> {
   const { credential, agentDid, revokedAuthorityRefs, now = new Date() } = request;
 
   // Shape check (defensive — caller should have parsed already).
-  const parsed = boundbuyerDelegationSchema.safeParse(credential);
+  const parsed = ghostbrokerDelegationSchema.safeParse(credential);
   if (!parsed.success) {
     return {
       status: "rejected",
@@ -261,8 +261,7 @@ export async function verifyBoundbuyerDelegationCredential(
   // Live + signed: try @terminal3/verify_vc at runtime. If it isn't
   // installed, fall back to structural unless VC_VERIFY_STRICT=true.
   // We intentionally use a dynamic import so the verifier works
-  // in sandbox environments that don't have it. (Same defensive
-  // pattern the boundbuyer BUIDL uses.)
+  // in sandbox environments that don't have it.
   return tryLiveVerify(safe, agentDid);
 }
 
@@ -274,9 +273,9 @@ interface VerifyFn {
 }
 
 async function tryLiveVerify(
-  safe: BoundbuyerDelegationCredential,
+  safe: GhostbrokerDelegationCredential,
   agentDid: string,
-): Promise<BoundbuyerVerificationResult> {
+): Promise<GhostbrokerVerificationResult> {
   try {
     const loaded = (await import(
       "@terminal3/verify_vc" as string

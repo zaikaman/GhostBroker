@@ -18,7 +18,7 @@ All notable changes to `@ghostbroker/agent-client` are documented here. The form
   authority.
 
 ### Removed
-- `DelegationProofBuilder` and the JCS-prove admit path. The boundbuyer
+- `DelegationProofBuilder` and the JCS-prove admit path. The Ghostbroker delegation
   W3C VC is the only credential the live T3N onboarding surface mints;
   `client.admitAgent({institutionId, agentDid, delegationCredential})`
   is the only admit shape. The `examples/buyer-agent.ts` /

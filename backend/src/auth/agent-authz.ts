@@ -1,19 +1,19 @@
-import { verifyBoundbuyerDelegationCredential } from "@ghostbroker/t3-enclave";
+import { verifyGhostbrokerDelegationCredential } from "@ghostbroker/t3-enclave";
 import type {
   AgentDelegationVerificationRequest,
   AgentDelegationVerificationResult,
-  BoundbuyerVerificationRequest,
+  GhostbrokerVerificationRequest,
 } from "@ghostbroker/t3-enclave";
 import { PublicError } from "../errors/public-error.js";
 
 /**
- * Single boundbuyer-only authorization facade.
+ * Single Ghostbroker delegation-only authorization facade.
  *
  * Every privileged backend action — `AgentService.admitAgent`,
  * `HiddenIntentService.submitIntent`, `HiddenIntentService.cancelIntent`,
  * and `SettlementCommandBuilder.build` — re-verifies the agent's
  * W3C VC (the credential persisted at admit time) before allowing
- * the action. The boundbuyer-style W3C Verifiable Credential is
+ * the action. The Ghostbroker-style W3C Verifiable Credential is
  * the only credential format the live T3N onboarding surface
  * mints; the JCS Smart-VC prove flow is no longer supported.
  */
@@ -27,7 +27,7 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
   public async verifyAgentAuthority(
     request: AgentDelegationVerificationRequest,
   ): Promise<AgentDelegationVerificationResult> {
-    const vcRequest: BoundbuyerVerificationRequest = {
+    const vcRequest: GhostbrokerVerificationRequest = {
       credential: request.delegationCredential,
       institutionId: request.institutionId,
       agentDid: request.agentDid,
@@ -37,7 +37,7 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
         : {}),
     };
 
-    const result = await verifyBoundbuyerDelegationCredential(vcRequest);
+    const result = await verifyGhostbrokerDelegationCredential(vcRequest);
 
     if (result.status !== "verified") {
       throw new PublicError("authorization_failed", 403);

@@ -118,7 +118,7 @@ Admit an autonomous agent after verifying its delegation credential.
 {
   "agentDid": "did:t3n:0xAgentAddress",
   "status": "admitted",
-  "authorityRef": "boundbuyer-delegation:urn:uuid:ghostbroker-delegation-..."
+  "authorityRef": "ghostbroker-delegation:urn:uuid:ghostbroker-delegation-..."
 }
 ```
 
@@ -146,7 +146,7 @@ Submit an encrypted hidden trading intent.
   "institutionId": "550e8400-e29b-41d4-a716-446655440000",
   "agentDid": "did:t3n:0xAgentAddress",
   "encryptedIntentEnvelope": "<base64url encrypted payload>",
-  "authorityRef": "boundbuyer-delegation:urn:uuid:ghostbroker-delegation-..."
+  "authorityRef": "ghostbroker-delegation:urn:uuid:ghostbroker-delegation-..."
 }
 ```
 
@@ -179,7 +179,7 @@ Cancel a previously submitted intent that is still pending in the matching orche
   "institutionId": "550e8400-e29b-41d4-a716-446655440000",
   "agentDid": "did:t3n:0xAgentAddress",
   "intentHandle": "intent_abc123def456...",
-  "authorityRef": "boundbuyer-delegation:urn:uuid:ghostbroker-delegation-..."
+  "authorityRef": "ghostbroker-delegation:urn:uuid:ghostbroker-delegation-..."
 }
 ```
 

@@ -5,14 +5,14 @@ import { z } from "zod";
 import { readIdentity, type AgentIdentityRecord } from "./identity.js";
 
 /**
- * W3C Verifiable Credential — ported from boundbuyer's
+ * W3C Verifiable Credential — ported from Ghostbroker delegation's
  * `src/auth/delegation.ts` and `src/scripts/setup-delegation.ts`.
  *
- * The boundbuyer BUIDL models the delegation as a standard W3C VC
+ * The Ghostbroker delegation BUIDL models the delegation as a standard W3C VC
  * with `issuer`, `credentialSubject`, and a `proof.jws` field. The
  * GhostVerifier (in t3-enclave) does not speak this shape — that
  * verifier was built for the T3 Smart VC `buildDelegationCredential`
- * format. The boundbuyer format is what the only published live
+ * format. The Ghostbroker delegation format is what the only published live
  * reference implementation actually mints, so the agent side
  * produces and consumes this shape end-to-end. The backend admit
  * path that consumes it lives in the GhostBroker backend
@@ -219,7 +219,7 @@ export function runSetupDelegationCli(): void {
   console.log(`Budget: $${maxSpendUsd.toFixed(2)}`);
   console.log("");
   console.log("Proof uses a demo marker (not a cryptographic signature).");
-  console.log("The boundbuyer-style verifier accepts this via structural fallback in sandbox mode.");
+  console.log("The Ghostbroker-style verifier accepts this via structural fallback in sandbox mode.");
   console.log("Set VC_VERIFY_MODE=live only when using a real signed VC.");
   console.log("");
   console.log("Add to .env if not already set:");

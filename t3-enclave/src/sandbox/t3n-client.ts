@@ -170,10 +170,10 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
    * `WriterSet` / `ReaderSet` accept either the literal `"all"` (every
    * tenant contract may read/write) or a numeric `{ only: number[] }`
    * list of contract ids. GhostBroker's `SealedSecretMapProvisioner`
-   * passes string tails (matching the boundbuyer BUIDL convention),
+   * passes string tails (matching the Ghostbroker delegation BUIDL convention),
    * so when no numeric id is known we use `"All"` and surface that
    * the host will resolve it. When at least one numeric contract id
-   * is supplied (the boundbuyer demo's `0` default for a freshly
+   * is supplied (the Ghostbroker delegation demo's `0` default for a freshly
    * published contract), we use `{ Only: number[] }`.
    */
   private async provisionTenantMap(body: unknown): Promise<unknown> {
@@ -401,7 +401,7 @@ function readVersionFromBody(body: unknown): string {
  * the body already carries an `input` field (the existing match
  * and blind-intent consumers do), pass it through. Otherwise, the
  * whole body is treated as the input — that matches the
- * boundbuyer BUIDL's `client.contracts.execute(tail, {input})`
+ * Ghostbroker delegation BUIDL's `client.contracts.execute(tail, {input})`
  * convention.
  */
 function extractContractInput(body: unknown): unknown {

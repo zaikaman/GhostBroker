@@ -225,7 +225,7 @@ services:
       - OPENAI_API_KEY=${'${OPENAI_API_KEY}'}  # Your OpenAI API key
       - INSTITUTION_ID=${'${INSTITUTION_ID}'}
       - AGENT_DID=did:t3n:0xYourAgentAddress
-      - DELEGATION_CREDENTIAL=${'${DELEGATION_CREDENTIAL}'}  # boundbuyer W3C VC (JSON)
+      - DELEGATION_CREDENTIAL=${'${DELEGATION_CREDENTIAL}'}  # Ghostbroker delegation W3C VC (JSON)
     logging:
       driver: "json-file"
       options:

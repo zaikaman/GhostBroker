@@ -24,7 +24,7 @@ const sandboxVc: DelegationCredential = {
   },
 };
 
-describe("verifyDelegationCredential (boundbuyer flow)", () => {
+describe("verifyDelegationCredential (Ghostbroker delegation flow)", () => {
   it("accepts a demo-proof VC in sandbox mode", async () => {
     const result = await verifyDelegationCredential(sandboxVc, "did:t3n:0xagent", "sandbox");
     expect(result.verified).toBe(true);

@@ -22,8 +22,8 @@ export interface SettlementExecutionRequest {
   buyerAgentDid: string;
   sellerAgentDid: string;
   /**
-   * Boundbuyer W3C VCs for the buyer and seller agents. The
-   * settlement command builder re-verifies both with the boundbuyer
+   * Ghostbroker delegation W3C VCs for the buyer and seller agents. The
+   * settlement command builder re-verifies both with the Ghostbroker delegation
    * verifier before issuing the settlement instruction.
    */
   buyerDelegationCredential: unknown;

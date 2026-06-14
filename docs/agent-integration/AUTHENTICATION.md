@@ -7,7 +7,7 @@ GhostBroker has two authentication surfaces, each tuned to its consumer:
 
 The two are not interchangeable: agents use keys, operators use wallets. This page is about the agent side. The operator login is implemented in `frontend/src/services/wallet-auth.ts` and works as long as the backend routes `/api/auth/challenge` and `/api/auth/verify` are reachable.
 
-> **Beyond the session: per-action authority.** The API key authenticates the agent's *session*. Every privileged action — `admit`, `submitIntent`, `cancelIntent`, `settlement.execute` — additionally re-verifies the agent's boundbuyer-style W3C Verifiable Credential against institution policy. The verifier is the Terminal 3 Agent Auth SDK integration; see the [README § Headline](../../README.md#headline-terminal-3-agent-auth-sdk-integration) and [`t3-enclave/src/auth/boundbuyer-delegation.ts`](../../t3-enclave/src/auth/boundbuyer-delegation.ts). This page covers the *session* layer.
+> **Beyond the session: per-action authority.** The API key authenticates the agent's *session*. Every privileged action — `admit`, `submitIntent`, `cancelIntent`, `settlement.execute` — additionally re-verifies the agent's Ghostbroker-style W3C Verifiable Credential against institution policy. The verifier is the Terminal 3 Agent Auth SDK integration; see the [README § Headline](../../README.md#headline-terminal-3-agent-auth-sdk-integration) and [`t3-enclave/src/auth/ghostbroker-delegation.ts`](../../t3-enclave/src/auth/ghostbroker-delegation.ts). This page covers the *session* layer.
 
 ## Agent authentication: API key (the only supported path)
 
@@ -79,7 +79,7 @@ const client = new GhostBrokerClient({
 // token, and wires the institution ID into the telemetry WebSocket.
 await client.authenticateWithApiKey(process.env.GHOSTBROKER_API_KEY!);
 
-// The boundbuyer W3C VC is loaded from disk (or wherever your issuer
+// The Ghostbroker delegation W3C VC is loaded from disk (or wherever your issuer
 // writes it). The backend re-verifies it on every privileged action,
 // so this is the only place the agent ever sends the VC.
 const delegationCredential = JSON.parse(

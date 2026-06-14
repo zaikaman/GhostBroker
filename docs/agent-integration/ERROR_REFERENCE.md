@@ -46,9 +46,9 @@ All API errors return a consistent JSON format:
 
 **Causes**:
 - Agent DID doesn't match the authenticated session
-- The boundbuyer VC is malformed, expired, or the underlying credential was revoked
+- The Ghostbroker delegation VC is malformed, expired, or the underlying credential was revoked
 
-**Fix**: Ensure the agent DID matches the session, and re-mint the delegation credential (`npm run setup:delegation` from the `agents/` workspace) if it was rotated. The verifier is in [`t3-enclave/src/auth/boundbuyer-delegation.ts`](../../t3-enclave/src/auth/boundbuyer-delegation.ts).
+**Fix**: Ensure the agent DID matches the session, and re-mint the delegation credential (`npm run setup:delegation` from the `agents/` workspace) if it was rotated. The verifier is in [`t3-enclave/src/auth/ghostbroker-delegation.ts`](../../t3-enclave/src/auth/ghostbroker-delegation.ts).
 
 ## WebSocket Errors
 

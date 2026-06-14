@@ -2,15 +2,15 @@ import type { DelegationCredential } from "./delegation.js";
 import { isDelegationActive } from "./delegation.js";
 
 /**
- * Ported from `boundbuyer/src/auth/vc-verifier.ts`.
+ * Ported from the Ghostbroker delegation/src/auth/vc-verifier.ts`.
  *
- * The verifier has three modes, exactly as boundbuyer defines them:
+ * The verifier has three modes, exactly as Ghostbroker delegation defines them:
  *   - "sandbox": structural checks only; sandbox proof markers pass.
  *   - "live":    real cryptographic verification via @terminal3/verify_vc.
  *                Falls back to "structural" if the SDK is unavailable
  *                and VC_VERIFY_STRICT is not "true".
  *   - "structural": real shape + time-window + DID-binding checks, no
- *                   crypto. This is the mode the boundbuyer BUIDL
+ *                   crypto. This is the mode the Ghostbroker delegation BUIDL
  *                   ships as its "sandbox/demo" production gate.
  *
  * The GhostBroker admit path runs the same verifier server-side; the

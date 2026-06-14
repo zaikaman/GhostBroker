@@ -2,7 +2,7 @@
 /**
  * CLI: mint a delegation credential for the agent.
  *
- * Equivalent to `boundbuyer/src/scripts/setup-delegation.ts`. Resolves
+ * Equivalent to `Ghostbroker delegation/src/scripts/setup-delegation.ts`. Resolves
  * the agent DID from the identity file, the user DID from the
  * T3N_API_KEY (or USER_DID env var), and writes a W3C JSON-LD VC to
  * `output/delegations/agent_delegation.json` (or wherever

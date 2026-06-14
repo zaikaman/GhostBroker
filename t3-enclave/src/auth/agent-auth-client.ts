@@ -1,17 +1,17 @@
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
-import { verifyBoundbuyerDelegationCredential } from "./boundbuyer-delegation.js";
+import { verifyGhostbrokerDelegationCredential } from "./ghostbroker-delegation.js";
 import type {
-  BoundbuyerVerificationRequest,
-  BoundbuyerVerificationResult,
+  GhostbrokerVerificationRequest,
+  GhostbrokerVerificationResult,
   RequestedAgentAction,
-} from "./boundbuyer-delegation.js";
+} from "./ghostbroker-delegation.js";
 
 /**
  * The single delegation verifier used by the GhostBroker backend.
  *
- * Boundbuyer-style W3C Verifiable Credential is the only credential
+ * Ghostbroker-style W3C Verifiable Credential is the only credential
  * format supported end-to-end. The live T3N network today issues
- * exactly this shape (the boundbuyer BUIDL is the only published
+ * exactly this shape (the Ghostbroker delegation BUIDL is the only published
  * live reference for "what Terminal 3 actually gives you"); the
  * JCS Smart VC shape is reserved for a future programmatic T3
  * issuer and is not part of the production code path.
@@ -22,7 +22,7 @@ import type {
  * (`submitIntent`, `cancelIntent`, `settlement.execute`).
  */
 
-export type { RequestedAgentAction } from "./boundbuyer-delegation.js";
+export type { RequestedAgentAction } from "./ghostbroker-delegation.js";
 
 export interface AgentDelegationVerificationRequest {
   institutionId: string;
@@ -30,7 +30,7 @@ export interface AgentDelegationVerificationRequest {
   authorityRef: string;
   requestedAction: RequestedAgentAction;
   revokedAuthorityRefs?: ReadonlySet<string>;
-  /** Boundbuyer W3C VC persisted at admit time. */
+  /** Ghostbroker delegation W3C VC persisted at admit time. */
   delegationCredential: unknown;
 }
 
@@ -67,8 +67,8 @@ export interface AgentDelegationVerifier {
 }
 
 /**
- * Boundbuyer-only agent authorization adapter. The live-network
- * fallback (POST /agent-delegations/verify) is gone — the boundbuyer
+ * Ghostbroker-only agent authorization adapter. The live-network
+ * fallback (POST /agent-delegations/verify) is gone — the Ghostbroker delegation
  * verifier runs entirely from the in-memory VC, with the VC's own
  * `id` and `issuer` driving `authorityRef` and `policyHash`.
  *
@@ -78,18 +78,22 @@ export interface AgentDelegationVerifier {
  *
  * The constructor still takes a `T3NetworkClient` for compatibility
  * with the composition root in the backend's `app.ts`. The
- * boundbuyer verifier does not need to make any network calls, so
+ * Ghostbroker delegation verifier does not need to make any network calls, so
  * the argument is captured but not used. Tests wire a stub client
  * to satisfy the type.
  */
-export class DashboardDelegationAgentAuthClient
+export class GhostbrokerDelegationAgentAuthClient
   implements AgentDelegationVerifier
 {
+  /**
+   * Retained for compatibility with the historical composition root
+   * in the backend's `app.ts`. The Ghostbroker delegation verifier
+   * runs from the in-memory VC and does not need network access, so
+   * these parameters are accepted and intentionally ignored. Tests
+   * wire a stub client to satisfy the type.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-useless-constructor
   public constructor(
-    // Retained for compatibility with the composition root in
-    // the backend's `app.ts`. The boundbuyer verifier runs from
-    // the in-memory VC and does not need network access, so
-    // these are captured but not used.
     _client?: T3NetworkClient,
     _verificationPath = "/agent-delegations/verify",
   ) {
@@ -99,7 +103,7 @@ export class DashboardDelegationAgentAuthClient
   public async verifyDelegation(
     request: AgentDelegationVerificationRequest,
   ): Promise<AgentDelegationVerificationResult> {
-    const vcRequest: BoundbuyerVerificationRequest = {
+    const vcRequest: GhostbrokerVerificationRequest = {
       credential: request.delegationCredential,
       institutionId: request.institutionId,
       agentDid: request.agentDid,
@@ -109,8 +113,8 @@ export class DashboardDelegationAgentAuthClient
         : {}),
     };
 
-    const result: BoundbuyerVerificationResult =
-      await verifyBoundbuyerDelegationCredential(vcRequest);
+    const result: GhostbrokerVerificationResult =
+      await verifyGhostbrokerDelegationCredential(vcRequest);
 
     if (result.status !== "verified") {
       return {

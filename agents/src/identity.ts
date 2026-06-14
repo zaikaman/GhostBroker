@@ -11,10 +11,10 @@ import {
 } from "@terminal3/t3n-sdk";
 
 /**
- * Agent identity for the GhostBroker boundbuyer-style credential flow.
+ * Agent identity for the GhostBroker Ghostbroker-style credential flow.
  *
- * Ported from `boundbuyer/src/scripts/setup-identity.ts` and
- * `boundbuyer/src/t3/identity.ts`. The boundbuyer BUIDL was the only
+ * Ported from the Ghostbroker delegation/src/scripts/setup-identity.ts` and
+ * `Ghostbroker delegation/src/t3/identity.ts`. The Ghostbroker delegation BUIDL was the only
  * published reference for "what Terminal 3 actually gives you" — it
  * confirmed that the T3 onboarding surface is just an `T3N_API_KEY`
  * (the claim-page key) + a derived `did:t3n`, with no dashboard.
@@ -113,7 +113,7 @@ export async function setupIdentity(options: SetupIdentityOptions): Promise<Agen
 
   // Sanity check: the DID should be `did:t3n:0x<address>` for an
   // Ethereum-style authenticated agent. We don't fail on a different
-  // shape — boundbuyer's verifier is happy with any `did:t3n:*` — but
+  // shape — Ghostbroker delegation's verifier is happy with any `did:t3n:*` — but
   // we log it.
   if (!did.startsWith("did:t3n:")) {
     throw new Error(

@@ -10,7 +10,7 @@ institutional dark pool. Each agent is a Node.js loop that:
    `npm run setup:delegation`).
 3. Adapts via the new `client.admitAgentWithDelegationCredential()` method
    on the `@ghostbroker/agent-client` SDK, which routes through
-   `t3-enclave/src/auth/boundbuyer-delegation.ts` on the server.
+   `t3-enclave/src/auth/ghostbroker-delegation.ts` on the server.
 4. On each tick, asks Groq (`qwen/qwen3-32b`) whether to submit, wait, or abort.
 5. If Groq says "submit" and the LLM's choice fits the configured bounds
    and the institution's available balance, seals an intent envelope and
@@ -27,8 +27,8 @@ agents/
 │   ├── buyer-agent.ts       # the buyer entry point (preflight + run)
 │   ├── seller-agent.ts      # the seller entry point (preflight + run)
 │   ├── env.ts               # zod-validated env loader (no dotenv dep)
-│   ├── identity.ts          # boundbuyer T3 identity: keypair + T3N DID
-│   ├── delegation.ts        # boundbuyer W3C VC mint/load/validate
+│   ├── identity.ts          # Ghostbroker delegation T3 identity: keypair + T3N DID
+│   ├── delegation.ts        # Ghostbroker delegation W3C VC mint/load/validate
 │   ├── vc-verifier.ts       # structural + live verifier, sandbox/live/structural modes
 │   ├── sealed-envelope.ts   # TEE-shaped base64url envelope
 │   ├── llm-decision.ts      # Groq client + decision schema + clamps
@@ -54,8 +54,8 @@ agents/
 
 There is **no Terminal 3 dashboard**. T3 onboarding is just the
 `T3N_API_KEY` + a derived `did:t3n`. This is a real difference from what
-the T3 public docs imply; it's the part the boundbuyer BUIDL
-(ghostbroker/boundbuyer) confirmed by working code.
+the T3 public docs imply; it's the part the Ghostbroker delegation BUIDL
+(ghostbroker/Ghostbroker delegation) confirmed by working code.
 
 ## Running the buyer and seller
 
@@ -100,9 +100,9 @@ intents, set `DRY_RUN=1` in `.env`. The agent will still authenticate,
 admit, call Groq on each tick, and log the decision — it just won't
 submit.
 
-## The boundbuyer credential flow
+## The Ghostbroker delegation credential flow
 
-The boundbuyer BUIDL (read-only reference in `../boundbuyer/`) is the
+The Ghostbroker delegation BUIDL (read-only reference in `../Ghostbroker delegation/`) is the
 canonical live T3 integration reference. It defines:
 
 - `npm run setup:identity` — generates a secp256k1 keypair and calls
@@ -114,14 +114,14 @@ canonical live T3 integration reference. It defines:
   binding the user (derived from `T3N_API_KEY`) to the agent
   (`did:t3n`) for a budget + category set. Persisted to
   `output/delegations/agent_delegation.json`.
-- The verifier (`t3-enclave/src/auth/boundbuyer-delegation.ts`) is a
-  port of `boundbuyer/src/auth/vc-verifier.ts`. It supports three
+- The verifier (`t3-enclave/src/auth/ghostbroker-delegation.ts`) is a
+  port of `Ghostbroker delegation/src/auth/vc-verifier.ts`. It supports three
   modes, controlled by the `VC_VERIFY_MODE` env var:
   - **`sandbox`** (default) — structural checks only. The demo `jws`
-    marker is accepted. This is the boundbuyer BUIDL's "production
+    marker is accepted. This is the Ghostbroker delegation BUIDL's "production
     gate" for smoke testing.
   - **`structural`** — same as sandbox but explicit. Used when you
-    want the boundbuyer demo `jws` to pass in live mode.
+    want the Ghostbroker delegation demo `jws` to pass in live mode.
   - **`live`** — real cryptographic verification via
     `@terminal3/verify_vc` (dynamically imported at runtime; the
     package is optional). Refuses demo `jws` markers.
@@ -219,7 +219,7 @@ Your `GHOSTBROKER_API_KEY` is wrong, revoked, or doesn't start with
 
 ### `✗ Admit failed: 403 authorization_failed`
 
-The server's boundbuyer verifier rejected the VC. Most common
+The server's Ghostbroker delegation verifier rejected the VC. Most common
 causes:
 - `VC_VERIFY_MODE=live` on the server, but the on-disk VC has a
   `proof.jws` of `"live-demo-unsigned"`. Either set
@@ -234,9 +234,9 @@ causes:
 
 ### `✗ Admit failed: 503 service_unavailable`
 
-The backend doesn't have the boundbuyer verifier wired in (it should
+The backend doesn't have the Ghostbroker delegation verifier wired in (it should
 be — the production `T3AgentAuthorizationFacade` implements
-`verifyBoundbuyerAuthority`). If you see this in a fresh checkout,
+`verifyGhostbrokerDelegationAuthority`). If you see this in a fresh checkout,
 rebuild the t3-enclave (`npm run build --workspace @ghostbroker/t3-enclave`)
 and restart the backend.
 
@@ -280,7 +280,7 @@ npm test          --workspace @ghostbroker/agents
 ```
 
 The unit test suite covers the LLM-decision parser, the price/quantity
-clamp, the sealed-envelope format, the boundbuyer VC mint/load
+clamp, the sealed-envelope format, the Ghostbroker delegation VC mint/load
 flow, and the verifier's three modes (sandbox accepts, sandbox rejects
 expired, sandbox rejects agent-mismatch, live rejects demo proof,
 structural accepts demo proof).

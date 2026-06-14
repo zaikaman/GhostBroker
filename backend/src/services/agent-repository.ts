@@ -60,7 +60,7 @@ export interface AgentRepository {
     limitReference?: string | null;
     policyHash?: string | null;
     /**
-     * The boundbuyer W3C VC, persisted so the intent submit /
+     * The Ghostbroker delegation W3C VC, persisted so the intent submit /
      * cancel / settlement paths can re-verify it on every
      * privileged action without the agent having to resend it.
      */

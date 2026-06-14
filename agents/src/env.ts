@@ -4,7 +4,7 @@ import { z } from "zod";
 
 /**
  * Minimal `.env` loader — no dotenv dependency. Mirrors the pattern
- * used by `agent-client/examples/buyer-agent.ts` and the boundbuyer
+ * used by `agent-client/examples/buyer-agent.ts` and the Ghostbroker delegation
  * BUIDL. Looks for `.env` in the CWD first, then in the `agents/`
  * package folder. Env vars already set in `process.env` are never
  * overridden.
@@ -81,7 +81,7 @@ export function booleanEnv(name: string, fallback: boolean): boolean {
 }
 
 /**
- * The full set of env vars a boundbuyer-style GhostBroker agent needs.
+ * The full set of env vars a Ghostbroker-style GhostBroker agent needs.
  * Validated at startup so a missing credential is a clear error and
  * not a stack trace buried inside the SDK.
  */

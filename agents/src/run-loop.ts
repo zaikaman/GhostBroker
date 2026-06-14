@@ -20,7 +20,7 @@ import { verifyDelegationCredential } from "./vc-verifier.js";
  * The agent boots from an on-disk identity file (DID + keypair,
  * produced by `setup:identity`) and an on-disk W3C Verifiable
  * Credential (produced by `setup:delegation`), passes the VC to
- * the server's boundbuyer verifier, and then submits encrypted
+ * the server's Ghostbroker delegation verifier, and then submits encrypted
  * intents through the regular matching pipeline.
  */
 
@@ -44,7 +44,7 @@ export interface AgentRunResult {
 export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunResult> {
   const { side, env, llm, dryRun, assetCode } = options;
 
-  // Preflight: load the boundbuyer identity and delegation VC from
+  // Preflight: load the Ghostbroker delegation identity and delegation VC from
   // disk. Both files are produced by the setup:identity and
   // setup:delegation CLIs, which call the live T3N network.
   const identity = readIdentity(env.AGENT_IDENTITY_CONFIG_PATH);
@@ -91,7 +91,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   }
   log(side, `✓ Authenticated as ${session.institution.displayName} (${session.institution.id})`);
 
-  // Admit via the boundbuyer path. The VC was loaded from disk by
+  // Admit via the Ghostbroker delegation path. The VC was loaded from disk by
   // `loadDelegationCredential` and re-verified locally by
   // `verifyDelegationCredential` above. The backend runs the same
   // verifier server-side and persists the VC on the agent record

@@ -287,7 +287,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         request.agentDid,
       );
 
-    // Re-verify the boundbuyer VC the agent was admitted with.
+    // Re-verify the Ghostbroker delegation VC the agent was admitted with.
     // The VC is persisted in the agent record's metadata at admit
     // time (see `AgentService.admitAgent` and
     // `SupabaseAgentRepository.create`). Without this, the intent
@@ -310,7 +310,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   }
 
   /**
-   * Look up the boundbuyer VC persisted at admit time. Returns
+   * Look up the Ghostbroker delegation VC persisted at admit time. Returns
    * `null` if the agent record is missing or has no credential —
    * the verifier will then reject as `unverified` / `malformed`.
    */
@@ -341,7 +341,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   public async cancelIntent(
     request: CancelIntentRequest,
   ): Promise<IntentCancelled | null> {
-    // Re-verify the agent's boundbuyer VC is still valid for this
+    // Re-verify the agent's Ghostbroker delegation VC is still valid for this
     // institution/agent pair. This catches the case where the
     // delegation was revoked after the intent was submitted.
     //

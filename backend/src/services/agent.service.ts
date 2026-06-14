@@ -53,8 +53,8 @@ export class AgentService implements AgentManagementService {
         request.agentDid,
       );
 
-    // Boundbuyer-only path. The JCS Smart-VC verifier is gone —
-    // the live T3N onboarding surface only issues boundbuyer-style
+    // Ghostbroker-only path. The JCS Smart-VC verifier is gone —
+    // the live T3N onboarding surface only issues Ghostbroker-style
     // W3C credentials. The credential is persisted on the agent
     // record so submit / cancel / settlement can re-verify it.
     const verification = await this.authorization.verifyAgentAuthority({
@@ -79,7 +79,7 @@ export class AgentService implements AgentManagementService {
 
   /**
    * Shared persistence path for the admit flow. Writes the agent
-   * record (with the boundbuyer VC stored in `metadata`) and
+   * record (with the Ghostbroker delegation VC stored in `metadata`) and
    * returns the public `AgentAdmission` shape.
    */
   private async persistAdmittedAgent(input: {

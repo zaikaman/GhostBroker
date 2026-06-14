@@ -20,14 +20,14 @@ The repository is a four-package monorepo:
 ## Terminal 3 Agent Auth SDK integration
 
 The headline integration is the per-action authority verifier in
-[`t3-enclave/src/auth/boundbuyer-delegation.ts`](../t3-enclave/src/auth/boundbuyer-delegation.ts).
-It verifies boundbuyer-style W3C Verifiable Credentials end-to-end:
+[`t3-enclave/src/auth/ghostbroker-delegation.ts`](../t3-enclave/src/auth/ghostbroker-delegation.ts).
+It verifies Ghostbroker-style W3C Verifiable Credentials end-to-end:
 
 - **Shape + time window + DID binding**: every VC must have an `id`, `issuer`, `credentialSubject.agentDid`, `issuanceDate`/`expirationDate`, and a `proof` object. The verifier checks all of these.
 - **Agent-binding**: the credential's `credentialSubject.agentDid` must match the agent DID on the request.
 - **Revocation**: the verifier accepts a `revokedAuthorityRefs` set, sourced from `AuthorityRevocationRepository` before every check. Revoked references are rejected as `revoked`.
 - **Cryptographic verification** (live mode only): the verifier calls `@terminal3/verify_vc` at runtime if it's installed. Otherwise it falls back to `structural` checks (unless `VC_VERIFY_STRICT=true`).
-- **Authority reference**: every verification produces a `boundbuyer-delegation:<vc-id>` reference; the agent must echo this back on every privileged action, and the backend re-asserts equality on each call.
+- **Authority reference**: every verification produces a `ghostbroker-delegation:<vc-id>` reference; the agent must echo this back on every privileged action, and the backend re-asserts equality on each call.
 
 The same facade is used by **every** backend service that performs a privileged action — `AgentService.admitAgent`, `HiddenIntentService.submitIntent`, `HiddenIntentService.cancelIntent`, and `SettlementCommandBuilder.build` — all calling the **same** `T3AgentAuthorizationFacade` singleton with the right `requestedAction` for the action. The VC is persisted on the agent record at admit time, so submit / cancel / settlement re-verify the same credential without the agent having to resend it. See [`backend/src/auth/agent-authz.ts`](../backend/src/auth/agent-authz.ts) and the composition root in [`backend/src/app.ts`](../backend/src/app.ts).
 
@@ -42,7 +42,7 @@ The auth model is layered to match the Agent Auth SDK's design intent:
 | Layer | Credential | Consumer | Purpose |
 |---|---|---|---|
 | **Session** | `gbk_…` persistent API key → 8-hour JWT | External agent SDK | Authenticate the agent to the backend across reconnects, restarts, and long-running deploys |
-| **Authority** | Boundbuyer W3C Verifiable Credential (`boundbuyer-delegation:<vc-id>`) | Every privileged action | Authorize *this specific* action against institution policy, with shape, time-window, DID-binding, and revocation checks |
+| **Authority** | Ghostbroker delegation W3C Verifiable Credential (`ghostbroker-delegation:<vc-id>`) | Every privileged action | Authorize *this specific* action against institution policy, with shape, time-window, DID-binding, and revocation checks |
 
 The two are complementary, not alternatives. The API key answers *"which institution does this agent belong to?"*; the delegation VC answers *"is this agent authorized to do this right now, for this action, against this policy?"* This is the same separation the Terminal 3 docs use for the [seed API key pattern](https://docs.terminal3.io/developers/adk/tips/seed-api-key), applied to the agent side of the boundary. Agents exchange the key at `POST /api/auth/api-key`, then present the signed VC on every privileged call.
 
@@ -94,7 +94,7 @@ onboarding friction points we encountered are tracked in
 [`docs/terminal3-adk-onboarding-doc-gaps.md`](../docs/terminal3-adk-onboarding-doc-gaps.md).
 The largest classes of friction we hit:
 
-- **Programmatic AI agent delegation is undocumented.** The T3N Dashboard delegation flow is documented; the SDK/API surface for the same operation is not. We shipped a working `DashboardDelegationAgentAuthClient` (with a live `/agent-delegations/verify` fallback) but it relies on the undocumented endpoint path.
+- **Programmatic AI agent delegation is undocumented.** The T3N Dashboard delegation flow is documented; the SDK/API surface for the same operation is not. We shipped a working `GhostbrokerDelegationAgentAuthClient` (with a live `/agent-delegations/verify` fallback) but it relies on the undocumented endpoint path.
 - **`agent-auth` Host API is marked coming soon** in the Host API table. We built against the assumption it is *not* available to app contracts and used the documented Dashboard delegation path. Confirming its real status would let us simplify the verifier.
 - **Typed error handling is missing.** The ADK returns human-readable detail strings; we have to substring-match in an adapter to map to internal categories (`authority_denied`, `map_acl_denied`, `token_metering_failed`, etc.). Filed for a future typed-SDK release.
 

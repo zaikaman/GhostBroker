@@ -760,7 +760,7 @@ Terminal 3 ADK/T3N documentation gives enough confidence to design GhostBroker a
 **Affected docs**: T3N DIDs, ADK overview, "Delegate Access to AI Agents"
 **Date filed**: 2026-06-14 (updated 2026-06-14 after the first end-to-end agent run)
 
-## What I found (Jun 2026, and again after the JCS → boundbuyer consolidation)
+## What I found (Jun 2026, and again after the JCS → Ghostbroker delegation consolidation)
 
 The public T3 documentation implies a dashboard-driven delegation flow
 ("enter an Agent DID, select a TEE contract, optionally select functions,
@@ -771,8 +771,8 @@ page at `https://www.terminal3.io/claim-page`, which issues a single
 derived from that key at runtime.
 
 The GhostBroker agent stack (this repo, `agents/` workspace) was
-built around the boundbuyer BUIDL (the only published live reference
-for "what Terminal 3 actually gives you"). Boundbuyer models the
+built around the Ghostbroker delegation BUIDL (the only published live reference
+for "what Terminal 3 actually gives you"). Ghostbroker delegation models the
 delegation as a **W3C Verifiable Credential JSON-LD** with `issuer` /
 `credentialSubject` / `proof.jws` fields, a budget, and a category
 allowlist. The agent's identity is a derived `did:t3n:0x<eth-address>`
@@ -792,17 +792,17 @@ secp256k1 key. That model required 5+ env vars (`CREDENTIAL_JCS_BASE64`,
 `POLICY_HASH`, `ADMIN_PRIVATE_KEY`, `AGENT_PRIVATE_KEY`, `AGENT_DID`)
 and a manual keypair generation step that is not documented anywhere.
 The JCS path is now **deleted** from GhostBroker — see the Jun 14
-consolidation that left only the boundbuyer verifier in
-`t3-enclave/src/auth/boundbuyer-delegation.ts`. The 5 JCS verifier
+consolidation that left only the Ghostbroker delegation verifier in
+`t3-enclave/src/auth/ghostbroker-delegation.ts`. The 5 JCS verifier
 tests in `auth-delegation-credential.test.ts` and the
 `DelegationProofBuilder` in the agent SDK are gone; the run-loop calls
 `client.admitAgent({institutionId, agentDid, delegationCredential})`
-with the boundbuyer VC loaded from disk.
+with the Ghostbroker delegation VC loaded from disk.
 
 ### Why this matters for GhostBroker
 
 The agents in this repo can run end-to-end against the live T3N
-network using the **boundbuyer flow** with one T3 secret
+network using the **Ghostbroker delegation flow** with one T3 secret
 (`T3N_API_KEY`). The run-loop admits the agent with the VC from
 `setup:delegation`; the backend persists the VC on the agent record;
 submit / cancel / settlement all re-verify the same VC against the
@@ -818,7 +818,7 @@ admin keypair ceremony, no dashboard integration.
      a real `did:t3n:0x...` to disk.
   2. `npm run setup:delegation` — mints a W3C VC to disk.
   3. `npm run buyer` and `npm run seller` — submit, match, settle.
-- The boundbuyer path is the only admit shape (`client.admitAgent` with
+- The Ghostbroker delegation path is the only admit shape (`client.admitAgent` with
   `delegationCredential`); the JCS-prove path is gone from the SDK.
   `client.admitAgentWithDelegationCredential` is deleted.
 
@@ -829,22 +829,22 @@ from Terminal 3"** with:
 
 - A clear statement: there is no T3 dashboard. The onboarding surface
   is the `T3N_API_KEY` from the claim page.
-- A diagram of the boundbuyer flow: claim key → T3N handshake → DID →
+- A diagram of the Ghostbroker delegation flow: claim key → T3N handshake → DID →
   W3C VC → bound to DID → agent authenticates → submits intents.
 - The wire format of the W3C VC (with a JSON example), the demo `jws`
   marker, and the three verifier modes (`sandbox` / `structural` /
   `live`).
 - A note that the Smart VC / JCS-prove shape is a future
-  programmatic-issuer mode; the boundbuyer shape is what works
+  programmatic-issuer mode; the Ghostbroker delegation shape is what works
   today.
 
 ## Recommended implementation action
 
-- Keep the boundbuyer verifier in `t3-enclave` as the single
+- Keep the Ghostbroker delegation verifier in `t3-enclave` as the single
   per-action authority gate. The JCS-prove path is gone.
-- The boundbuyer path is the smoke-test gate **and** the production
+- The Ghostbroker delegation path is the smoke-test gate **and** the production
   gate. Tests for it should pass.
-- A combined `setup:all` helper that mints a boundbuyer-style
+- A combined `setup:all` helper that mints a Ghostbroker-style
   delegation VC and a real agent DID in one step would be a
   one-line addition on top of `setup:identity` and
   `setup:delegation`.

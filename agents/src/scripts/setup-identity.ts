@@ -2,7 +2,7 @@
 /**
  * CLI: mint an agent identity by talking to the T3N network.
  *
- * Equivalent to `boundbuyer/src/scripts/setup-identity.ts`. Hands a
+ * Equivalent to `Ghostbroker delegation/src/scripts/setup-identity.ts`. Hands a
  * fresh secp256k1 keypair to the T3N SDK's `T3nClient.handshake()`
  * + `client.authenticate(...)` flow and persists the resulting
  * `did:t3n:0x...` plus the keypair to `output/identities/agent_identity.json`.

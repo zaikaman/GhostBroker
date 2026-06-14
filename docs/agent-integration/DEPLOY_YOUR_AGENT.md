@@ -94,7 +94,7 @@ const client = new GhostBrokerClient({ baseUrl: process.env.GHOSTBROKER_URL! });
 const session = await client.authenticateWithApiKey(process.env.GHOSTBROKER_API_KEY!);
 console.log(`✅ Authenticated as ${session.institution.displayName}`);
 
-// Load the boundbuyer W3C VC minted by `agents` `setup:delegation`
+// Load the Ghostbroker delegation W3C VC minted by `agents` `setup:delegation`
 // (or by your own issuer) and admit the agent.
 const delegationCredential = JSON.parse(
   readFileSync(process.env.DELEGATION_CREDENTIAL_PATH!, "utf8"),

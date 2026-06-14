@@ -7,9 +7,9 @@ import type { OpaqueMatchOutcome } from "./match-contract-client.js";
 
 export interface SettlementAuthorityVerifier {
   /**
-   * Re-verify the agent's boundbuyer W3C VC for the action the
+   * Re-verify the agent's Ghostbroker delegation W3C VC for the action the
    * settlement is about to perform. The verifier needs the
-   * `delegationCredential` (the boundbuyer VC persisted at admit
+   * `delegationCredential` (the Ghostbroker delegation VC persisted at admit
    * time) and the `authorityRef` the agent echoed back on submit,
    * to confirm the agent is presenting the same credential it
    * was admitted with.

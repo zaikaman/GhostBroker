@@ -35,7 +35,7 @@ We will:
 |---|---|---|
 | `GHOSTBROKER_API_KEY` (`gbk_…`) | Submit intents + admit agents on behalf of your institution | Revoke from the **API Keys** panel on the dashboard. Generate a new key and update your agent's secrets store. |
 | Dashboard operator session token | Read-only dashboard access (no trading authority) | Sign out of the dashboard; sign back in to invalidate active sessions. |
-| Delegation credential (boundbuyer W3C VC) | Admission of a specific agent under a specific institution policy, and every subsequent privileged action | Re-mint the VC (`npm run setup:delegation` from the `agents/` workspace). The backend re-verifies on admit / submit / cancel / settlement. |
+| Delegation credential (Ghostbroker delegation W3C VC) | Admission of a specific agent under a specific institution policy, and every subsequent privileged action | Re-mint the VC (`npm run setup:delegation` from the `agents/` workspace). The backend re-verifies on admit / submit / cancel / settlement. |
 
 **There is no self-service key rotation in the SDK.** Key rotation is a dashboard operation, by design.
 
@@ -52,7 +52,7 @@ We will:
 
 - API keys are stored hashed (SHA-256) in the backend. The plaintext key is shown exactly once on creation and is unrecoverable from the backend.
 - Session tokens are HMAC-SHA-256 over a compact JWS-style payload (`base64url(header).base64url(payload).signature`). The signing secret is server-side; agents never see it.
-- The boundbuyer-style W3C delegation VC is the only credential the live T3N onboarding surface mints. The backend verifier (`t3-enclave/src/auth/boundbuyer-delegation.ts`) runs in `sandbox` / `structural` / `live` mode (server-side `VC_VERIFY_MODE`); `live` mode uses `@terminal3/verify_vc` if installed, else falls back to `structural`. See [`docs/agent-integration/AUTHENTICATION.md`](https://github.com/zaikaman/GhostBroker/blob/main/docs/agent-integration/AUTHENTICATION.md) for the per-action authority flow.
+- The Ghostbroker-style W3C delegation VC is the only credential the live T3N onboarding surface mints. The backend verifier (`t3-enclave/src/auth/ghostbroker-delegation.ts`) runs in `sandbox` / `structural` / `live` mode (server-side `VC_VERIFY_MODE`); `live` mode uses `@terminal3/verify_vc` if installed, else falls back to `structural`. See [`docs/agent-integration/AUTHENTICATION.md`](https://github.com/zaikaman/GhostBroker/blob/main/docs/agent-integration/AUTHENTICATION.md) for the per-action authority flow.
 - The matching engine runs inside a Terminal 3 hardware enclave. The SDK never touches enclave keys, the receipt key, or the match contract.
 
 ## Acknowledgements

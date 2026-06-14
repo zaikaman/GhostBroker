@@ -182,7 +182,7 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     supabase as never,
   );
 
-  // Boundbuyer-only authorization facade. No live network client
+  // Ghostbroker-only authorization facade. No live network client
   // is needed — the verifier runs entirely from the VC the agent
   // supplies. The T3N SDK still powers the identity / handshake
   // / blind-intent / match-contract surfaces, but the authorization

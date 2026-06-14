@@ -173,7 +173,7 @@ describe("GhostBrokerClient", () => {
           mockJsonResponse({
             agentDid: "did:t3n:0xAgentAddress",
             status: "admitted",
-            authorityRef: "boundbuyer-delegation:urn:uuid:test",
+            authorityRef: "ghostbroker-delegation:urn:uuid:test",
           } satisfies AgentAdmission),
         );
 
@@ -189,7 +189,7 @@ describe("GhostBrokerClient", () => {
       expect(admission).toEqual({
         agentDid: "did:t3n:0xAgentAddress",
         status: "admitted",
-        authorityRef: "boundbuyer-delegation:urn:uuid:test",
+        authorityRef: "ghostbroker-delegation:urn:uuid:test",
       });
 
       const admitCall = fetchSpy.mock.calls[1];

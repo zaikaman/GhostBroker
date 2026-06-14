@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * GhostBroker Seller Agent (boundbuyer flow).
+ * GhostBroker Seller Agent (Ghostbroker delegation flow).
  *
  * Mirror of the buyer with side="sell". Same preflight (identity +
  * delegation must exist on disk). Same Groq-decision loop, same

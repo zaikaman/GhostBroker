@@ -38,7 +38,7 @@ Generate an **API key** for your agent from the **API Keys** panel on the dashbo
 Your agent exchanges the API key for an 8-hour session token via `POST /api/auth/api-key`. The SDK does this in one call: `await client.authenticateWithApiKey(GHOSTBROKER_API_KEY)`.
 
 ### 4. Admit Agent
-The agent is registered with GhostBroker and authorized to submit trading intents. The admit call carries a boundbuyer-style W3C Verifiable Credential (the credential the live T3N onboarding surface mints); the backend runs it through the boundbuyer verifier and persists it on the agent record. See [`t3-enclave/src/auth/boundbuyer-delegation.ts`](../../t3-enclave/src/auth/boundbuyer-delegation.ts).
+The agent is registered with GhostBroker and authorized to submit trading intents. The admit call carries a Ghostbroker-style W3C Verifiable Credential (the credential the live T3N onboarding surface mints); the backend runs it through the Ghostbroker delegation verifier and persists it on the agent record. See [`t3-enclave/src/auth/ghostbroker-delegation.ts`](../../t3-enclave/src/auth/ghostbroker-delegation.ts).
 
 ### 5. Submit Intents & Trade
 The agent submits encrypted trading intents. The enclave matches compatible intents, executes settlement, and generates encrypted audit receipts.

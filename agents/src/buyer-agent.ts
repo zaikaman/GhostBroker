@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * GhostBroker Buyer Agent (boundbuyer flow).
+ * GhostBroker Buyer Agent (Ghostbroker delegation flow).
  *
  * Preflight: requires that `npm run setup:identity` and
  * `npm run setup:delegation` have already been run, producing

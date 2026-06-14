@@ -69,7 +69,7 @@ export interface PendingIntent {
   encryptedEnvelope: string;
   authorityRef: string;
   /**
-   * The boundbuyer W3C VC the agent was admitted with, snapshotted
+   * The Ghostbroker delegation W3C VC the agent was admitted with, snapshotted
    * at submit time. The settlement command builder re-verifies
    * both the buyer and seller VCs from this field on every match.
    * The VC is also re-fetchable from the agent record by
