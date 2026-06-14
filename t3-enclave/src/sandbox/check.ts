@@ -6,6 +6,11 @@ import {
   InsufficientT3TokenBalanceError,
   SandboxTokenBalanceClient,
 } from "./token-balance.js";
+import {
+  readT3EnclaveConfig,
+  runStartupCheck,
+  T3EnclaveConfigError,
+} from "./config.js";
 import type { Environment } from "@terminal3/t3n-sdk";
 
 interface SandboxCheckEnv {
@@ -123,6 +128,21 @@ async function main(): Promise<void> {
     minimumTokenBalance,
   );
 
+  // Run the new fail-closed P0 startup check (T3-ONB-001). The
+  // CLI surfaces the result instead of throwing so operators can
+  // see the warnings; the backend wrapper uses the same function
+  // and does throw.
+  const startupConfig = readT3EnclaveConfig();
+  const startupResult = runStartupCheck(startupConfig, {
+    nodeEnv: (process.env.NODE_ENV as
+      | "development"
+      | "test"
+      | "production"
+      | undefined) ?? "development",
+    verifiedAgentDids: new Set<string>(),
+    skipAgentGrantCheck: true,
+  });
+
   console.log(
     JSON.stringify(
       {
@@ -135,6 +155,15 @@ async function main(): Promise<void> {
         tokenAccount: balance.account,
         tokenBalanceAvailable: balance.available.toString(),
         tokenBalanceMinimum: balance.minimumRequired.toString(),
+        startupCheck: {
+          authSdkEnv: startupConfig.authSdkEnv,
+          agentDelegationMode: startupConfig.agentDelegationMode,
+          agentGrantVerificationRequired:
+            startupConfig.agentGrantVerificationRequired,
+          ok: startupResult.ok,
+          warnings: startupResult.warnings,
+          errors: startupResult.errors,
+        },
       },
       null,
       2,
@@ -146,9 +175,11 @@ main().catch((error: unknown) => {
   const message =
     error instanceof InsufficientT3TokenBalanceError
       ? "T3 sandbox token balance is below the configured minimum."
-      : error instanceof Error
-        ? error.message
-        : "T3 sandbox check failed.";
+      : error instanceof T3EnclaveConfigError
+        ? `T3 enclave config invalid: ${error.issues.join("; ")}`
+        : error instanceof Error
+          ? error.message
+          : "T3 sandbox check failed.";
 
   console.error(message);
   process.exitCode = 1;

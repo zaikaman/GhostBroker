@@ -64,6 +64,15 @@ const envSchema = z.object({
   AUTH_SESSION_SECRET: z.string().min(32).optional(),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
   PORTFOLIO_SYNC_TOKEN: z.string().min(32).optional(),
+  /**
+   * Comma-separated list of `did:t3n:...` DIDs whose dashboard
+   * grant the operator has verified out-of-band. Consumed by
+   * the T3-enclave startup check (T3-ONB-001) so a production
+   * backend with `T3_AGENT_DELEGATION_MODE=dashboard` and
+   * `T3_AGENT_GRANT_VERIFICATION_REQUIRED=true` refuses to
+   * boot when this list is empty.
+   */
+  T3_VERIFIED_AGENT_DIDS: z.string().optional(),
 });
 
 export type BackendEnv = z.infer<typeof envSchema>;
