@@ -2,6 +2,21 @@
 
 GhostBroker is an institutional dark pool platform composed of a Vite React dashboard, an Express REST/WebSocket API, Supabase PostgreSQL migrations, and a dedicated Terminal 3 enclave package for confidential agent execution.
 
+## Headline: Terminal 3 Agent Auth SDK integration
+
+GhostBroker integrates the **Terminal 3 Agent Auth SDK** for per-action authority verification. Every agent admission, every intent submission, and every settlement re-verifies a Terminal 3 delegation credential against institution policy. The integration lives in [`t3-enclave/src/auth/delegation-credential.ts`](t3-enclave/src/auth/delegation-credential.ts), which verifies signed delegation VCs end-to-end:
+
+- **Cryptography**: `secp256k1` (EIP-191) user signature + `secp256k1` agent signature over a typed invocation preimage.
+- **Authority reference**: every verification produces a `t3-delegation:<vc-id>` reference that the agent must echo back on every privileged action.
+- **Function scoping**: the credential lists which actions the agent is authorized for (`agent.admit`, `intent.submit`, `settlement.execute`). Requests for unlisted actions are rejected as `over_scoped`.
+- **Time windowing**: `not_before_secs` / `not_after_secs` are checked against the verifier's clock; expired or not-yet-valid credentials are rejected.
+- **Revocation**: the verifier accepts a `revokedAuthorityRefs` set; revoked references are rejected before signature verification even runs.
+- **Canonicalisation**: the credential body is JCS-canonicalised and compared byte-for-byte against the supplied canonical form, so a tampered credential cannot pass.
+
+The verifier is the **fast path** when the proof is locally valid; if local verification fails, the verifier falls through to a live `POST /agent-delegations/verify` call on the Terminal 3 network (`agent-auth-client.ts`). This is the same facade used by every backend service — `AgentService.admitAgent`, `HiddenIntentService.submitIntent`, `HiddenIntentService.cancelIntent`, and `SettlementCommandBuilder.build` all call the **same** `T3AgentAuthorizationFacade` singleton, each with the right `requestedAction` for the action. See [`backend/src/auth/agent-authz.ts`](backend/src/auth/agent-authz.ts) and [`backend/src/app.ts`](backend/src/app.ts) (composition root) for the wiring.
+
+Auth is layered: agents hold a persistent `gbk_…` API key to establish a session with the backend (exchanged at `POST /api/auth/api-key` for an 8-hour JWT — see [`agent-client/`](agent-client/) and [`docs/agent-integration/AUTHENTICATION.md`](docs/agent-integration/AUTHENTICATION.md) for the external agent developer experience); on every privileged action they then present a signed Terminal 3 delegation VC. The persistent key is the *session* credential, the signed VC is the *authority* credential. This is the separation the Terminal 3 docs use for the ["seed API key"](https://docs.terminal3.io/developers/adk/tips/seed-api-key) pattern, applied to the agent side of the boundary.
+
 ## Workspace Layout
 
 - `frontend/`: operator dashboard for secure connectivity, completed history, and encrypted receipt workflows.

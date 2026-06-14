@@ -141,7 +141,12 @@ describe("IntentLockJanitor", () => {
       ageMs: 6 * 60 * 1000,
     });
 
-    const received: { phase: string; institutionId: string; agentId?: string }[] = [];
+    // `exactOptionalPropertyTypes` is enabled in tsconfig, so
+    // `event.agentId` is `string | undefined` from the listener
+    // and cannot be assigned to a plain `agentId?: string` slot.
+    // The local receive type makes the `| undefined` explicit so
+    // the subscription callback can pass the value through as-is.
+    const received: { phase: string; institutionId: string; agentId?: string | undefined }[] = [];
     telemetry.subscribe((event) => {
       received.push({
         phase: event.phase,

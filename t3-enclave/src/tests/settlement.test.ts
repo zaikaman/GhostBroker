@@ -61,11 +61,18 @@ describe("settlement command builder", () => {
   it("fails closed for revoked authority", async () => {
     const builder = new SettlementCommandBuilder(new Verifier("rejected"));
 
+    // Pin `now` to a time before `outcome.expiresAt` so this
+    // test exercises the authority-rejection path rather than
+    // accidentally falling into the expired-outcome path as
+    // real wall-clock time advances past 2026-06-13. Test 1
+    // uses the same fixed `now`, keeping the two authority
+    // paths on a consistent timeline.
     await expect(
       builder.build({
         matchOutcome: outcome,
         buyerAgentDid: "did:t3n:agent:buyer-us3",
         sellerAgentDid: "did:t3n:agent:seller-us3",
+        now: new Date("2026-06-12T00:00:00.000Z"),
       }),
     ).rejects.toBeInstanceOf(SettlementAuthorityError);
   });

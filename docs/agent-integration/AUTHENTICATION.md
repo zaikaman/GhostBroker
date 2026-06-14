@@ -1,11 +1,13 @@
 # Authentication
 
-GhostBroker has two distinct authentication surfaces:
+GhostBroker has two authentication surfaces, each tuned to its consumer:
 
-1. **Agents** authenticate with the API via a persistent **API key** (`gbk_…`). This is the only path the agent SDK supports.
-2. **Operators** sign in to the dashboard using a Web3 wallet via the DID challenge-response flow. This is an internal dashboard concern, not part of the agent API contract.
+1. **Agents** (the audience for this doc) authenticate with the API via a persistent **API key** (`gbk_…`). This is the only path the agent SDK supports, because agents are headless and cannot complete a wallet challenge-response.
+2. **Operators** (humans) sign in to the dashboard using a Web3 wallet via the Terminal 3 DID challenge-response flow.
 
-The two are not interchangeable: agents use keys, operators use wallets. This page is about the agent side. The dashboard login is implemented in `frontend/src/services/wallet-auth.ts` and works as long as the backend routes `/api/auth/challenge` and `/api/auth/verify` are reachable.
+The two are not interchangeable: agents use keys, operators use wallets. This page is about the agent side. The operator login is implemented in `frontend/src/services/wallet-auth.ts` and works as long as the backend routes `/api/auth/challenge` and `/api/auth/verify` are reachable.
+
+> **Beyond the session: per-action authority.** The API key authenticates the agent's *session*. Every privileged action — `admit`, `submitIntent`, `cancelIntent`, `settlement.execute` — additionally requires a signed **Terminal 3 delegation VC** that the backend verifies against institution policy. The verifier is the real Terminal 3 Agent Auth SDK integration; see the [README § Headline](../../README.md#headline-terminal-3-agent-auth-sdk-integration) and [`t3-enclave/src/auth/delegation-credential.ts`](../../t3-enclave/src/auth/delegation-credential.ts). This page covers the *session* layer.
 
 ## Agent authentication: API key (the only supported path)
 
@@ -103,7 +105,7 @@ const client = new GhostBrokerClient({
 
 ---
 
-## Operator dashboard login (internal)
+## Operator dashboard login
 
 The Observatory Console at `/` requires the operator to sign in with a Web3 wallet. The flow is the Terminal 3 DID challenge-response:
 
@@ -111,9 +113,11 @@ The Observatory Console at `/` requires the operator to sign in with a Web3 wall
 2. The browser calls `personal_sign` on the wallet.
 3. The signed challenge is posted to `POST /api/auth/verify`, which returns a session token.
 
-This path is **not** exposed by the agent SDK. Agents should never call it — use the API key flow above. The backend routes are kept available only because the dashboard needs them.
+The backend verifies the signature using `T3AgentIdentityVerifier` (in [`t3-enclave/src/auth/agent-identity.ts`](../../t3-enclave/src/auth/agent-identity.ts)) and falls back to a live `POST /agent-identity/verify` call on the Terminal 3 network when local verification cannot resolve the wallet from the DID.
 
-> **Why is this here?** The DID routes are part of the backend's HTTP surface for legacy/compatibility reasons. New agent code should always use `/api/auth/api-key`. If you are writing an agent, you can ignore this section.
+This path is **not** exposed by the agent SDK. Agents should never call it — use the API key flow above. It exists because the human-facing dashboard needs a wallet-based login: the operator is the only party in the system who actually holds a wallet and can sign interactively.
+
+> **Why two paths?** The agent SDK deliberately uses a long-lived API key because agents are headless, unattended, and may run across restarts; a wallet challenge on every connection would break them. The operator login deliberately uses a wallet challenge because the operator *is* present and benefits from a one-tap login that ties the session to a wallet the institution controls. Both are real integrations; they just solve different problems.
 
 ---
 
