@@ -594,19 +594,13 @@ function WriteAgentStep({ session }: { session: AuthSession }): React.JSX.Elemen
           <Package01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Install the SDK:
         </strong>
         <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginBottom: 'var(--spacing-sm)' }}>
-          The SDK is distributed via <strong>GitHub Packages</strong>. First, authenticate:
+          The SDK is open source on GitHub. Install it directly with npm:
         </span>
-        <CodeBlock code={`# .npmrc — create this file in your project root
-@ghostbroker:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN`} />
-        <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 'var(--spacing-sm)', marginBottom: 'var(--spacing-sm)' }}>
-          Replace <code>YOUR_GITHUB_TOKEN</code> with a <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>GitHub personal access token</a> with <code>read:packages</code> scope. Then install:
-        </span>
-        <CodeBlock code="npm install @ghostbroker/agent-client@0.1.0 openai" />
+        <CodeBlock code="npm install github:zaikaman/ghostbroker-agent openai" />
         <div style={{ marginTop: 'var(--spacing-sm)', padding: 'var(--spacing-sm)', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-          <strong>Alternative (no GitHub token):</strong> Copy the SDK into your project and use a file dependency:<br />
-          <code style={{ color: 'var(--color-accent)' }}>cp -r path/to/GhostBroker/agent-client ./agent-client</code><br />
-          <code style={{ color: 'var(--color-accent)' }}>npm install ./agent-client openai</code>
+          <strong>Alternative (clone first):</strong> If you want to browse or modify the SDK source, clone it into a sibling folder and use a file dependency:<br />
+          <code style={{ color: 'var(--color-accent)' }}>git clone https://github.com/zaikaman/ghostbroker-agent.git</code><br />
+          <code style={{ color: 'var(--color-accent)' }}>npm install ./ghostbroker-agent openai</code>
         </div>
         <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--spacing-sm)' }}>
           Then set your env vars and run: <code>npx tsx agent.ts</code>
