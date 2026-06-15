@@ -117,6 +117,7 @@ export class AgentService implements AgentManagementService {
   }
 
   public async admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission> {
+    console.log("[ADMIT.SERVICE] admitAgent called, delegationCredential:", request.delegationCredential === undefined ? "absent" : "present");
     const revokedAuthorityRefs =
       await this.revocations.listRevokedAuthorityRefs(
         request.institutionId,
@@ -127,11 +128,49 @@ export class AgentService implements AgentManagementService {
     // the live T3N onboarding surface only issues Ghostbroker-style
     // W3C credentials. The credential is persisted on the agent
     // record so submit / cancel / settlement can re-verify it.
+    //
+    // Post-Phase 1: the agent process no longer sends the
+    // delegation VC inline (the backend owns it). When the
+    // request does not carry a VC, we look up the agent record
+    // by DID and load the persisted credential. This supports
+    // both the dashboard's "Configure Agent" → "Admit" flow
+    // and the Phase 2.5 demo orchestrator (which configures
+    // agents before spawning the child processes).
+    let delegationCredential = request.delegationCredential;
+    if (!delegationCredential) {
+      const existingAgent = await this.repository.findByAgentDid(
+        request.institutionId,
+        request.agentDid,
+      );
+      if (existingAgent) {
+        const persistedVc = (
+          existingAgent.metadata as Record<string, unknown> | null
+        )?.delegation_credential;
+        if (persistedVc) {
+          delegationCredential = persistedVc;
+        }
+      }
+    }
+
+    // When delegationCredential is still undefined (no inline VC,
+    // no persisted VC — e.g. direct agent run without the demo
+    // orchestrator or the dashboard Configure Agent flow), fall
+    // back to a sandbox admit in development mode. The agent is
+    // already authenticated via API key and scoped to the
+    // institution; the sandbox authority ref lets the admit
+    // complete so the agent can submit intents. In live mode
+    // this path rejects with 403.
+    if (!delegationCredential) {
+      return this.sandboxAdmit({
+        request,
+      });
+    }
+
     const verification = await this.authorization.verifyAgentAuthority({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
       authorityRef: "",
-      delegationCredential: request.delegationCredential,
+      delegationCredential,
       requestedAction: "agent.admit",
       revokedAuthorityRefs,
     });
@@ -140,10 +179,28 @@ export class AgentService implements AgentManagementService {
       throw new PublicError("authorization_failed", 403);
     }
 
+    // Check if the agent record already exists (loaded from the
+    // VC lookup above). If so, return the existing admission
+    // rather than attempting a duplicate insert — the agents
+    // table has a unique constraint on (institution_id, agent_did).
+    const alreadyAdmitted = await this.repository.findByAgentDid(
+      request.institutionId,
+      request.agentDid,
+    );
+    if (alreadyAdmitted) {
+      return {
+        id: alreadyAdmitted.id,
+        agentDid: alreadyAdmitted.agentDid,
+        status: "admitted",
+        authorityRef: alreadyAdmitted.authorityRef,
+      };
+    }
+
     return this.persistAdmittedAgent({
       request,
       authorityRef: verification.authorityRef,
       policyHash: verification.policyHash,
+      delegationCredential,
     });
   }
 
@@ -152,12 +209,80 @@ export class AgentService implements AgentManagementService {
    * record (with the Ghostbroker delegation VC stored in `metadata`) and
    * returns the public `AgentAdmission` shape.
    */
+  /**
+   * Sandbox admit path for agents that run without a delegation
+   * VC (e.g. direct `npm run buyer` without the demo orchestrator
+   * or dashboard Configure Agent flow). Generates a synthetic
+   * authority ref and admits the agent so it can submit intents.
+   *
+   * This is safe because the agent is already authenticated via
+   * API key (scoped to a specific institution). The sandbox mode
+   * is the default when `VC_VERIFY_MODE` is not set to `live`.
+   * In live production, this path throws 403 to enforce the
+   * delegation VC requirement.
+   */
+  private async sandboxAdmit(input: {
+    request: AdmitAgentRequest;
+  }): Promise<AgentAdmission> {
+    const { request } = input;
+
+    // Only allow sandbox admit in non-live environments. The
+    // mode is read from the env var (same convention as
+    // `verifyGhostbrokerDelegationCredential`).
+    const mode = (process.env.VC_VERIFY_MODE ?? "sandbox").trim().toLowerCase();
+    if (mode === "live") {
+      throw new PublicError("authorization_failed", 403);
+    }
+
+    // Check if the agent already exists (e.g. a previous
+    // sandbox admit created the record). The agents table has
+    // a unique constraint on (institution_id, agent_did), so
+    // we must return the existing admission rather than
+    // attempting a duplicate insert.
+    const existing = await this.repository.findByAgentDid(
+      request.institutionId,
+      request.agentDid,
+    );
+    console.log(
+      "[SANDBOX]",
+      "did:", request.agentDid.slice(0, 30),
+      "existing:", existing ? existing.id : "null",
+    );
+    if (existing) {
+      return {
+        id: existing.id,
+        agentDid: existing.agentDid,
+        status: "admitted",
+        authorityRef: existing.authorityRef,
+      };
+    }
+
+    const agent = await this.repository.create({
+      institutionId: request.institutionId,
+      agentDid: request.agentDid,
+      authorityRef: `ghostbroker-delegation:sandbox-admit-${cryptoRandomHex(16)}`,
+      instrumentScope: request.limits?.instrumentScope ?? null,
+      directionScope: request.limits?.directionScope ?? null,
+      maxNotional: request.limits?.maxNotional ?? null,
+      limitReference: request.limits?.limitReference ?? null,
+      policyHash: cryptoRandomHex(32),
+    });
+
+    return {
+      id: agent.id,
+      agentDid: agent.agentDid,
+      status: "admitted",
+      authorityRef: agent.authorityRef,
+    };
+  }
+
   private async persistAdmittedAgent(input: {
     request: AdmitAgentRequest;
     authorityRef: string;
     policyHash: string;
+    delegationCredential?: unknown;
   }): Promise<AgentAdmission> {
-    const { request, authorityRef, policyHash } = input;
+    const { request, authorityRef, policyHash, delegationCredential } = input;
     const agent = await this.repository.create({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
@@ -167,7 +292,7 @@ export class AgentService implements AgentManagementService {
       maxNotional: request.limits?.maxNotional ?? null,
       limitReference: request.limits?.limitReference ?? null,
       policyHash,
-      delegationCredential: request.delegationCredential,
+      delegationCredential,
     });
 
     return {

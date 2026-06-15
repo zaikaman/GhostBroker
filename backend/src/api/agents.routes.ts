@@ -73,6 +73,15 @@ export function createAgentsRouter(
       const admission = await agentService.admitAgent(parsed.data);
       response.status(200).json(admission);
     } catch (error) {
+      console.error("[ADMIT DEBUG]", error instanceof Error ? error.message : error);
+      if (error instanceof PublicError) {
+        console.error("[ADMIT DEBUG] code:", error.code, "status:", error.statusCode);
+        if (error.cause) {
+          console.error("[ADMIT DEBUG] cause:", error.cause);
+        }
+      } else if (error instanceof Error && error.stack) {
+        console.error("[ADMIT DEBUG] stack:", error.stack);
+      }
       next(error);
     }
   });

@@ -58,6 +58,12 @@ export function readIdentity(path: string = DEFAULT_IDENTITY_PATH): AgentIdentit
  * duration of the run. The private key never leaves the
  * process — the backend only sees the public DID, and the
  * delegation VC is owned server-side.
+ *
+ * When the `AGENT_IDENTITY_DID` env var is set (Phase 2.5
+ * demo orchestrator path), the process uses that DID
+ * directly instead of generating a random keypair. This
+ * ensures the agent admits with the same DID the backend
+ * configured and minted a VC for.
  */
 export function loadOrGenerateIdentity(
   path: string | undefined,
@@ -65,6 +71,25 @@ export function loadOrGenerateIdentity(
   if (path && existsSync(path)) {
     return readIdentity(path);
   }
+
+  // Phase 2.5: accept a pre-assigned DID from the demo
+  // orchestrator. No keypair is needed because the backend
+  // owns the delegation VC and the agent only uses the DID
+  // as an identifier on admit / submit calls.
+  const forcedDid = process.env.AGENT_IDENTITY_DID;
+  if (forcedDid) {
+    return {
+      version: 1,
+      createdAt: new Date().toISOString(),
+      did: forcedDid,
+      ethAddress: forcedDid,
+      networkTier: "testnet",
+      publicKey: "",
+      privateKey: "",
+      networkUrl: "",
+    };
+  }
+
   const keypair = generateKeypair();
   return {
     version: 1,

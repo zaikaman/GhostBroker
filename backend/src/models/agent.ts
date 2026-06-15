@@ -26,7 +26,7 @@ export const admitAgentRequestSchema = z.object({
    * time so the intent submit / cancel / settlement paths can
    * re-verify it on every privileged action.
    */
-  delegationCredential: z.unknown(),
+  delegationCredential: z.unknown().optional(),
   limits: authorityLimitsSchema.optional(),
 });
 

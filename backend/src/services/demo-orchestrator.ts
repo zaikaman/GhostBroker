@@ -36,6 +36,24 @@ export interface DemoAgentOrchestrator {
     institutionId: string;
     /** Plaintext API key to inject into the spawned agents. */
     demoApiKey: string;
+    /**
+     * ID of the API key the route handler minted for this
+     * demo run. Stored in state and revoked on `stopDemo()`.
+     * The orchestrator does NOT mint its own key — the route
+     * handler owns the key lifecycle.
+     */
+    apiKeyId: string;
+    /**
+     * Pre-configured agent DID for the buyer process.
+     * Passed through as `AGENT_IDENTITY_DID` so the agent
+     * uses the same DID the backend configured with a VC.
+     */
+    buyerAgentDid?: string;
+    /**
+     * Pre-configured agent DID for the seller process.
+     * Same pattern as buyerAgentDid.
+     */
+    sellerAgentDid?: string;
   }): Promise<DemoStatus>;
   stopDemo(): Promise<DemoStatus>;
   getStatus(): DemoStatus;
@@ -109,6 +127,9 @@ export class ChildProcessDemoAgentOrchestrator implements DemoAgentOrchestrator 
   public async startDemo(input: {
     institutionId: string;
     demoApiKey: string;
+    apiKeyId: string;
+    buyerAgentDid?: string;
+    sellerAgentDid?: string;
   }): Promise<DemoStatus> {
     if (this.state) {
       throw new PublicError("service_unavailable", 409);
@@ -117,31 +138,26 @@ export class ChildProcessDemoAgentOrchestrator implements DemoAgentOrchestrator 
       throw new PublicError("validation_failed", 400);
     }
 
-    // Mint a labeled API key for the demo so the audit log
-    // can attribute any activity to this run. The label
-    // includes the institution + a short timestamp. The
-    // key is revoked on `stopDemo`.
-    const apiKey = await this.apiKeyService.createKey(
-      input.institutionId,
-      `demo-${new Date().toISOString().slice(11, 19)}`,
-      ["agent:operate"],
-    );
+    // The route handler owns the API key lifecycle: it mints
+    // the key before calling startDemo and passes the id so
+    // we can revoke it on stop. We do NOT mint our own key
+    // here — that would leak an unused credential.
 
-    // (The env is built per-side in `spawnSide` via
-    // `spawnEnv`.) The API key + backend URL are passed
-    // through to the child so the spawned agent can
-    // authenticate against the backend without the
-    // operator copying anything into `agents/.env`.
-
-    const buyer = this.spawnSide("buyer", input.demoApiKey);
-    const seller = this.spawnSide("seller", input.demoApiKey);
+    // The agent DIDs are generated server-side by
+    // `AgentService.configureAgent()` which also mints
+    // and persists the delegation VC. We pass the DIDs
+    // through to the spawned processes via
+    // `AGENT_IDENTITY_DID` so the agent re-uses the same
+    // DID the backend configured.
+    const buyer = this.spawnSide("buyer", input.demoApiKey, input.buyerAgentDid);
+    const seller = this.spawnSide("seller", input.demoApiKey, input.sellerAgentDid);
 
     const state: InternalState = {
       buyer,
       seller,
       startedAt: new Date().toISOString(),
       institutionId: input.institutionId,
-      apiKeyId: apiKey.id,
+      apiKeyId: input.apiKeyId,
       buyerLogTail: "",
       sellerLogTail: "",
     };
@@ -222,12 +238,16 @@ export class ChildProcessDemoAgentOrchestrator implements DemoAgentOrchestrator 
   private spawnSide(
     side: "buyer" | "seller",
     demoApiKey: string,
+    agentDid?: string,
   ): ChildProcess {
     const isScriptMode =
       this.buyerScript !== undefined || this.sellerScript !== undefined;
     const script =
       side === "buyer" ? this.buyerScript : this.sellerScript;
-    const env = this.spawnEnv(demoApiKey);
+    const env: NodeJS.ProcessEnv = {
+      ...this.spawnEnv(demoApiKey),
+      ...(agentDid ? { AGENT_IDENTITY_DID: agentDid } : {}),
+    };
     const isWin = process.platform === "win32";
     const shell = isWin && this.runner[0] === "npm";
 

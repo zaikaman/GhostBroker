@@ -128,9 +128,11 @@ describe("DemoAgentOrchestrator (state machine)", () => {
     const initial = orchestrator.getStatus();
     expect(initial.running).toBe(false);
 
+    const apiKeyId = "route-handler-minted-key-uuid";
     const started = await orchestrator.startDemo({
       institutionId: "00000000-0000-4000-8000-000000000101",
       demoApiKey: "gbk_test_demo_key",
+      apiKeyId,
     });
     expect(started.running).toBe(true);
     expect(started.buyerPid).toBeGreaterThan(0);
@@ -138,18 +140,17 @@ describe("DemoAgentOrchestrator (state machine)", () => {
     expect(started.institutionId).toBe(
       "00000000-0000-4000-8000-000000000101",
     );
-
-    // Exactly one API key was minted.
-    expect(apiKeyService.minted).toHaveLength(1);
-    const mintedKey = apiKeyService.minted[0]!;
-    expect(mintedKey.label.startsWith("demo-")).toBe(true);
-    expect(mintedKey.scopes).toEqual(["agent:operate"]);
+    // The orchestrator no longer mints its own key —
+    // the route handler owns the lifecycle. No stub
+    // calls should have been made.
+    expect(apiKeyService.minted).toHaveLength(0);
 
     // Second startDemo while running is refused.
     await expect(
       orchestrator.startDemo({
         institutionId: "00000000-0000-4000-8000-000000000101",
         demoApiKey: "gbk_test_demo_key",
+        apiKeyId: "another-key-uuid",
       }),
     ).rejects.toMatchObject({ statusCode: 409 });
 
@@ -157,10 +158,10 @@ describe("DemoAgentOrchestrator (state machine)", () => {
     expect(mid.running).toBe(true);
 
     await orchestrator.stopDemo();
+    // stopDemo revokes the apiKeyId that was passed to startDemo.
     expect(apiKeyService.revoked).toEqual([
-      { id: mintedKey.id, institutionId: mintedKey.institutionId },
+      { id: apiKeyId, institutionId: "00000000-0000-4000-8000-000000000101" },
     ]);
-    expect(apiKeyService.minted[0]?.revokedAt).not.toBeNull();
 
     const after = orchestrator.getStatus();
     expect(after.running).toBe(false);
@@ -183,6 +184,7 @@ describe("DemoAgentOrchestrator (state machine)", () => {
       orchestrator.startDemo({
         institutionId: "00000000-0000-4000-8000-000000000101",
         demoApiKey: "not-a-valid-prefix",
+        apiKeyId: "irrelevant-key-uuid",
       }),
     ).rejects.toMatchObject({ statusCode: 400 });
   });

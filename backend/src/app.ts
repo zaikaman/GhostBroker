@@ -428,6 +428,13 @@ export function createApp(
       createDemoRouter({
         orchestrator: services.demoAgentOrchestrator,
         apiKeyService: services.apiKeyService,
+        agentService: services.agentService,
+        // With exactOptionalPropertyTypes, we use a spread to
+        // omit the key entirely when the signer is absent
+        // rather than passing `undefined` explicitly.
+        ...(services.tenantDelegationSigner
+          ? { tenantSigner: services.tenantDelegationSigner }
+          : {}),
       }),
     );
   }
