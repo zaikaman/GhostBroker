@@ -50,6 +50,15 @@ describe("match contract client", () => {
       encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
       status: "matched",
     });
-    expect(networkClient.requests[0]?.body).toEqual(request);
+    // The on-the-wire body is snake_case to match the TEE
+    // contract's `EvaluateMatchInput` deserializer in
+    // contracts/matching-policy/src/lib.rs. The public
+    // `MatchEvaluationRequest` is camelCase; the translation
+    // lives in `T3MatchContractClient.evaluateMatch`.
+    expect(networkClient.requests[0]?.body).toEqual({
+      buy_intent_handle: request.buyIntentHandle,
+      sell_intent_handle: request.sellIntentHandle,
+      correlation_ref: request.correlationRef,
+    });
   });
 });

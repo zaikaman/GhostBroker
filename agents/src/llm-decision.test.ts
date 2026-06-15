@@ -62,6 +62,29 @@ describe("decisionSchema", () => {
     expect(parsed.action).toBe("submit");
   });
 
+  it("accepts a valid wait with zero quantity", () => {
+    const parsed = decisionSchema.parse({
+      action: "wait",
+      quantity: 0,
+      price: 70_000,
+      reasoning: "observing",
+    });
+    expect(parsed.action).toBe("wait");
+    expect(parsed.quantity).toBe(0);
+  });
+
+  it("accepts a valid abort with zero quantity and price", () => {
+    const parsed = decisionSchema.parse({
+      action: "abort",
+      quantity: 0,
+      price: 0,
+      reasoning: "stopping",
+    });
+    expect(parsed.action).toBe("abort");
+    expect(parsed.quantity).toBe(0);
+    expect(parsed.price).toBe(0);
+  });
+
   it("rejects an unknown action", () => {
     expect(() =>
       decisionSchema.parse({

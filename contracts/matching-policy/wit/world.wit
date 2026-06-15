@@ -1,0 +1,81 @@
+// WIT world for the GhostBroker matching TEE contract.
+//
+// T3N host calls this contract at two routes, both under the
+// `matching` tail the GhostBroker orchestrator hits via the
+// `T3BlindIntentClient` and `T3MatchContractClient` in
+// `t3-enclave/src/matching/`. Both functions are pure
+// (no host I/O) and produce deterministic opaque handles the
+// orchestrator threads through its in-memory queue.
+//
+// Tail: `matching` (must match the T3 contract-name + the
+// `contractPath` defaults in the t3-enclave clients).
+package ghostbroker:matching-policy@0.1.0;
+
+world contract {
+  import host:tenant/tenant-context@1.0.0;
+  import host:interfaces/logging@2.1.0;
+
+  export contracts;
+}
+
+interface contracts {
+  // Shared input envelope. Mirrors the procurement-policy
+  // `generic-input` shape so the T3 host can dispatch without
+  // a per-contract path.
+  record generic-input {
+    input: option<list<u8>>,
+    user-profile: option<list<u8>>,
+    context: option<list<u8>>,
+  }
+
+  // Seal an encrypted blind intent. The host returns a fresh
+  // opaque handle the orchestrator uses as the in-memory queue
+  // key. The contract is intentionally non-validating: the
+  // orchestrator already verified the GhostBroker delegation
+  // VC before calling; the TEE's job is to mint a tamper-evident
+  // handle, not re-check policy.
+  //
+  // Input  (JSON): SealIntentInput
+  //   {
+  //     "institution_id":   "<uuid>",
+  //     "agent_did":        "did:t3n:...",
+  //     "encrypted_intent": "<base64url envelope>",
+  //     "authority_ref":    "ghostbroker-delegation:...",
+  //     "correlation_ref":  "corr_...",
+  //   }
+  // Output (JSON): SealIntentOutput
+  //   {
+  //     "intent_handle":  "intent_<32-hex>",
+  //     "execution_ref":  "t3exec_<uuid>",
+  //   }
+  seal-intent: func(req: generic-input) -> result<list<u8>, string>;
+
+  // Evaluate whether two sealed intents (one buy, one sell) can
+  // match. The host returns an opaque match outcome the
+  // orchestrator hands to the settlement command builder. The
+  // contract is intentionally thin: it echoes the required
+  // authority refs + a deterministic outcome ref derived from
+  // the two intent handles. All real matching logic lives in
+  // the orchestrator; the TEE provides a verifiable execution
+  // surface, not a policy engine.
+  //
+  // Input  (JSON): EvaluateMatchInput
+  //   {
+  //     "buy_intent_handle":  "intent_...",
+  //     "sell_intent_handle": "intent_...",
+  //     "correlation_ref":    "corr_...",
+  //   }
+  // Output (JSON): EvaluateMatchOutput
+  //   {
+  //     "outcome_ref":               "outcome_<32-hex>",
+  //     "execution_ref":             "t3exec_<uuid>",
+  //     "buyer_institution_id":      "<uuid>",
+  //     "seller_institution_id":     "<uuid>",
+  //     "encrypted_trade_fields_ref": "t3fields_<32-hex>",
+  //     "buyer_authority_ref":       "ghostbroker-delegation:...",
+  //     "seller_authority_ref":      "ghostbroker-delegation:...",
+  //     "expires_at":                "<iso8601>",
+  //     "status":                    "matched" | "no_match",
+  //   }
+  evaluate-match: func(req: generic-input) -> result<list<u8>, string>;
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@ghostbroker/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GhostBroker TEE contracts — compiled to WASI Preview 2 components and published to the T3N tenant at runtime. Currently ships the `matching-policy` contract that backs the dark-pool seal + match orchestrator.",
+  "type": "module",
+  "scripts": {
+    "build:matching": "cd matching-policy && cargo build --target wasm32-wasip2 --release",
+    "publish:matching": "cd .. && npx tsx scripts/publish-matching.ts",
+    "verify:matching": "cd .. && npx tsx scripts/verify-matching-contract.ts"
+  }
+}

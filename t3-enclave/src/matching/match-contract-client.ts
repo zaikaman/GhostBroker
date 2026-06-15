@@ -80,7 +80,21 @@ export class T3MatchContractClient implements MatchContractClient {
     const response = await this.networkClient.request<T3MatchOutcomeResponse>({
       method: "POST",
       path: this.contractPath,
-      body: request,
+      body: {
+        // The TEE contract's `EvaluateMatchInput` deserializer
+        // (contracts/matching-policy/src/lib.rs) expects
+        // snake_case keys — `buy_intent_handle`,
+        // `sell_intent_handle`, `correlation_ref`. The public
+        // `MatchEvaluationRequest` is camelCase to match the
+        // rest of the GhostBroker API surface, so we translate
+        // at the network boundary. Posting the camelCase
+        // form would produce the same T3N 400 the seal path
+        // was hitting (missing field) once the contract
+        // exercise path is wired up.
+        buy_intent_handle: request.buyIntentHandle,
+        sell_intent_handle: request.sellIntentHandle,
+        correlation_ref: request.correlationRef,
+      },
     });
 
     if (response.status < 200 || response.status >= 300) {

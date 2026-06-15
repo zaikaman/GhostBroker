@@ -9,9 +9,9 @@ import { z } from "zod";
 export const decisionSchema = z.object({
   action: z.enum(["submit", "wait", "abort"]),
   /** WBTC quantity, between the configured min and max. */
-  quantity: z.number().positive(),
+  quantity: z.number().nonnegative(),
   /** USDC price per WBTC, within the configured band around the reference. */
-  price: z.number().positive(),
+  price: z.number().nonnegative(),
   /** A free-text rationale, capped at 280 chars so the log line stays sane. */
   reasoning: z.string().max(280),
 });

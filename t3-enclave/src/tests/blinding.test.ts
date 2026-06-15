@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BlindIntentSealFailureError,
   T3BlindIntentClient,
+  classifyBlindIntentSealFailure,
   type BlindIntentRequest,
 } from "../matching/blind-intent.js";
 import type {
@@ -13,16 +15,19 @@ import type { TokenBalanceClient, TokenBalance } from "../sandbox/token-balance.
 class CapturingNetworkClient implements T3NetworkClient {
   public requests: T3NetworkRequest[] = [];
 
+  public status = 202;
+  public body: unknown = {
+    intent_handle: "intent_t3_opaque",
+    execution_ref: "t3exec_opaque",
+  };
+
   public async request<TBody = unknown>(
     request: T3NetworkRequest,
   ): Promise<T3NetworkResponse<TBody>> {
     this.requests.push(request);
     return {
-      status: 202,
-      body: {
-        intent_handle: "intent_t3_opaque",
-        execution_ref: "t3exec_opaque",
-      } as TBody,
+      status: this.status,
+      body: this.body as TBody,
     };
   }
 }
@@ -77,6 +82,129 @@ describe("blind intent client", () => {
       sealedAt: expect.any(String) as string,
     });
     expect(tokenClient.checked).toBe(true);
-    expect(networkClient.requests[0]?.body).toEqual(request);
+    // The on-the-wire body is snake_case to match the TEE
+    // contract's `SealIntentInput` deserializer in
+    // contracts/matching-policy/src/lib.rs. The public
+    // `BlindIntentRequest` is camelCase; the translation lives
+    // in `T3BlindIntentClient.sealIntent`. See the comment
+    // there for the field-by-field mapping.
+    expect(networkClient.requests[0]?.body).toEqual({
+      institution_id: request.institutionId,
+      agent_did: request.agentDid,
+      encrypted_intent: request.encryptedIntentEnvelope,
+      authority_ref: request.authorityRef,
+      correlation_ref: request.correlationRef,
+    });
+  });
+
+  it("throws BlindIntentSealFailureError classified as contract_not_registered on T3N 404", async () => {
+    const networkClient = new CapturingNetworkClient();
+    networkClient.status = 404;
+    networkClient.body = {
+      code: "not_found",
+      detail:
+        "tenant contract did:t3n:tenant:abc:matching not registered",
+      request_id: "req-001",
+    };
+    const tokenClient = new ReadyTokenClient();
+    const client = new T3BlindIntentClient({
+      networkClient,
+      tokenBalanceClient: tokenClient,
+      tokenAccount: "did:t3n:institution:us2",
+      minimumTokenBalance: 1n,
+    });
+
+    await expect(client.sealIntent(request)).rejects.toMatchObject({
+      name: "BlindIntentSealFailureError",
+      kind: "contract_not_registered",
+      status: 404,
+    });
+    await expect(client.sealIntent(request)).rejects.toBeInstanceOf(
+      BlindIntentSealFailureError,
+    );
+  });
+
+  it("classifies a 503 with t3_sdk_request_failed wrapping a 'not registered' detail as contract_not_registered", async () => {
+    const networkClient = new CapturingNetworkClient();
+    networkClient.status = 503;
+    networkClient.body = {
+      code: "t3_sdk_request_failed",
+      message:
+        "HTTP 404: Method not found ({\"code\":\"not_found\",\"detail\":\"tenant contract did:t3n:tenant:abc:matching not registered\"})",
+    };
+    const tokenClient = new ReadyTokenClient();
+    const client = new T3BlindIntentClient({
+      networkClient,
+      tokenBalanceClient: tokenClient,
+      tokenAccount: "did:t3n:institution:us2",
+      minimumTokenBalance: 1n,
+    });
+
+    await expect(client.sealIntent(request)).rejects.toMatchObject({
+      kind: "contract_not_registered",
+      status: 503,
+    });
+  });
+
+  it("classifies a generic 502 T3N rejection as t3_request_failed and preserves the upstream body on the error", async () => {
+    const networkClient = new CapturingNetworkClient();
+    networkClient.status = 502;
+    networkClient.body = { code: "upstream_error", message: "T3N gateway timeout" };
+    const tokenClient = new ReadyTokenClient();
+    const client = new T3BlindIntentClient({
+      networkClient,
+      tokenBalanceClient: tokenClient,
+      tokenAccount: "did:t3n:institution:us2",
+      minimumTokenBalance: 1n,
+    });
+
+    let caught: BlindIntentSealFailureError | undefined;
+    try {
+      await client.sealIntent(request);
+    } catch (error) {
+      caught = error as BlindIntentSealFailureError;
+    }
+    expect(caught).toBeInstanceOf(BlindIntentSealFailureError);
+    expect(caught?.kind).toBe("t3_request_failed");
+    expect(caught?.status).toBe(502);
+    expect(caught?.upstreamBody).toEqual({
+      code: "upstream_error",
+      message: "T3N gateway timeout",
+    });
+  });
+});
+
+describe("classifyBlindIntentSealFailure", () => {
+  it("extracts the contract name from a T3N 'tenant contract <did>:<name> not registered' detail", () => {
+    const result = classifyBlindIntentSealFailure(404, {
+      code: "not_found",
+      detail: "tenant contract did:t3n:tenant:xyz:matching not registered",
+    });
+    expect(result.kind).toBe("contract_not_registered");
+    expect(result.message).toContain("'matching'");
+  });
+
+  it("falls back to a generic contract name when the detail string shape is unknown", () => {
+    const result = classifyBlindIntentSealFailure(404, {
+      code: "not_found",
+      detail: "some other not registered error",
+    });
+    expect(result.kind).toBe("contract_not_registered");
+    expect(result.message).toContain("'matching'");
+  });
+
+  it("classifies a non-registered-style 5xx as t3_request_failed with the upstream message preserved", () => {
+    const result = classifyBlindIntentSealFailure(502, {
+      code: "upstream_error",
+      message: "T3N gateway timeout",
+    });
+    expect(result.kind).toBe("t3_request_failed");
+    expect(result.message).toBe("T3N gateway timeout");
+  });
+
+  it("falls back to a synthesized message when the upstream body is empty", () => {
+    const result = classifyBlindIntentSealFailure(500, {});
+    expect(result.kind).toBe("t3_request_failed");
+    expect(result.message).toContain("HTTP 500");
   });
 });

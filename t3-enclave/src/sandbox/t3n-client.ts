@@ -166,6 +166,7 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
         } as TBody,
       };
     } catch (error) {
+      console.error("[T3N CLIENT REQUEST ERROR]", error);
       return {
         status: 503,
         body: {

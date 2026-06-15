@@ -870,3 +870,289 @@ Once the above is true, the on-the-page path from `git clone` to
 a running two-agent smoke test against live T3 is complete.
 
 ---
+
+## Addendum (2026-06-15) — T3N `matching` contract registration is required for live seal calls
+
+**Discovered while debugging** `400 validation_failed: The request could not be accepted.`
+on `POST /api/agents/intents` during the seller-agent loop in GhostBroker.
+
+### Symptom
+
+The agent authenticates, admits, and submits an encrypted intent. The
+orchestrator route calls
+`T3BlindIntentClient.sealIntent(...)` (in
+`t3-enclave/src/matching/blind-intent.ts`), which `POST`s to
+`/contracts/matching/blind-intents` on the T3N testnet. T3N replies:
+
+```
+HTTP 404
+{
+  "code": "not_found",
+  "detail": "tenant contract <tenant_did>:matching not registered",
+  "request_id": "..."
+}
+```
+
+The T3 SDK wraps the 404 as a `503` with body
+`{ "code": "t3_sdk_request_failed", "message": "HTTP 404: Method not found (...)" }`.
+The `T3BlindIntentClient` previously threw the generic
+`Error("T3 hidden intent sealing failed.")` and the orchestrator route
+swallowed it as `400 validation_failed: "The request could not be
+accepted."` with no upstream detail, leaving the agent log uninformative.
+
+### Root cause
+
+The T3N tenant identified by `T3_TENANT_DID`
+(`did:t3n:a07f5f528c01e22dfd229a027c4b4afa4514e952` in our dev `.env`)
+has **no `matching` smart contract registered** on the testnet. The
+seal call needs the contract to exist on the tenant's account before
+the testnet will accept the call.
+
+### What the docs do not cover
+
+The ADK / T3N docs describe tenant onboarding (`tenant.tenant.claim()`,
+`tenant.tenant.me()`) and tenant KV-map provisioning
+(`/tenant/maps`), and TEE contract publishing, but do **not** document:
+
+- A first-class SDK call to publish a TEE smart contract
+  (`matching`) and register it on a tenant. The T3N SDK exposes
+  `tenant.contracts.execute(...)` for *calling* a contract, but the
+  `register` / `publish` flow is undocumented.
+- Whether the `matching` contract that GhostBroker needs is a
+  built-in (provided by T3) or one that the GhostBroker team
+  needs to publish themselves. The TEE contracts under
+  `ghostbroker-delegation-reference/contracts/` are an
+  existing reference (currently `procurement-policy`); the
+  matching contract for the dark-pool pipeline has not been
+  located in the workspace and may need to be authored and
+  published.
+- The error code shape we saw — `code: "not_found", detail:
+  "tenant contract <did>:<contract> not registered"` — is
+  produced by the T3N host but is not listed in the ADK common
+  errors page.
+
+### Production impact
+
+This is the second silent-failure bug in the live seal path.
+GhostBroker agents that get past VC verification (admit succeeds)
+still 400 on the very first submit and the agent log shows a
+generic `validation_failed: The request could not be accepted.`
+with no signal that T3N rejected the seal. Operators had to
+attach a debugger to the backend to find the cause.
+
+### Fixes shipped in GhostBroker
+
+1. New typed error in `t3-enclave`:
+   `BlindIntentSealFailureError` with
+   `kind: "contract_not_registered" | "t3_request_failed" | "t3_unreachable"`,
+   `status`, and `upstreamBody`. The seal call classifies the
+   T3N response and throws this typed error instead of a
+   generic `Error("T3 hidden intent sealing failed.")`.
+2. New `classifyBlindIntentSealFailure(status, body)` helper
+   (exported for testability) that recognises both the bare T3N
+   404 body and the SDK-wrapped 503 with `code:
+   "t3_sdk_request_failed"`. Extracts the contract name from
+   the T3N detail string when present, falls back to
+   `"matching"` otherwise.
+3. `POST /api/agents/intents` route maps the typed error to
+   `503 sealing_failed` with the upstream cause on the response
+   (`code: "sealing_failed", message: "...", cause: "T3N tenant
+   contract 'matching' is not registered for this tenant. ..."`)
+   so the agent log surfaces the real reason.
+4. `PublicError.toResponse()` exposes a `cause: string` field
+   for `sealing_failed` and `service_unavailable` codes only.
+   Authorization and validation errors continue to omit
+   `cause` to avoid leaking internal detail.
+5. Tests: 7 new tests in
+   `t3-enclave/src/tests/blinding.test.ts` (classification +
+   the typed error path), 2 new tests in
+   `backend/src/tests/contracts/agents-intents.contract.test.ts`
+   (the 503 mapping + the 400-regression guard), 7 new tests
+   in `backend/src/tests/unit/public-error.test.ts` (cause
+   redaction rules).
+
+### Operator action required (un-blocked by the fix above)
+
+The user must register the GhostBroker `matching` TEE contract
+on the T3N testnet tenant before the seller/buyer loops can
+succeed. The fix above surfaces the *cause* clearly; the fix
+does not by itself provision the contract on T3N. Possible
+paths:
+
+- Publish the matching TEE contract shipped in
+  `ghostbroker-delegation-reference/contracts/` to the
+  GhostBroker tenant via the T3N control-plane dashboard
+  (recommended — this is the path the reference
+  `ghostbroker-delegation-reference/src/scripts/publish-contract.ts`
+  script follows).
+- Wait for Terminal 3 to expose a `tenant.contracts.publish`
+  SDK call and integrate it into the GhostBroker
+  `setup:identity` / `setup:delegation` flow so the contract
+  is auto-registered at agent-creation time.
+
+### Severity
+
+- **P1**: blocks every live submit on T3N, but the fix removes
+  the silent-failure mode so operators can diagnose it from
+  the agent log alone. The contract-registration step itself
+  is a one-time T3N operation, not a recurring bug.
+
+### Resolution (2026-06-15)
+
+The full fix is now shipped and the orchestrator's 404 is gone.
+Three new artifacts carry the fix:
+
+- `contracts/matching-policy/` — a new Rust crate that compiles
+  to a WASI Preview 2 core module exposing `seal-intent` and
+  `evaluate-match`. Pure functions, deterministic SHA-256
+  handle minting, 152 KB stripped WASM at v0.1.0 / 175 KB at
+  v0.1.1 (the bump added the `generic-input` envelope
+  unwrapper).
+- `scripts/publish-matching.ts` — reads `backend/.env` for the
+  T3N credentials, builds a T3nClient + TenantClient session,
+  and calls `tenant.contracts.publish({ tail: "matching",
+  version, wasm })`. Idempotent: re-publish at the same
+  version is a no-op (the `already_registered` shape is
+  treated as success). To push a new version, set
+  `T3_MATCHING_CONTRACT_VERSION` (env wins over .env).
+- `scripts/verify-matching-contract.ts` — calls `seal-intent`
+  and `evaluate-match` against the live tenant and prints the
+  opaque handles. Use this to confirm the registration took
+  effect after a T3N reset.
+
+### How to reproduce the fix from a clean checkout
+
+```sh
+# 1. Install the wasm32-wasip2 target (one-time).
+rustup target add wasm32-wasip2
+
+# 2. Build the contract.
+cd contracts/matching-policy
+cargo build --target wasm32-wasip2 --release
+# WASM lands at target/wasm32-wasip2/release/matching_policy.wasm
+
+# 3. Publish it. Uses T3N_API_KEY + T3_TENANT_DID from
+#    backend/.env. Bump T3_MATCHING_CONTRACT_VERSION to
+#    push a new version (T3N enforces monotonic versions).
+cd ../../       # back to repo root
+npx tsx scripts/publish-matching.ts
+# Result: "✓ Published contract matching v0.1.X"
+
+# 4. Verify it works.
+npx tsx scripts/verify-matching-contract.ts
+# Both calls return opaque handles → orchestrator's 404 is gone.
+
+# 5. Restart the backend so the T3 client picks up the
+#    new contract registration (in-memory cache).
+cd backend && npm run dev
+```
+
+### What we now know about the T3 contract publish path
+
+- T3N accepts a **core WASM module** (not just components) as
+  the `wasm` field of `contracts.publish`. The
+  `wasm32-wasip2` target + `cdylib` crate-type is sufficient;
+  `wasm-tools` / `wasm-component-ld` are not required.
+- T3N enforces **monotonic contract versions** per (tenant,
+  tail). Re-publishing at the same version returns
+  `bad_request: "contract version invalid: version X is not
+  higher than current version X"`. The publish script bails
+  with a non-zero exit; bump `T3_MATCHING_CONTRACT_VERSION`
+  to push a new version.
+- T3N dispatch wraps the body in a `generic-input` envelope
+  whose `input` field is the JSON-stringified call body. The
+  contract's first job is to unwrap that envelope before
+  parsing the inner shape.
+- The Rust toolchain `wasm32-wasip2` target was not in the
+  default `rustup` install on this machine. The setup script
+  in the new `contracts/README.md` documents the one-time
+  `rustup target add wasm32-wasip2` step.
+
+### T3-ONB-017: TEE Contract Inputs Are Strictly snake_case — the SDK Does Not Translate
+
+**Severity**: P1
+**Category**: TEE contract authoring / orchestrator↔contract contract
+**Affected docs**: WIT world examples, generic-input envelope docs, the procurement-policy reference BUIDL
+
+**What I found**
+
+T3N host-dispatched contracts read their function input by JSON-parsing
+the `input` field of the `generic-input` envelope. The Rust
+`serde::Deserialize` derive defaults to field-name matching: a struct
+field `institution_id: String` deserializes from JSON key
+`"institution_id"`, not `"institutionId"`. There is no `#[serde(rename_all = "camelCase")]` in either of the GhostBroker matching contract
+shapes (`SealIntentInput`, `EvaluateMatchInput`) nor in the
+procurement-policy reference BUIDL — they all use the default snake_case
+field names.
+
+The GhostBroker public API surface (REST routes, agent-client SDK,
+agents orchestrator, in-memory `BlindIntentRequest` / `MatchEvaluationRequest`
+types) is camelCase, the way TypeScript codebases naturally model JSON.
+The `T3BlindIntentClient` and `T3MatchContractClient` originally posted
+their `request.body` directly to the network client — which meant the
+contract received `{"institutionId": "...", "encryptedIntentEnvelope":
+"..."}` and serde rejected it with
+`seal-intent: invalid JSON input: missing field 'institution_id' at
+line 1 column <N>`. The 400 from the host was then re-wrapped by
+`classifyBlindIntentSealFailure` as a generic `t3_request_failed`,
+which masked the schema mismatch and made the error look like an
+upstream T3N problem.
+
+**Why this matters for GhostBroker**
+
+The matching contract is the load-bearing TEE primitive of the
+dark-pool orchestrator. Every `POST /api/agents/intents` call from an
+agent eventually flows through this envelope. If the camelCase form is
+posted, the contract fails every call and no agent can submit an
+intent. The error path is silent (the typed
+`BlindIntentSealFailureError` correctly returns 503 with a cause, but
+the cause points at the *contract-not-registered* remediation because
+that was the only classified kind; the actual cause
+`"missing field 'institution_id'"` was preserved on the
+`upstreamBody` but the `message` field misled operators).
+
+**Recommended fix for docs**
+
+- Spell out in the WIT world docs: the contract's input struct uses
+  whatever field names the Rust `Deserialize` derive produces, and
+  there is no implicit camelCase translation. State explicitly that
+  T3 host dispatch does **not** rewrite keys.
+- The reference BUIDLs (`procurement-policy`, future TEE contract
+  samples) should include a short note: "field names here match the
+  Rust struct; client code must translate to snake_case before
+  posting."
+- Common Errors page should add a diagnostic for the
+  `bad_request: "invalid JSON input: missing field '...'"` shape,
+  pointing operators at the wire-format mismatch.
+
+**Recommended implementation action**
+
+- In `t3-enclave/src/matching/blind-intent.ts` and
+  `t3-enclave/src/matching/match-contract-client.ts`, translate the
+  public camelCase request type to a snake_case body just before
+  `networkClient.request(...)` (commit: fix camelCase→snake_case TEE
+  contract input translation). Keep the public TS interface camelCase
+  to match the agent-client SDK and the REST surface; translate at
+  the network boundary.
+- Update the two on-the-wire body assertions in
+  `src/tests/blinding.test.ts` and
+  `src/tests/match-contract-client.test.ts` to assert snake_case.
+- (Optional, future) Extend `classifyBlindIntentSealFailure` with a
+  `body_validation` kind that detects
+  `code: "bad_request"` + `detail` starting with
+  `"<function-name>: invalid JSON input: missing field"` so future
+  field-shape regressions return a typed error pointing at the
+  field, not at "matching not registered". The current
+  `t3_request_failed` fallback already surfaces the upstream
+  `detail` in the 503 `cause`, but a dedicated kind would let the
+  route distinguish "fix your TEE call site" from "T3N is down".
+
+**Verification**
+
+- `t3-enclave` tests: 65/65 pass (post-fix).
+- `backend` tests: 122/122 pass (post-fix).
+- Live `verify-matching-contract.ts` returns a valid
+  `intent_handle` + `execution_ref` from `seal-intent` against the
+  published matching contract.
+
+

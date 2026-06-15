@@ -17,6 +17,7 @@ import type { AgentManagementService } from "../services/agent.service.js";
 import type { HiddenIntentSubmissionService } from "../services/hidden-intent.service.js";
 import { InsufficientBalanceError } from "../services/portfolio.service.js";
 import type { TenantDelegationSigner } from "../services/tenant-delegation-signer.js";
+import { BlindIntentSealFailureError } from "@ghostbroker/t3-enclave";
 
 const listIntentsQuerySchema = z.object({
   agentDid: agentDidSchema.optional(),
@@ -285,6 +286,32 @@ export function createAgentsRouter(
         return;
       }
 
+      if (error instanceof BlindIntentSealFailureError) {
+        // T3 enclave refused to seal. The most common cause in
+        // the demo environment is the tenant's `matching`
+        // contract not being registered on T3N — surface that
+        // as a 503 with a useful message instead of the
+        // previous generic 400 that hid the real cause.
+        //
+        // The `kind` discriminator lets an operator
+        // distinguish "the tenant's T3N is misconfigured" from
+        // "T3N returned a transient error". Both come back as
+        // 503 because the agent cannot recover by retrying —
+        // the operator must fix the T3N registration first.
+        console.error(
+          "[SUBMIT INTENT SEAL FAILURE]",
+          `kind=${error.kind}`,
+          `upstream_status=${error.status}`,
+          `upstream_body=${JSON.stringify(error.upstreamBody)}`,
+          `cause=${error.message}`,
+        );
+        next(
+          new PublicError("sealing_failed", 503, error),
+        );
+        return;
+      }
+
+      console.error("[SUBMIT INTENT ERROR]", error);
       next(new PublicError("validation_failed", 400, error));
     }
   });

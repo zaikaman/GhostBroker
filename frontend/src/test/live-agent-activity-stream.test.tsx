@@ -71,8 +71,8 @@ describe('LiveAgentActivityStream Component', () => {
     );
 
     // Verify pane titles
-    expect(screen.getByText(/BUYER AGENT LOGS \(JPMorgan\)/)).toBeInTheDocument();
-    expect(screen.getByText(/SELLER AGENT LOGS \(Goldman Sachs\)/)).toBeInTheDocument();
+    expect(screen.getByText(/LOCAL AGENT LOGS \(JPMorgan\)/)).toBeInTheDocument();
+    expect(screen.getByText(/COUNTERPARTY AGENT LOGS \(Goldman Sachs\)/)).toBeInTheDocument();
 
     // Verify center column title
     expect(screen.getByText(/GhostBroker TEE/i)).toBeInTheDocument();
