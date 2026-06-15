@@ -23,7 +23,25 @@ import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
 import { ApiKeysPanel } from '../components/ApiKeysPanel';
 import { AgentsPanel } from '../components/AgentsPanel';
+import { SettingsPanel } from '../components/SettingsPanel';
 import { apiClient, type AuthSession } from '../services/api-client';
+
+const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSProperties }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={style}
+  >
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
 import {
   Robot01Icon,
   Shield01Icon,
@@ -118,18 +136,20 @@ function DashboardView({
     localStorage.removeItem('ghostbroker-is-drawer-open');
   };
 
-  // The active tab is derived from the URL when on `/deploy`, and
+  // The active tab is derived from the URL when on `/deploy` or `/settings`, and
   // from a local-storage-backed user preference when on `/dashboard`.
   // We avoid a setState-in-effect by reading the URL on every render
   // and falling back to the user-selected tab for the dashboard.
   const [dashboardTab, setDashboardTab] = useState<string>(() =>
     localStorage.getItem('ghostbroker-active-tab') || 'overview',
   );
-  const activeTab = currentPath === '/deploy' ? 'deploy' : dashboardTab;
+  const activeTab = currentPath === '/deploy' ? 'deploy' : (currentPath === '/settings' ? 'settings' : dashboardTab);
 
   const handleTabChange = (tab: string) => {
     if (tab === 'deploy') {
       navigate('/deploy');
+    } else if (tab === 'settings') {
+      navigate('/settings');
     } else {
       setDashboardTab(tab);
       localStorage.setItem('ghostbroker-active-tab', tab);
@@ -278,6 +298,13 @@ function DashboardView({
           </div>
         );
 
+      case 'settings':
+        return (
+          <div style={{ animation: 'fadeIn 0.3s ease' }}>
+            <SettingsPanel session={session} />
+          </div>
+        );
+
       default:
         return null;
     }
@@ -372,6 +399,13 @@ function DashboardView({
             </button>
             <button
               type="button"
+              className={`sidebar-link ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={() => handleTabChange('settings')}
+            >
+              <GearIcon size={16} /> Settings
+            </button>
+            <button
+              type="button"
               className={`sidebar-link ${activeTab === 'deploy' ? 'active' : ''}`}
               onClick={() => handleTabChange('deploy')}
               style={{ marginTop: 'var(--spacing-md)' }}
@@ -410,6 +444,7 @@ function DashboardView({
                     {activeTab === 'enclaves' && 'SECURE ENCLAVE RUNNERS'}
                     {activeTab === 'ledger' && 'SECURE AUDIT LEDGER'}
                     {activeTab === 'developer' && 'DEVELOPER INTEGRATIONS'}
+                    {activeTab === 'settings' && 'SYSTEM SETTINGS'}
                   </h2>
                 </div>
                 <div className="header-meta" style={{ display: 'flex', gap: 'var(--spacing-md)', alignItems: 'center' }}>
@@ -590,7 +625,7 @@ function AppContent({
         )
       } />
 
-      {session && (currentPath === '/dashboard' || currentPath === '/deploy') ? (
+      {session && (currentPath === '/dashboard' || currentPath === '/deploy' || currentPath === '/settings') ? (
         <DashboardView session={session} setSession={setSession} />
       ) : null}
     </>

@@ -377,7 +377,13 @@ export function createApp(
   if (env.NODE_ENV !== "production") {
     app.use("/api", createDevTokenRouter(env));
   }
-  app.use("/api", createInstitutionsRouter(services.institutionService));
+  app.use(
+    "/api",
+    createInstitutionsRouter(
+      services.institutionService,
+      operatorAuthMiddleware(env, services.apiKeyService),
+    ),
+  );
   app.use(
     "/api",
     operatorAuthMiddleware(env, services.apiKeyService),

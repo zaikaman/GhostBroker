@@ -73,7 +73,7 @@ describe("POST /api/agents/admit contract", () => {
         revokeAgent: async () => { throw new Error("not used"); },
         persistDelegation: async () => { throw new Error("not used"); },
         loadDelegationCredential: async () => null,
-      }),
+      } as any),
     );
 
     const token = issueOperatorSessionToken({

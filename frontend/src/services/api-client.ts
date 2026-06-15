@@ -15,6 +15,7 @@ export interface Institution {
   displayName: string;
   status: 'pending' | 'active' | 'suspended' | 'closed';
   t3TenantDid: string;
+  metadata?: Record<string, any>;
 }
 
 export interface AdmitAgentRequest {
@@ -43,6 +44,7 @@ export interface Agent {
   maxNotional: string | null;
   limitReference: string | null;
   policyHash: string | null;
+  metadata?: Record<string, any>;
   createdAt: string;
   updatedAt: string;
 }
@@ -358,6 +360,19 @@ export const apiClient = {
     return handleResponse<Institution>(res);
   },
 
+  async getInstitution(id: string): Promise<Institution> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/institutions/${id}`);
+    return handleResponse<Institution>(res);
+  },
+
+  async rotateKeys(id: string): Promise<Institution> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/institutions/${id}/rotate-key`,
+      { method: 'POST' },
+    );
+    return handleResponse<Institution>(res);
+  },
+
   async requestAuthChallenge(did: string): Promise<AuthChallenge> {
     const res = await fetch(`${API_BASE_URL}/api/auth/challenge`, {
       method: 'POST',
@@ -477,6 +492,27 @@ export const apiClient = {
       `${API_BASE_URL}/api/agents/${id}/revoke`,
       { method: "POST" },
     );
+  },
+
+  async mintDelegation(
+    id: string,
+    policy: {
+      maxSpendUsd: number;
+      allowedCategories: string[];
+      approverEmail?: string;
+      purpose?: string;
+      validityMonths?: number;
+    },
+  ): Promise<{ authorityRef: string; policyHash: string }> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/agents/${id}/delegation`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(policy),
+      },
+    );
+    return handleResponse<{ authorityRef: string; policyHash: string }>(res);
   },
 
   // ── API Key Management ────────────────────────────────────────────────
