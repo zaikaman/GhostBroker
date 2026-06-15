@@ -5,6 +5,8 @@ import { PublicError } from "../errors/public-error.js";
 import {
   admitAgentRequestSchema,
   listAgentsQuerySchema,
+  mintDelegationParamsSchema,
+  mintDelegationPolicySchema,
   revokeAgentParamsSchema,
   updateAgentLabelSchema,
 } from "../models/agent.js";
@@ -14,6 +16,7 @@ import { parseEncryptedIntentRequest } from "../validation/encrypted-intent.sche
 import type { AgentManagementService } from "../services/agent.service.js";
 import type { HiddenIntentSubmissionService } from "../services/hidden-intent.service.js";
 import { InsufficientBalanceError } from "../services/portfolio.service.js";
+import type { TenantDelegationSigner } from "../services/tenant-delegation-signer.js";
 
 const listIntentsQuerySchema = z.object({
   agentDid: agentDidSchema.optional(),
@@ -52,6 +55,7 @@ function toPendingIntentView(intent: PendingIntent): PendingIntentView {
 export function createAgentsRouter(
   agentService: AgentManagementService,
   hiddenIntentService?: HiddenIntentSubmissionService,
+  tenantSigner?: TenantDelegationSigner,
 ): Router {
   const router = Router();
 
@@ -175,6 +179,69 @@ export function createAgentsRouter(
         operatorAuth.institutionId,
       );
       response.status(200).json({ status: "revoked" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Phase 1: server-minted delegation VC re-mint.
+   *
+   * The dashboard calls this on the "Regenerate Delegation"
+   * button (and implicitly, on the new "Configure Agent"
+   * flow). The backend signs a fresh VC with the
+   * institution's tenant keypair and persists it on the
+   * agent record. The agent process never sees the VC; the
+   * `loadAndVerify` facade looks it up on every privileged
+   * call.
+   */
+  router.post("/agents/:id/delegation", async (request, response, next) => {
+    try {
+      if (!tenantSigner) {
+        throw new PublicError("service_unavailable", 503);
+      }
+      const operatorAuth = requireOperatorAuth(response);
+
+      const params = mintDelegationParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        throw new PublicError("validation_failed", 400, params.error);
+      }
+
+      const policy = mintDelegationPolicySchema.safeParse(request.body);
+      if (!policy.success) {
+        throw new PublicError("validation_failed", 400, policy.error);
+      }
+
+      const agent = await agentService.getAgent(
+        params.data.id,
+        operatorAuth.institutionId,
+      );
+
+      const { credential, policyHash } = await tenantSigner.mint({
+        agentDid: agent.agentDid,
+        institutionId: agent.institutionId,
+        maxSpendUsd: policy.data.maxSpendUsd,
+        allowedCategories: [...policy.data.allowedCategories],
+        ...(policy.data.approverEmail
+          ? { approverEmail: policy.data.approverEmail }
+          : {}),
+        ...(policy.data.purpose ? { purpose: policy.data.purpose } : {}),
+        ...(policy.data.validityMonths
+          ? { validityMonths: policy.data.validityMonths }
+          : {}),
+      });
+
+      const updated = await agentService.persistDelegation({
+        agentId: agent.id,
+        institutionId: agent.institutionId,
+        credential,
+        policyHash,
+      });
+
+      response.status(200).json({
+        authorityRef: updated.authorityRef,
+        policyHash: updated.policyHash ?? policyHash,
+      });
     } catch (error) {
       next(error);
     }

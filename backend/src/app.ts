@@ -35,7 +35,7 @@ import {
   type InstitutionManagementService,
 } from "./services/institution.service.js";
 import { DidAuthService, type AuthSessionService } from "./services/auth.service.js";
-import { SupabaseAuthorityRevocationRepository } from "./services/authority-revocation.service.js";
+import { SupabaseAuthorityRevocationRepository, type AuthorityRevocationRepository } from "./services/authority-revocation.service.js";
 import { AgentService, type AgentManagementService } from "./services/agent.service.js";
 import { SupabaseAgentRepository } from "./services/agent-repository.js";
 import {
@@ -64,6 +64,15 @@ import {
 } from "./services/intent-lock-repository.js";
 import { IntentLockJanitor } from "./services/intent-lock-janitor.js";
 import {
+  BackendTenantDelegationSigner,
+  type TenantDelegationSigner,
+} from "./services/tenant-delegation-signer.js";
+import {
+  ChildProcessDemoAgentOrchestrator,
+  type DemoAgentOrchestrator,
+} from "./services/demo-orchestrator.js";
+import { createDemoRouter } from "./api/demo.routes.js";
+import {
   AdkTenantDidRegistry,
   SandboxTokenBalanceClient,
   SettlementCommandBuilder,
@@ -71,6 +80,7 @@ import {
   T3MatchContractClient,
   T3AgentIdentityVerifier,
   createAuthenticatedT3NetworkClient,
+  loadOrCreateTenantIdentity,
   readT3EnclaveConfig,
   runStartupCheck,
   T3EnclaveConfigError,
@@ -116,9 +126,25 @@ export interface BackendServices {
   matchingOrchestrator?: MatchingOrchestrator;
   intentLockRepository?: IntentLockRepository;
   intentLockJanitor?: IntentLockJanitor;
+  /**
+   * Phase 1: server-side delegation VC signer. Wired
+   * when the T3N handshake at backend boot returned a
+   * tenant DID. Optional so the test composition root
+   * (which uses `BackendServices` without booting the
+   * t3-enclave) can omit it.
+   */
+  tenantDelegationSigner?: TenantDelegationSigner;
+  /**
+   * Phase 2.5: Demo Mode orchestrator. Owns the
+   * lifecycle of the buyer + seller child processes
+   * spawned on the dashboard's "Spin up demo agents"
+   * button. Optional so the test composition root can
+   * omit it; production boots it in `createDefaultServices`.
+   */
+  demoAgentOrchestrator?: DemoAgentOrchestrator;
 }
 
-async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
+export async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
   const t3Options: AuthenticatedT3NetworkClientOptions = {
     apiKey: env.T3N_API_KEY,
     environment: env.T3N_ENV,
@@ -174,11 +200,26 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     supabase as never,
   );
 
-  // Ghostbroker-only authorization facade. No live network client
-  // is needed — the verifier runs entirely from the VC the agent
-  // supplies. The T3N SDK still powers the identity / handshake
-  // / blind-intent / match-contract surfaces, but the authorization
-  // gate is local + sandbox/structural by default.
+  // Phase 1: tenant identity. The T3N handshake returned
+  // an authenticated tenant DID; we use it as the issuer
+  // of every server-minted delegation VC. The signing
+  // keypair is generated locally on first boot and
+  // persisted to `output/identities/tenant_identity.json`
+  // so a backend restart re-uses the same identity and
+  // existing VCs stay valid.
+  const tenantIdentity = loadOrCreateTenantIdentity({
+    tenantDid: t3NetworkClient.tenantDidValue,
+  });
+  const tenantDelegationSigner = new BackendTenantDelegationSigner(
+    tenantIdentity,
+  );
+
+  // Ghostbroker-only authorization facade. Constructed
+  // before the agent service so we can late-bind the
+  // service into the facade after both are built (the
+  // facade's `loadAndVerify` needs the service to look
+  // up the persisted VC; the agent service needs the
+  // facade for `verifyAgentAuthority` at admit time).
   const authorizationFacade = new T3AgentAuthorizationFacade();
   const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
   const portfolioService = new PortfolioService(
@@ -248,12 +289,12 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     ),
     portfolioService,
     ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
-    agentService: new AgentService(
+    agentService: buildAgentService({
       authorizationFacade,
-      new SupabaseAgentRepository(supabase as never),
-      authorityRevocationRepository,
       matchingOrchestrator,
-    ),
+      supabase: supabase as never,
+      authorityRevocationRepository,
+    }),
     hiddenIntentService: new HiddenIntentService(
       authorizationFacade,
       blindIntentClient,
@@ -273,6 +314,12 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
     matchingOrchestrator,
     intentLockRepository,
     intentLockJanitor,
+    tenantDelegationSigner,
+    demoAgentOrchestrator: new ChildProcessDemoAgentOrchestrator({
+      agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
+      backendUrl: `http://localhost:${env.PORT}`,
+      apiKeyService: new ApiKeyService(apiKeyRepository),
+    }),
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
@@ -283,6 +330,29 @@ async function createDefaultServices(env: BackendEnv): Promise<BackendServices> 
         "development-only-auth-session-secret-change-before-production",
     }),
   };
+}
+
+function buildAgentService(input: {
+  authorizationFacade: T3AgentAuthorizationFacade;
+  matchingOrchestrator: MatchingOrchestrator;
+  supabase: unknown;
+  authorityRevocationRepository: AuthorityRevocationRepository;
+}): AgentService {
+  const service = new AgentService(
+    input.authorizationFacade,
+    new SupabaseAgentRepository(input.supabase as never),
+    input.authorityRevocationRepository,
+    input.matchingOrchestrator,
+  );
+  // Late-bind the agent service into the facade so
+  // `loadAndVerify` can look up the persisted VC. The
+  // facade and the service form a cycle (the service
+  // holds a facade reference for `verifyAgentAuthority`,
+  // the facade holds a service reference for
+  // `loadAndVerify`); this constructor-then-setter
+  // pattern is the standard escape hatch.
+  input.authorizationFacade.setAgentService(service);
+  return service;
 }
 
 export function createApp(
@@ -325,7 +395,11 @@ export function createApp(
   app.use(
     "/api",
     operatorAuthMiddleware(env, services.apiKeyService),
-    createAgentsRouter(services.agentService, services.hiddenIntentService),
+    createAgentsRouter(
+      services.agentService,
+      services.hiddenIntentService,
+      services.tenantDelegationSigner,
+    ),
   );
   if (services.tradeHistoryService) {
     app.use(
@@ -339,6 +413,16 @@ export function createApp(
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
       createReceiptsRouter(services.receiptService),
+    );
+  }
+  if (services.demoAgentOrchestrator) {
+    app.use(
+      "/api",
+      operatorAuthMiddleware(env, services.apiKeyService),
+      createDemoRouter({
+        orchestrator: services.demoAgentOrchestrator,
+        apiKeyService: services.apiKeyService,
+      }),
     );
   }
   app.use(publicErrorHandler);

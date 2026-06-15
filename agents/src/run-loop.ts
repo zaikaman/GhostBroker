@@ -10,9 +10,7 @@ import {
 import type { AgentEnv } from "./env.js";
 import type { Decision, LlmClient } from "./llm-decision.js";
 import { buildSealedEnvelope } from "./sealed-envelope.js";
-import { readIdentity } from "./identity.js";
-import { loadDelegationCredential } from "./delegation.js";
-import { verifyDelegationCredential } from "./vc-verifier.js";
+import { loadOrGenerateIdentity } from "./identity.js";
 
 /**
  * Shared loop runtime for the buyer and seller.
@@ -38,40 +36,23 @@ export interface AgentRunResult {
   lastDecision: Decision | undefined;
   settlementCorrelationRef: string | undefined;
   admissionAuthorityRef: string | undefined;
-  verificationMode: string | undefined;
 }
 
 export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunResult> {
   const { side, env, llm, dryRun, assetCode } = options;
 
-  // Preflight: load the Ghostbroker delegation identity and delegation VC from
-  // disk. Both files are produced by the setup:identity and
-  // setup:delegation CLIs, which call the live T3N network.
-  const identity = readIdentity(env.AGENT_IDENTITY_CONFIG_PATH);
-  const delegation = loadDelegationCredential(env.DELEGATION_CREDENTIAL_PATH);
+  // Agent identity. Post-Phase 1: the backend owns the
+  // delegation VC. The agent DID is still the agent's
+  // public identifier — but the agent process no longer
+  // needs to hold a long-lived keypair. For the demo
+  // orchestrator path (no `AGENT_IDENTITY_CONFIG_PATH`
+  // on disk) we mint a fresh keypair at process boot.
+  // For the legacy path (the env var points at a JSON
+  // file) we read it from disk so existing
+  // installations keep working.
+  const identity = loadOrGenerateIdentity(env.AGENT_IDENTITY_CONFIG_PATH);
 
   log(side, `→ Using identity ${identity.did} (eth ${identity.ethAddress})`);
-  log(side, `→ Delegation ${delegation.id} issued by ${delegation.issuer}`);
-
-  // Local verification is belt-and-suspenders; the server runs
-  // the authoritative verifier on admit. We never want to send a
-  // malformed VC over the wire even if the local file was edited.
-  const localVerification = await verifyDelegationCredential(
-    delegation,
-    identity.did,
-    env.VC_VERIFY_MODE,
-  );
-  for (const warning of localVerification.warnings) {
-    log(side, `  vc-warn: ${warning}`);
-  }
-  if (!localVerification.verified) {
-    log(
-      side,
-      `✗ Local VC verification failed: ${localVerification.message}. Re-run npm run setup:delegation.`,
-    );
-    process.exit(2);
-  }
-  log(side, `✓ Local VC verification passed (mode: ${localVerification.mode})`);
 
   // Authenticate against the GhostBroker backend.
   const client = new GhostBrokerClient({ baseUrl: env.GHOSTBROKER_URL });
@@ -86,23 +67,22 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
-      verificationMode: localVerification.mode,
     };
   }
   log(side, `✓ Authenticated as ${session.institution.displayName} (${session.institution.id})`);
 
-  // Admit via the Ghostbroker delegation path. The VC was loaded from disk by
-  // `loadDelegationCredential` and re-verified locally by
-  // `verifyDelegationCredential` above. The backend runs the same
-  // verifier server-side and persists the VC on the agent record
-  // so submit / cancel / settlement can re-verify it on every
-  // privileged action.
+  // Admit via the Ghostbroker delegation path. Post-Phase
+  // 1: the delegation VC is owned by the backend. The
+  // dashboard mints + signs + persists it at "Configure
+  // Agent" time; the agent process only sends its
+  // `institutionId` + `agentDid`. The backend's
+  // `loadAndVerify` facade looks up the persisted VC on
+  // admit.
   let admission: AgentAdmission;
   try {
     admission = await client.admitAgent({
       institutionId: session.institution.id,
       agentDid: identity.did,
-      delegationCredential: delegation,
     });
   } catch (err) {
     log(side, `✗ Admit failed: ${formatError(err)}`);
@@ -112,7 +92,6 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
-      verificationMode: localVerification.mode,
     };
   }
   log(side, `✓ Admitted. Authority ref: ${admission.authorityRef}`);
@@ -183,7 +162,6 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
-        verificationMode: localVerification.mode,
       };
     }
 
@@ -237,7 +215,6 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
-        verificationMode: localVerification.mode,
       };
     }
 
@@ -329,7 +306,6 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         lastDecision,
         settlementCorrelationRef: settledRef,
         admissionAuthorityRef: admission.authorityRef,
-        verificationMode: localVerification.mode,
       };
     }
     lastOutcome = "intent in flight, no settlement within one tick";
@@ -346,8 +322,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     lastDecision,
     settlementCorrelationRef,
     admissionAuthorityRef: admission.authorityRef,
-    verificationMode: localVerification.mode,
-  };
+    };
 }
 
 interface BuildContextInput {

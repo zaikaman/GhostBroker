@@ -141,3 +141,89 @@ export const updateAgentLabelSchema = z.object({
 });
 
 export type UpdateAgentLabelBody = z.infer<typeof updateAgentLabelSchema>;
+
+// ── Phase 1: server-minted delegation policy ──────────────────────────
+
+/**
+ * The policy knobs the dashboard's "Configure Agent" form
+ * collects. All fields are bounded so a malformed UI can't
+ * mint a runaway VC. The backend signs the VC with the
+ * institution's tenant keypair — the user never holds or
+ * sees the signing key.
+ */
+export const mintDelegationPolicySchema = z.object({
+  maxSpendUsd: z.number().positive().max(1_000_000_000),
+  allowedCategories: z
+    .array(
+      z.enum([
+        "office-supplies",
+        "software",
+        "hardware",
+        "services",
+        "travel",
+      ]),
+    )
+    .min(1)
+    .max(20),
+  approverEmail: z.string().email().optional(),
+  purpose: z.string().trim().min(1).max(500).optional(),
+  validityMonths: z.number().int().positive().max(120).optional(),
+});
+
+export type MintDelegationPolicy = z.infer<typeof mintDelegationPolicySchema>;
+
+export const mintDelegationParamsSchema = z.object({
+  id: z.string().uuid(),
+});
+
+export const mintDelegationResponseSchema = z.object({
+  authorityRef: z.string().min(1),
+  policyHash: z.string().min(1),
+});
+
+/**
+ * Phase 2.5 + Phase 1 step 4: "Configure Agent" entrypoint.
+ *
+ * The dashboard's "Deploy Agent" form posts this body;
+ * the Phase 2.5 demo orchestrator posts it for each side
+ * (buyer + seller) before spawning the child processes.
+ * The backend:
+ *
+ *   1. Mints a placeholder agent DID (the agent process
+ *      later sends the same DID on admit; we don't yet
+ *      know what the agent will choose, so we default
+ *      to `did:t3n:demo-<random>` for the demo path and
+ *      accept an explicit `agentDid` from the dashboard).
+ *   2. Mints a fresh tenant delegation VC for that
+ *      DID using the institution's tenant keypair.
+ *   3. Persists the agent record with the VC in
+ *      `metadata.delegation_credential`.
+ *   4. Returns `{ agentId, agentDid, authorityRef,
+ *      policyHash }` so the caller (dashboard or
+ *      orchestrator) can pass `agentId` to the
+ *      `loadAndVerify` facade on the next admit /
+ *      intent call.
+ */
+export const configureAgentRequestSchema = z.object({
+  institutionId: z.string().uuid(),
+  /**
+   * Optional explicit agent DID. When omitted, the
+   * backend mints a synthetic `did:t3n:demo-<random>`
+   * placeholder (the agent process re-uses the same
+   * DID on admit). The dashboard's "Configure Agent"
+   * form mints a secp256k1-derived DID in the browser
+   * and passes it here.
+   */
+  agentDid: agentDidSchema.optional(),
+  label: z.string().trim().min(1).max(100).optional(),
+  policy: mintDelegationPolicySchema,
+});
+
+export type ConfigureAgentRequest = z.infer<typeof configureAgentRequestSchema>;
+
+export interface ConfigureAgentResponse {
+  agentId: string;
+  agentDid: string;
+  authorityRef: string;
+  policyHash: string;
+}

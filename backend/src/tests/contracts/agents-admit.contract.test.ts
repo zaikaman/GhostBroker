@@ -33,7 +33,10 @@ describe("POST /api/agents/admit contract", () => {
             getAgent: async () => { throw new Error("not used"); },
             updateAgentLabel: async () => { throw new Error("not used"); },
           revokeAgent: async () => { throw new Error("not used"); },
-        };
+        persistDelegation: async () => { throw new Error("not used"); },
+        loadDelegationCredential: async () => null,
+        configureAgent: async () => { throw new Error("not used"); },
+      };
     const app = createApp(buildBackendTestEnv(), buildServices(agentService));
 
     const token = issueOperatorSessionToken({
@@ -68,6 +71,8 @@ describe("POST /api/agents/admit contract", () => {
         getAgent: async () => { throw new Error("not used"); },
         updateAgentLabel: async () => { throw new Error("not used"); },
         revokeAgent: async () => { throw new Error("not used"); },
+        persistDelegation: async () => { throw new Error("not used"); },
+        loadDelegationCredential: async () => null,
       }),
     );
 

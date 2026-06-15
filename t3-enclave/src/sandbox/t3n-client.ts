@@ -70,6 +70,18 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
     this.tenantDid = tenantDid;
   }
 
+  /**
+   * The authenticated tenant DID returned by the T3N
+   * handshake. The backend uses this as the `issuer` of
+   * every server-minted delegation VC, and as the
+   * `subject` of the tenant identity record on disk. Read
+   * once at backend boot and reused for the lifetime of
+   * the process.
+   */
+  public get tenantDidValue(): string {
+    return this.tenantDid;
+  }
+
   public async request<TBody = unknown>(
     request: T3NetworkRequest,
   ): Promise<T3NetworkResponse<TBody>> {

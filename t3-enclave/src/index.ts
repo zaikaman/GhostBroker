@@ -7,5 +7,6 @@ export * from "./runner/create-runner.js";
 export * from "./runner/lifecycle.js";
 export * from "./sandbox/config.js";
 export * from "./sandbox/t3n-client.js";
+export * from "./sandbox/tenant-identity-store.js";
 export * from "./sandbox/token-balance.js";
 export * from "./settlement/index.js";

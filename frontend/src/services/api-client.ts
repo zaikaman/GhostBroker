@@ -20,7 +20,15 @@ export interface Institution {
 export interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
-  delegationCredential: unknown;
+  /**
+   * Post-Phase 1: the delegation VC is owned by the
+   * backend. The dashboard mints + persists the VC on
+   * the agent record at "Configure Agent" time; the
+   * agent process never holds or sends the VC. The
+   * optional field is kept for forward-compat
+   * (custom integrations, E2E tests).
+   */
+  delegationCredential?: unknown;
 }
 
 export interface Agent {
@@ -128,8 +136,30 @@ export interface ApiKey {
 }
 
 export interface CreatedApiKey extends ApiKey {
-  /** The plaintext API key. Returned only once on creation. */
   key: string;
+}
+
+// ── Phase 2.5: Demo Mode ──────────────────────────────────────
+
+/**
+ * Status of the dashboard's one-click demo spin-up.
+ * Mirrors the backend's `DemoStatus` in
+ * `backend/src/services/demo-orchestrator.ts`. The
+ * `running: false` shape has no PIDs / startedAt /
+ * institutionId; the `running: true` shape has all of
+ * them. The `logTail` fields are the most recent 4 KB
+ * of stdout/stderr from each child process — the
+ * UI shows a "view logs" affordance on hover.
+ */
+export interface DemoStatus {
+  running: boolean;
+  buyerPid?: number;
+  sellerPid?: number;
+  startedAt?: string;
+  institutionId?: string;
+  apiKeyId?: string;
+  buyerLogTail?: string;
+  sellerLogTail?: string;
 }
 
 export type RedactedErrorCode =
@@ -475,5 +505,41 @@ export const apiClient = {
       `${API_BASE_URL}/api/keys/${id}/revoke`,
       { method: 'POST' },
     );
+  },
+
+  // ── Phase 2.5: Demo Mode ───────────────────────────────────
+  //
+  // The dashboard's Observatory tab calls these three
+  // methods to drive the one-click "Spin up demo agents"
+  // button. The backend spawns a buyer + seller agent as
+  // child processes, authenticated with a per-run API key
+  // minted at start time and revoked on stop.
+
+  async startDemo(institutionId: string): Promise<DemoStatus> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/demo/start`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ institutionId }),
+      },
+    );
+    return handleResponse<DemoStatus>(res);
+  },
+
+  async stopDemo(): Promise<DemoStatus> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/demo/stop`,
+      { method: 'POST' },
+    );
+    return handleResponse<DemoStatus>(res);
+  },
+
+  async getDemoStatus(): Promise<DemoStatus> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/demo/status`,
+      { method: 'GET' },
+    );
+    return handleResponse<DemoStatus>(res);
   },
 };

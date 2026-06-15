@@ -1,36 +1,17 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
-import {
-  T3nClient,
-  createEthAuthInput,
-  eth_get_address,
-  loadWasmComponent,
-  metamask_sign,
-} from "@terminal3/t3n-sdk";
 
 /**
  * Agent identity for the GhostBroker Ghostbroker-style credential flow.
  *
- * Ported from the Ghostbroker delegation/src/scripts/setup-identity.ts` and
- * `Ghostbroker delegation/src/t3/identity.ts`. The Ghostbroker delegation BUIDL was the only
- * published reference for "what Terminal 3 actually gives you" — it
- * confirmed that the T3 onboarding surface is just an `T3N_API_KEY`
- * (the claim-page key) + a derived `did:t3n`, with no dashboard.
- *
- * Two outputs:
- *   - the agent's secp256k1 keypair (private + public)
- *   - the agent's `did:t3n:0x...` identifier (assigned by the T3N
- *     network after a real handshake + auth challenge)
- *
- * The keypair is the agent's long-term identity. The DID is what
- * other institutions reference when they authorize this agent.
- * Bound the two together on disk so an agent can re-load its
- * identity across restarts without re-deriving.
+ * Post-Phase 1: the agent no longer needs a T3N handshake or a long-lived
+ * keypair. The backend derives the tenant identity from the T3N_API_KEY
+ * at boot. The agent process only needs a unique DID for admission — it
+ * generates an ephemeral keypair at process boot and derives a synthetic
+ * `did:t3n:demo-<pubkey>` from it. The private key never leaves the process.
  */
 
-const DEFAULT_T3N_API_URL = "https://cn-api.sg.testnet.t3n.terminal3.io";
 const DEFAULT_IDENTITY_PATH = "output/identities/agent_identity.json";
 
 export interface AgentIdentityRecord {
@@ -44,11 +25,6 @@ export interface AgentIdentityRecord {
   networkUrl: string;
 }
 
-export interface AuthenticateOptions {
-  apiKey: string;
-  networkUrl?: string;
-}
-
 function generateKeypair(): { privateKey: string; publicKey: string } {
   const privateKeyBytes = randomBytes(32);
   const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, true);
@@ -56,89 +32,6 @@ function generateKeypair(): { privateKey: string; publicKey: string } {
     privateKey: `0x${Buffer.from(privateKeyBytes).toString("hex")}`,
     publicKey: `0x${Buffer.from(publicKeyBytes).toString("hex")}`,
   };
-}
-
-/**
- * Handshake with the T3N network and authenticate the agent DID.
- * This calls the real T3N SDK — `client.handshake()` opens the
- * authenticated encrypted session, `client.authenticate(...)` runs
- * the EIP-191 personal-sign challenge over the agent's address, and
- * the network returns a `did:t3n:<unique-id>` for the agent.
- */
-export async function authenticateAgentDid(
-  options: AuthenticateOptions,
-): Promise<string> {
-  const networkUrl = options.networkUrl ?? DEFAULT_T3N_API_URL;
-  const address = eth_get_address(options.apiKey);
-  const wasmComponent = await loadWasmComponent();
-  const client = new T3nClient({
-    baseUrl: networkUrl,
-    wasmComponent,
-    handlers: {
-      EthSign: metamask_sign(address, undefined, options.apiKey),
-    },
-  });
-
-  await client.handshake();
-  const result = await client.authenticate(createEthAuthInput(address));
-  // The SDK returns either a string or an object with `.value`.
-  return typeof result === "object" && result !== null && "value" in result
-    ? String((result as { value: unknown }).value)
-    : String(result);
-}
-
-export interface SetupIdentityOptions {
-  apiKey: string;
-  networkUrl?: string;
-  /** When provided and the file exists, re-use it instead of minting a new identity. */
-  identityPath?: string;
-}
-
-export async function setupIdentity(options: SetupIdentityOptions): Promise<AgentIdentityRecord> {
-  const identityPath = options.identityPath ?? DEFAULT_IDENTITY_PATH;
-
-  if (existsSync(identityPath)) {
-    const existing = readFile(identityPath);
-    if (existing.privateKey && existing.did) {
-      return existing;
-    }
-  }
-
-  const keypair = generateKeypair();
-  const did = await authenticateAgentDid({
-    apiKey: options.apiKey,
-    ...(options.networkUrl !== undefined ? { networkUrl: options.networkUrl } : {}),
-  });
-  const ethAddress = eth_get_address(options.apiKey);
-
-  // Sanity check: the DID should be `did:t3n:0x<address>` for an
-  // Ethereum-style authenticated agent. We don't fail on a different
-  // shape — Ghostbroker delegation's verifier is happy with any `did:t3n:*` — but
-  // we log it.
-  if (!did.startsWith("did:t3n:")) {
-    throw new Error(
-      `T3N authentication did not return a T3N DID. Got: ${did}. Check that your T3N_API_KEY is valid.`,
-    );
-  }
-
-  const record: AgentIdentityRecord = {
-    version: 1,
-    createdAt: new Date().toISOString(),
-    did,
-    ethAddress,
-    networkTier: "testnet",
-    publicKey: keypair.publicKey,
-    privateKey: keypair.privateKey,
-    networkUrl: options.networkUrl ?? DEFAULT_T3N_API_URL,
-  };
-
-  mkdirSync(dirname(identityPath), { recursive: true });
-  writeFileSync(identityPath, JSON.stringify(record, null, 2), "utf8");
-  return record;
-}
-
-function readFile(path: string): AgentIdentityRecord {
-  return JSON.parse(readFileSync(path, "utf8")) as AgentIdentityRecord;
 }
 
 export function readIdentity(path: string = DEFAULT_IDENTITY_PATH): AgentIdentityRecord {
@@ -156,4 +49,33 @@ export function readIdentity(path: string = DEFAULT_IDENTITY_PATH): AgentIdentit
   return raw as AgentIdentityRecord;
 }
 
-export { DEFAULT_IDENTITY_PATH, DEFAULT_T3N_API_URL };
+/**
+ * Load the agent identity from disk when a path is
+ * supplied; otherwise mint a fresh ephemeral keypair at
+ * process boot. The demo orchestrator spawns the agent
+ * with no `AGENT_IDENTITY_CONFIG_PATH` set; this path
+ * mints a one-shot keypair the process uses for the
+ * duration of the run. The private key never leaves the
+ * process — the backend only sees the public DID, and the
+ * delegation VC is owned server-side.
+ */
+export function loadOrGenerateIdentity(
+  path: string | undefined,
+): AgentIdentityRecord {
+  if (path && existsSync(path)) {
+    return readIdentity(path);
+  }
+  const keypair = generateKeypair();
+  return {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    did: `did:t3n:demo-${keypair.publicKey.slice(2, 14)}`,
+    ethAddress: keypair.publicKey,
+    networkTier: "testnet",
+    publicKey: keypair.publicKey,
+    privateKey: keypair.privateKey,
+    networkUrl: "",
+  };
+}
+
+export { DEFAULT_IDENTITY_PATH };

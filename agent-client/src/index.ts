@@ -25,3 +25,25 @@ export type {
   Institution,
 } from "./types.js";
 export { GhostBrokerApiError } from "./errors.js";
+
+/**
+ * Browser-safe W3C VC delegation signing. Pure functions — no
+ * Node-only modules — so the dashboard can mint and sign an
+ * agent's delegation credential in the browser (no CLI
+ * required) and the agent process / `setup:delegation`
+ * operator tool can both produce VCs that the backend's
+ * `@terminal3/verify_vc`-backed verifier accepts.
+ */
+export {
+  buildDelegationSigningBody,
+  canonicalizeDelegationJson,
+  delegationCredentialSchema,
+  mintAndSignDelegationCredential,
+  mintDelegationCredentialBody,
+  signDelegationCredential,
+  type DelegationCredential,
+  type DelegationSigningBody,
+  type MintAndSignDelegationOptions,
+  type MintDelegationCredentialBody,
+  type SignDelegationCredentialOptions,
+} from "./delegation-signer.js";

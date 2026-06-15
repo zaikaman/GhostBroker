@@ -2,16 +2,12 @@
 /**
  * GhostBroker Seller Agent (Ghostbroker delegation flow).
  *
- * Mirror of the buyer with side="sell". Same preflight (identity +
- * delegation must exist on disk). Same Groq-decision loop, same
- * telemetry wiring.
- *
- * Usage:
- *   npm run setup:identity
- *   npm run setup:delegation
- *   npm run seller
+ * Mirror of `buyer-agent.ts` with `side="sell"`. Post-Phase
+ * 1, the preflight only requires `GHOSTBROKER_URL`,
+ * `GHOSTBROKER_API_KEY`, and `GROQ_API_KEY`. The
+ * delegation credential + agent identity are owned by
+ * the backend.
  */
-import { existsSync } from "node:fs";
 import { loadAgentEnv, numberEnv, booleanEnv } from "./env.js";
 import { GroqLlmClient } from "./llm-decision.js";
 import { runAgentLoop } from "./run-loop.js";
@@ -20,7 +16,7 @@ async function main(): Promise<void> {
   const env = loadAgentEnv();
   const dryRun = booleanEnv("DRY_RUN", false) || numberEnv("DRY_RUN", 0) === 1;
 
-  preflightIdentityAndDelegation(env);
+  preflightCredentials(env);
 
   const llm = new GroqLlmClient({ apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL });
 
@@ -37,19 +33,19 @@ async function main(): Promise<void> {
   process.exit(result.outcome === "aborted" || result.outcome === "admit_failed" ? 2 : 0);
 }
 
-function preflightIdentityAndDelegation(env: ReturnType<typeof loadAgentEnv>): void {
-  if (!existsSync(env.AGENT_IDENTITY_CONFIG_PATH)) {
-    console.error(
-      `✗ Agent identity not found at ${env.AGENT_IDENTITY_CONFIG_PATH}.`,
-    );
-    console.error("  Run: npm run setup:identity");
+function preflightCredentials(env: ReturnType<typeof loadAgentEnv>): void {
+  if (!env.GHOSTBROKER_URL) {
+    console.error("✗ Missing GHOSTBROKER_URL");
     process.exit(2);
   }
-  if (!existsSync(env.DELEGATION_CREDENTIAL_PATH)) {
+  if (!env.GHOSTBROKER_API_KEY) {
+    console.error("✗ Missing GHOSTBROKER_API_KEY");
+    process.exit(2);
+  }
+  if (!env.GROQ_API_KEY) {
     console.error(
-      `✗ Delegation credential not found at ${env.DELEGATION_CREDENTIAL_PATH}.`,
+      "✗ Missing GROQ_API_KEY — set it in your shell or pass it through the spawn env",
     );
-    console.error("  Run: npm run setup:delegation");
     process.exit(2);
   }
 }

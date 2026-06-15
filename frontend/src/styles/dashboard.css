@@ -658,7 +658,7 @@
 /* Step Progress Indicator */
 .deploy-steps-indicator {
   display: grid !important;
-  grid-template-columns: repeat(6, minmax(130px, 1fr)) !important;
+  grid-template-columns: repeat(3, 1fr) !important;
   gap: 0 !important;
   padding: 0 !important;
   background: rgba(255, 255, 255, 0.01) !important;

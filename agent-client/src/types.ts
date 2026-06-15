@@ -18,15 +18,25 @@ export interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
   /**
-   * Ghostbroker-style W3C Verifiable Credential that authorizes
-   * this agent to act on behalf of the institution. The backend
-   * runs it through `t3-enclave/src/auth/ghostbroker-delegation.ts`
-   * and persists it on the agent record at admit time, so the
-   * intent submit / cancel / settlement paths can re-verify it
-   * on every privileged action without the agent having to
-   * resend it.
+   * The W3C Verifiable Credential that authorizes this
+   * agent to act on behalf of the institution.
+   *
+   * Post-Phase 1: the delegation VC is owned by the
+   * backend. The dashboard mints + signs it on the
+   * "Configure Agent" form and persists it on the agent
+   * record; the agent process never holds or sends the
+   * VC. The backend's `loadAndVerify` facade looks the VC
+   * up on every privileged call and runs the existing
+   * verifier against it.
+   *
+   * The optional field is kept here for forward-compat:
+   * a custom integration that wants to send the VC inline
+   * (e.g. an E2E test, or a legacy agent that hasn't
+   * migrated yet) can still do so. When supplied, the
+   * backend's admit path runs the verifier on the inline
+   * VC instead of the persisted one.
    */
-  delegationCredential: unknown;
+  delegationCredential?: unknown;
 }
 
 export interface EncryptedIntentRequest {

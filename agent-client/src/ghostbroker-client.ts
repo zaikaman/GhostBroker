@@ -95,14 +95,14 @@ export class GhostBrokerClient {
   /**
    * Admit an autonomous agent.
    *
-   * The `delegationCredential` is a Ghostbroker-style W3C
-   * Verifiable Credential (the only credential format the live
-   * T3N onboarding surface issues today). The backend runs it
-   * through `t3-enclave/src/auth/ghostbroker-delegation.ts` to
-   * verify the agent is authorized for this institution, and
-   * persists it on the agent record so the intent submit / cancel
-   * / settlement paths can re-verify it on every privileged
-   * action.
+   * Post-Phase 1: the delegation VC is owned by the
+   * backend. The agent process supplies only its
+   * `institutionId` + `agentDid`; the backend looks up
+   * the persisted VC on the agent record and re-verifies
+   * it on admit. The `delegationCredential` field on
+   * `AdmitAgentRequest` is optional and only used by
+   * legacy / custom integrations that want to send the
+   * VC inline.
    */
   public async admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission> {
     if (!this.token) {

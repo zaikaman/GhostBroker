@@ -133,27 +133,6 @@ describe("GhostBrokerClient", () => {
       const request: AdmitAgentRequest = {
         institutionId: SAMPLE_SESSION.institution.id,
         agentDid: "did:t3n:0xAgentAddress",
-        delegationCredential: {
-          id: "urn:uuid:test",
-          type: ["VerifiableCredential", "GhostBrokerDelegation"],
-          issuer: "did:t3n:0xTest",
-          issuanceDate: "2026-01-01T00:00:00.000Z",
-          expirationDate: "2027-01-01T00:00:00.000Z",
-          credentialSubject: {
-            id: "did:t3n:0xTest",
-            agentDid: "did:t3n:0xAgentAddress",
-            maxSpendUsd: 1000,
-            allowedCategories: ["software"],
-            purpose: "test",
-          },
-          proof: {
-            type: "JsonWebSignature2020",
-            created: "2026-01-01T00:00:00.000Z",
-            proofPurpose: "assertionMethod",
-            verificationMethod: "did:t3n:0xTest#key-1",
-            jws: "live-demo-unsigned",
-          },
-        },
       };
       let caught: unknown;
       try {
@@ -165,7 +144,12 @@ describe("GhostBrokerClient", () => {
       expect((caught as Error).message).toMatch(/Not authenticated/i);
     });
 
-    it("POSTs to /api/agents/admit with the stored session token", async () => {
+    it("POSTs to /api/agents/admit with just institutionId + agentDid (no VC)", async () => {
+      // Post-Phase 1: the VC is owned by the backend. The
+      // agent process never sends it. The body sent to
+      // /api/agents/admit is the slim shape — only the
+      // two identifying fields the server needs to look
+      // up the persisted VC.
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
         .mockResolvedValueOnce(mockJsonResponse(SAMPLE_SESSION))
@@ -173,7 +157,7 @@ describe("GhostBrokerClient", () => {
           mockJsonResponse({
             agentDid: "did:t3n:0xAgentAddress",
             status: "admitted",
-            authorityRef: "ghostbroker-delegation:urn:uuid:test",
+            authorityRef: "ghostbroker-delegation:urn:uuid:server-minted",
           } satisfies AgentAdmission),
         );
 
@@ -183,13 +167,12 @@ describe("GhostBrokerClient", () => {
       const admission = await client.admitAgent({
         institutionId: SAMPLE_SESSION.institution.id,
         agentDid: "did:t3n:0xAgentAddress",
-        delegationCredential: { id: "urn:uuid:test" },
       });
 
       expect(admission).toEqual({
         agentDid: "did:t3n:0xAgentAddress",
         status: "admitted",
-        authorityRef: "ghostbroker-delegation:urn:uuid:test",
+        authorityRef: "ghostbroker-delegation:urn:uuid:server-minted",
       });
 
       const admitCall = fetchSpy.mock.calls[1];
@@ -199,6 +182,45 @@ describe("GhostBrokerClient", () => {
       const init = admitInit as RequestInit;
       expect(init.method).toBe("POST");
       expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${SAMPLE_SESSION.token}`);
+
+      // Body is the slim shape — no delegationCredential.
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(body).toEqual({
+        institutionId: SAMPLE_SESSION.institution.id,
+        agentDid: "did:t3n:0xAgentAddress",
+      });
+      expect(body.delegationCredential).toBeUndefined();
+    });
+
+    it("forwards an optional inline delegationCredential for legacy / custom integrations", async () => {
+      // The optional field is kept on the type for
+      // forward-compat (E2E tests, legacy agent processes
+      // that haven't migrated). When supplied, the SDK
+      // passes it through unchanged.
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(mockJsonResponse(SAMPLE_SESSION))
+        .mockResolvedValueOnce(
+          mockJsonResponse({
+            agentDid: "did:t3n:0xAgentAddress",
+            status: "admitted",
+            authorityRef: "ghostbroker-delegation:urn:uuid:legacy",
+          } satisfies AgentAdmission),
+        );
+
+      const client = new GhostBrokerClient({ baseUrl: "https://api.example.com" });
+      await client.authenticateWithApiKey("gbk_test");
+
+      await client.admitAgent({
+        institutionId: SAMPLE_SESSION.institution.id,
+        agentDid: "did:t3n:0xAgentAddress",
+        delegationCredential: { id: "urn:uuid:legacy" },
+      });
+
+      const admitCall = fetchSpy.mock.calls[1];
+      const [, admitInit] = admitCall ?? [];
+      const body = JSON.parse((admitInit as RequestInit).body as string);
+      expect(body.delegationCredential).toEqual({ id: "urn:uuid:legacy" });
     });
   });
 

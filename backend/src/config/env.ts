@@ -64,6 +64,16 @@ const envSchema = z.object({
   AUTH_SESSION_SECRET: z.string().min(32).optional(),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
   PORTFOLIO_SYNC_TOKEN: z.string().min(32).optional(),
+  /**
+   * Phase 2.5: Demo Mode.
+   *
+   * The path to the `agents/` workspace (relative to the
+   * backend's CWD). The demo orchestrator spawns
+   * `npm run buyer` / `npm run seller` from this
+   * directory. Defaults to `../agents` so the standard
+   * monorepo layout works without configuration.
+   */
+  AGENTS_WORKSPACE_DIR: z.string().min(1).optional(),
 });
 
 export type BackendEnv = z.infer<typeof envSchema>;

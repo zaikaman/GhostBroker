@@ -94,4 +94,40 @@ export class FakeAgentRepository implements AgentRepository {
       ) ?? null
     );
   }
+
+  public async updateMetadata(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<Agent> {
+    const agent = this.agents.find((a) => a.id === id);
+    if (!agent) {
+      throw new Error(`agent ${id} not found`);
+    }
+    const next: Agent = {
+      ...agent,
+      metadata: { ...agent.metadata, ...patch } as Readonly<
+        Record<string, unknown>
+      >,
+    };
+    Object.assign(agent, next);
+    return next;
+  }
+
+  public async updateAuthorityRef(input: {
+    id: string;
+    authorityRef: string;
+    policyHash: string;
+  }): Promise<Agent> {
+    const agent = this.agents.find((a) => a.id === input.id);
+    if (!agent) {
+      throw new Error(`agent ${input.id} not found`);
+    }
+    const next: Agent = {
+      ...agent,
+      authorityRef: input.authorityRef,
+      policyHash: input.policyHash,
+    };
+    Object.assign(agent, next);
+    return next;
+  }
 }

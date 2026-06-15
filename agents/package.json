@@ -6,8 +6,6 @@
   "type": "module",
   "main": "dist/buyer-agent.js",
   "scripts": {
-    "setup:identity": "tsx src/scripts/setup-identity.ts",
-    "setup:delegation": "tsx src/scripts/setup-delegation.ts",
     "buyer": "tsx src/buyer-agent.ts",
     "seller": "tsx src/seller-agent.ts",
     "build": "tsc -p tsconfig.json",

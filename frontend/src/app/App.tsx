@@ -17,6 +17,7 @@ import { LandingPage } from '../components/LandingPage';
 import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
 import { PortfolioCard } from '../components/PortfolioCard';
 import { PortfolioHistory } from '../components/PortfolioHistory';
+import { DemoControlPanel } from '../components/DemoControlPanel';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
@@ -165,6 +166,7 @@ function DashboardView({
           <div className="dashboard-grid-overview" style={{ animation: 'fadeIn 0.3s ease' }}>
             <div className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               <PortfolioCard institutionId={session.institution.id} />
+              <DemoControlPanel institutionId={session.institution.id} />
               <PortfolioHistory institutionId={session.institution.id} />
             </div>
             <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>

@@ -37,6 +37,18 @@ function buildServices(
       revokeAgent: async () => {
         throw new Error("not used");
       },
+      persistDelegation: async () => {
+        throw new Error("not used");
+      },
+      loadDelegationCredential: async () => null,
+      configureAgent: async () => {
+        throw new Error("not used");
+      },
+      persistDelegation: async () => {
+        throw new Error("not used");
+      },
+      loadDelegationCredential: async () => null,
+        configureAgent: async () => { throw new Error("not used"); },
     } as AgentManagementService,
     authService,
     portfolioService: {} as never,

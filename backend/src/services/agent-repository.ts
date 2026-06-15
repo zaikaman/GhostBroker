@@ -36,7 +36,11 @@ interface UpdateQuery {
     eq(column: string, value: string): Promise<{
       data: unknown;
       error: Error | null;
-    }>;
+    }> & {
+      select(columns?: string): {
+        single(): Promise<{ data: AgentRecord | null; error: Error | null }>;
+      };
+    };
   };
 }
 
@@ -77,6 +81,29 @@ export interface AgentRepository {
     institutionId: string,
     agentDid: string,
   ): Promise<Agent | null>;
+  /**
+   * Patch the agent's `metadata` JSONB column. Used by the
+   * server-side delegation signer to persist the W3C VC on
+   * the agent record at admit time, and to re-persist a
+   * freshly minted VC on the "Regenerate Delegation" path.
+   * Merges into the existing metadata object — does not
+   * overwrite the whole column.
+   */
+  updateMetadata(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<Agent>;
+  /**
+   * Update the `authority_ref` / `policy_hash` columns. Used
+   * together with `updateMetadata` when a re-mint produces
+   * a new VC id; the columns need to track the new id so
+   * the verifier's `authorityRef` check still lines up.
+   */
+  updateAuthorityRef(input: {
+    id: string;
+    authorityRef: string;
+    policyHash: string;
+  }): Promise<Agent>;
 }
 
 export class SupabaseAgentRepository implements AgentRepository {
@@ -206,6 +233,59 @@ export class SupabaseAgentRepository implements AgentRepository {
       return null;
     }
 
+    return agentFromRecord(data);
+  }
+
+  public async updateMetadata(
+    id: string,
+    patch: Record<string, unknown>,
+  ): Promise<Agent> {
+    // Read-merge-write. The JSONB column is small (one VC
+    // + a few operator-set fields) and the merge keeps the
+    // interface local — no need to add a Supabase RPC for
+    // a single-writer hot path that fires once per agent
+    // per re-mint.
+    const existing = await this.client
+      .from("agents")
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (existing.error || !existing.data) {
+      throw new PublicError("not_found", 404);
+    }
+    const merged = {
+      ...(existing.data.metadata ?? {}),
+      ...patch,
+    };
+    const { data, error } = await this.client
+      .from("agents")
+      .update({ metadata: merged })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error || !data) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
+    return agentFromRecord(data);
+  }
+
+  public async updateAuthorityRef(input: {
+    id: string;
+    authorityRef: string;
+    policyHash: string;
+  }): Promise<Agent> {
+    const { data, error } = await this.client
+      .from("agents")
+      .update({
+        authority_ref: input.authorityRef,
+        policy_hash: input.policyHash,
+      })
+      .eq("id", input.id)
+      .select("*")
+      .single();
+    if (error || !data) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
     return agentFromRecord(data);
   }
 }

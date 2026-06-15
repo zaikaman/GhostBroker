@@ -46,6 +46,9 @@ describe("operator auth bearer sessions", () => {
         getAgent: async () => { throw new Error("not used"); },
         updateAgentLabel: async () => { throw new Error("not used"); },
         revokeAgent: async () => { throw new Error("not used"); },
+        persistDelegation: async () => { throw new Error("not used"); },
+        loadDelegationCredential: async () => null,
+        configureAgent: async () => { throw new Error("not used"); },
       }),
     );
 
@@ -74,6 +77,9 @@ describe("operator auth bearer sessions", () => {
         getAgent: async () => { throw new Error("not used"); },
         updateAgentLabel: async () => { throw new Error("not used"); },
         revokeAgent: async () => { throw new Error("not used"); },
+        persistDelegation: async () => { throw new Error("not used"); },
+        loadDelegationCredential: async () => null,
+        configureAgent: async () => { throw new Error("not used"); },
       }),
     );
 

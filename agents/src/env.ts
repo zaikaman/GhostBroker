@@ -90,17 +90,23 @@ export const agentEnvSchema = z.object({
   GHOSTBROKER_API_KEY: z.string().regex(/^gbk_/u, "must start with the gbk_ prefix"),
 
   /**
-   * T3N claim-page key. This is the **only** T3 secret the agent
-   * needs. It is used to derive both the user DID (via
-   * `eth_get_address(apiKey)`) and the agent DID (via
-   * `T3nClient.handshake()` + `client.authenticate(...)`).
+   * Post-Phase 1: the T3N claim-page key is optional on
+   * the agent runtime. The delegation VC + agent identity
+   * are owned by the backend. The agent process only
+   * needs the GhostBroker API key to authenticate. Kept
+   * here as `optional()` so a legacy setup that still has
+   * these in `.env` keeps loading.
    */
-  T3N_API_KEY: z.string().min(1),
-  T3N_API_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)),
-  AGENT_IDENTITY_CONFIG_PATH: z.string().min(1).default("output/identities/agent_identity.json"),
-  DELEGATION_CREDENTIAL_PATH: z.string().min(1).default("output/delegations/agent_delegation.json"),
+  T3N_API_KEY: z.string().min(1).optional(),
+  T3N_API_URL: z
+    .string()
+    .url()
+    .or(z.string().regex(/^https?:\/\//u))
+    .optional(),
+  AGENT_IDENTITY_CONFIG_PATH: z.string().min(1).optional(),
+  DELEGATION_CREDENTIAL_PATH: z.string().min(1).optional(),
   /** Verifier mode on the server: sandbox | live | structural. */
-  VC_VERIFY_MODE: z.enum(["sandbox", "live", "structural"]).default("sandbox"),
+  VC_VERIFY_MODE: z.enum(["sandbox", "live", "structural"]).default("sandbox").optional(),
 
   GROQ_API_KEY: z.string().min(1),
   GROQ_MODEL: z.string().min(1).default("qwen/qwen3-32b"),
@@ -142,8 +148,8 @@ export function loadAgentEnv(): AgentEnv {
   const parsed = agentEnvSchema.safeParse({
     GHOSTBROKER_URL: process.env.GHOSTBROKER_URL,
     GHOSTBROKER_API_KEY: process.env.GHOSTBROKER_API_KEY,
-    T3N_API_KEY: process.env.T3N_API_KEY,
-    T3N_API_URL: optionalEnv("T3N_API_URL", "https://cn-api.sg.testnet.t3n.terminal3.io"),
+    T3N_API_KEY: process.env.T3N_API_KEY === "" ? undefined : process.env.T3N_API_KEY,
+    T3N_API_URL: process.env.T3N_API_URL,
     AGENT_IDENTITY_CONFIG_PATH: process.env.AGENT_IDENTITY_CONFIG_PATH,
     DELEGATION_CREDENTIAL_PATH: process.env.DELEGATION_CREDENTIAL_PATH,
     VC_VERIFY_MODE: optionalEnv("VC_VERIFY_MODE", "sandbox"),
