@@ -51,7 +51,6 @@ import {
   ScrollIcon,
   LockIcon,
   RocketIcon,
-  Key01Icon,
   EyeIcon,
   CancelCircleIcon,
 } from 'hugeicons-react';
@@ -186,10 +185,12 @@ function DashboardView({
           <div className="dashboard-grid-overview" style={{ animation: 'fadeIn 0.3s ease' }}>
             <div className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               <PortfolioCard institutionId={session.institution.id} />
-              <DemoControlPanel institutionId={session.institution.id} />
               <PortfolioHistory institutionId={session.institution.id} />
             </div>
             <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+              <div className="card">
+                <ProcessingStatusRail intents={intents} />
+              </div>
               <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                 <LiveAgentActivityStream
                   agents={agents}
@@ -205,9 +206,6 @@ function DashboardView({
       case 'enclaves':
         return (
           <div className="dashboard-grid-enclaves" style={{ animation: 'fadeIn 0.3s ease' }}>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <AgentsPanel onNavigateToDeveloperKeys={() => handleTabChange('developer')} />
-            </div>
             <div className="enclaves-main" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               {agents.length === 0 && (
                 <div className="deploy-onboarding-hero" style={{ margin: 0 }}>
@@ -253,13 +251,18 @@ function DashboardView({
                   </button>
                 </div>
               )}
-              <div className="card">
-                <AgentConnectionGrid agents={agents} onDeploy={() => handleTabChange('deploy')} />
-              </div>
+              <AgentsPanel onNavigateToDeveloperKeys={() => {
+                const el = document.getElementById('api-keys-panel');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }} />
+              <ApiKeysPanel />
             </div>
             <div className="enclaves-side" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-              <div className="card enclave-health-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '300px' }}>
+              <div className="card enclave-health-card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <EnclaveHealthMonitor />
+              </div>
+              <div className="card">
+                <AgentConnectionGrid agents={agents} onDeploy={() => handleTabChange('deploy')} />
               </div>
             </div>
           </div>
@@ -269,9 +272,6 @@ function DashboardView({
         return (
           <div className="dashboard-grid-ledger" style={{ animation: 'fadeIn 0.3s ease' }}>
             <div className="card">
-              <ProcessingStatusRail intents={intents} />
-            </div>
-            <footer className="card">
               <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ScrollIcon size={18} style={{ color: 'var(--color-accent)' }} /> Completed Trades & Audit History
               </h2>
@@ -280,7 +280,7 @@ function DashboardView({
                 isLoading={isHistoryLoading}
                 onViewReceipt={handleViewReceipt}
               />
-            </footer>
+            </div>
           </div>
         );
 
@@ -293,8 +293,13 @@ function DashboardView({
 
       case 'deploy':
         return (
-          <div style={{ animation: 'fadeIn 0.3s ease' }}>
-            <AgentDeploymentGuide session={session} onBack={() => handleTabChange('enclaves')} />
+          <div className="dashboard-grid-overview" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div className="layout-col-1" style={{ display: 'flex', flexDirection: 'column' }}>
+              <AgentDeploymentGuide session={session} onBack={() => handleTabChange('enclaves')} />
+            </div>
+            <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)', marginTop: '2rem' }}>
+              <DemoControlPanel institutionId={session.institution.id} />
+            </div>
           </div>
         );
 
@@ -381,7 +386,7 @@ function DashboardView({
               className={`sidebar-link ${activeTab === 'enclaves' ? 'active' : ''}`}
               onClick={() => handleTabChange('enclaves')}
             >
-              <Robot01Icon size={16} /> Agents & Keys
+              <Robot01Icon size={16} /> Access Control
             </button>
             <button
               type="button"
@@ -389,13 +394,6 @@ function DashboardView({
               onClick={() => handleTabChange('ledger')}
             >
               <ScrollIcon size={16} /> Audit Ledger
-            </button>
-            <button
-              type="button"
-              className={`sidebar-link ${activeTab === 'developer' ? 'active' : ''}`}
-              onClick={() => handleTabChange('developer')}
-            >
-              <Key01Icon size={16} /> Developer Keys
             </button>
             <button
               type="button"
@@ -410,7 +408,7 @@ function DashboardView({
               onClick={() => handleTabChange('deploy')}
               style={{ marginTop: 'var(--spacing-md)' }}
             >
-              <RocketIcon size={16} style={{ color: 'var(--color-accent)' }} /> Deploy Agent
+              <RocketIcon size={16} style={{ color: 'var(--color-accent)' }} /> Developer Sandbox
             </button>
           </nav>
 
@@ -441,9 +439,8 @@ function DashboardView({
                 <div className="header-brand">
                   <h2 style={{ fontSize: '1.1rem', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     {activeTab === 'overview' && 'SYSTEM OVERVIEW'}
-                    {activeTab === 'enclaves' && 'SECURE ENCLAVE RUNNERS'}
+                    {activeTab === 'enclaves' && 'ACCESS CONTROL & INFRASTRUCTURE'}
                     {activeTab === 'ledger' && 'SECURE AUDIT LEDGER'}
-                    {activeTab === 'developer' && 'DEVELOPER INTEGRATIONS'}
                     {activeTab === 'settings' && 'SYSTEM SETTINGS'}
                   </h2>
                 </div>

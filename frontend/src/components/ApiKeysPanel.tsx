@@ -93,7 +93,7 @@ export function ApiKeysPanel(): React.JSX.Element {
   };
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+    <div id="api-keys-panel" className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 className="card-title" style={{ margin: 0, border: 'none', padding: 0 }}>
           <Key01Icon size={18} style={{ color: 'var(--color-accent)' }} /> API Keys

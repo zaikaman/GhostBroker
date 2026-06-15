@@ -363,15 +363,20 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
           <span>
             <strong style={{ color: 'var(--color-text-primary)' }}>{apiKeys.length}</strong> API key{apiKeys.length !== 1 ? 's' : ''} available for agent authentication.{' '}
             <a
-              href="#"
+              href="#api-keys-panel"
               onClick={(e) => {
                 e.preventDefault();
                 setError(null);
-                onNavigateToDeveloperKeys?.();
+                const el = document.getElementById('api-keys-panel');
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth' });
+                } else {
+                  onNavigateToDeveloperKeys?.();
+                }
               }}
               style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}
             >
-              Manage keys in Developer Keys tab →
+              Manage keys below ↓
             </a>
           </span>
         </div>

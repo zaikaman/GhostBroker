@@ -643,11 +643,11 @@ export function LiveAgentActivityStream({
         </div>
       ) : (
         <div className="live-agent-stream-layout">
-          {/* LEFT PANEL: Buyer Agent (Own) */}
+          {/* LEFT PANEL: Local Agent (Own) */}
           <div className="agent-log-panel" tabIndex={0}>
             <div className="agent-log-header">
               <div className="agent-log-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span className="pulse-dot" style={{ background: 'var(--color-success)', boxShadow: '0 0 8px var(--color-success)' }}></span> BUYER AGENT LOGS ({institutionName})
+                <span className="pulse-dot" style={{ background: 'var(--color-success)', boxShadow: '0 0 8px var(--color-success)' }}></span> LOCAL AGENT LOGS ({institutionName})
               </div>
               <div className="agent-log-did">
                 DID: {leftAgentDid ? truncateDid(leftAgentDid) : 'did:t3:verifying...'}
@@ -664,7 +664,7 @@ export function LiveAgentActivityStream({
                   <div className="mini-radar">
                     <div className="mini-radar-sweep"></div>
                   </div>
-                  <div>Awaiting Buyer Agent connection...</div>
+                  <div>Awaiting Local Agent connection...</div>
                 </div>
               ) : (
                 leftLogs.map((log) => (
@@ -718,11 +718,11 @@ export function LiveAgentActivityStream({
             </div>
           </div>
 
-          {/* RIGHT PANEL: Seller Agent (Counterparty) */}
+          {/* RIGHT PANEL: Counterparty Agent */}
           <div className="agent-log-panel" tabIndex={0}>
             <div className="agent-log-header">
               <div className="agent-log-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span className="pulse-dot" style={{ background: 'var(--color-warning)', boxShadow: '0 0 8px var(--color-warning)' }}></span> SELLER AGENT LOGS ({getCounterpartyName(rightAgentDid)})
+                <span className="pulse-dot" style={{ background: 'var(--color-warning)', boxShadow: '0 0 8px var(--color-warning)' }}></span> COUNTERPARTY AGENT LOGS ({getCounterpartyName(rightAgentDid)})
               </div>
               <div className="agent-log-did">
                 DID: {rightAgentDid ? truncateDid(rightAgentDid) : 'did:t3:pending...'}
@@ -739,7 +739,7 @@ export function LiveAgentActivityStream({
                   <div className="mini-radar">
                     <div className="mini-radar-sweep"></div>
                   </div>
-                  <div>Awaiting Seller Agent connection...</div>
+                  <div>Awaiting Counterparty Agent connection...</div>
                 </div>
               ) : (
                 rightLogs.map((log) => (
