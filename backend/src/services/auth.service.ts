@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from "node:crypto";
+﻿import { randomBytes, createHash } from "node:crypto";
 import type { AgentIdentityVerifier } from "@ghostbroker/t3-enclave";
 import { logger } from "../logging/logger.js";
 import { PublicError } from "../errors/public-error.js";
@@ -11,6 +11,7 @@ import type { Institution } from "../models/institution.js";
 import { createOpaqueId, issueOperatorSessionToken } from "../auth/session-token.js";
 import type { WalletPortfolioSyncService } from "./sepolia-portfolio-sync.service.js";
 import type { ApiKeyManagementService } from "./api-key.service.js";
+import type { DepositWalletService } from "./deposit-wallet.service.js";
 
 interface ChallengeRecord {
   did: string;
@@ -62,12 +63,16 @@ export class DidAuthService implements AuthSessionService {
     walletPortfolioSyncService?: WalletPortfolioSyncService;
     apiKeyService: ApiKeyManagementService;
     sessionSecret: string;
+    depositWalletService?: DepositWalletService;
+    defaultChainTokenAddresses?: Readonly<Record<string, string>>;
   }) {
     this.institutions = params.institutions;
     this.identityVerifier = params.identityVerifier;
     this.walletPortfolioSyncService = params.walletPortfolioSyncService;
     this.apiKeyService = params.apiKeyService;
     this.sessionSecret = params.sessionSecret;
+    this.depositWalletService = params.depositWalletService;
+    this.defaultChainTokenAddresses = params.defaultChainTokenAddresses;
   }
 
   private readonly challenges = new Map<string, ChallengeRecord>();
@@ -76,6 +81,10 @@ export class DidAuthService implements AuthSessionService {
   private readonly walletPortfolioSyncService: WalletPortfolioSyncService | undefined;
   private readonly apiKeyService: ApiKeyManagementService;
   private readonly sessionSecret: string;
+  private readonly depositWalletService: DepositWalletService | undefined;
+  private readonly defaultChainTokenAddresses:
+    | Readonly<Record<string, string>>
+    | undefined;
 
   private async findOrCreateInstitution(did: string): Promise<Institution> {
     const existing = await this.institutions.findByTenantDid(did);
@@ -98,10 +107,25 @@ export class DidAuthService implements AuthSessionService {
         metadata.connectedWalletAddress = connectedWalletAddress;
       }
 
+      // Default new wallet-auth institutions onto the Sepolia
+      // chain rail so assets actually move on-chain. The chain
+      // rail needs a server-managed deposit wallet; when that
+      // service is configured we derive the deposit address and
+      // attach the canonical token addresses. If the chain rail
+      // is not configured (no deposit-wallet service), fall back
+      // to the off-chain default so login never breaks.
+      let settlementProfileRef = "wallet:default";
+      if (this.depositWalletService) {
+        settlementProfileRef = "chain:sepolia:erc20";
+        metadata.depositAddress =
+          this.depositWalletService.deriveDepositAddress(did);
+        metadata.tokenAddresses = { ...(this.defaultChainTokenAddresses ?? {}) };
+      }
+
       const institution = await this.institutions.createInstitution({
         legalName: walletDisplayName(did),
         displayName: walletDisplayName(did),
-        settlementProfileRef: "wallet:default",
+        settlementProfileRef,
         t3TenantDid: did,
         metadata,
       });

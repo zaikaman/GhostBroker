@@ -1,4 +1,4 @@
-import cors from "cors";
+﻿import cors from "cors";
 import express, {
   type ErrorRequestHandler,
   type Express,
@@ -86,7 +86,7 @@ import {
   ChildProcessDemoAgentOrchestrator,
   type DemoAgentOrchestrator,
 } from "./services/demo-orchestrator.js";
-import { InstitutionFundingService } from "./services/institution-funding.service.js";
+import { InstitutionApprovalService } from "./services/institution-approval.service.js";
 import { InstitutionWithdrawalService } from "./services/institution-withdrawal.service.js";
 import { createDemoRouter } from "./api/demo.routes.js";
 import {
@@ -177,7 +177,7 @@ export interface BackendServices {
    * omit it; production boots it in `createDefaultServices`.
    */
   demoAgentOrchestrator?: DemoAgentOrchestrator;
-  institutionFundingService?: InstitutionFundingService;
+  institutionApprovalService?: InstitutionApprovalService;
   institutionWithdrawalService?: InstitutionWithdrawalService;
 }
 
@@ -236,13 +236,17 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         )
       : undefined;
   const defaultChainTokenAddresses: Record<string, string> = {};
-  if (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS) {
-    defaultChainTokenAddresses["WBTC"] =
-      env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS;
+  const defaultWbtcAddress =
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS ??
+    env.SEPOLIA_WBTC_CONTRACT_ADDRESS;
+  const defaultUsdcAddress =
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS ??
+    env.SEPOLIA_USDC_CONTRACT_ADDRESS;
+  if (defaultWbtcAddress) {
+    defaultChainTokenAddresses["WBTC"] = defaultWbtcAddress;
   }
-  if (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS) {
-    defaultChainTokenAddresses["USDC"] =
-      env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS;
+  if (defaultUsdcAddress) {
+    defaultChainTokenAddresses["USDC"] = defaultUsdcAddress;
   }
   const authorityRevocationRepository =
     new SupabaseAuthorityRevocationRepository(supabase as never);
@@ -418,10 +422,14 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   }
   const railDispatcher = new MapSettlementRailDispatcher(railRegistry);
 
-  let institutionFundingService: InstitutionFundingService | undefined;
+  let institutionApprovalService: InstitutionApprovalService | undefined;
   let institutionWithdrawalService: InstitutionWithdrawalService | undefined;
-  const chainWbtcAddress = env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS;
-  const chainUsdcAddress = env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS;
+  const chainWbtcAddress =
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS ??
+    env.SEPOLIA_WBTC_CONTRACT_ADDRESS;
+  const chainUsdcAddress =
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS ??
+    env.SEPOLIA_USDC_CONTRACT_ADDRESS;
   if (
     depositWalletService &&
     env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL &&
@@ -439,27 +447,16 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       wbtcAddress: chainWbtcAddress as `0x${string}`,
       usdcAddress: chainUsdcAddress as `0x${string}`,
     });
-    if (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FAUCET_PRIVATE_KEY) {
-      institutionFundingService = new InstitutionFundingService({
-        institutionRepository,
-        depositWalletService,
-        rpcUrl: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL,
-        chainId,
-        faucetPrivateKey:
-          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FAUCET_PRIVATE_KEY as `0x${string}`,
-        relayerContractAddress:
-          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS as `0x${string}`,
-        relayerPrivateKey:
-          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
-        wbtcAddress: chainWbtcAddress as `0x${string}`,
-        usdcAddress: chainUsdcAddress as `0x${string}`,
-        defaultFunding: {
-          eth: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_ETH_DEFAULT ?? "0.5",
-          wbtc: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_WBTC_DEFAULT ?? "0.1",
-          usdc: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_USDC_DEFAULT ?? "1000",
-        },
-      });
-    }
+    institutionApprovalService = new InstitutionApprovalService({
+      institutionRepository,
+      depositWalletService,
+      rpcUrl: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL,
+      chainId,
+      relayerContractAddress:
+        env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS as `0x${string}`,
+      wbtcAddress: chainWbtcAddress as `0x${string}`,
+      usdcAddress: chainUsdcAddress as `0x${string}`,
+    });
   }
 
   // WS2: production resolver for per-institution settlement
@@ -568,7 +565,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     intentLockRepository,
     intentLockJanitor,
     tenantDelegationSigner,
-    ...(institutionFundingService ? { institutionFundingService } : {}),
+    ...(institutionApprovalService ? { institutionApprovalService } : {}),
     ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),
     demoAgentOrchestrator: new ChildProcessDemoAgentOrchestrator({
       agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
@@ -580,6 +577,10 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
       ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
       apiKeyService: new ApiKeyService(apiKeyRepository),
+      ...(depositWalletService ? { depositWalletService } : {}),
+      ...(Object.keys(defaultChainTokenAddresses).length > 0
+        ? { defaultChainTokenAddresses }
+        : {}),
       sessionSecret:
         env.AUTH_SESSION_SECRET ??
         "development-only-auth-session-secret-change-before-production",
@@ -626,7 +627,7 @@ export function createApp(
     app.use("/api", createAuthRouter(services.authService));
   }
   // Dev-only token minting endpoint for Playwright E2E tests and local
-  // development. Never mount in production — this issues real signed JWTs
+  // development. Never mount in production â€” this issues real signed JWTs
   // for an arbitrary institutionId with no DID challenge, which would
   // bypass the wallet-auth security model.
   if (env.NODE_ENV !== "production") {
@@ -638,8 +639,8 @@ export function createApp(
       services.institutionService,
       operatorAuthMiddleware(env, services.apiKeyService),
       {
-        ...(services.institutionFundingService
-          ? { fundingService: services.institutionFundingService }
+        ...(services.institutionApprovalService
+          ? { approvalService: services.institutionApprovalService }
           : {}),
         ...(services.institutionWithdrawalService
           ? { withdrawalService: services.institutionWithdrawalService }
@@ -727,3 +728,6 @@ export async function createProductionApp(
 ): Promise<Express> {
   return createApp(env, await createDefaultServices(env));
 }
+
+
+

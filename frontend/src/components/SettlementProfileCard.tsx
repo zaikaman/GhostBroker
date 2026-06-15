@@ -2,14 +2,21 @@
 import {
   apiClient,
   type CompletedTrade,
-  type FundRelayerResponse,
   type Institution,
+  type RelayerApprovalResponse,
   type WithdrawalAsset,
   type WithdrawResponse,
 } from "../services/api-client";
 import {
+  depositWithWallet,
+  type DepositAsset,
+  type DepositAssetConfig,
+  type DepositWithWalletResult,
+} from "../services/wallet-deposit";
+import {
   AlertCircleIcon,
   CheckmarkCircle01Icon,
+  Copy01Icon,
   Link01Icon,
   Loading03Icon,
   RocketIcon,
@@ -22,19 +29,21 @@ import {
  *
  * Displays the institution's settlement profile, the
  * server-managed chain-rail deposit wallet, the per-asset
- * token addresses, and the most recent rail trade refs
- * (with Etherscan links). For chain-rail institutions it
- * also exposes two operator actions:
+ * token addresses, and the most recent rail trade refs.
+ * For chain-rail institutions it exposes three operator
+ * actions:
  *
- *   - Fund + approve: tops up the deposit wallet with
- *     sepETH / WBTC / USDC and approves the relayer.
- *   - Withdraw: sends assets out of the deposit wallet to
- *     an operator-supplied destination address.
- *
- * Both actions are server-driven: the backend holds the
- * deposit wallet key (derived per-institution) and signs
- * the transactions. The UI only collects amounts and a
- * destination address.
+ *   - Deposit: the operator signs a transfer from their own
+ *     browser wallet straight to the deposit address. The
+ *     server never holds the operator funds; assets move on
+ *     chain wallet-to-wallet.
+ *   - Approve relayer: a server action. The backend holds
+ *     the per-institution deposit wallet key and signs the
+ *     ERC-20 approval so the settlement relayer can move
+ *     assets during a trade. Only the server can do this
+ *     because only it controls the deposit wallet key.
+ *   - Withdraw: the backend signs and broadcasts a transfer
+ *     out of the deposit wallet to an operator destination.
  */
 interface SettlementProfileCardProps {
   institutionId: string;
@@ -42,12 +51,24 @@ interface SettlementProfileCardProps {
 
 const SEPOLIA_ETHERSCAN_TX_BASE = "https://sepolia.etherscan.io/tx/";
 const WITHDRAW_ASSETS: readonly WithdrawalAsset[] = ["ETH", "WBTC", "USDC"];
+const DEPOSIT_ASSETS: readonly DepositAsset[] = ["ETH", "WBTC", "USDC"];
+const ASSET_DECIMALS: Record<DepositAsset, number> = {
+  ETH: 18,
+  WBTC: 8,
+  USDC: 6,
+};
+
+function assetLabel(asset: DepositAsset | WithdrawalAsset): string {
+  return asset === "ETH" ? "sepETH" : asset;
+}
 
 export function SettlementProfileCard({
   institutionId,
 }: SettlementProfileCardProps): React.JSX.Element {
   const [institution, setInstitution] = useState<Institution | null>(null);
   const [trades, setTrades] = useState<readonly CompletedTrade[]>([]);
+  const [depositStatus, setDepositStatus] =
+    useState<RelayerApprovalResponse | null>(null);
   // `loading` starts true; the useEffect below flips it to
   // false when the data is ready. We do not call
   // setLoading(true) inside the effect to avoid the
@@ -55,16 +76,20 @@ export function SettlementProfileCard({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fund + withdraw panel state.
-  const [activePanel, setActivePanel] = useState<"fund" | "withdraw" | null>(
-    null,
-  );
+  const [activePanel, setActivePanel] = useState<
+    "deposit" | "withdraw" | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [fundBusy, setFundBusy] = useState<boolean>(false);
-  const [fundResult, setFundResult] = useState<FundRelayerResponse | null>(null);
-  const [fundEth, setFundEth] = useState<string>("");
-  const [fundWbtc, setFundWbtc] = useState<string>("");
-  const [fundUsdc, setFundUsdc] = useState<string>("");
+
+  const [depositBusy, setDepositBusy] = useState<boolean>(false);
+  const [depositResult, setDepositResult] =
+    useState<DepositWithWalletResult | null>(null);
+  const [depositAsset, setDepositAsset] = useState<DepositAsset>("USDC");
+  const [depositAmount, setDepositAmount] = useState<string>("");
+
+  const [approveBusy, setApproveBusy] = useState<boolean>(false);
+  const [approveResult, setApproveResult] =
+    useState<RelayerApprovalResponse | null>(null);
 
   const [withdrawBusy, setWithdrawBusy] = useState<boolean>(false);
   const [withdrawResult, setWithdrawResult] = useState<WithdrawResponse | null>(
@@ -74,14 +99,25 @@ export function SettlementProfileCard({
   const [withdrawAmount, setWithdrawAmount] = useState<string>("");
   const [withdrawTo, setWithdrawTo] = useState<string>("");
 
-  const reload = useCallback(async (): Promise<void> => {
-    const [inst, tradeList] = await Promise.all([
-      apiClient.getInstitution(institutionId),
-      apiClient.getCompletedTrades(),
-    ]);
-    setInstitution(inst);
-    setTrades(tradeList.items);
-  }, [institutionId]);
+  const refreshDepositStatus = useCallback(
+    async (isChainRail: boolean): Promise<void> => {
+      if (!isChainRail) {
+        setDepositStatus(null);
+        return;
+      }
+      try {
+        const status = await apiClient.getDepositStatus(institutionId);
+        setDepositStatus(status);
+      } catch {
+        // Status is best-effort; the deposit address is still
+        // shown from the institution metadata even if the RPC
+        // read fails.
+        setDepositStatus(null);
+      }
+    },
+    [institutionId],
+  );
+
 
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +136,9 @@ export function SettlementProfileCard({
         setInstitution(inst);
         setTrades(tradeList.items);
         setLoading(false);
+        await refreshDepositStatus(
+          inst.settlementProfileRef === "chain:sepolia:erc20",
+        );
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -109,7 +148,7 @@ export function SettlementProfileCard({
     return (): void => {
       cancelled = true;
     };
-  }, [institutionId]);
+  }, [institutionId, refreshDepositStatus]);
 
   if (loading) {
     return (
@@ -134,7 +173,8 @@ export function SettlementProfileCard({
   const isChainRail =
     institution.settlementProfileRef === "chain:sepolia:erc20";
   const depositAddress = isChainRail
-    ? (institution.metadata?.["depositAddress"] as string | undefined)
+    ? ((institution.metadata?.["depositAddress"] as string | undefined) ??
+      depositStatus?.depositAddress)
     : undefined;
   const tokenAddresses = isChainRail
     ? (institution.metadata?.["tokenAddresses"] as
@@ -142,32 +182,70 @@ export function SettlementProfileCard({
         | undefined)
     : undefined;
 
-  // Surface only the most recent 5 rail refs.
   const recentRailRefs = trades
     .filter((t) => t.railTradeRef !== null && t.railTradeRef !== undefined)
     .slice(0, 5);
 
-  const togglePanel = (panel: "fund" | "withdraw"): void => {
+  const togglePanel = (panel: "deposit" | "withdraw"): void => {
     setActionError(null);
     setActivePanel((current) => (current === panel ? null : panel));
   };
 
-  const handleFund = async (): Promise<void> => {
-    setFundBusy(true);
-    setActionError(null);
-    setFundResult(null);
+  const depositAssetConfig = (asset: DepositAsset): DepositAssetConfig => {
+    const tokenAddress = asset === "ETH" ? undefined : tokenAddresses?.[asset];
+    return {
+      symbol: assetLabel(asset),
+      decimals: ASSET_DECIMALS[asset],
+      ...(tokenAddress ? { tokenAddress } : {}),
+    };
+  };
+
+  const handleCopyDeposit = async (): Promise<void> => {
+    if (!depositAddress) return;
     try {
-      const result = await apiClient.fundRelayer(institutionId, {
-        ...(fundEth.trim() ? { ethAmount: fundEth.trim() } : {}),
-        ...(fundWbtc.trim() ? { wbtcAmount: fundWbtc.trim() } : {}),
-        ...(fundUsdc.trim() ? { usdcAmount: fundUsdc.trim() } : {}),
+      await navigator.clipboard.writeText(depositAddress);
+    } catch {
+      // Clipboard is best-effort; ignore failures.
+    }
+  };
+
+  const handleDeposit = async (): Promise<void> => {
+    if (!depositAddress) {
+      setActionError("Deposit address is not available yet.");
+      return;
+    }
+    setDepositBusy(true);
+    setActionError(null);
+    setDepositResult(null);
+    try {
+      const result = await depositWithWallet({
+        asset: depositAsset,
+        amount: depositAmount.trim(),
+        depositAddress,
+        assetConfig: depositAssetConfig(depositAsset),
       });
-      setFundResult(result);
-      await reload();
+      setDepositResult(result);
+      setDepositAmount("");
+      await refreshDepositStatus(true);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
-      setFundBusy(false);
+      setDepositBusy(false);
+    }
+  };
+
+  const handleApprove = async (): Promise<void> => {
+    setApproveBusy(true);
+    setActionError(null);
+    setApproveResult(null);
+    try {
+      const result = await apiClient.approveRelayer(institutionId);
+      setApproveResult(result);
+      setDepositStatus(result);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApproveBusy(false);
     }
   };
 
@@ -183,13 +261,16 @@ export function SettlementProfileCard({
       });
       setWithdrawResult(result);
       setWithdrawAmount("");
-      await reload();
+      await refreshDepositStatus(true);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setWithdrawBusy(false);
     }
   };
+
+  const approved = depositStatus?.approved;
+  const allApproved = Boolean(approved?.wbtc && approved?.usdc);
 
   return (
     <div className="settlement-profile-card">
@@ -209,10 +290,60 @@ export function SettlementProfileCard({
             <span className="settlement-profile-card__label">
               <Wallet01Icon size={12} /> Deposit address
             </span>
-            <code className="settlement-profile-card__value">
-              {depositAddress ?? <em>not set</em>}
-            </code>
+            <span className="settlement-profile-card__value-group">
+              <code className="settlement-profile-card__value">
+                {depositAddress ?? <em>not set</em>}
+              </code>
+              {depositAddress && (
+                <button
+                  type="button"
+                  className="settlement-profile-card__icon-btn"
+                  onClick={handleCopyDeposit}
+                  title="Copy deposit address"
+                  aria-label="Copy deposit address"
+                >
+                  <Copy01Icon size={12} />
+                </button>
+              )}
+            </span>
           </div>
+
+          {depositStatus && (
+            <div className="settlement-profile-card__row settlement-profile-card__row--block">
+              <span className="settlement-profile-card__label">
+                Deposit wallet balances
+              </span>
+              <ul className="settlement-profile-card__token-list">
+                <li>
+                  <code>sepETH</code> -&gt; <code>{depositStatus.balances.eth}</code>
+                </li>
+                <li>
+                  <code>WBTC</code> -&gt; <code>{depositStatus.balances.wbtc}</code>
+                </li>
+                <li>
+                  <code>USDC</code> -&gt; <code>{depositStatus.balances.usdc}</code>
+                </li>
+              </ul>
+              <div
+                className={
+                  allApproved
+                    ? "status-badge success settlement-profile-card__action-status"
+                    : "status-badge settlement-profile-card__action-status"
+                }
+              >
+                {allApproved ? (
+                  <>
+                    <CheckmarkCircle01Icon size={14} /> Relayer approved
+                  </>
+                ) : (
+                  <>
+                    <AlertCircleIcon size={14} /> Relayer approval pending
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {tokenAddresses && Object.keys(tokenAddresses).length > 0 && (
             <div className="settlement-profile-card__row settlement-profile-card__row--block">
               <span className="settlement-profile-card__label">Token addresses</span>
@@ -230,10 +361,30 @@ export function SettlementProfileCard({
             <button
               type="button"
               className="btn btn-primary settlement-profile-card__action-btn"
-              onClick={() => togglePanel("fund")}
-              aria-pressed={activePanel === "fund"}
+              onClick={() => togglePanel("deposit")}
+              aria-pressed={activePanel === "deposit"}
             >
-              <Wallet01Icon size={14} /> Fund &amp; approve relayer
+              <Wallet01Icon size={14} /> Deposit
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary settlement-profile-card__action-btn"
+              onClick={handleApprove}
+              disabled={approveBusy}
+            >
+              {approveBusy ? (
+                <>
+                  <Loading03Icon
+                    size={14}
+                    style={{ animation: "spin 1s linear infinite" }}
+                  />{" "}
+                  Approving...
+                </>
+              ) : (
+                <>
+                  <Shield01Icon size={14} /> Approve relayer
+                </>
+              )}
             </button>
             <button
               type="button"
@@ -251,44 +402,52 @@ export function SettlementProfileCard({
             </div>
           )}
 
-          {activePanel === "fund" && (
+          {approveResult && (
+            <div className="settlement-profile-card__result">
+              <div className="settlement-profile-card__result-head">
+                <CheckmarkCircle01Icon
+                  size={14}
+                  style={{ color: "var(--color-success)" }}
+                />
+                <span>Relayer approval submitted</span>
+              </div>
+              <ApprovalTxLinks result={approveResult} />
+            </div>
+          )}
+
+          {activePanel === "deposit" && (
             <div className="settlement-profile-card__panel">
               <p className="settlement-profile-card__panel-hint">
-                Tops up the deposit wallet to the target balance and approves the
-                relayer. Leave a field blank to use the configured default.
+                Send assets from your own wallet to the deposit address. Your
+                wallet signs the transfer on Sepolia; nothing is custodied by
+                the browser.
               </p>
               <div className="settlement-profile-card__field-grid">
                 <label className="settlement-profile-card__field">
-                  <span>sepETH</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className="form-input"
-                    placeholder="default"
-                    value={fundEth}
-                    onChange={(e) => setFundEth(e.target.value)}
-                  />
+                  <span>Asset</span>
+                  <select
+                    className="form-select"
+                    value={depositAsset}
+                    onChange={(e) =>
+                      setDepositAsset(e.target.value as DepositAsset)
+                    }
+                  >
+                    {DEPOSIT_ASSETS.map((asset) => (
+                      <option key={asset} value={asset}>
+                        {assetLabel(asset)}
+                      </option>
+                    ))}
+                  </select>
                 </label>
-                <label className="settlement-profile-card__field">
-                  <span>WBTC</span>
+                <label className="settlement-profile-card__field settlement-profile-card__field--wide">
+                  <span>Amount</span>
                   <input
                     type="text"
                     inputMode="decimal"
                     className="form-input"
-                    placeholder="default"
-                    value={fundWbtc}
-                    onChange={(e) => setFundWbtc(e.target.value)}
-                  />
-                </label>
-                <label className="settlement-profile-card__field">
-                  <span>USDC</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className="form-input"
-                    placeholder="default"
-                    value={fundUsdc}
-                    onChange={(e) => setFundUsdc(e.target.value)}
+                    placeholder="0.0"
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
                   />
                 </label>
               </div>
@@ -296,43 +455,48 @@ export function SettlementProfileCard({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={handleFund}
-                  disabled={fundBusy}
+                  onClick={handleDeposit}
+                  disabled={depositBusy || !depositAmount.trim()}
                 >
-                  {fundBusy ? (
+                  {depositBusy ? (
                     <>
                       <Loading03Icon
                         size={14}
                         style={{ animation: "spin 1s linear infinite" }}
                       />{" "}
-                      Funding...
+                      Confirm in wallet...
                     </>
                   ) : (
-                    "Fund + approve"
+                    "Deposit"
                   )}
                 </button>
               </div>
-              {fundResult && (
+              {depositResult && (
                 <div className="settlement-profile-card__result">
                   <div className="settlement-profile-card__result-head">
                     <CheckmarkCircle01Icon
                       size={14}
                       style={{ color: "var(--color-success)" }}
                     />
-                    <span>Deposit wallet funded</span>
+                    <span>
+                      Sent {depositResult.amount}{" "}
+                      {assetLabel(depositResult.asset)}
+                    </span>
                   </div>
                   <ul className="settlement-profile-card__result-list">
                     <li>
-                      sepETH balance: <code>{fundResult.balances.eth}</code>
-                    </li>
-                    <li>
-                      WBTC balance: <code>{fundResult.balances.wbtc}</code>
-                    </li>
-                    <li>
-                      USDC balance: <code>{fundResult.balances.usdc}</code>
+                      Tx:{" "}
+                      <a
+                        href={SEPOLIA_ETHERSCAN_TX_BASE + depositResult.txHash}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="settlement-profile-card__rail-link"
+                      >
+                        {shortenTxHash(depositResult.txHash)}{" "}
+                        <Link01Icon size={10} />
+                      </a>
                     </li>
                   </ul>
-                  <FundTxLinks result={fundResult} />
                 </div>
               )}
             </div>
@@ -356,7 +520,7 @@ export function SettlementProfileCard({
                   >
                     {WITHDRAW_ASSETS.map((asset) => (
                       <option key={asset} value={asset}>
-                        {asset === "ETH" ? "sepETH" : asset}
+                        {assetLabel(asset)}
                       </option>
                     ))}
                   </select>
@@ -416,9 +580,7 @@ export function SettlementProfileCard({
                     />
                     <span>
                       Sent {withdrawResult.amount}{" "}
-                      {withdrawResult.asset === "ETH"
-                        ? "sepETH"
-                        : withdrawResult.asset}
+                      {assetLabel(withdrawResult.asset)}
                     </span>
                   </div>
                   <ul className="settlement-profile-card__result-list">
@@ -481,18 +643,18 @@ export function SettlementProfileCard({
   );
 }
 
-function FundTxLinks({
+function ApprovalTxLinks({
   result,
 }: {
-  result: FundRelayerResponse;
-}): React.JSX.Element | null {
+  result: RelayerApprovalResponse;
+}): React.JSX.Element {
   const entries = Object.entries(result.txHashes).filter(
     ([, hash]) => typeof hash === "string" && hash.length > 0,
   ) as Array<[string, string]>;
   if (entries.length === 0) {
     return (
       <p className="settlement-profile-card__panel-hint">
-        Already funded and approved. No new transactions were needed.
+        Already approved. No new transactions were needed.
       </p>
     );
   }
@@ -535,3 +697,4 @@ function shortenTxHash(railTradeRef: string | null | undefined): string {
   if (railTradeRef.length <= 14) return railTradeRef;
   return `${railTradeRef.slice(0, 10)}...${railTradeRef.slice(-8)}`;
 }
+

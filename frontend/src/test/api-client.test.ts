@@ -1,4 +1,4 @@
-import { apiClient } from '../services/api-client';
+﻿import { apiClient } from '../services/api-client';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 type FetchMock = ReturnType<typeof vi.fn>;
@@ -200,7 +200,7 @@ describe('apiClient Services', () => {
     expect(result).toEqual(mockReceipt);
   });
 
-  it('fundRelayer issues POST with the operator bearer token', async () => {
+  it('getDepositStatus issues GET with the operator bearer token', async () => {
     apiClient.setAuthSession({
       token: 'real.jwt.token',
       expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
@@ -213,9 +213,10 @@ describe('apiClient Services', () => {
 
     const mockResponse = {
       depositAddress: '0x1111111111111111111111111111111111111111',
-      relayerAddress: '0x2222222222222222222222222222222222222222',
-      txHashes: { ethTopUp: '0x' + 'a'.repeat(64) },
+      relayerContractAddress: '0x2222222222222222222222222222222222222222',
+      txHashes: {},
       balances: { eth: '0.5', wbtc: '0.1', usdc: '1000' },
+      approved: { wbtc: false, usdc: true },
     };
 
     asFetchMock(global.fetch).mockResolvedValueOnce({
@@ -223,17 +224,54 @@ describe('apiClient Services', () => {
       json: async () => mockResponse,
     } as Response);
 
-    const result = await apiClient.fundRelayer('inst_123', { ethAmount: '0.5' });
+    const result = await apiClient.getDepositStatus('inst_123');
 
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/institutions/inst_123/fund-relayer'),
+      expect.stringContaining('/api/institutions/inst_123/deposit-status'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Authorization': 'Bearer real.jwt.token',
+        }),
+      }),
+    );
+    expect(result).toEqual(mockResponse);
+  });
+
+  it('approveRelayer issues POST with the operator bearer token', async () => {
+    apiClient.setAuthSession({
+      token: 'real.jwt.token',
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      institution: {
+        id: 'inst_123',
+        displayName: 'Northstar Capital',
+        t3TenantDid: 'did:t3n:tenant:northstar',
+      },
+    });
+
+    const mockResponse = {
+      depositAddress: '0x1111111111111111111111111111111111111111',
+      relayerContractAddress: '0x2222222222222222222222222222222222222222',
+      txHashes: { wbtcApprove: '0x' + 'a'.repeat(64) },
+      balances: { eth: '0.5', wbtc: '0.1', usdc: '1000' },
+      approved: { wbtc: true, usdc: true },
+    };
+
+    asFetchMock(global.fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await apiClient.approveRelayer('inst_123');
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/institutions/inst_123/approve-relayer'),
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
           'Content-Type': 'application/json',
           'Authorization': 'Bearer real.jwt.token',
         }),
-        body: JSON.stringify({ ethAmount: '0.5' }),
+        body: JSON.stringify({}),
       }),
     );
     expect(result).toEqual(mockResponse);
@@ -285,3 +323,4 @@ describe('apiClient Services', () => {
     expect(result).toEqual(mockResponse);
   });
 });
+

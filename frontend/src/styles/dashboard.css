@@ -1,4 +1,4 @@
-/* Responsive Grid & Layout Rules */
+﻿/* Responsive Grid & Layout Rules */
 .dashboard-layout {
   display: grid;
   grid-template-columns: 1fr;
@@ -607,9 +607,9 @@
   flex-shrink: 0;
 }
 
-/* ──────────────────────────────────────────────
-   Deploy Your Agent — Onboarding Guide
-   ────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   Deploy Your Agent â€” Onboarding Guide
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .deploy-layout {
   display: flex;
@@ -1555,9 +1555,9 @@
   border-color: var(--color-accent);
 }
 
-/* ──────────────────────────────────────────────
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    Sidebar & Layout Shell Styling (v3)
-   ────────────────────────────────────────────── */
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .dashboard-container-v3 {
   display: flex;
@@ -1920,6 +1920,32 @@
   font-family: var(--font-mono);
 }
 
+
+.settlement-profile-card__value-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settlement-profile-card__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.settlement-profile-card__icon-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
 .settlement-profile-card__action-status {
   width: fit-content;
 }

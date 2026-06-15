@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from "vitest";
-import type { Address, Hash } from "viem";
+import type { Address } from "viem";
 import { InstitutionWithdrawalService } from "../../services/institution-withdrawal.service.js";
 import type { InstitutionRepository } from "../../services/institution.service.js";
 import type { Institution } from "../../models/institution.js";

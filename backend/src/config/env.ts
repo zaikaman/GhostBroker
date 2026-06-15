@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 
 function loadProcessEnvFile(source: NodeJS.ProcessEnv): void {
   if (source !== process.env) {
@@ -76,7 +76,7 @@ const envSchema = z.object({
   AGENTS_WORKSPACE_DIR: z.string().min(1).optional(),
 
   /**
-   * WS2 — chain rail (Sepolia ERC-20). The rail is opt-in: a
+   * WS2 â€” chain rail (Sepolia ERC-20). The rail is opt-in: a
    * missing or empty value means the rail is not registered and
    * every profile `chain:sepolia:erc20` falls through to the
    * noop rail. In production all three are required when the
@@ -165,15 +165,6 @@ const envSchema = z.object({
     .regex(/^0x[0-9a-f]{64}$/iu)
     .optional(),
   /**
-   * WS6: hot-wallet private key used to top up institution
-   * deposit wallets with Sepolia test assets.
-   */
-  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FAUCET_PRIVATE_KEY: z
-    .string()
-    .trim()
-    .regex(/^0x[0-9a-f]{64}$/iu)
-    .optional(),
-  /**
    * WS6: canonical Sepolia token addresses used by the chain
    * rail and by the funding / withdrawal flows.
    */
@@ -186,25 +177,6 @@ const envSchema = z.object({
     .string()
     .trim()
     .regex(/^0x[0-9a-fA-F]{40}$/u)
-    .optional(),
-  /**
-   * WS6: default human-readable funding amounts. Operators may
-   * always override these per request.
-   */
-  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_ETH_DEFAULT: z
-    .string()
-    .trim()
-    .regex(/^\d+(\.\d+)?$/u)
-    .optional(),
-  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_WBTC_DEFAULT: z
-    .string()
-    .trim()
-    .regex(/^\d+(\.\d+)?$/u)
-    .optional(),
-  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_USDC_DEFAULT: z
-    .string()
-    .trim()
-    .regex(/^\d+(\.\d+)?$/u)
     .optional(),
 });
 
@@ -250,3 +222,4 @@ export function getCorsAllowedOrigins(
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 }
+

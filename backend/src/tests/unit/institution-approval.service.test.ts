@@ -1,6 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
 import type { Address, Hash } from "viem";
-import { InstitutionFundingService } from "../../services/institution-funding.service.js";
+import { InstitutionApprovalService } from "../../services/institution-approval.service.js";
 import type { InstitutionRepository } from "../../services/institution.service.js";
 import type { Institution } from "../../models/institution.js";
 import type { DepositWalletService } from "../../services/deposit-wallet.service.js";
@@ -8,12 +8,13 @@ import type { DepositWalletService } from "../../services/deposit-wallet.service
 const WBTC = "0x29f2D40B0605204364af54EC677bD022dA425d03" as Address;
 const USDC = "0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8" as Address;
 const RELAYER_CONTRACT = "0x5fbdb2315678afecb367f032d93f642f64180aa3" as Address;
-const FAUCET_KEY =
-  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-const RELAYER_KEY =
+const DEPOSIT_KEY =
   "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
-const DEPOSIT =
-  "0x1111111111111111111111111111111111111111" as Address;
+const DEPOSIT = "0x1111111111111111111111111111111111111111" as Address;
+
+const MAX = BigInt(
+  "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+);
 
 function chainInstitution(overrides: Partial<Institution> = {}): Institution {
   return {
@@ -39,16 +40,14 @@ function makeRepository(institution: Institution | null): InstitutionRepository 
 }
 
 const depositWalletService: DepositWalletService = {
-  deriveDepositPrivateKey: () => RELAYER_KEY,
+  deriveDepositPrivateKey: () => DEPOSIT_KEY,
   deriveDepositAddress: () => DEPOSIT,
 };
 
 interface CapturedCall {
   fn: string;
-  args?: readonly unknown[];
-  to?: Address;
-  value?: bigint;
   address?: Address;
+  args?: readonly unknown[];
 }
 
 function makeClients(opts: {
@@ -66,10 +65,7 @@ function makeClients(opts: {
 
   const publicClient = {
     getBalance: async () => opts.balances.eth,
-    readContract: async (args: {
-      address: Address;
-      functionName: string;
-    }) => {
+    readContract: async (args: { address: Address; functionName: string }) => {
       if (args.functionName === "decimals") return tokenDecimals(args.address);
       if (args.functionName === "balanceOf") return tokenBalance(args.address);
       if (args.functionName === "allowance") return tokenAllowance(args.address);
@@ -77,11 +73,7 @@ function makeClients(opts: {
     },
   };
 
-  const faucetWalletClient = {
-    sendTransaction: async (args: { to: Address; value: bigint }) => {
-      calls.push({ fn: "sendTransaction", to: args.to, value: args.value });
-      return ("0x" + "a".repeat(64)) as Hash;
-    },
+  const walletClient = {
     writeContract: async (args: {
       address: Address;
       functionName: string;
@@ -92,74 +84,80 @@ function makeClients(opts: {
     },
   };
 
-  return { publicClient, faucetWalletClient, calls };
+  return { publicClient, walletClient, calls };
 }
 
 function makeService(
   repository: InstitutionRepository,
   clients: ReturnType<typeof makeClients>,
-): InstitutionFundingService {
-  return new InstitutionFundingService({
+): InstitutionApprovalService {
+  return new InstitutionApprovalService({
     institutionRepository: repository,
     depositWalletService,
     rpcUrl: "http://127.0.0.1:8545",
     chainId: 31337,
-    faucetPrivateKey: FAUCET_KEY,
     relayerContractAddress: RELAYER_CONTRACT,
-    relayerPrivateKey: RELAYER_KEY,
     wbtcAddress: WBTC,
     usdcAddress: USDC,
-    defaultFunding: { eth: "0.5", wbtc: "0.1", usdc: "1000" },
     publicClient: clients.publicClient as never,
-    faucetWalletClient: clients.faucetWalletClient as never,
+    makeWalletClient: () => clients.walletClient as never,
   });
 }
 
-describe("InstitutionFundingService", () => {
-  it("tops up assets when balances are empty", async () => {
+describe("InstitutionApprovalService", () => {
+  it("approves the relayer for both tokens when no allowance exists", async () => {
     const clients = makeClients({
-      balances: { eth: 0n, wbtc: 0n, usdc: 0n },
-      allowances: {
-        wbtc: BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-        usdc: BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
-      },
+      balances: { eth: 10n ** 17n, wbtc: 0n, usdc: 0n },
+      allowances: { wbtc: 0n, usdc: 0n },
       decimals: { wbtc: 8, usdc: 6 },
     });
     const service = makeService(makeRepository(chainInstitution()), clients);
 
-    const result = await service.fundInstitution("00000000-0000-4000-8000-0000000000f1");
+    const result = await service.approveRelayer("00000000-0000-4000-8000-0000000000f1");
 
     expect(result.depositAddress).toBe(DEPOSIT);
-    expect(result.txHashes.ethTopUp).toBeDefined();
-    expect(result.txHashes.wbtcTopUp).toBeDefined();
-    expect(result.txHashes.usdcTopUp).toBeDefined();
-    expect(result.txHashes.wbtcApprove).toBeUndefined();
-    expect(result.txHashes.usdcApprove).toBeUndefined();
+    expect(result.relayerContractAddress).toBe(RELAYER_CONTRACT);
+    expect(result.txHashes.wbtcApprove).toBeDefined();
+    expect(result.txHashes.usdcApprove).toBeDefined();
+    const approveCalls = clients.calls.filter((c) => c.fn === "approve");
+    expect(approveCalls).toHaveLength(2);
+    expect(approveCalls[0]?.args?.[0]).toBe(RELAYER_CONTRACT);
+    expect(approveCalls[0]?.args?.[1]).toBe(MAX);
   });
 
-  it("does not top up when balances already meet the target and approvals exist", async () => {
-    const MAX = BigInt(
-      "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-    );
+  it("does not re-approve when allowance already exists", async () => {
     const clients = makeClients({
-      balances: {
-        eth: 10n ** 18n, // 1 ETH > 0.5 target
-        wbtc: 10n ** 8n, // 1 WBTC > 0.1 target
-        usdc: 10_000n * 10n ** 6n, // 10000 USDC > 1000 target
-      },
+      balances: { eth: 10n ** 17n, wbtc: 10n ** 8n, usdc: 1000n * 10n ** 6n },
       allowances: { wbtc: MAX, usdc: MAX },
       decimals: { wbtc: 8, usdc: 6 },
     });
     const service = makeService(makeRepository(chainInstitution()), clients);
 
-    const result = await service.fundInstitution("00000000-0000-4000-8000-0000000000f1");
+    const result = await service.approveRelayer("00000000-0000-4000-8000-0000000000f1");
 
-    expect(result.txHashes.ethTopUp).toBeUndefined();
-    expect(result.txHashes.wbtcTopUp).toBeUndefined();
-    expect(result.txHashes.usdcTopUp).toBeUndefined();
     expect(result.txHashes.wbtcApprove).toBeUndefined();
     expect(result.txHashes.usdcApprove).toBeUndefined();
-    expect(clients.calls).toHaveLength(0);
+    expect(clients.calls.filter((c) => c.fn === "approve")).toHaveLength(0);
+    expect(result.approved.wbtc).toBe(true);
+    expect(result.approved.usdc).toBe(true);
+  });
+
+  it("reports deposit status with balances and approval flags", async () => {
+    const clients = makeClients({
+      balances: { eth: 5n * 10n ** 17n, wbtc: 25n * 10n ** 6n, usdc: 250n * 10n ** 6n },
+      allowances: { wbtc: MAX, usdc: 0n },
+      decimals: { wbtc: 8, usdc: 6 },
+    });
+    const service = makeService(makeRepository(chainInstitution()), clients);
+
+    const result = await service.getDepositStatus("00000000-0000-4000-8000-0000000000f1");
+
+    expect(result.depositAddress).toBe(DEPOSIT);
+    expect(result.balances.eth).toBe("0.5");
+    expect(result.balances.usdc).toBe("250");
+    expect(result.approved.wbtc).toBe(true);
+    expect(result.approved.usdc).toBe(false);
+    expect(clients.calls.filter((c) => c.fn === "approve")).toHaveLength(0);
   });
 
   it("rejects an institution that is not on the chain rail", async () => {
@@ -174,7 +172,7 @@ describe("InstitutionFundingService", () => {
     );
 
     await expect(
-      service.fundInstitution("00000000-0000-4000-8000-0000000000f1"),
+      service.approveRelayer("00000000-0000-4000-8000-0000000000f1"),
     ).rejects.toMatchObject({ statusCode: 422 });
   });
 
@@ -187,7 +185,7 @@ describe("InstitutionFundingService", () => {
     const service = makeService(makeRepository(null), clients);
 
     await expect(
-      service.fundInstitution("00000000-0000-4000-8000-0000000000f1"),
+      service.getDepositStatus("00000000-0000-4000-8000-0000000000f1"),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
 });

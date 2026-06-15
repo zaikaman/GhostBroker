@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { SettlementProfileCard } from "../components/SettlementProfileCard";
 
@@ -13,16 +13,29 @@ vi.mock("../services/api-client", () => ({
   apiClient: {
     getInstitution: vi.fn(),
     getCompletedTrades: vi.fn(),
+    getDepositStatus: vi.fn(),
   },
 }));
 
 import { apiClient } from "../services/api-client";
 const mockedGetInstitution = vi.mocked(apiClient.getInstitution);
 const mockedGetCompletedTrades = vi.mocked(apiClient.getCompletedTrades);
+const mockedGetDepositStatus = vi.mocked(apiClient.getDepositStatus);
 
 const INSTITUTION_ID = "00000000-0000-4000-8000-0000000000d1";
 
+const STATUS_FIXTURE = {
+  depositAddress: "0x90f79bf6eb2c4f870365e785982e1f101e93b906",
+  relayerContractAddress: "0x2222222222222222222222222222222222222222",
+  txHashes: {},
+  balances: { eth: "0", wbtc: "0", usdc: "0" },
+  approved: { wbtc: false, usdc: false },
+};
+
 describe("SettlementProfileCard (WS3)", () => {
+  beforeEach(() => {
+    mockedGetDepositStatus.mockResolvedValue(STATUS_FIXTURE);
+  });
   it("renders the institution's settlement profile ref", async () => {
     mockedGetInstitution.mockResolvedValue({
       id: INSTITUTION_ID,
@@ -69,8 +82,8 @@ describe("SettlementProfileCard (WS3)", () => {
     expect(
       screen.getByText("0x90f79bf6eb2c4f870365e785982e1f101e93b906"),
     ).toBeInTheDocument();
-    expect(screen.getByText("WBTC")).toBeInTheDocument();
-    expect(screen.getByText("USDC")).toBeInTheDocument();
+    expect(screen.getAllByText("WBTC").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("USDC").length).toBeGreaterThan(0);
   });
 
   it("renders a clickable Etherscan link for chain-rail trade refs", async () => {
@@ -159,3 +172,7 @@ describe("SettlementProfileCard (WS3)", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+
+
+

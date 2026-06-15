@@ -1,4 +1,4 @@
-export interface HealthResponse {
+﻿export interface HealthResponse {
   status: 'ok' | 'degraded' | 'unavailable';
   services: Record<string, 'ok' | 'degraded' | 'unavailable'>;
 }
@@ -8,10 +8,10 @@ export interface CreateInstitutionRequest {
   displayName: string;
   /**
    * WS3: settlement profile ref. One of:
-   *   - `wallet:default`            — noop rail (system default)
-   *   - `chain:sepolia:erc20`       — Sepolia ERC-20 chain rail
-   *   - `custody:<partner>`         — future custody rail
-   *   - `settlement-profile:<name>`  — legacy free-form (back-compat)
+   *   - `wallet:default`            â€” noop rail (system default)
+   *   - `chain:sepolia:erc20`       â€” Sepolia ERC-20 chain rail
+   *   - `custody:<partner>`         â€” future custody rail
+   *   - `settlement-profile:<name>`  â€” legacy free-form (back-compat)
    *
    * The chain rail requires `metadata.depositAddress` and
    * `metadata.tokenAddresses` (a `Record<assetCode, address>`
@@ -31,19 +31,10 @@ export interface UpdateInstitutionRequest {
   metadata?: Record<string, unknown>;
 }
 
-export interface FundRelayerRequest {
-  ethAmount?: string;
-  wbtcAmount?: string;
-  usdcAmount?: string;
-}
-
-export interface FundRelayerResponse {
+export interface RelayerApprovalResponse {
   depositAddress: string;
-  relayerAddress: string;
+  relayerContractAddress: string;
   txHashes: {
-    ethTopUp?: string;
-    wbtcTopUp?: string;
-    usdcTopUp?: string;
     wbtcApprove?: string;
     usdcApprove?: string;
   };
@@ -51,6 +42,10 @@ export interface FundRelayerResponse {
     eth: string;
     wbtc: string;
     usdc: string;
+  };
+  approved: {
+    wbtc: boolean;
+    usdc: boolean;
   };
 }
 
@@ -217,7 +212,7 @@ export interface CreatedApiKey extends ApiKey {
   key: string;
 }
 
-// ── Phase 2.5: Demo Mode ──────────────────────────────────────
+// â”€â”€ Phase 2.5: Demo Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Status of the dashboard's one-click demo spin-up.
@@ -226,7 +221,7 @@ export interface CreatedApiKey extends ApiKey {
  * `running: false` shape has no PIDs / startedAt /
  * institutionId; the `running: true` shape has all of
  * them. The `logTail` fields are the most recent 4 KB
- * of stdout/stderr from each child process — the
+ * of stdout/stderr from each child process â€” the
  * UI shows a "view logs" affordance on hover.
  */
 export interface DemoStatus {
@@ -393,7 +388,7 @@ export const apiClient = {
     }
 
     // No valid session. Never fabricate a synthetic session with a fake
-    // `e2e-bypass-token` — the backend has no way to validate it and every
+    // `e2e-bypass-token` â€” the backend has no way to validate it and every
     // authenticated request would fail with 401. Callers must use the real
     // DID challenge/verify flow (wallet auth) to obtain a signed JWT.
     return null;
@@ -471,23 +466,33 @@ export const apiClient = {
   },
 
   /**
-   * Fund the institution's server-owned deposit wallet with
-   * Sepolia test assets and approve the settlement relayer.
+   * Read the institution's deposit wallet status: on-chain
+   * balances and whether the relayer is approved per token.
    * Chain-rail institutions only; operator-scoped.
    */
-  async fundRelayer(
-    id: string,
-    req: FundRelayerRequest = {},
-  ): Promise<FundRelayerResponse> {
+  async getDepositStatus(id: string): Promise<RelayerApprovalResponse> {
     const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/institutions/${id}/fund-relayer`,
+      `${API_BASE_URL}/api/institutions/${id}/deposit-status`,
+    );
+    return handleResponse<RelayerApprovalResponse>(res);
+  },
+
+  /**
+   * Approve the settlement relayer to move ERC-20 tokens out of
+   * the institution's server-owned deposit wallet. The backend
+   * holds the deposit wallet key and signs the approval.
+   * Chain-rail institutions only; operator-scoped.
+   */
+  async approveRelayer(id: string): Promise<RelayerApprovalResponse> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/institutions/${id}/approve-relayer`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
+        body: JSON.stringify({}),
       },
     );
-    return handleResponse<FundRelayerResponse>(res);
+    return handleResponse<RelayerApprovalResponse>(res);
   },
 
   /**
@@ -595,7 +600,7 @@ export const apiClient = {
     return handleResponse<AuditReceipt>(res);
   },
 
-  // ── Agent Management ──────────────────────────────────────────────────
+  // â”€â”€ Agent Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async listAgents(status?: "admitted" | "revoked"): Promise<Agent[]> {
     const url = new URL(`${API_BASE_URL}/api/agents`);
@@ -652,7 +657,7 @@ export const apiClient = {
     return handleResponse<{ authorityRef: string; policyHash: string }>(res);
   },
 
-  // ── API Key Management ────────────────────────────────────────────────
+  // â”€â”€ API Key Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async listApiKeys(): Promise<ApiKey[]> {
     const res = await requestWithOperatorFallback(
@@ -680,7 +685,7 @@ export const apiClient = {
     );
   },
 
-  // ── Phase 2.5: Demo Mode ───────────────────────────────────
+  // â”€â”€ Phase 2.5: Demo Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // The dashboard's Observatory tab calls these three
   // methods to drive the one-click "Spin up demo agents"
@@ -716,3 +721,4 @@ export const apiClient = {
     return handleResponse<DemoStatus>(res);
   },
 };
+

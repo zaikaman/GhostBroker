@@ -1,4 +1,4 @@
-import { Router, type RequestHandler } from "express";
+﻿import { Router, type RequestHandler } from "express";
 import { assertInstitutionScope, requireOperatorAuth } from "../auth/operator-auth.js";
 import { PublicError } from "../errors/public-error.js";
 import {
@@ -7,10 +7,7 @@ import {
   type Institution,
 } from "../models/institution.js";
 import type { InstitutionManagementService } from "../services/institution.service.js";
-import type {
-  InstitutionFundingRequest,
-  InstitutionFundingService,
-} from "../services/institution-funding.service.js";
+import type { InstitutionApprovalService } from "../services/institution-approval.service.js";
 import type {
   InstitutionWithdrawalRequest,
   InstitutionWithdrawalService,
@@ -20,7 +17,7 @@ export function createInstitutionsRouter(
   institutionService: InstitutionManagementService,
   authMiddleware: RequestHandler,
   deps?: {
-    fundingService?: InstitutionFundingService;
+    approvalService?: InstitutionApprovalService;
     withdrawalService?: InstitutionWithdrawalService;
   },
 ): Router {
@@ -124,20 +121,37 @@ export function createInstitutionsRouter(
     }
   });
 
-  const fundingService = deps?.fundingService;
-  if (fundingService) {
-    router.post("/institutions/:id/fund-relayer", authMiddleware, async (request, response, next) => {
+  const approvalService = deps?.approvalService;
+  if (approvalService) {
+    // Read the deposit wallet's current balances + relayer
+    // approval status. The institution funds this address
+    // itself (Deposit flow); this route lets the dashboard
+    // show whether funds arrived and whether the relayer is
+    // approved.
+    router.get("/institutions/:id/deposit-status", authMiddleware, async (request, response, next) => {
       try {
         const operatorAuth = requireOperatorAuth(response);
         const id = request.params.id as string;
         assertInstitutionScope(operatorAuth, id);
 
-        const body = (request.body ?? {}) as Partial<InstitutionFundingRequest>;
-        const result = await fundingService.fundInstitution(id, {
-          ...(typeof body.ethAmount === "string" ? { ethAmount: body.ethAmount } : {}),
-          ...(typeof body.wbtcAmount === "string" ? { wbtcAmount: body.wbtcAmount } : {}),
-          ...(typeof body.usdcAmount === "string" ? { usdcAmount: body.usdcAmount } : {}),
-        });
+        const result = await approvalService.getDepositStatus(id);
+        response.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // Sign the deposit wallet's ERC-20 `approve(relayer)`
+    // calls. Only the backend can do this because it holds the
+    // derived deposit wallet key. Without the approval,
+    // on-chain settlement reverts.
+    router.post("/institutions/:id/approve-relayer", authMiddleware, async (request, response, next) => {
+      try {
+        const operatorAuth = requireOperatorAuth(response);
+        const id = request.params.id as string;
+        assertInstitutionScope(operatorAuth, id);
+
+        const result = await approvalService.approveRelayer(id);
         response.status(200).json(result);
       } catch (error) {
         next(error);
@@ -180,3 +194,4 @@ export function createInstitutionsRouter(
 
   return router;
 }
+
