@@ -2,11 +2,13 @@
   "name": "@ghostbroker/contracts",
   "version": "0.1.0",
   "private": true,
-  "description": "GhostBroker TEE contracts — compiled to WASI Preview 2 components and published to the T3N tenant at runtime. Currently ships the `matching-policy` contract that backs the dark-pool seal + match orchestrator.",
+  "description": "GhostBroker TEE contracts — compiled to WASI Preview 2 components and published to the T3N tenant at runtime. Also includes the on-chain settlement relayer (a Solidity contract compiled with Forge) used by the WS2.5 chain rail.",
   "type": "module",
   "scripts": {
     "build:matching": "cd matching-policy && cargo build --target wasm32-wasip2 --release",
     "publish:matching": "cd .. && npx tsx scripts/publish-matching.ts",
-    "verify:matching": "cd .. && npx tsx scripts/verify-matching-contract.ts"
+    "verify:matching": "cd .. && npx tsx scripts/verify-matching-contract.ts",
+    "build:relayer": "cd relayer && forge build",
+    "build:relayer:copy-abi": "node -e \"const fs=require('fs'); fs.copyFileSync('relayer/out/GhostBrokerSettlementRelayer.sol/GhostBrokerSettlementRelayer.json','../backend/src/services/settlement-rails/abi/GhostBrokerSettlementRelayer.json'); fs.copyFileSync('relayer/out/MinimalERC20.sol/MinimalERC20.json','../backend/src/services/settlement-rails/abi/MinimalERC20.json');\""
   }
 }

@@ -24,6 +24,7 @@ import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
 import { ApiKeysPanel } from '../components/ApiKeysPanel';
 import { AgentsPanel } from '../components/AgentsPanel';
 import { SettingsPanel } from '../components/SettingsPanel';
+import { SettlementProfileCard } from '../components/SettlementProfileCard';
 import { apiClient, type AuthSession } from '../services/api-client';
 
 const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSProperties }) => (
@@ -306,6 +307,15 @@ function DashboardView({
       case 'settings':
         return (
           <div style={{ animation: 'fadeIn 0.3s ease' }}>
+            {/* WS3: settlement profile summary card. The
+                full editor (with deposit address + per-asset
+                token address fields) lives inside
+                SettingsPanel; this card surfaces the
+                read-only view so the operator sees the rail
+                config + the most recent rail trade refs
+                (with Etherscan links for the chain rail)
+                without leaving the settings page. */}
+            <SettlementProfileCard institutionId={session.institution.id} />
             <SettingsPanel session={session} />
           </div>
         );

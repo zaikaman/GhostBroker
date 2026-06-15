@@ -14,6 +14,20 @@ const allowedKeys = new Set<keyof TelemetryEvent>([
   "correlationRef",
   "agentId",
   "receiptRef",
+  // WS1: rail transport proof. Carries only the rail id and the
+  // rail-specific transport ref (a chain tx hash for the chain
+  // rail, a custody ref for the custody rail, a `noop:<sha256>`
+  // for the noop rail). The full `RailSettlementProof` is
+  // intentionally NOT included because it would carry
+  // `assetMovements` on the operator websocket, violating the
+  // `telemetry-settlement-redaction.test.ts` invariant that no
+  // settlement-phase payload contain plaintext asset/quantity/price
+  // substrings.
+  "railProofRef",
+  // WS4: rail dispatch latency in milliseconds. Numeric value;
+  // the allow-list permits it through the websocket
+  // redaction filter.
+  "latencyMs",
 ]);
 
 export type RedactedTelemetryEvent = Pick<
@@ -26,7 +40,7 @@ export type RedactedTelemetryEvent = Pick<
   | "timestamp"
   | "correlationRef"
 > &
-  Partial<Pick<TelemetryEvent, "agentId" | "receiptRef">>;
+  Partial<Pick<TelemetryEvent, "agentId" | "receiptRef" | "railProofRef" | "latencyMs">>;
 
 export function redactTelemetryEvent(
   event: TelemetryEvent & object,

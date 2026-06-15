@@ -74,6 +74,87 @@ const envSchema = z.object({
    * monorepo layout works without configuration.
    */
   AGENTS_WORKSPACE_DIR: z.string().min(1).optional(),
+
+  /**
+   * WS2 — chain rail (Sepolia ERC-20). The rail is opt-in: a
+   * missing or empty value means the rail is not registered and
+   * every profile `chain:sepolia:erc20` falls through to the
+   * noop rail. In production all three are required when the
+   * rail is enabled.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL: z.string().url().optional(),
+  /**
+   * Private key for the relayer that broadcasts the rail's
+   * transactions. In production this is held inside a TEE
+   * (see `docs/terminal3-adk-onboarding-doc-gaps.md` for the
+   * open question on the relayer/signing host interface); for
+   * the v1 demo the key is in the backend's env. Always
+   * 0x-prefixed 64 hex chars. The dev `0x` test key is allowed
+   * because Anvil uses it as a default funded key.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{64}$/iu)
+    .optional(),
+  /**
+   * WS2.5: address of the deployed
+   * `GhostBrokerSettlementRelayer` contract. The rail calls
+   * `settle(...)` and `reverse(...)` on this contract. The
+   * contract source lives at
+   * `contracts/relayer/src/contracts/GhostBrokerSettlementRelayer.sol`
+   * and is compiled with `forge build`. The
+   * `build:relayer:copy-abi` script copies the artifact into
+   * `backend/src/services/settlement-rails/abi/` so viem can
+   * type-check the call.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-fA-F]{40}$/u)
+    .optional(),
+  /**
+   * WS2.5: a T3 secret-ref (e.g. `t3_secret:abc123`) that
+   * the production relayer signer uses to resolve the
+   * T3 tenant identity. The relayer's broadcast
+   * `from` is the tenant identity's address; in
+   * production the tenant key is held inside the T3
+   * tenant TEE.
+   *
+   * When this env var is set, `app.ts` builds a
+   * `TeeAttestedRelayerSigner` whose
+   * `tenantPrivateKey` is loaded via `t3-enclave`'s
+   * `loadOrCreateTenantIdentity(...)`. When unset
+   * (the v1 demo), the rail uses the default
+   * `ViemWalletRelayerSigner` whose signer key is the
+   * `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`
+   * env var. The interface is the same in both cases;
+   * the relayer's broadcast tx is identical except
+   * for the `from` address.
+   *
+   * T3-ONB-011: the underlying T3 secret-store +
+   * relayer-primitive host interface is still
+   * `Coming soon` for external developers. The
+   * production migration is a one-line change to
+   * `app.ts` once the host interface ships.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF: z
+    .string()
+    .trim()
+    .min(1)
+    .max(256)
+    .optional(),
+  /**
+   * Sepolia chain id. Defaults to 11155111. Override only for
+   * forked tests against Anvil (where the id is 31337).
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID: z.coerce.number().int().positive().optional(),
+  /**
+   * Optional: maximum seconds the rail will wait for the chain
+   * tx to be confirmed before declaring the dispatch failed.
+   * Defaults to 90s in `chain-sepolia-rail.ts`.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC: z.coerce.number().int().positive().optional(),
 });
 
 export type BackendEnv = z.infer<typeof envSchema>;

@@ -51,6 +51,13 @@ describe("settlement success", () => {
       executionPriceCiphertext: "t3cipher.execution.us3",
       settledAt: "2026-06-12T00:00:00.000Z",
       settlementStatus: "settled",
+      // WS1: rail proof fields. The fake repository used by this
+      // test does not return rail fields, so they default to null.
+      // The rail call is verified separately in
+      // `settlement-rail-noop.test.ts`.
+      railId: null,
+      railTradeRef: null,
+      railState: null,
       receiptIds: [
         "00000000-0000-4000-8000-000000000331",
         "00000000-0000-4000-8000-000000000332",

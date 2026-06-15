@@ -17,6 +17,7 @@ import { createInstitutionsRouter } from "./api/institutions.routes.js";
 import { createPortfoliosRouter } from "./api/portfolios.routes.js";
 import { createAgentsRouter } from "./api/agents.routes.js";
 import { createTradesRouter } from "./api/trades.routes.js";
+import { createAdminRouter, type AdminRouterDeps } from "./api/admin.routes.js";
 import { createReceiptsRouter } from "./api/receipts.routes.js";
 import { createAuthRouter } from "./api/auth.routes.js";
 import { operatorAuthMiddleware } from "./auth/operator-auth.js";
@@ -54,6 +55,19 @@ import {
   SettlementService,
   SupabaseSettlementRepository,
 } from "./services/settlement.service.js";
+import {
+  MapSettlementRailDispatcher,
+  type SettlementRailDispatcher,
+} from "./services/settlement-rails/dispatcher.js";
+import { NoopCustodialRail } from "./services/settlement-rails/noop-custodial-rail.js";
+import { SepoliaErc20Rail } from "./services/settlement-rails/chain-sepolia-rail.js";
+import type { SettlementRail } from "./services/settlement-rails/rail.js";
+import { TeeAttestedRelayerSigner } from "./services/settlement-rails/relayer-signer.js";
+import { createWalletClient, defineChain, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { RepositoryInstitutionSettlementConfigResolver } from "./services/institution-settlement-config-resolver.js";
+import { SupabaseSettlementReconciliationRepository } from "./services/settlement-reconciliation.repository.js";
+import { SettlementReconciler } from "./services/settlement-reconciler.js";
 import { PortfolioService } from "./services/portfolio.service.js";
 import { SepoliaEtherscanPortfolioSyncService, type WalletPortfolioSyncService } from "./services/sepolia-portfolio-sync.service.js";
 import { MatchingOrchestrator } from "./services/matching-orchestrator.js";
@@ -119,6 +133,24 @@ export interface BackendServices {
   agentService: AgentManagementService;
   hiddenIntentService?: HiddenIntentSubmissionService;
   settlementService?: SettlementService;
+  /**
+   * WS4: the settlement reconciler service. Optional so
+   * test compositions that build `BackendServices` without
+   * booting a real Supabase client can omit it. The
+   * reconciler is the system task that periodically
+   * verifies the chain state of `completed_trades` rows.
+   */
+  settlementReconciler?: SettlementReconciler;
+  /**
+   * WS4.2: the rail dispatcher used by the admin
+   * reverser route to look up the rail that produced a
+   * given trade and call `rail.reverse(...)`. The
+   * dispatcher is the same instance the settlement
+   * service uses; the field is a reference to it so
+   * the admin route (mounted in `createApp`) does not
+   * need to share a closure with `createDefaultServices`.
+   */
+  railDispatcher?: SettlementRailDispatcher;
   tradeHistoryService?: TradeHistoryService;
   receiptService?: ReceiptService;
   authService?: AuthSessionService;
@@ -238,12 +270,164 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         })
       : undefined;
 
+  // WS2: build the rail registry. The noop rail is always
+  // registered (universal fallback). The chain rail is
+  // registered only when all three of its env vars are set;
+  // otherwise every `chain:sepolia:erc20` profile falls through
+  // to the noop rail. This is the documented opt-in path: a
+  // missing or empty env value disables the rail without
+  // breaking existing flows.
+  const railRegistry = new Map<string, SettlementRail>([
+    ["wallet:default", new NoopCustodialRail()],
+  ]);
+  if (
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL &&
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY &&
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS
+  ) {
+    // WS2.5: the relayer signer is a deliberate seam.
+    // v1 demo path: a `ViemWalletRelayerSigner` that
+    // signs the broadcast with the
+    // `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`
+    // env var. The on-chain `from` is the address
+    // derived from this key.
+    //
+    // Production-swap path: a `TeeAttestedRelayerSigner`
+    // whose `tenantPrivateKey` is the T3 tenant identity
+    // loaded via `t3-enclave`'s
+    // `loadOrCreateTenantIdentity(...)`. The
+    // production tenant key is held inside the T3
+    // tenant TEE; the v1 demo's tenant key is the
+    // file-backed keypair the matching-policy contract
+    // also uses. The on-chain `from` is the tenant
+    // identity's address either way; in production
+    // the key's extraction is attestation-anchored.
+    //
+    // The decision: when
+    // `SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF` is
+    // set (a T3 secret-ref, e.g. `t3_secret:abc123`),
+    // the wiring resolves it through the `t3-enclave`'s
+    // secret store and builds a TEE-attested signer.
+    // Otherwise the v1 viem path runs (the env var is
+    // empty in the demo).
+    const useTeeSigner = Boolean(
+      process.env["SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF"],
+    );
+    let tenantPrivateKeyForRail: `0x${string}` | undefined;
+    if (useTeeSigner) {
+      // Production: the relayer's tenant key is the T3
+      // tenant identity. `loadOrCreateTenantIdentity`
+      // reads the file-backed keypair that
+      // `t3-enclave` already produces; in the
+      // production T3-tenant-TEE the same call returns
+      // a TEE-held key.
+      const { loadOrCreateTenantIdentity } = await import(
+        "@ghostbroker/t3-enclave"
+      );
+      const tenantIdentity = loadOrCreateTenantIdentity({
+        tenantDid:
+          env.T3_TENANT_DID ?? "did:t3n:tenant:default-relayer",
+      });
+      tenantPrivateKeyForRail = tenantIdentity.privateKey as `0x${string}`;
+    }
+
+    const relayerSigner = useTeeSigner
+      ? new TeeAttestedRelayerSigner({
+          // The `walletClient` is still used for the
+          // EIP-1559 broadcast; the v1 demo's T3N does
+          // not expose a TEE-attested relayer
+          // primitive yet (T3-ONB-011). Production:
+          // this `walletClient` is replaced with a
+          // TEE-attested client whose key is held
+          // inside the tenant TEE.
+          walletClient: createWalletClient({
+            account: privateKeyToAccount(
+              env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
+            ),
+            chain: defineChain({
+              id: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111,
+              name:
+                (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111) ===
+                11155111
+                  ? "Sepolia"
+                  : "anvil-test",
+              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+              rpcUrls: {
+                default: { http: [env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL] },
+              },
+            }),
+            transport: http(env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL),
+          }),
+          // The T3 tenant identity's private key. In
+          // v1 demo this is the file-backed keypair;
+          // in production this is the TEE-held key
+          // (T3-ONB-011).
+          tenantPrivateKey:
+            (tenantPrivateKeyForRail ??
+              env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY) as `0x${string}`,
+          // `false` for the v1 demo (the key is
+          // file-backed, not TEE-held). Production
+          // sets this to `true` once T3N exposes the
+          // tenant-TEE key store.
+          isTeeAttested: false,
+        })
+      : undefined;
+
+    railRegistry.set(
+      "chain:sepolia:erc20",
+      new SepoliaErc20Rail(
+        {
+          rpcUrl: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL,
+          // viem types `relayerPrivateKey` as a `0x${string}` template
+          // literal; the env-validator's regex narrows the runtime
+          // shape but not the TS literal type, so we cast here.
+          relayerPrivateKey:
+            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
+          relayerContractAddress:
+            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS as `0x${string}`,
+          chainId: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111,
+          confirmTimeoutSec: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC ?? 90,
+        },
+        relayerSigner
+          ? {
+              relayerSigner,
+            }
+          : {},
+      ),
+    );
+  }
+  const railDispatcher = new MapSettlementRailDispatcher(railRegistry);
+
+  // WS2: production resolver for per-institution settlement
+  // config (settlement_profile_ref + metadata). Wired from the
+  // existing institution repository. The settlement service
+  // uses this to pick the rail per side and to look up the
+  // chain rail's per-institution deposit addresses.
+  const institutionConfigResolver = new RepositoryInstitutionSettlementConfigResolver(
+    institutionRepository,
+  );
+
+  // WS4: settlement reconciler. Periodically polls
+  // `completed_trades` for unreconciled rows and verifies
+  // the chain state via `rail.status(railTradeRef)`. Drift
+  // is surfaced via a `rail_drift_detected` telemetry event
+  // and the row's `reconciled_at` is set to a sentinel
+  // timestamp so the next sweep does not loop on the
+  // same drift forever.
+  const settlementReconciler = new SettlementReconciler(
+    new SupabaseSettlementReconciliationRepository(supabase as never),
+    railDispatcher,
+    telemetryBus,
+  );
+
   const settlementService = new SettlementService(
     new SettlementCommandBuilder(authorizationFacade),
     new SupabaseSettlementRepository(supabase as never),
     telemetryBus,
     undefined, // audit sink
     portfolioService,
+    railDispatcher,
+    institutionConfigResolver,
   );
 
   const blindIntentClient = new T3BlindIntentClient({
@@ -269,6 +453,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     undefined, // intentTtlMs
     undefined, // cleanupIntervalMs
     intentLockRepository,
+    institutionConfigResolver,
   );
 
   // The orphan-lock janitor: runs every 30s in production, finds
@@ -306,6 +491,8 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       intentLockRepository,
     ),
     settlementService,
+    settlementReconciler,
+    railDispatcher,
     tradeHistoryService: new TradeHistoryService(
       new SupabaseTradeHistoryRepository(supabase as never),
     ),
@@ -436,6 +623,22 @@ export function createApp(
           ? { tenantSigner: services.tenantDelegationSigner }
           : {}),
       }),
+    );
+  }
+  // WS4.2: admin reverser route. The rail dispatcher is
+  // always present in production (the noop rail is the
+  // universal fallback). The trade-history service is
+  // required for the reverser to fetch the trade row.
+  if (services.railDispatcher && services.tradeHistoryService) {
+    const adminDeps: AdminRouterDeps = {
+      railDispatcher: services.railDispatcher,
+      tradeHistoryService: services.tradeHistoryService,
+      telemetryBus,
+    };
+    app.use(
+      "/api",
+      operatorAuthMiddleware(env, services.apiKeyService),
+      createAdminRouter(adminDeps, operatorAuthMiddleware(env, services.apiKeyService)),
     );
   }
   app.use(publicErrorHandler);

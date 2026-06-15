@@ -29,6 +29,23 @@ export interface TradeHistoryRepository {
     institutionId: string,
     filter?: { from?: string; to?: string },
   ): Promise<CompletedTrade[]>;
+  /**
+   * WS4.2: look up a single completed trade by its
+   * `trade_ref`, scoped to the operator's institution. The
+   * repository's Supabase implementation filters by
+   * `buy_institution_id` OR `sell_institution_id`, so an
+   * operator from either side of the trade can fetch it.
+   * Returns `null` when no such trade exists.
+   *
+   * Optional on the interface because test fakes that
+   * only exercise the list path do not implement it.
+   * Production implementations must provide it; the
+   * admin reverser route assumes it is present.
+   */
+  getCompletedTradeByRef?(
+    institutionId: string,
+    tradeRef: string,
+  ): Promise<CompletedTrade | null>;
 }
 
 export interface SupabaseTradeHistoryClient {
@@ -93,6 +110,34 @@ export class SupabaseTradeHistoryRepository implements TradeHistoryRepository {
       completedTradeFromRecord(record, receiptIdsByTradeId.get(record.id) ?? []),
     );
   }
+
+  public async getCompletedTradeByRef(
+    institutionId: string,
+    tradeRef: string,
+  ): Promise<CompletedTrade | null> {
+    // The repository's Supabase client has a strict
+    // query chain; the unique `trade_ref` index makes
+    // a separate `eq` filter redundant. We use the
+    // existing `or` + `order` shape: order by
+    // `settled_at DESC` and return the first row that
+    // matches the institution scope. The unique
+    // index guarantees at most one row exists.
+    const { data, error } = await this.client
+      .from("completed_trades")
+      .select("*")
+      .or(
+        `buy_institution_id.eq.${institutionId},sell_institution_id.eq.${institutionId}`,
+      )
+      .order("settled_at", { ascending: false });
+    if (error || !data) {
+      return null;
+    }
+    const match = data.find((row) => row.trade_ref === tradeRef);
+    if (!match) {
+      return null;
+    }
+    return completedTradeFromRecord(match);
+  }
 }
 
 export class TradeHistoryService {
@@ -108,5 +153,19 @@ export class TradeHistoryService {
   ): Promise<{ items: CompletedTrade[] }> {
     const items = await this.repository.listCompletedTrades(institutionId, filter);
     return { items };
+  }
+
+  public async getCompletedTradeByRef(
+    institutionId: string,
+    tradeRef: string,
+  ): Promise<CompletedTrade | null> {
+    if (!this.repository.getCompletedTradeByRef) {
+      throw new PublicError(
+        "service_unavailable",
+        503,
+        "Repository does not implement getCompletedTradeByRef",
+      );
+    }
+    return this.repository.getCompletedTradeByRef(institutionId, tradeRef);
   }
 }

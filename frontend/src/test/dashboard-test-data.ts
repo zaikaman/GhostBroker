@@ -18,6 +18,12 @@ export function buildMockCompletedTrade(overrides: Partial<CompletedTrade> = {})
     settledAt: '2026-06-12T00:00:00.000Z',
     settlementStatus: 'settled',
     receiptIds: [mockReceiptId],
+    // WS1: rail proof fields. The mock defaults to the noop
+    // rail (system default). Tests that exercise the chain
+    // rail override these per-case.
+    railId: 'wallet:default',
+    railTradeRef: 'noop:0'.padEnd(72, '0') as string,
+    railState: 'settled',
     ...overrides,
   };
 }

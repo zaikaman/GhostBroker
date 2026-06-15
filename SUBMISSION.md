@@ -69,11 +69,56 @@ What an operator sees in the Observatory Console is restricted to:
 - Completed trade records (post-settlement only, with encrypted fields)
 - Audit receipt metadata (hash, key version, attestation reference)
 
+## Settlement rails (WS1 → WS5)
+
+GhostBroker ships a pluggable **settlement rail** layer that
+moves the actual assets when a match settles. The layer is
+defined in `.hermes/plans/settlement-rails.md` and the
+operator-facing runbook lives at
+[`docs/settlement-rails.md`](../docs/settlement-rails.md). The
+rails we shipped:
+
+- **`wallet:default`** — the noop rail. The DB row is the
+  only artifact. Default for the demo "Spin up demo agents"
+  flow.
+- **`chain:sepolia:erc20`** — the on-chain rail. A real
+  `GhostBrokerSettlementRelayer` Solidity contract
+  ([`contracts/relayer/`](../contracts/relayer/)) holds the
+  per-institution pre-approved ERC-20 allowances and broadcasts
+  the atomic `settle(...)` call. The Anvil integration test
+  deploys the relayer + 2 minimal ERC-20s + funds + approves
+  the relayer, then dispatches a real trade, decodes the
+  on-chain `Settled` event, and asserts the ERC-20 `Transfer`
+  balances round-trip exactly. The integration test is gated
+  by `WS2_ANVIL_INTEGRATION=1`.
+- **Production relayer-in-TEE** — the relayer key is held in
+  the backend's env for v1; the T3 tenant TEE swap is the
+  one-file production migration tracked in the
+  [T3 doc-gaps addendum](../docs/terminal3-adk-onboarding-doc-gaps.md)
+  (2026-06-15).
+
+The chain rail preserves the dark-pool privacy claim
+end-to-end through settlement: the on-chain calldata carries
+the relayer's `settle(bytes32, bytes32, address, address,
+address, address, uint256, uint256)` ABI; a public chain
+observer sees the institution's deposit addresses and the
+two `amount` values but **not** the TEE-decrypted `quantity *
+price` semantics. The reverser endpoint
+(`POST /api/admin/trades/:tradeRef/reverse`) is the only path
+that can flip a settled row's `settlement_status`. The
+reconciler (system task) is read-only and surfaces drift via a
+high-severity `rail_drift_detected` telemetry event.
+
 ## What you can run
 
 - `npm install` at the repo root sets up all four workspaces.
 - `npm run typecheck` runs `tsc` against every workspace.
-- `npm test` runs the Vitest suite for every workspace: **201 tests, 65 test files, all passing**.
+- `npm test` runs the Vitest suite for every workspace: **363 tests, 49 test files, all passing**.
+- `WS2_ANVIL_INTEGRATION=1 npm test` adds **7 real on-chain
+  tests** that deploy a `GhostBrokerSettlementRelayer`
+  contract + 2 ERC-20s to a local Anvil node and assert
+  real `Settled` event decoding + `Transfer` balance
+  round-trips.
 - `npm run sandbox:check --workspace @ghostbroker/t3-enclave` probes the
   live Terminal 3 sandbox and reports the tenant DID + token balance.
 - `npm run dev --workspace @ghostbroker/backend` (with `.env` filled in
@@ -85,7 +130,9 @@ agent, submit intents, watch settlements — is documented in
 [`docs/agent-integration/`](../docs/agent-integration/) and walked through
 end-to-end in the
 [`AgentDeploymentGuide`](../frontend/src/components/AgentDeploymentGuide.tsx)
-component of the dashboard itself.
+component of the dashboard itself. The settlement-rail layer
+is documented separately in
+[`docs/settlement-rails.md`](../docs/settlement-rails.md).
 
 ## Bugs and documentation gaps filed
 

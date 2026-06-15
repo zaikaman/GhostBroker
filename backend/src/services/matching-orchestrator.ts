@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { MatchContractClient } from "@ghostbroker/t3-enclave";
 import type {
+  InstitutionSettlementConfigResolver,
   SettlementExecutionRequest,
   SettlementService,
 } from "./settlement.service.js";
@@ -57,6 +58,7 @@ export class MatchingOrchestrator {
   private readonly intentTtlMs: number;
   private readonly cleanupTimer: ReturnType<typeof setInterval>;
   private readonly intentLockRepository: IntentLockRepository | undefined;
+  private readonly institutionConfigResolver: InstitutionSettlementConfigResolver | undefined;
   private pendingIntents: PendingIntent[] = [];
   private evictedCount = 0;
 
@@ -69,6 +71,7 @@ export class MatchingOrchestrator {
     intentTtlMs: number = DEFAULT_INTENT_TTL_MS,
     cleanupIntervalMs: number = DEFAULT_CLEANUP_INTERVAL_MS,
     intentLockRepository?: IntentLockRepository,
+    institutionConfigResolver?: InstitutionSettlementConfigResolver,
   ) {
     this.matchClient = matchClient;
     this.settlementService = settlementService;
@@ -77,6 +80,7 @@ export class MatchingOrchestrator {
     this.intentLockRepository = intentLockRepository;
     this.settlementAssetCode = settlementAssetCode;
     this.intentTtlMs = intentTtlMs;
+    this.institutionConfigResolver = institutionConfigResolver;
 
     // Start periodic cleanup sweep
     this.cleanupTimer = setInterval(
@@ -307,6 +311,22 @@ export class MatchingOrchestrator {
         // Generate receipt ciphertexts deterministically from the outcome
         const receiptBase = `t3receipt.${outcome.outcomeRef}.${outcome.executionRef}`;
 
+        // WS2: resolve per-side settlement profile refs (if the
+        // orchestrator has an institution-config resolver). The
+        // settlement service uses the buyer's profile to pick
+        // the rail; the seller must match. Mismatched profiles
+        // cause the service to throw a typed error.
+        let buyerSettlementProfileRef: string | undefined;
+        let sellerSettlementProfileRef: string | undefined;
+        if (this.institutionConfigResolver) {
+          const [buyerConfig, sellerConfig] = await Promise.all([
+            this.institutionConfigResolver.resolve(buyIntent.institutionId),
+            this.institutionConfigResolver.resolve(sellIntent.institutionId),
+          ]);
+          buyerSettlementProfileRef = buyerConfig?.settlementProfileRef;
+          sellerSettlementProfileRef = sellerConfig?.settlementProfileRef;
+        }
+
         const request: SettlementExecutionRequest = {
           matchOutcome: outcome,
           buyerAgentDid: buyIntent.agentDid,
@@ -321,6 +341,8 @@ export class MatchingOrchestrator {
           assetCode: buyIntent.assetCode,
           quantity: matchQuantity,
           executionPrice: matchPrice,
+          buyerSettlementProfileRef,
+          sellerSettlementProfileRef,
           receipts: [
             {
               institutionId: buyIntent.institutionId,

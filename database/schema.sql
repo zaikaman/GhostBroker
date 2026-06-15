@@ -39,6 +39,10 @@ CREATE TABLE public.completed_trades (
   settled_at timestamp with time zone NOT NULL,
   t3_execution_ref text NOT NULL CHECK (t3_execution_ref <> ''::text),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
+  rail_id text,
+  rail_trade_ref text,
+  rail_state text CHECK (rail_state IS NULL OR (rail_state = ANY (ARRAY['settled'::text, 'failed'::text, 'reversed'::text]))),
+  reconciled_at timestamp with time zone,
   CONSTRAINT completed_trades_pkey PRIMARY KEY (id),
   CONSTRAINT completed_trades_buy_institution_id_fkey FOREIGN KEY (buy_institution_id) REFERENCES public.institutions(id),
   CONSTRAINT completed_trades_sell_institution_id_fkey FOREIGN KEY (sell_institution_id) REFERENCES public.institutions(id)

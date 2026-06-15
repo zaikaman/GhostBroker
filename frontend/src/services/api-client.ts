@@ -6,7 +6,29 @@ export interface HealthResponse {
 export interface CreateInstitutionRequest {
   legalName: string;
   displayName: string;
+  /**
+   * WS3: settlement profile ref. One of:
+   *   - `wallet:default`            — noop rail (system default)
+   *   - `chain:sepolia:erc20`       — Sepolia ERC-20 chain rail
+   *   - `custody:<partner>`         — future custody rail
+   *   - `settlement-profile:<name>`  — legacy free-form (back-compat)
+   *
+   * The chain rail requires `metadata.depositAddress` and
+   * `metadata.tokenAddresses` (a `Record<assetCode, address>`
+   * map). The backend's Zod schema validates this.
+   */
   settlementProfileRef: string;
+  /**
+   * WS3: per-rail config. For the chain rail, the
+   * `depositAddress` and `tokenAddresses` fields are
+   * required. For other rails, the field is free-form.
+   */
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateInstitutionRequest {
+  settlementProfileRef?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Institution {
@@ -15,6 +37,7 @@ export interface Institution {
   displayName: string;
   status: 'pending' | 'active' | 'suspended' | 'closed';
   t3TenantDid: string;
+  settlementProfileRef: string;
   metadata?: Record<string, any>;
 }
 
@@ -93,6 +116,19 @@ export interface CompletedTrade {
   settledAt: string;
   settlementStatus: 'settled' | 'failed' | 'reversed';
   receiptIds: string[];
+  /**
+   * WS1: rail transport proof fields. For the noop rail
+   * the values are `null` (no external transport). For
+   * the chain rail the values are the contract id and
+   * the on-chain tx hash.
+   */
+  railId: string | null;
+  railTradeRef: string | null;
+  /**
+   * WS1: mirrors `settlementStatus` for symmetry. `null`
+   * for pre-WS1 rows.
+   */
+  railState: 'settled' | 'failed' | 'reversed' | null;
 }
 
 export interface PortfolioHolding {
@@ -369,6 +405,27 @@ export const apiClient = {
     const res = await requestWithOperatorFallback(
       `${API_BASE_URL}/api/institutions/${id}/rotate-key`,
       { method: 'POST' },
+    );
+    return handleResponse<Institution>(res);
+  },
+
+  /**
+   * WS3: PATCH an institution's settlement profile and/or
+   * chain-rail metadata. The route is operator-scoped; the
+   * backend validates that profile + metadata satisfy the
+   * chain-rail superRefine when applicable.
+   */
+  async patchInstitution(
+    id: string,
+    req: UpdateInstitutionRequest,
+  ): Promise<Institution> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/institutions/${id}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      },
     );
     return handleResponse<Institution>(res);
   },

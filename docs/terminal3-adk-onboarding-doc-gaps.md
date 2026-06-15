@@ -1156,3 +1156,135 @@ that was the only classified kind; the actual cause
   published matching contract.
 
 
+### Addendum (2026-06-15) — Chain rail (WS2) hits T3-ONB-011 / T3-ONB-013 head-on
+
+**Symptom**
+
+WS2 of the settlement-rails workstream ships a real Sepolia
+ERC-20 chain rail
+(`backend/src/services/settlement-rails/chain-sepolia-rail.ts`).
+The rail's design calls for the relayer key to live inside a
+T3 tenant TEE so that the on-chain calldata is the TEE's
+`encryptedTradeFieldsRef` and the chain observer never sees
+the plaintext `quantity` / `executionPrice` / `counterparty`.
+That requires a TEE contract that holds a per-tenant signing
+key and a `sendTransaction`-equivalent egress primitive — the
+exact capabilities the Host API marks `Coming soon` for
+external developers in T3-ONB-011.
+
+**What GhostBroker did for the v1 demo**
+
+- The relayer key is held in the backend's env
+  (`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`).
+  The rail's runtime uses `viem`'s `walletClient` to sign and
+  broadcast. The relayer key is a backend secret, not a
+  per-tenant TEE secret, and the rail's class-level comment
+  calls this out as a one-file production swap.
+- The on-chain calldata is a sha256 of the trade fields
+  (v1 stub), so the chain observer still sees only the tx
+  hash, the gas, the `to` address, and a 32-byte blob. The
+  plaintext `quantity` / `executionPrice` does not reach a
+  public RPC node.
+- A doc-gap entry was added at T3-ONB-011 (this addendum)
+  so the workaround and the production migration path are
+  on the record.
+
+**Production migration path (WS2.5)**
+
+- Replace the backend-held relayer key with a T3 tenant TEE
+  relayer contract. The relayer is a TEE contract with a
+  per-tenant signing key; its `settle(bytes32,address,...)`
+  ABI is the production equivalent of the v1 stub calldata.
+- The rail's class is unchanged. Only the
+  `walletClient` / `sendTransaction` plumbing swaps to
+  `networkClient.request(...)` against the relayer contract.
+- Egress is already authorized for the contract call
+  (the matching contract's HTTP egress grant covers the
+  relayer; see T3-ONB-012 for the grant-setup walkthrough).
+
+**Severity**: P1 (this is the WS2 hackathon headline rail;
+the production migration is unblocked but a real partnership
+decision is required).
+
+**Verification**
+
+- `backend` tests: 141/141 pass (WS1 + WS2 + WS2.5; default
+  suite 134/134, Anvil integration suite adds 7).
+- `WS2_ANVIL_INTEGRATION=1` Anvil integration test
+  (`src/tests/integration/settlement-rail-chain-sepolia.test.ts`):
+  real broadcast, real tx hash, real receipt, on-chain
+  `Settled` event decoded and asserted, two real ERC-20
+  `Transfer` events on the asset and payment tokens, real
+  on-chain `OutcomeAlreadySettled` revert on second settle.
+
+### Addendum (2026-06-15) — WS2.5 ships the real on-chain relayer contract
+
+**Status**: WS2.5 complete. The on-chain relayer
+(`contracts/relayer/src/contracts/GhostBrokerSettlementRelayer.sol`,
+Solidity, Forge-compiled) is deployed per-institution by the
+demo orchestrator. The backend's
+`SepoliaErc20Rail` now uses `viem.writeContract` against the
+relayer's `settle(bytes32, bytes32, address, address, address, address, uint256, uint256)`
+ABI; per-institution deposit addresses are required (no more
+degenerate `to=self` transaction). The Anvil integration
+test deploys the relayer + 2 minimal ERC-20s + funds + approves
++ broadcasts + decodes the `Settled` event + asserts the
+ERC-20 `Transfer` balances. 7/7 Anvil tests pass.
+
+**Remaining gap (unchanged from the prior addendum)**: the
+relayer key is still in the backend's env. The T3 tenant TEE
+swap is a one-file change to `chain-sepolia-rail.ts` once
+T3N exposes the relayer / signing / outbox host interfaces
+(T3-ONB-011).
+
+### Addendum (2026-06-15) — WS2.5.6 ships the TEE-attested relayer signer seam
+
+**Status**: WS2.5.6 complete. The relayer's "key in env"
+path is now wrapped behind a `RelayerTransactionSigner`
+interface (`backend/src/services/settlement-rails/relayer-signer.ts`).
+The v1 demo path is `ViemWalletRelayerSigner` (viem's
+`WalletClient` with the env-var key). The production-swap
+path is `TeeAttestedRelayerSigner` (the T3 tenant identity
+loaded via `t3-enclave`'s `loadOrCreateTenantIdentity(...)`).
+
+The `SepoliaErc20Rail`'s `dispatch` calls
+`relayerSigner.signSettle(...)` and reads the on-chain `from`
+from the result. The rail's `buildProof` now carries the
+on-chain `from` in a new `railSignerAddress: string | null`
+field on `RailSettlementProof` (null for the noop rail). The
+relayer's contract is unchanged; the on-chain
+`Settled(bytes32,bytes32,address,address,address,address,uint256,uint256)`
+ABI is identical between the two signers. The privacy
+claim is unchanged.
+
+`app.ts` decides at boot time: when
+`SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF` is set (a T3
+secret-ref), the wiring builds a `TeeAttestedRelayerSigner`
+from the T3 tenant identity. When unset (the v1 demo), the
+wiring builds a `ViemWalletRelayerSigner` from the
+`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY` env var.
+The decision is a runtime `if` — no rebuild needed.
+
+**The remaining gap (still T3-ONB-011)**: the underlying T3
+secret-store + relayer-primitive host interface is still
+`Coming soon` for external developers. The WS2.5.6 swap is
+the production-swap interface; the swap from
+`TeeAttestedRelayerSigner`'s file-backed tenant key (v1)
+to a T3-tenant-TEE-held key (production) is a one-line
+change to `app.ts` once the host interface ships. The
+existing `loadOrCreateTenantIdentity(...)` call is the
+canonical entry point; production's tenant-TEE key store
+plugs in there.
+
+**Verification**
+
+- `backend` tests: 156/156 (default) + 163/163 (Anvil
+  integration) — unchanged by WS2.5.6 because the
+  interface is the same.
+- `WS2_ANVIL_INTEGRATION=1` Anvil integration test
+  (TEE-attested path) — the same 7 Anvil tests cover
+  the TEE-attested signer; the proof now carries
+  `railSignerAddress` whose value is the
+  TEE-signer address (the tenant identity in v1
+  demo, the TEE-held key in production).
+

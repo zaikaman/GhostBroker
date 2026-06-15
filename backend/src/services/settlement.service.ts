@@ -16,6 +16,141 @@ import {
 import type { TelemetryBus } from "./telemetry-bus.js";
 import type { PortfolioService } from "./portfolio.service.js";
 import { InsufficientBalanceError } from "./portfolio.service.js";
+import {
+  MapSettlementRailDispatcher,
+  type SettlementRailDispatcher,
+} from "./settlement-rails/dispatcher.js";
+import { RailDispatchError } from "./settlement-rails/rail-dispatch-error.js";
+import type {
+  RailSettlementProof,
+  SettlementRailContext,
+  SettlementRailPlaintext,
+} from "./settlement-rails/rail.js";
+
+/**
+ * Read a per-institution deposit address from
+ * `institutions.metadata.depositAddress`. The metadata is
+ * `Record<string, unknown>`; the function is defensive against
+ * the field being missing or wrong-typed.
+ */
+function readDepositAddress(
+  metadata: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const value = metadata["depositAddress"];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Read a per-asset token address map from
+ * `institutions.metadata.tokenAddresses`. The field is a
+ * `Record<assetCode, address>`. For WS2 both institutions on
+ * the same rail use the buyer's map (the rail assumes a single
+ * canonical token-address registry per rail). The seller's
+ * metadata is consulted as a fallback for any asset missing
+ * from the buyer's map.
+ */
+function readTokenAddresses(
+  buyerMetadata: Readonly<Record<string, unknown>>,
+  sellerMetadata: Readonly<Record<string, unknown>>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const buyerMap = buyerMetadata["tokenAddresses"];
+  if (isStringRecord(buyerMap)) {
+    for (const [k, v] of Object.entries(buyerMap)) {
+      out[k] = v;
+    }
+  }
+  const sellerMap = sellerMetadata["tokenAddresses"];
+  if (isStringRecord(sellerMap)) {
+    for (const [k, v] of Object.entries(sellerMap)) {
+      if (out[k] === undefined) {
+        out[k] = v;
+      }
+    }
+  }
+  return out;
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  return Object.values(value).every((v) => typeof v === "string");
+}
+
+/**
+ * Per-side settlement profile. The settlement service routes
+ * through the dispatcher keyed by this string. Default is
+ * `"wallet:default"`, which resolves to `NoopCustodialRail`. WS3
+ * will plumb the actual institution's `settlement_profile_ref`
+ * through to this field via the orchestrator's settlement request.
+ *
+ * Today the field is hard-coded to `"wallet:default"` to preserve
+ * the existing behaviour exactly. The default is set in the
+ * `executeSettlement` body so it is observable in unit tests
+ * without any caller change.
+ */
+export type SettlementProfileRef = string;
+
+/**
+ * WS2: per-institution settlement configuration. The settlement
+ * service uses this to resolve the buyer's and seller's
+ * `settlement_profile_ref` (which rail to use) and to pass
+ * per-institution / per-asset config to the rail's
+ * dispatch context.
+ *
+ * The resolver is the seam between the institution model (where
+ * `settlement_profile_ref` and `metadata.depositAddress` live)
+ * and the rail layer. Production wiring (`app.ts`) builds an
+ * implementation that reads from the `institutions` table via
+ * the existing `InstitutionRepository`; tests inject a stub.
+ */
+export interface InstitutionSettlementConfig {
+  settlementProfileRef: string;
+  /**
+   * Per-institution metadata the rails need. The chain rail
+   * reads `depositAddress`; noop rail ignores it.
+   */
+  metadata: Readonly<Record<string, unknown>>;
+}
+
+export interface InstitutionSettlementConfigResolver {
+  resolve(institutionId: string): Promise<InstitutionSettlementConfig | null>;
+}
+
+/**
+ * WS4: the reconciliation DB seam. Defined here (not in
+ * `settlement-reconciler.ts`) so the orchestrator's wiring
+ * `app.ts` only imports from one module. The reconciler
+ * service in `settlement-reconciler.ts` consumes this
+ * interface; the Supabase implementation lives in
+ * `settlement-reconciliation.repository.ts`.
+ */
+export interface SettlementReconciliationRepository {
+  /**
+   * List up to `limit` `completed_trades` rows with
+   * `rail_state = 'settled' AND reconciled_at IS NULL`.
+   * Ordered by `settled_at ASC` so the oldest
+   * unreconciled trade is processed first.
+   */
+  listUnreconciledTrades(limit: number): Promise<
+    {
+      tradeRef: string;
+      railId: string;
+      railTradeRef: string;
+      settlementProfileRef: string;
+      buyerInstitutionId: string;
+      sellerInstitutionId: string;
+    }[]
+  >;
+
+  /**
+   * Mark a trade as reconciled at the given ISO-8601
+   * timestamp. Idempotent: a second call with the same
+   * `tradeRef` overwrites the previous `reconciled_at`.
+   */
+  markReconciled(tradeRef: string, observedAt: string): Promise<void>;
+}
 
 export interface SettlementExecutionRequest {
   matchOutcome: OpaqueMatchOutcome;
@@ -37,6 +172,17 @@ export interface SettlementExecutionRequest {
   assetCode: string;
   quantity: number;
   executionPrice: number;
+  /**
+   * WS2: per-side settlement profile. The settlement service
+   * looks up the rail via the dispatcher keyed by the buyer's
+   * profile (both sides must be on the same profile for WS2;
+   * asymmetric routing is a WS3+ concern). If the request does
+   * not carry profile refs (e.g. legacy callers), the service
+   * falls back to `"wallet:default"` (the noop rail) which
+   * preserves the pre-WS2 behaviour exactly.
+   */
+  buyerSettlementProfileRef?: string | undefined;
+  sellerSettlementProfileRef?: string | undefined;
   receipts: {
     institutionId: string;
     receiptCiphertext: string;
@@ -57,6 +203,15 @@ export interface SettlementRepository {
     command: SettlementCommand;
     encryptedTradeFields: SettlementExecutionRequest["encryptedTradeFields"];
     receipts: SettlementExecutionRequest["receipts"];
+    /**
+     * WS1: the rail transport proof produced by
+     * `SettlementRail.dispatch(...)`. Both fields are stored on
+     * `completed_trades` as `rail_id` and `rail_trade_ref`. The
+     * `rail_state` mirrors `settlement_status` and is set to
+     * `proof.railState` if the proof is in a terminal state, else
+     * `"settled"`.
+     */
+    railProof: RailSettlementProof;
   }): Promise<SettlementPersistenceResult>;
 }
 
@@ -101,6 +256,7 @@ export class SupabaseSettlementRepository implements SettlementRepository {
     command: SettlementCommand;
     encryptedTradeFields: SettlementExecutionRequest["encryptedTradeFields"];
     receipts: SettlementExecutionRequest["receipts"];
+    railProof: RailSettlementProof;
   }): Promise<SettlementPersistenceResult> {
     const { data, error } = await this.client.rpc("persist_completed_settlement", {
       completed_trade: {
@@ -114,6 +270,9 @@ export class SupabaseSettlementRepository implements SettlementRepository {
         settlement_status: "settled",
         settled_at: value.command.submittedAt,
         t3_execution_ref: value.command.executionRef,
+        rail_id: value.railProof.railId,
+        rail_trade_ref: value.railProof.railTradeRef,
+        rail_state: value.railProof.railState,
       },
       receipts: value.receipts.map((receipt) => ({
         institution_id: receipt.institutionId,
@@ -142,6 +301,22 @@ export class SettlementService {
   private readonly telemetryBus: TelemetryBus;
   private readonly auditEvents: SettlementAuditEventSink;
   private readonly portfolioService: PortfolioService | undefined;
+  /**
+   * WS1: rail dispatcher. Defaults to a noop-only dispatcher so
+   * existing unit tests that construct `SettlementService`
+   * with 3-5 args continue to work unchanged. Production wiring
+   * (`app.ts`) passes an explicit dispatcher.
+   */
+  private readonly railDispatcher: SettlementRailDispatcher;
+  /**
+   * WS2: per-institution config lookup. Used to resolve the
+   * per-institution `settlement_profile_ref`, the per-institution
+   * deposit address (chain rail), and the per-asset token address
+   * (chain rail) at dispatch time. Optional: when absent, the
+   * service falls back to the noop rail's hard-coded default and
+   * any per-side profile is ignored.
+   */
+  private readonly institutionConfigResolver: InstitutionSettlementConfigResolver | undefined;
 
   public constructor(
     commandBuilder: SettlementCommandBuilder,
@@ -149,12 +324,16 @@ export class SettlementService {
     telemetryBus: TelemetryBus,
     auditEvents: SettlementAuditEventSink = new NoopSettlementAuditEventSink(),
     portfolioService?: PortfolioService,
+    railDispatcher?: SettlementRailDispatcher,
+    institutionConfigResolver?: InstitutionSettlementConfigResolver,
   ) {
     this.commandBuilder = commandBuilder;
     this.repository = repository;
     this.telemetryBus = telemetryBus;
     this.auditEvents = auditEvents;
     this.portfolioService = portfolioService;
+    this.railDispatcher = railDispatcher ?? new MapSettlementRailDispatcher(new Map());
+    this.institutionConfigResolver = institutionConfigResolver;
   }
 
   public async executeSettlement(
@@ -181,10 +360,66 @@ export class SettlementService {
         sellerDelegationCredential: request.sellerDelegationCredential,
       });
       await this.emitAudit("match", command, correlationRef);
+
+      // WS1/WS2: rail dispatch sits between the TEE command build
+      // and the DB persist. On rail failure: no DB write, no
+      // portfolio delta, the orchestrator's existing cancellation
+      // path releases the locked balance.
+      //
+      // The settlement profile is the buyer's
+      // `institutions.settlement_profile_ref` (when the orchestrator
+      // plumbed it through). Both sides must be on the same
+      // profile for WS2; asymmetric routing is a WS3+ concern.
+      // If the request does not carry a per-side profile (e.g.
+      // legacy callers) or the institution lookup is absent
+      // (test paths), the service falls back to the noop rail's
+      // hard-coded default.
+      const settlementProfileRef: SettlementProfileRef =
+        (await this.resolveEffectiveProfile(
+          request.buyerSettlementProfileRef,
+          request.sellerSettlementProfileRef,
+          request.matchOutcome.buyerInstitutionId,
+          request.matchOutcome.sellerInstitutionId,
+        )) ?? "wallet:default";
+      const plaintext: SettlementRailPlaintext = {
+        assetCode: request.assetCode,
+        quantity: request.quantity,
+        executionPrice: request.executionPrice,
+      };
+      const railContext = await this.buildRailContext(
+        settlementProfileRef,
+        request.matchOutcome.buyerInstitutionId,
+        request.matchOutcome.sellerInstitutionId,
+        request.assetCode,
+      );
+      // WS4: track rail dispatch latency so the
+      // `rail_settled` telemetry event can graph p50 / p99.
+      const railDispatchStartedAt = Date.now();
+      const { proof: railProof } = await this.railDispatcher.dispatch(
+        settlementProfileRef,
+        command,
+        plaintext,
+        railContext,
+      );
+      const railLatencyMs = Date.now() - railDispatchStartedAt;
+      this.publishRailSettled(
+        request.matchOutcome.buyerInstitutionId,
+        railProof,
+        correlationRef,
+        railLatencyMs,
+      );
+      this.publishRailSettled(
+        request.matchOutcome.sellerInstitutionId,
+        railProof,
+        correlationRef,
+        railLatencyMs,
+      );
+
       const persisted = await this.repository.persistCompletedSettlement({
         command,
         encryptedTradeFields: request.encryptedTradeFields,
         receipts: request.receipts,
+        railProof,
       });
       await this.emitAudit("settlement", command, correlationRef);
 
@@ -269,6 +504,33 @@ export class SettlementService {
     });
   }
 
+  /**
+   * WS1: emit a `rail_settled` telemetry event. Carries only the
+   * rail id and the rail-specific transport ref. The full
+   * `RailSettlementProof` (with its `assetMovements`) is never
+   * published on the telemetry bus — see the type-level comment
+   * on `TelemetryEvent.railProofRef` for the rationale.
+   */
+  private publishRailSettled(
+    institutionId: string,
+    proof: RailSettlementProof,
+    correlationRef: string,
+    latencyMs?: number,
+  ): void {
+    this.telemetryBus.publish({
+      institutionId,
+      type: "telemetry.processing.changed",
+      phase: "rail_settled",
+      severity: "info",
+      correlationRef,
+      railProofRef: {
+        railId: proof.railId,
+        railTradeRef: proof.railTradeRef,
+      },
+      ...(latencyMs !== undefined ? { latencyMs } : {}),
+    });
+  }
+
   private async emitAudit(
     step: SettlementAuditEvent["step"],
     command: SettlementCommand,
@@ -281,6 +543,100 @@ export class SettlementService {
       institutionIds: [command.buyerInstitutionId, command.sellerInstitutionId],
       occurredAt: new Date().toISOString(),
     });
+  }
+
+  /**
+   * WS2: resolve the effective settlement profile. The buyer's
+   * profile is the dispatch key (the seller must match). If
+   * either side is missing a profile (legacy callers, or
+   * resolver absent), the function returns `null` and the
+   * caller falls back to the noop rail's hard-coded default.
+   *
+   * Mismatched profiles return `null` too: WS2 does not
+   * support asymmetric routing. The caller must reject the
+   * trade before this is reached (the orchestrator is
+   * responsible for that check).
+   */
+  private async resolveEffectiveProfile(
+    buyerProfile: string | undefined,
+    sellerProfile: string | undefined,
+    buyerInstitutionId: string,
+    sellerInstitutionId: string,
+  ): Promise<string | null> {
+    if (!this.institutionConfigResolver) {
+      return null;
+    }
+    if (buyerProfile && sellerProfile) {
+      if (buyerProfile !== sellerProfile) {
+        throw new Error(
+          `Settlement profile mismatch: buyer (${buyerInstitutionId}) is on '${buyerProfile}' but seller (${sellerInstitutionId}) is on '${sellerProfile}'. WS2 requires both sides on the same profile.`,
+        );
+      }
+      return buyerProfile;
+    }
+    const [buyerConfig, sellerConfig] = await Promise.all([
+      this.institutionConfigResolver.resolve(buyerInstitutionId),
+      this.institutionConfigResolver.resolve(sellerInstitutionId),
+    ]);
+    if (!buyerConfig || !sellerConfig) {
+      return null;
+    }
+    if (buyerConfig.settlementProfileRef !== sellerConfig.settlementProfileRef) {
+      throw new Error(
+        `Settlement profile mismatch: buyer (${buyerInstitutionId}) is on '${buyerConfig.settlementProfileRef}' but seller (${sellerInstitutionId}) is on '${sellerConfig.settlementProfileRef}'. WS2 requires both sides on the same profile.`,
+      );
+    }
+    return buyerConfig.settlementProfileRef;
+  }
+
+  /**
+   * WS2: build the rail dispatch context for a given
+   * settlement profile. Reads the per-institution deposit
+   * addresses and the per-asset token addresses from the
+   * institution metadata. Returns `undefined` for the noop
+   * rail (the noop rail ignores context).
+   */
+  private async buildRailContext(
+    settlementProfileRef: string,
+    buyerInstitutionId: string,
+    sellerInstitutionId: string,
+    assetCode: string,
+  ): Promise<SettlementRailContext | undefined> {
+    if (settlementProfileRef === "wallet:default") {
+      return undefined;
+    }
+    if (!this.institutionConfigResolver) {
+      return undefined;
+    }
+    const [buyerConfig, sellerConfig] = await Promise.all([
+      this.institutionConfigResolver.resolve(buyerInstitutionId),
+      this.institutionConfigResolver.resolve(sellerInstitutionId),
+    ]);
+    if (!buyerConfig || !sellerConfig) {
+      return undefined;
+    }
+    const depositAddresses: Record<string, string> = {};
+    const buyerDeposit = readDepositAddress(buyerConfig.metadata);
+    const sellerDeposit = readDepositAddress(sellerConfig.metadata);
+    if (buyerDeposit) {
+      depositAddresses[buyerInstitutionId] = buyerDeposit;
+    }
+    if (sellerDeposit) {
+      depositAddresses[sellerInstitutionId] = sellerDeposit;
+    }
+    const tokenAddresses = readTokenAddresses(buyerConfig.metadata, sellerConfig.metadata);
+    return {
+      depositAddresses,
+      tokenAddresses,
+      buyerProfileRef: buyerConfig.settlementProfileRef,
+      sellerProfileRef: sellerConfig.settlementProfileRef,
+    };
+    // Note: `assetCode` is passed in so a future iteration can
+    // fall back to the per-institution `metadata.tokenAddresses[assetCode]`
+    // when the buyer and seller do not share a token-address
+    // map. For WS2 both institutions on the same rail use the
+    // same token-address map.
+    void assetCode;
   }
 
   private publishFailure(
@@ -319,6 +675,16 @@ export class SettlementService {
 
     if (error instanceof InsufficientBalanceError) {
       return new PublicError("authorization_failed", 403);
+    }
+
+    if (error instanceof RailDispatchError) {
+      // A rail failure is a transport-layer problem (chain RPC
+      // unreachable, relayer rejected, custody API error). It is
+      // not an authorization failure — the agent's credentials are
+      // valid, the TEE command built successfully. The right
+      // status is 503 service_unavailable so the orchestrator's
+      // retry path can pick it up.
+      return new PublicError("service_unavailable", 503);
     }
 
     return new PublicError("service_unavailable", 503);

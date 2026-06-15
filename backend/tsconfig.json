@@ -10,7 +10,8 @@
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
-    "noEmit": false
+    "noEmit": false,
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "vitest.config.ts"],
   "exclude": ["dist", "coverage", "node_modules"]

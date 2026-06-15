@@ -9,15 +9,116 @@ export const institutionStatusSchema = z.enum([
 
 export type InstitutionStatus = z.infer<typeof institutionStatusSchema>;
 
-export const createInstitutionRequestSchema = z.object({
-  legalName: z.string().trim().min(1).max(256),
-  displayName: z.string().trim().min(1).max(128),
-  settlementProfileRef: z.string().trim().min(1).max(256),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
+/**
+ * WS3: settlement profile refs the system understands.
+ *   - `wallet:default`     — noop rail; the system default
+ *   - `chain:sepolia:erc20` — Sepolia ERC-20 chain rail
+ *   - `custody:<partner>`   — future custody rail (e.g.
+ *                             `custody:fireblocks`). The
+ *                             service validates the
+ *                             ref's prefix; the actual rail
+ *                             registration is a separate
+ *                             concern (see `app.ts`).
+ *
+ * The chain rail's metadata must include `depositAddress`
+ * (the institution's per-institution deposit wallet) and
+ * `tokenAddresses` (a `Record<assetCode, erc20Address>`
+ * map). These fields are validated at the route layer so
+ * the rail's `dispatch` always sees a complete context.
+ */
+export const SUPPORTED_SETTLEMENT_PROFILE_REFS = [
+  "wallet:default",
+  "chain:sepolia:erc20",
+] as const;
+
+export const SUPPORTED_SETTLEMENT_PROFILE_REFS_REGEX = /^(wallet:default|chain:sepolia:erc20|custody:[a-z0-9_-]+|settlement-profile:[a-z0-9_:-]+)$/u;
+
+const ethereumAddressSchema = z
+  .string()
+  .trim()
+  .regex(/^0x[0-9a-fA-F]{40}$/u, "must be a 0x-prefixed 40-hex address");
+
+/**
+ * WS3: the metadata shape for institutions on the chain
+ * rail. For the chain rail, `depositAddress` and
+ * `tokenAddresses` are required. For other rails, the
+ * metadata is free-form.
+ */
+const chainRailMetadataShape = z
+  .object({
+    depositAddress: ethereumAddressSchema,
+    tokenAddresses: z.record(z.string(), ethereumAddressSchema),
+  })
+  .strict();
+
+export const createInstitutionRequestSchema = z
+  .object({
+    legalName: z.string().trim().min(1).max(256),
+    displayName: z.string().trim().min(1).max(128),
+    settlementProfileRef: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .regex(SUPPORTED_SETTLEMENT_PROFILE_REFS_REGEX, "unsupported settlement profile ref"),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.settlementProfileRef !== "chain:sepolia:erc20") {
+      return;
+    }
+    const parsed = chainRailMetadataShape.safeParse(value.metadata ?? {});
+    if (parsed.success) {
+      return;
+    }
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue({
+        ...issue,
+        path: ["metadata", ...issue.path],
+      });
+    }
+  });
 
 export type CreateInstitutionRequest = z.infer<
   typeof createInstitutionRequestSchema
+>;
+
+/**
+ * WS3: PATCH /api/institutions/:id request shape. Allows
+ * updating the settlement profile and/or the chain-rail
+ * metadata without recreating the institution. Profile
+ * changes are gated by the same chain-rail superRefine as
+ * create.
+ */
+export const updateInstitutionRequestSchema = z
+  .object({
+    settlementProfileRef: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .regex(SUPPORTED_SETTLEMENT_PROFILE_REFS_REGEX, "unsupported settlement profile ref")
+      .optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.settlementProfileRef !== "chain:sepolia:erc20") {
+      return;
+    }
+    const parsed = chainRailMetadataShape.safeParse(value.metadata ?? {});
+    if (parsed.success) {
+      return;
+    }
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue({
+        ...issue,
+        path: ["metadata", ...issue.path],
+      });
+    }
+  });
+
+export type UpdateInstitutionRequest = z.infer<
+  typeof updateInstitutionRequestSchema
 >;
 
 export interface Institution {

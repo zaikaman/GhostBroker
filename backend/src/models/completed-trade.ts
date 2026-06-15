@@ -17,6 +17,24 @@ export interface CompletedTrade {
   settledAt: string;
   settlementStatus: SettlementStatus;
   receiptIds: string[];
+  /**
+   * The settlement rail that transported this trade. `null` for
+   * pre-WS1 rows (no rail proof existed). For trades settled after
+   * WS1, this is the `SettlementRail.id` of the rail that handled
+   * the dispatch (e.g. `"wallet:default"` for NoopCustodialRail).
+   */
+  railId: string | null;
+  /**
+   * Rail-specific transport proof. A chain tx hash, a custody
+   * transfer ref, or a `noop:<sha256>` for the noop rail. `null`
+   * for pre-WS1 rows.
+   */
+  railTradeRef: string | null;
+  /**
+   * Mirrors `settlementStatus` for symmetry. `null` for pre-WS1
+   * rows.
+   */
+  railState: SettlementStatus | null;
 }
 
 export interface CompletedTradeRecord {
@@ -30,6 +48,15 @@ export interface CompletedTradeRecord {
   settlement_status: SettlementStatus;
   settled_at: string;
   t3_execution_ref: string;
+  /**
+   * Optional rail columns. The DB columns are nullable for
+   * pre-WS1 rows; the TypeScript fields are `string | null` for
+   * the same reason. Both new columns were added in migration
+   * `011_completed_trades_rail_columns.sql`.
+   */
+  rail_id?: string | null;
+  rail_trade_ref?: string | null;
+  rail_state?: SettlementStatus | null;
   created_at?: string;
 }
 
@@ -46,5 +73,8 @@ export function completedTradeFromRecord(
     settledAt: record.settled_at,
     settlementStatus: record.settlement_status,
     receiptIds,
+    railId: record.rail_id ?? null,
+    railTradeRef: record.rail_trade_ref ?? null,
+    railState: record.rail_state ?? null,
   };
 }

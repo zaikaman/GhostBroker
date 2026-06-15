@@ -1805,4 +1805,105 @@
 }
 
 
+/* WS3: settlement profile card */
+.settlement-profile-card {
+  margin: var(--spacing-lg) 0;
+  padding: var(--spacing-lg);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md, 12px);
+}
+
+.settlement-profile-card--loading,
+.settlement-profile-card--error {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.settlement-profile-card--error {
+  border-color: rgba(255, 99, 99, 0.4);
+  color: #ff8a8a;
+}
+
+.settlement-profile-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settlement-profile-card__header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.settlement-profile-card__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.8rem;
+}
+
+.settlement-profile-card__row--block {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.settlement-profile-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  min-width: 160px;
+}
+
+.settlement-profile-card__value,
+.settlement-profile-card__rail-id {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+
+.settlement-profile-card__token-list,
+.settlement-profile-card__rail-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+}
+
+.settlement-profile-card__rail-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-accent, #5ed29c);
+  text-decoration: none;
+  font-family: var(--font-mono, monospace);
+  border-bottom: 1px dashed transparent;
+}
+
+.settlement-profile-card__rail-link:hover {
+  border-bottom-color: var(--color-accent, #5ed29c);
+}
+
+.settlement-profile-card__empty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+
 

@@ -79,6 +79,15 @@ function ConfigureSection({ session }: { session: AuthSession }): React.JSX.Elem
         credential is minted and persisted server-side — you never need to handle
         a W3C VC or a private key.
       </p>
+      <p className="deploy-step-desc" style={{ marginTop: 'var(--spacing-md)' }}>
+        <strong>Before deploying</strong>, confirm your institution's
+        settlement profile in <em>Settings</em>. The default
+        <code> wallet:default</code> profile is a noop rail (no external
+        transport). If you want real on-chain settlement, switch the
+        institution to <code>chain:sepolia:erc20</code> and configure the
+        deposit address + per-asset token addresses on the
+        <em> Settlement profile</em> card.
+      </p>
       <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-lg)' }}>
         <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ClipboardIcon size={16} style={{ color: 'var(--color-accent)' }} /> Platform Values
