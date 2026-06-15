@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   apiClient,
   type CompletedTrade,
@@ -650,7 +650,7 @@ function ApprovalTxLinks({
 }): React.JSX.Element {
   const entries = Object.entries(result.txHashes).filter(
     ([, hash]) => typeof hash === "string" && hash.length > 0,
-  ) as Array<[string, string]>;
+  ) as [string, string][];
   if (entries.length === 0) {
     return (
       <p className="settlement-profile-card__panel-hint">
