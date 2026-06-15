@@ -67,12 +67,6 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   const [purpose, setPurpose] = useState<string>('Autonomous market making and dark pool liquidity provisioning');
   const [validityMonths, setValidityMonths] = useState<number>(12);
 
-  // Settlement Profile Edit State
-  const [tokenAddressUsdc, setTokenAddressUsdc] = useState<string>('');
-  const [tokenAddressWbtc, setTokenAddressWbtc] = useState<string>('');
-  const [isSavingSettlement, setIsSavingSettlement] = useState(false);
-  const [settlementSuccess, setSettlementSuccess] = useState<string | null>(null);
-  const [settlementError, setSettlementError] = useState<string | null>(null);
 
   const loadAgents = useCallback(async () => {
     setIsAgentsLoading(true);
@@ -93,11 +87,6 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     try {
       const data = await apiClient.getInstitution(session.institution.id);
       setInstitution(data);
-      const tokens = data.metadata?.tokenAddresses as Record<string, string> | undefined;
-      if (tokens) {
-        setTokenAddressUsdc(tokens.USDC || '');
-        setTokenAddressWbtc(tokens.WBTC || '');
-      }
     } catch (err) {
       setInstError(err instanceof Error ? err.message : 'Failed to load institution details.');
     } finally {
@@ -194,42 +183,6 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     }
   };
 
-  const handleSaveSettlement = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingSettlement(true);
-    setSettlementError(null);
-    setSettlementSuccess(null);
-    try {
-      const ethAddressRegex = /^0x[0-9a-fA-F]{40}$/;
-      if (tokenAddressUsdc && !ethAddressRegex.test(tokenAddressUsdc.trim())) {
-        throw new Error('USDC token address must be a valid 0x-prefixed 40-hex Ethereum address.');
-      }
-      if (tokenAddressWbtc && !ethAddressRegex.test(tokenAddressWbtc.trim())) {
-        throw new Error('WBTC token address must be a valid 0x-prefixed 40-hex Ethereum address.');
-      }
-
-      const updatedMetadata = {
-        ...(institution?.metadata || {}),
-        tokenAddresses: {
-          ...(institution?.metadata?.tokenAddresses || {}),
-          USDC: tokenAddressUsdc.trim(),
-          WBTC: tokenAddressWbtc.trim(),
-        }
-      };
-
-      await apiClient.patchInstitution(session.institution.id, {
-        metadata: updatedMetadata
-      });
-
-      setSettlementSuccess('Token addresses updated successfully.');
-      await loadInstitution();
-      setTimeout(() => setSettlementSuccess(null), 5000);
-    } catch (err) {
-      setSettlementError(err instanceof Error ? err.message : 'Failed to update token addresses.');
-    } finally {
-      setIsSavingSettlement(false);
-    }
-  };
 
   const handleCategoryToggle = (category: string) => {
     setAllowedCategories((prev) =>
@@ -596,7 +549,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
           </div>
         )}
 
-        {/* Tab 4: Settlement Profile & Editor */}
+        {/* Tab 4: Settlement Profile */}
         {activeSubTab === 'settlement' && (
           <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', animation: 'fadeIn 0.2s ease' }}>
             <div style={{ borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--spacing-sm)' }}>
@@ -608,96 +561,8 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 'var(--spacing-lg)' }}>
-              {/* Left Column: Settlement Profile Card */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                <SettlementProfileCard institutionId={session.institution.id} />
-              </div>
-
-              {/* Right Column: Settlement Profile Editor */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                <div style={{ background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 'var(--spacing-md)' }}>
-                  <h3 style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)', margin: '0 0 var(--spacing-sm) 0', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
-                    Settlement Profile Editor
-                  </h3>
-                  
-                  {settlementSuccess && (
-                    <div className="status-badge secure" style={{ fontSize: '0.75rem', padding: '6px 12px', marginBottom: 'var(--spacing-sm)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <CheckmarkCircle01Icon size={14} /> {settlementSuccess}
-                    </div>
-                  )}
-
-                  {settlementError && (
-                    <div className="status-badge error" style={{ fontSize: '0.75rem', padding: '6px 12px', marginBottom: 'var(--spacing-sm)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <AlertCircleIcon size={14} /> {settlementError}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleSaveSettlement} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                    <div className="form-group">
-                      <label className="form-label">Active Rail Profile</label>
-                      <select 
-                        className="form-select" 
-                        value={institution?.settlementProfileRef || 'wallet:default'} 
-                        disabled
-                        style={{ opacity: 0.8, cursor: 'not-allowed' }}
-                      >
-                        <option value="wallet:default">No-Op / Off-Chain Rail (wallet:default)</option>
-                        <option value="chain:sepolia:erc20">Sepolia ERC-20 Rail (chain:sepolia:erc20)</option>
-                      </select>
-                      <span style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block', lineHeight: '1.3' }}>
-                        ℹ️ Profile switching in settings is planned for WS3.5. In v1, please recreate the institution to register a different settlement rail profile.
-                      </span>
-                    </div>
-
-                    {institution?.settlementProfileRef === 'chain:sepolia:erc20' ? (
-                      <>
-                        <div className="form-group">
-                          <label className="form-label">USDC Token Address</label>
-                          <input
-                            type="text"
-                            className="form-input"
-                            placeholder="0x..."
-                            value={tokenAddressUsdc}
-                            onChange={(e) => setTokenAddressUsdc(e.target.value)}
-                            disabled={isSavingSettlement}
-                          />
-                        </div>
-
-                        <div className="form-group">
-                          <label className="form-label">WBTC Token Address</label>
-                          <input
-                            type="text"
-                            className="form-input"
-                            placeholder="0x..."
-                            value={tokenAddressWbtc}
-                            onChange={(e) => setTokenAddressWbtc(e.target.value)}
-                            disabled={isSavingSettlement}
-                          />
-                        </div>
-
-                        <button
-                          type="submit"
-                          className="btn btn-primary"
-                          style={{ fontFamily: 'var(--font-mono)', alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', padding: '8px 16px', marginTop: 'var(--spacing-xs)' }}
-                          disabled={isSavingSettlement}
-                        >
-                          {isSavingSettlement ? (
-                            <Loading03Icon size={12} style={{ animation: 'spin 1s linear infinite' }} />
-                          ) : (
-                            <CheckmarkCircle01Icon size={12} />
-                          )}
-                          {isSavingSettlement ? 'Saving Addresses...' : 'Save Token Addresses'}
-                        </button>
-                      </>
-                    ) : (
-                      <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px dotted var(--color-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--spacing-md)', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '0.7rem' }}>
-                        The active Off-Chain / No-Op rail does not use on-chain token addresses. No configuration is required.
-                      </div>
-                    )}
-                  </form>
-                </div>
-              </div>
+            <div style={{ maxWidth: '800px', width: '100%', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+              <SettlementProfileCard institutionId={session.institution.id} />
             </div>
           </div>
         )}
