@@ -20,11 +20,13 @@ export type InstitutionStatus = z.infer<typeof institutionStatusSchema>;
  *                             registration is a separate
  *                             concern (see `app.ts`).
  *
- * The chain rail's metadata must include `depositAddress`
- * (the institution's per-institution deposit wallet) and
- * `tokenAddresses` (a `Record<assetCode, erc20Address>`
- * map). These fields are validated at the route layer so
- * the rail's `dispatch` always sees a complete context.
+ * The chain rail's metadata must include `tokenAddresses`
+ * (a `Record<assetCode, erc20Address>` map). The
+ * `depositAddress` is optional at request time because the
+ * backend can derive and manage a per-institution deposit
+ * wallet automatically when the server-owned wallet mode
+ * is enabled. When supplied, it must still be a valid
+ * Ethereum address.
  */
 export const SUPPORTED_SETTLEMENT_PROFILE_REFS = [
   "wallet:default",
@@ -40,13 +42,13 @@ const ethereumAddressSchema = z
 
 /**
  * WS3: the metadata shape for institutions on the chain
- * rail. For the chain rail, `depositAddress` and
- * `tokenAddresses` are required. For other rails, the
+ * rail. For the chain rail, `tokenAddresses` is required
+ * and `depositAddress` is optional. For other rails, the
  * metadata is free-form.
  */
 const chainRailMetadataShape = z
   .object({
-    depositAddress: ethereumAddressSchema,
+    depositAddress: ethereumAddressSchema.optional(),
     tokenAddresses: z.record(z.string(), ethereumAddressSchema),
   })
   .strict();

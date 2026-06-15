@@ -155,6 +155,57 @@ const envSchema = z.object({
    * Defaults to 90s in `chain-sepolia-rail.ts`.
    */
   SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC: z.coerce.number().int().positive().optional(),
+  /**
+   * WS6: master seed used to deterministically derive each
+   * institution's server-owned deposit wallet.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{64}$/iu)
+    .optional(),
+  /**
+   * WS6: hot-wallet private key used to top up institution
+   * deposit wallets with Sepolia test assets.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FAUCET_PRIVATE_KEY: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{64}$/iu)
+    .optional(),
+  /**
+   * WS6: canonical Sepolia token addresses used by the chain
+   * rail and by the funding / withdrawal flows.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-fA-F]{40}$/u)
+    .optional(),
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-fA-F]{40}$/u)
+    .optional(),
+  /**
+   * WS6: default human-readable funding amounts. Operators may
+   * always override these per request.
+   */
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_ETH_DEFAULT: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d+)?$/u)
+    .optional(),
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_WBTC_DEFAULT: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d+)?$/u)
+    .optional(),
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_USDC_DEFAULT: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d+)?$/u)
+    .optional(),
 });
 
 export type BackendEnv = z.infer<typeof envSchema>;

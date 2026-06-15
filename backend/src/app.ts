@@ -65,6 +65,7 @@ import type { SettlementRail } from "./services/settlement-rails/rail.js";
 import { TeeAttestedRelayerSigner } from "./services/settlement-rails/relayer-signer.js";
 import { createWalletClient, defineChain, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { HmacDepositWalletService } from "./services/deposit-wallet.service.js";
 import { RepositoryInstitutionSettlementConfigResolver } from "./services/institution-settlement-config-resolver.js";
 import { SupabaseSettlementReconciliationRepository } from "./services/settlement-reconciliation.repository.js";
 import { SettlementReconciler } from "./services/settlement-reconciler.js";
@@ -85,6 +86,8 @@ import {
   ChildProcessDemoAgentOrchestrator,
   type DemoAgentOrchestrator,
 } from "./services/demo-orchestrator.js";
+import { InstitutionFundingService } from "./services/institution-funding.service.js";
+import { InstitutionWithdrawalService } from "./services/institution-withdrawal.service.js";
 import { createDemoRouter } from "./api/demo.routes.js";
 import {
   AdkTenantDidRegistry,
@@ -174,6 +177,8 @@ export interface BackendServices {
    * omit it; production boots it in `createDefaultServices`.
    */
   demoAgentOrchestrator?: DemoAgentOrchestrator;
+  institutionFundingService?: InstitutionFundingService;
+  institutionWithdrawalService?: InstitutionWithdrawalService;
 }
 
 export async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
@@ -224,6 +229,21 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   const institutionRepository = new SupabaseInstitutionRepository(
     supabase as never,
   );
+  const depositWalletService =
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED
+      ? new HmacDepositWalletService(
+          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED,
+        )
+      : undefined;
+  const defaultChainTokenAddresses: Record<string, string> = {};
+  if (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS) {
+    defaultChainTokenAddresses["WBTC"] =
+      env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS;
+  }
+  if (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS) {
+    defaultChainTokenAddresses["USDC"] =
+      env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS;
+  }
   const authorityRevocationRepository =
     new SupabaseAuthorityRevocationRepository(supabase as never);
 
@@ -398,6 +418,50 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   }
   const railDispatcher = new MapSettlementRailDispatcher(railRegistry);
 
+  let institutionFundingService: InstitutionFundingService | undefined;
+  let institutionWithdrawalService: InstitutionWithdrawalService | undefined;
+  const chainWbtcAddress = env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS;
+  const chainUsdcAddress = env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS;
+  if (
+    depositWalletService &&
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL &&
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY &&
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS &&
+    chainWbtcAddress &&
+    chainUsdcAddress
+  ) {
+    const chainId = env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111;
+    institutionWithdrawalService = new InstitutionWithdrawalService({
+      institutionRepository,
+      depositWalletService,
+      rpcUrl: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL,
+      chainId,
+      wbtcAddress: chainWbtcAddress as `0x${string}`,
+      usdcAddress: chainUsdcAddress as `0x${string}`,
+    });
+    if (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FAUCET_PRIVATE_KEY) {
+      institutionFundingService = new InstitutionFundingService({
+        institutionRepository,
+        depositWalletService,
+        rpcUrl: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL,
+        chainId,
+        faucetPrivateKey:
+          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FAUCET_PRIVATE_KEY as `0x${string}`,
+        relayerContractAddress:
+          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS as `0x${string}`,
+        relayerPrivateKey:
+          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
+        wbtcAddress: chainWbtcAddress as `0x${string}`,
+        usdcAddress: chainUsdcAddress as `0x${string}`,
+        defaultFunding: {
+          eth: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_ETH_DEFAULT ?? "0.5",
+          wbtc: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_WBTC_DEFAULT ?? "0.1",
+          usdc: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_FUND_USDC_DEFAULT ?? "1000",
+        },
+      });
+    }
+  }
+
   // WS2: production resolver for per-institution settlement
   // config (settlement_profile_ref + metadata). Wired from the
   // existing institution repository. The settlement service
@@ -471,6 +535,8 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     institutionService: new InstitutionService(
       institutionRepository,
       new AdkTenantDidRegistry(t3NetworkClient),
+      depositWalletService,
+      defaultChainTokenAddresses,
     ),
     portfolioService,
     ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
@@ -502,6 +568,8 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     intentLockRepository,
     intentLockJanitor,
     tenantDelegationSigner,
+    ...(institutionFundingService ? { institutionFundingService } : {}),
+    ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),
     demoAgentOrchestrator: new ChildProcessDemoAgentOrchestrator({
       agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
       backendUrl: `http://localhost:${env.PORT}`,
@@ -569,6 +637,14 @@ export function createApp(
     createInstitutionsRouter(
       services.institutionService,
       operatorAuthMiddleware(env, services.apiKeyService),
+      {
+        ...(services.institutionFundingService
+          ? { fundingService: services.institutionFundingService }
+          : {}),
+        ...(services.institutionWithdrawalService
+          ? { withdrawalService: services.institutionWithdrawalService }
+          : {}),
+      },
     ),
   );
   app.use(

@@ -10,6 +10,7 @@ import {
   type Institution,
   type InstitutionRecord,
 } from "../models/institution.js";
+import type { DepositWalletService } from "./deposit-wallet.service.js";
 
 interface InsertQuery<TResult> {
   insert(value: Record<string, unknown>): {
@@ -159,13 +160,21 @@ export class SupabaseInstitutionRepository implements InstitutionRepository {
 export class InstitutionService implements InstitutionManagementService {
   private readonly repository: InstitutionRepository;
   private readonly didRegistry: TenantDidRegistry;
+  private readonly depositWalletService: DepositWalletService | undefined;
+  private readonly defaultChainTokenAddresses:
+    | Readonly<Record<string, string>>
+    | undefined;
 
   public constructor(
     repository: InstitutionRepository,
     didRegistry: TenantDidRegistry,
+    depositWalletService?: DepositWalletService,
+    defaultChainTokenAddresses?: Readonly<Record<string, string>>,
   ) {
     this.repository = repository;
     this.didRegistry = didRegistry;
+    this.depositWalletService = depositWalletService;
+    this.defaultChainTokenAddresses = defaultChainTokenAddresses;
   }
 
   public async createInstitution(
@@ -177,12 +186,18 @@ export class InstitutionService implements InstitutionManagementService {
       settlementProfileRef: request.settlementProfileRef,
     });
 
+    const metadata = this.enrichChainRailMetadata(
+      request.settlementProfileRef,
+      request.metadata ?? {},
+      tenant.tenantDid,
+    );
+
     return this.repository.createInstitution({
       legalName: request.legalName,
       displayName: request.displayName,
       settlementProfileRef: request.settlementProfileRef,
       t3TenantDid: tenant.tenantDid,
-      metadata: request.metadata ?? {},
+      metadata,
     });
   }
 
@@ -220,10 +235,15 @@ export class InstitutionService implements InstitutionManagementService {
     }
 
     const nextProfile = request.settlementProfileRef ?? current.settlementProfileRef;
-    const nextMetadata: Record<string, unknown> = {
+    const mergedMetadata: Record<string, unknown> = {
       ...((current.metadata as Record<string, unknown> | undefined) ?? {}),
       ...((request.metadata as Record<string, unknown> | undefined) ?? {}),
     };
+    const nextMetadata = this.enrichChainRailMetadata(
+      nextProfile,
+      mergedMetadata,
+      current.t3TenantDid,
+    );
 
     // Persist the metadata update first via the repository's
     // `updateMetadata`, then the profile via a direct
@@ -342,5 +362,44 @@ export class InstitutionService implements InstitutionManagementService {
     };
 
     return this.repository.updateMetadata!(id, nextMetadata);
+  }
+
+  private enrichChainRailMetadata(
+    settlementProfileRef: string,
+    metadata: Readonly<Record<string, unknown>>,
+    institutionSeed: string,
+  ): Readonly<Record<string, unknown>> {
+    if (settlementProfileRef !== "chain:sepolia:erc20") {
+      return metadata;
+    }
+    if (!this.depositWalletService) {
+      throw new PublicError(
+        "service_unavailable",
+        503,
+        "Chain-rail institution setup requires a configured deposit-wallet service.",
+      );
+    }
+
+    const existingTokenAddresses =
+      metadata["tokenAddresses"] && typeof metadata["tokenAddresses"] === "object"
+        ? (metadata["tokenAddresses"] as Record<string, unknown>)
+        : {};
+    const normalizedTokenAddresses: Record<string, string> = {};
+    for (const [key, value] of Object.entries(existingTokenAddresses)) {
+      if (typeof value === "string" && value.length > 0) {
+        normalizedTokenAddresses[key] = value;
+      }
+    }
+    for (const [key, value] of Object.entries(this.defaultChainTokenAddresses ?? {})) {
+      if (!normalizedTokenAddresses[key]) {
+        normalizedTokenAddresses[key] = value;
+      }
+    }
+
+    return {
+      ...metadata,
+      depositAddress: this.depositWalletService.deriveDepositAddress(institutionSeed),
+      tokenAddresses: normalizedTokenAddresses,
+    };
   }
 }

@@ -199,4 +199,89 @@ describe('apiClient Services', () => {
     );
     expect(result).toEqual(mockReceipt);
   });
+
+  it('fundRelayer issues POST with the operator bearer token', async () => {
+    apiClient.setAuthSession({
+      token: 'real.jwt.token',
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      institution: {
+        id: 'inst_123',
+        displayName: 'Northstar Capital',
+        t3TenantDid: 'did:t3n:tenant:northstar',
+      },
+    });
+
+    const mockResponse = {
+      depositAddress: '0x1111111111111111111111111111111111111111',
+      relayerAddress: '0x2222222222222222222222222222222222222222',
+      txHashes: { ethTopUp: '0x' + 'a'.repeat(64) },
+      balances: { eth: '0.5', wbtc: '0.1', usdc: '1000' },
+    };
+
+    asFetchMock(global.fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await apiClient.fundRelayer('inst_123', { ethAmount: '0.5' });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/institutions/inst_123/fund-relayer'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer real.jwt.token',
+        }),
+        body: JSON.stringify({ ethAmount: '0.5' }),
+      }),
+    );
+    expect(result).toEqual(mockResponse);
+  });
+
+  it('withdrawFromDeposit issues POST with asset, amount, and destination', async () => {
+    apiClient.setAuthSession({
+      token: 'real.jwt.token',
+      expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      institution: {
+        id: 'inst_123',
+        displayName: 'Northstar Capital',
+        t3TenantDid: 'did:t3n:tenant:northstar',
+      },
+    });
+
+    const mockResponse = {
+      asset: 'USDC',
+      amount: '1',
+      fromAddress: '0x1111111111111111111111111111111111111111',
+      toAddress: '0x2222222222222222222222222222222222222222',
+      txHash: '0x' + 'b'.repeat(64),
+      remainingBalance: '999',
+    };
+
+    asFetchMock(global.fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    } as Response);
+
+    const req = {
+      asset: 'USDC' as const,
+      amount: '1',
+      toAddress: '0x2222222222222222222222222222222222222222',
+    };
+    const result = await apiClient.withdrawFromDeposit('inst_123', req);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/institutions/inst_123/withdrawals'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer real.jwt.token',
+        }),
+        body: JSON.stringify(req),
+      }),
+    );
+    expect(result).toEqual(mockResponse);
+  });
 });

@@ -7,10 +7,22 @@ import {
   type Institution,
 } from "../models/institution.js";
 import type { InstitutionManagementService } from "../services/institution.service.js";
+import type {
+  InstitutionFundingRequest,
+  InstitutionFundingService,
+} from "../services/institution-funding.service.js";
+import type {
+  InstitutionWithdrawalRequest,
+  InstitutionWithdrawalService,
+} from "../services/institution-withdrawal.service.js";
 
 export function createInstitutionsRouter(
   institutionService: InstitutionManagementService,
   authMiddleware: RequestHandler,
+  deps?: {
+    fundingService?: InstitutionFundingService;
+    withdrawalService?: InstitutionWithdrawalService;
+  },
 ): Router {
   const router = Router();
 
@@ -111,6 +123,60 @@ export function createInstitutionsRouter(
       next(error);
     }
   });
+
+  const fundingService = deps?.fundingService;
+  if (fundingService) {
+    router.post("/institutions/:id/fund-relayer", authMiddleware, async (request, response, next) => {
+      try {
+        const operatorAuth = requireOperatorAuth(response);
+        const id = request.params.id as string;
+        assertInstitutionScope(operatorAuth, id);
+
+        const body = (request.body ?? {}) as Partial<InstitutionFundingRequest>;
+        const result = await fundingService.fundInstitution(id, {
+          ...(typeof body.ethAmount === "string" ? { ethAmount: body.ethAmount } : {}),
+          ...(typeof body.wbtcAmount === "string" ? { wbtcAmount: body.wbtcAmount } : {}),
+          ...(typeof body.usdcAmount === "string" ? { usdcAmount: body.usdcAmount } : {}),
+        });
+        response.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
+
+  const withdrawalService = deps?.withdrawalService;
+  if (withdrawalService) {
+    router.post("/institutions/:id/withdrawals", authMiddleware, async (request, response, next) => {
+      try {
+        const operatorAuth = requireOperatorAuth(response);
+        const id = request.params.id as string;
+        assertInstitutionScope(operatorAuth, id);
+
+        const body = (request.body ?? {}) as Partial<InstitutionWithdrawalRequest>;
+        if (
+          (body.asset !== "ETH" && body.asset !== "WBTC" && body.asset !== "USDC") ||
+          typeof body.amount !== "string" ||
+          typeof body.toAddress !== "string"
+        ) {
+          throw new PublicError(
+            "validation_failed",
+            400,
+            "Withdrawal body requires { asset: 'ETH' | 'WBTC' | 'USDC', amount: string, toAddress: address }.",
+          );
+        }
+
+        const result = await withdrawalService.withdraw(id, {
+          asset: body.asset,
+          amount: body.amount,
+          toAddress: body.toAddress as `0x${string}`,
+        });
+        response.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
 
   return router;
 }

@@ -31,6 +31,46 @@ export interface UpdateInstitutionRequest {
   metadata?: Record<string, unknown>;
 }
 
+export interface FundRelayerRequest {
+  ethAmount?: string;
+  wbtcAmount?: string;
+  usdcAmount?: string;
+}
+
+export interface FundRelayerResponse {
+  depositAddress: string;
+  relayerAddress: string;
+  txHashes: {
+    ethTopUp?: string;
+    wbtcTopUp?: string;
+    usdcTopUp?: string;
+    wbtcApprove?: string;
+    usdcApprove?: string;
+  };
+  balances: {
+    eth: string;
+    wbtc: string;
+    usdc: string;
+  };
+}
+
+export type WithdrawalAsset = 'ETH' | 'WBTC' | 'USDC';
+
+export interface WithdrawRequest {
+  asset: WithdrawalAsset;
+  amount: string;
+  toAddress: string;
+}
+
+export interface WithdrawResponse {
+  asset: WithdrawalAsset;
+  amount: string;
+  fromAddress: string;
+  toAddress: string;
+  txHash: string;
+  remainingBalance: string;
+}
+
 export interface Institution {
   id: string;
   legalName: string;
@@ -428,6 +468,46 @@ export const apiClient = {
       },
     );
     return handleResponse<Institution>(res);
+  },
+
+  /**
+   * Fund the institution's server-owned deposit wallet with
+   * Sepolia test assets and approve the settlement relayer.
+   * Chain-rail institutions only; operator-scoped.
+   */
+  async fundRelayer(
+    id: string,
+    req: FundRelayerRequest = {},
+  ): Promise<FundRelayerResponse> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/institutions/${id}/fund-relayer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      },
+    );
+    return handleResponse<FundRelayerResponse>(res);
+  },
+
+  /**
+   * Withdraw assets from the institution's deposit wallet to an
+   * external destination. The backend signs and broadcasts the
+   * transfer. Chain-rail institutions only; operator-scoped.
+   */
+  async withdrawFromDeposit(
+    id: string,
+    req: WithdrawRequest,
+  ): Promise<WithdrawResponse> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/institutions/${id}/withdrawals`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+      },
+    );
+    return handleResponse<WithdrawResponse>(res);
   },
 
   async requestAuthChallenge(did: string): Promise<AuthChallenge> {
