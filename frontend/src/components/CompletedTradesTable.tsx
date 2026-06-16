@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { CompletedTrade } from '../services/api-client';
 import { LockIcon, ScrollIcon, Shield01Icon } from 'hugeicons-react';
+import { Pagination } from './Pagination';
 
 export interface CompletedTradesTableProps {
   trades: CompletedTrade[];
@@ -13,6 +14,9 @@ export function CompletedTradesTable({
   isLoading,
   onViewReceipt,
 }: CompletedTradesTableProps): React.JSX.Element {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+
   const truncateCiphertext = (text: string | undefined) => {
     if (!text) return <><LockIcon size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} /> [ENCRYPTED]</>;
     if (text.length <= 20) return text;
@@ -67,8 +71,14 @@ export function CompletedTradesTable({
     );
   }
 
+  const totalPages = Math.ceil(trades.length / itemsPerPage);
+  
+  // Guard current page bounds if trades count changes
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedTrades = trades.slice((activePage - 1) * itemsPerPage, activePage * itemsPerPage);
+
   return (
-    <div className="table-container">
+    <div className="table-container" style={{ padding: 'var(--spacing-md)' }}>
       <table className="trades-table" aria-label="Completed Trades History">
         <thead>
           <tr>
@@ -82,7 +92,7 @@ export function CompletedTradesTable({
           </tr>
         </thead>
         <tbody>
-          {trades.map((trade) => {
+          {paginatedTrades.map((trade) => {
             const hasReceipt = trade.receiptIds && trade.receiptIds.length > 0;
             const primaryReceiptId = hasReceipt ? trade.receiptIds[0] : null;
 
@@ -138,6 +148,14 @@ export function CompletedTradesTable({
           })}
         </tbody>
       </table>
+
+      <Pagination
+        currentPage={activePage}
+        totalPages={totalPages}
+        onPageChange={setCurrentPage}
+        totalItems={trades.length}
+        itemsPerPage={itemsPerPage}
+      />
     </div>
   );
 }

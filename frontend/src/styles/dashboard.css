@@ -2373,6 +2373,9 @@
   flex-direction: column;
   gap: var(--spacing-sm);
   margin-top: var(--spacing-md);
+  max-height: 290px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .deploy-agent-runtime {
@@ -2445,6 +2448,24 @@
     flex-direction: column;
   }
 }
+
+/* Pagination Button Styling */
+.pagination-btn {
+  border-color: rgba(255, 255, 255, 0.05) !important;
+  color: var(--color-text-secondary) !important;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: rgba(94, 210, 156, 0.05) !important;
+  border-color: rgba(94, 210, 156, 0.3) !important;
+  color: var(--color-accent) !important;
+}
+
+.pagination-btn:focus-visible {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 8px rgba(94, 210, 156, 0.2) !important;
+}
+
 
 
 

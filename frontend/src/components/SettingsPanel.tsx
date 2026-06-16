@@ -14,6 +14,7 @@ import {
 import { EnclaveHealthMonitor } from './EnclaveHealthMonitor';
 import { PortfolioCard } from './PortfolioCard';
 import { SettlementProfileCard } from './SettlementProfileCard';
+import { Pagination } from './Pagination';
 
 // Custom SVG Gear Icon for Settings to guarantee compatibility
 const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSProperties }) => (
@@ -68,6 +69,9 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   const [purpose, setPurpose] = useState<string>('Autonomous market making and dark pool liquidity provisioning');
   const [validityMonths, setValidityMonths] = useState<number>(12);
 
+  // Pagination State for Mandates
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
   const loadAgents = useCallback(async () => {
     setIsAgentsLoading(true);
@@ -191,6 +195,10 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     );
   };
 
+  const totalPages = Math.ceil(agents.length / itemsPerPage);
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedAgents = agents.slice((activePage - 1) * itemsPerPage, activePage * itemsPerPage);
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 'var(--spacing-lg)', minHeight: '600px' }}>
       
@@ -272,92 +280,102 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                 No active or historical agents found for this institution. Launch a hosted agent to configure mandates.
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table className="trades-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-                  <thead>
-                    <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>
-                      <th style={{ padding: '10px var(--spacing-sm)' }}>Agent Label</th>
-                      <th style={{ padding: '10px var(--spacing-sm)' }}>DID / Authority Ref</th>
-                      <th style={{ padding: '10px var(--spacing-sm)' }}>Max Spend Limit</th>
-                      <th style={{ padding: '10px var(--spacing-sm)' }}>Allowed Categories</th>
-                      <th style={{ padding: '10px var(--spacing-sm)', textAlign: 'center' }}>Status</th>
-                      <th style={{ padding: '10px var(--spacing-sm)', textAlign: 'right' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {agents.map((agent) => {
-                      const meta = agent.metadata as any;
-                      const cred = meta?.delegation_credential;
-                      const claims = cred?.credentialSubject?.authorityClaims?.[0]?.authorityLimits;
-                      
-                      const spendLimit = claims?.maxSpendUsd 
-                        ? `$${claims.maxSpendUsd.toLocaleString()}` 
-                        : (agent.maxNotional ? `$${parseInt(agent.maxNotional).toLocaleString()}` : 'No Limit');
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="trades-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>
+                        <th style={{ padding: '10px var(--spacing-sm)' }}>Agent Label</th>
+                        <th style={{ padding: '10px var(--spacing-sm)' }}>DID / Authority Ref</th>
+                        <th style={{ padding: '10px var(--spacing-sm)' }}>Max Spend Limit</th>
+                        <th style={{ padding: '10px var(--spacing-sm)' }}>Allowed Categories</th>
+                        <th style={{ padding: '10px var(--spacing-sm)', textAlign: 'center' }}>Status</th>
+                        <th style={{ padding: '10px var(--spacing-sm)', textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedAgents.map((agent) => {
+                        const meta = agent.metadata as any;
+                        const cred = meta?.delegation_credential;
+                        const claims = cred?.credentialSubject?.authorityClaims?.[0]?.authorityLimits;
                         
-                      const categories = claims?.allowedCategories 
-                        ? claims.allowedCategories.join(', ') 
-                        : (agent.instrumentScope ? agent.instrumentScope.join(', ') : 'All');
+                        const spendLimit = claims?.maxSpendUsd 
+                          ? `$${claims.maxSpendUsd.toLocaleString()}` 
+                          : (agent.maxNotional ? `$${parseInt(agent.maxNotional).toLocaleString()}` : 'No Limit');
+                          
+                        const categories = claims?.allowedCategories 
+                          ? claims.allowedCategories.join(', ') 
+                          : (agent.instrumentScope ? agent.instrumentScope.join(', ') : 'All');
 
-                      const isActive = agent.status === 'admitted';
+                        const isActive = agent.status === 'admitted';
 
-                      return (
-                        <tr key={agent.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)', transition: 'background var(--transition-fast)' }}>
-                          <td style={{ padding: '12px var(--spacing-sm)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                            {agent.label || 'Unnamed Agent'}
-                          </td>
-                          <td style={{ padding: '12px var(--spacing-sm)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
-                            <div style={{ color: 'var(--color-text-primary)' }}>{agent.agentDid}</div>
-                            <div style={{ color: 'var(--color-text-muted)', fontSize: '0.65rem', marginTop: '2px' }}>{agent.authorityRef}</div>
-                          </td>
-                          <td style={{ padding: '12px var(--spacing-sm)', fontFamily: 'var(--font-mono)' }}>
-                            {spendLimit}
-                          </td>
-                          <td style={{ padding: '12px var(--spacing-sm)', color: 'var(--color-text-secondary)' }}>
-                            <span style={{ fontSize: '0.7rem', background: 'rgba(255, 255, 255, 0.03)', padding: '2px 6px', borderRadius: '4px' }}>
-                              {categories}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px var(--spacing-sm)', textAlign: 'center' }}>
-                            <span className={`status-badge ${isActive ? 'secure' : 'error'}`} style={{ display: 'inline-flex', fontSize: '0.65rem' }}>
-                              {isActive ? 'ACTIVE' : 'SUSPENDED'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px var(--spacing-sm)', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: 'var(--spacing-xs)' }}>
-                              {isActive && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenEditPolicy(agent)}
-                                    className="btn-grid-header-deploy"
-                                    style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                                    title="Edit Limit Mandates"
-                                  >
-                                    <Edit02Icon size={12} /> Edit Policy
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRevoke(agent.id, agent.label || agent.id)}
-                                    className="btn-grid-header-deploy"
-                                    style={{ padding: '4px 8px', color: 'var(--color-error)', borderColor: 'rgba(244, 63, 94, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                                    title="Suspend trading agent"
-                                  >
-                                    <Delete02Icon size={12} /> Suspend
-                                  </button>
-                                </>
-                              )}
-                              {!isActive && (
-                                <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                                  Revoked permanently
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                        return (
+                          <tr key={agent.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)', transition: 'background var(--transition-fast)' }}>
+                            <td style={{ padding: '12px var(--spacing-sm)', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                              {agent.label || 'Unnamed Agent'}
+                            </td>
+                            <td style={{ padding: '12px var(--spacing-sm)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+                              <div style={{ color: 'var(--color-text-primary)' }}>{agent.agentDid}</div>
+                              <div style={{ color: 'var(--color-text-muted)', fontSize: '0.65rem', marginTop: '2px' }}>{agent.authorityRef}</div>
+                            </td>
+                            <td style={{ padding: '12px var(--spacing-sm)', fontFamily: 'var(--font-mono)' }}>
+                              {spendLimit}
+                            </td>
+                            <td style={{ padding: '12px var(--spacing-sm)', color: 'var(--color-text-secondary)' }}>
+                              <span style={{ fontSize: '0.7rem', background: 'rgba(255, 255, 255, 0.03)', padding: '2px 6px', borderRadius: '4px' }}>
+                                {categories}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px var(--spacing-sm)', textAlign: 'center' }}>
+                              <span className={`status-badge ${isActive ? 'secure' : 'error'}`} style={{ display: 'inline-flex', fontSize: '0.65rem' }}>
+                                {isActive ? 'ACTIVE' : 'SUSPENDED'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px var(--spacing-sm)', textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 'var(--spacing-xs)' }}>
+                                {isActive && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditPolicy(agent)}
+                                      className="btn-grid-header-deploy"
+                                      style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                      title="Edit Limit Mandates"
+                                    >
+                                      <Edit02Icon size={12} /> Edit Policy
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRevoke(agent.id, agent.label || agent.id)}
+                                      className="btn-grid-header-deploy"
+                                      style={{ padding: '4px 8px', color: 'var(--color-error)', borderColor: 'rgba(244, 63, 94, 0.3)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                      title="Suspend trading agent"
+                                    >
+                                      <Delete02Icon size={12} /> Suspend
+                                    </button>
+                                  </>
+                                )}
+                                {!isActive && (
+                                  <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+                                    Revoked permanently
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <Pagination
+                  currentPage={activePage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                  totalItems={agents.length}
+                  itemsPerPage={itemsPerPage}
+                />
               </div>
             )}
           </div>

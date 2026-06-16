@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { AgentState } from '../hooks/useConnectionTelemetry';
 import { UserIcon, Activity01Icon, RocketIcon } from 'hugeicons-react';
+import { Pagination } from './Pagination';
 
 export interface AgentConnectionGridProps {
   agents: AgentState[];
@@ -8,6 +9,9 @@ export interface AgentConnectionGridProps {
 }
 
 export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridProps): React.JSX.Element {
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
   const truncateDid = (did: string) => {
     if (did.length <= 16) return did;
     return `${did.slice(0, 10)}...${did.slice(-6)}`;
@@ -25,6 +29,10 @@ export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridPro
         return <span className="status-badge error">Revoked</span>;
     }
   };
+
+  const totalPages = Math.ceil(agents.length / itemsPerPage);
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedAgents = agents.slice((activePage - 1) * itemsPerPage, activePage * itemsPerPage);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
@@ -109,7 +117,7 @@ export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridPro
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-          {agents.map((agent) => (
+          {paginatedAgents.map((agent) => (
             <div 
               key={agent.agentDid}
               style={{ 
@@ -186,6 +194,14 @@ export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridPro
               )}
             </div>
           ))}
+
+          <Pagination
+            currentPage={activePage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={agents.length}
+            itemsPerPage={itemsPerPage}
+          />
         </div>
       )}
     </div>

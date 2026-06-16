@@ -89,7 +89,10 @@ export function ProcessingStatusRail({ intents }: ProcessingStatusRailProps): Re
           style={{ 
             display: 'flex', 
             flexDirection: 'column', 
-            gap: 'var(--spacing-sm)' 
+            gap: 'var(--spacing-sm)',
+            maxHeight: '400px',
+            overflowY: 'auto',
+            paddingRight: '6px'
           }}
         >
           {intents.map((intent) => {

@@ -10,6 +10,7 @@ import {
   Key01Icon,
   Refresh01Icon,
 } from 'hugeicons-react';
+import { Pagination } from './Pagination';
 
 export interface AgentsPanelProps {
   onNavigateToDeveloperKeys?: () => void;
@@ -25,6 +26,8 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
   const [isSaving, setIsSaving] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
   const loadData = useCallback(async (): Promise<{ agents: Agent[]; keys: ApiKey[] }> => {
     const [agentList, keyList] = await Promise.all([
@@ -111,6 +114,15 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
     });
   };
 
+  const totalPages = Math.ceil(agents.length / itemsPerPage);
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedAgents = agents.slice((activePage - 1) * itemsPerPage, activePage * itemsPerPage);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    setExpandedAgentId(null); // Close expanded details on page change
+  };
+
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -173,7 +185,7 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
             <span style={{ width: '60px' }}>Actions</span>
           </div>
 
-          {agents.map((agent) => (
+          {paginatedAgents.map((agent) => (
             <React.Fragment key={agent.id}>
             <div
               onClick={() => setExpandedAgentId(expandedAgentId === agent.id ? null : agent.id)}
@@ -224,7 +236,7 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
                       onClick={handleCancelEdit}
                       style={{ padding: '2px 6px', fontSize: '0.65rem', color: 'var(--color-text-muted)' }}
                     >
-                      âœ•
+                      &#x2716;
                     </button>
                   </div>
                 ) : (
@@ -236,7 +248,10 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
                       <button
                         type="button"
                         className="btn-grid-header-deploy"
-                        onClick={() => handleStartEdit(agent)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartEdit(agent);
+                        }}
                         title="Edit label"
                         style={{ padding: '2px 4px', opacity: 0.5 }}
                       >
@@ -280,7 +295,8 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
                   <button
                     type="button"
                     className="btn-grid-header-deploy"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       if (window.confirm(`Revoke agent "${agent.label || agent.agentDid}"? This will clear their active intents and they won't be able to submit new ones until re-admitted.`)) {
                         handleRevoke(agent.id);
                       }
@@ -342,6 +358,14 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
             )}
             </React.Fragment>
           ))}
+
+          <Pagination
+            currentPage={activePage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+            totalItems={agents.length}
+            itemsPerPage={itemsPerPage}
+          />
         </div>
       )}
 

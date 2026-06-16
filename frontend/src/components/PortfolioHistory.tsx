@@ -12,6 +12,7 @@ import {
   ScrollIcon,
   AlertCircleIcon
 } from 'hugeicons-react';
+import { Pagination } from './Pagination';
 
 export interface PortfolioHistoryEntry {
   id: string;
@@ -81,6 +82,8 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
   const [history, setHistory] = useState<PortfolioHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
   const fetchHistoryData = useCallback(async (): Promise<PortfolioHistoryEntry[]> => {
     return await apiClient.getPortfolioHistory(institutionId);
@@ -88,9 +91,6 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
 
   useEffect(() => {
     let cancelled = false;
-    // Defer the loading-state flag to a microtask so the React-hooks
-    // `set-state-in-effect` rule does not flag the effect's
-    // synchronous setState calls.
     queueMicrotask(() => {
       if (cancelled) return;
       setIsLoading(true);
@@ -155,13 +155,17 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
     );
   }
 
+  const totalPages = Math.ceil(filteredHistory.length / itemsPerPage);
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedHistory = filteredHistory.slice((activePage - 1) * itemsPerPage, activePage * itemsPerPage);
+
   return (
     <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '350px' }}>
       <h3 className="card-title" style={{ fontSize: '0.85rem', marginBottom: 'var(--spacing-md)', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Mirrored Inventory History
       </h3>
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
-        {filteredHistory.map((entry) => {
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
+        {paginatedHistory.map((entry) => {
           const typeInfo = CHANGE_TYPE_LABELS[entry.changeType] ?? { label: entry.changeType, icon: <AlertCircleIcon size={12} />, color: 'var(--color-text-muted)' };
           return (
             <div
@@ -222,6 +226,14 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
           );
         })}
       </div>
+
+      <Pagination
+        currentPage={activePage}
+        totalPages={totalPages}
+        onPageChange={setCurrentPage}
+        totalItems={filteredHistory.length}
+        itemsPerPage={itemsPerPage}
+      />
     </div>
   );
 }

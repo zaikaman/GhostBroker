@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiClient, type ApiKey, type CreatedApiKey } from '../services/api-client';
 import { Key01Icon, Copy01Icon, Delete02Icon, PlusSignIcon, CheckmarkCircle01Icon, AlertCircleIcon, Loading03Icon } from 'hugeicons-react';
+import { Pagination } from './Pagination';
 
 export function ApiKeysPanel(): React.JSX.Element {
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -11,6 +12,8 @@ export function ApiKeysPanel(): React.JSX.Element {
   const [newLabel, setNewLabel] = useState('');
   const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
   const loadKeys = useCallback(async (): Promise<ApiKey[]> => {
     return await apiClient.listApiKeys();
@@ -52,6 +55,7 @@ export function ApiKeysPanel(): React.JSX.Element {
       setNewLabel('');
       setShowCreateForm(false);
       await loadKeys();
+      setCurrentPage(1); // Reset to page 1 on new key generation
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create API key.');
     } finally {
@@ -91,6 +95,10 @@ export function ApiKeysPanel(): React.JSX.Element {
       minute: '2-digit',
     });
   };
+
+  const totalPages = Math.ceil(keys.length / itemsPerPage);
+  const activePage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedKeys = keys.slice((activePage - 1) * itemsPerPage, activePage * itemsPerPage);
 
   return (
     <div id="api-keys-panel" className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
@@ -245,7 +253,7 @@ export function ApiKeysPanel(): React.JSX.Element {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-          {keys.map((key) => (
+          {paginatedKeys.map((key) => (
             <div
               key={key.id}
               style={{
@@ -298,6 +306,14 @@ export function ApiKeysPanel(): React.JSX.Element {
               </button>
             </div>
           ))}
+
+          <Pagination
+            currentPage={activePage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={keys.length}
+            itemsPerPage={itemsPerPage}
+          />
         </div>
       )}
 
