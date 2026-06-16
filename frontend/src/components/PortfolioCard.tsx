@@ -148,10 +148,10 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-xl)', gap: 'var(--spacing-sm)' }}>
         <Wallet01Icon size={32} style={{ opacity: 0.5, color: 'var(--color-text-muted)' }} />
         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-          Awaiting mirrored inventory snapshot
+          Awaiting connected wallet balances
         </div>
         <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', maxWidth: '22rem' }}>
-          Trading inventory appears here after the enclave imports a custody or Sepolia snapshot. Settlement wallet funds are tracked separately.
+          Mirrored trading inventory reflects your connected wallet balances on Sepolia. Connect and fund your wallet to see assets here. Settlement deposit funds are tracked separately.
         </div>
       </div>
     );
@@ -176,7 +176,7 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
         </button>
       </div>
       <div style={{ marginBottom: 'var(--spacing-sm)', fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-        Secondary ledger view imported from custody or a signed Sepolia snapshot, separate from the settlement deposit wallet.
+        Connected wallet balances on Sepolia, reflected here for mirrored trading. Separate from the settlement deposit wallet below.
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
         {filteredHoldings.map((holding) => (
@@ -249,7 +249,7 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
             lineHeight: 1.4,
           }}
         >
-          Use faucet assets to seed the imported trading inventory when you are testing end-to-end flows.
+          Use faucet assets to seed your connected wallet balances when testing mirrored trading end-to-end flows.
         </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-sm)' }}>
           <a

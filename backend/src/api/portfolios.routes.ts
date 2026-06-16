@@ -115,15 +115,13 @@ export function createPortfoliosRouter(
         return;
       }
 
-      // Live balance fetch follows the settlement wallet: for
-      // chain-rail institutions that is the deposit address
-      // (`settle()` pays out of it), not the login wallet. For
-      // other institutions we fall back to the connected wallet
-      // address (legacy behaviour). When a chain-rail
-      // institution has no deposit address on its session, we
-      // warn and return stored DB balances rather than guessing
-      // from the login wallet.
-      const walletAddress = operatorAuth.depositAddress ?? operatorAuth.walletAddress;
+      // Live balance fetch follows the operator's connected wallet
+      // address. This is the mirrored trading inventory — the
+      // wallet the operator uses for trading, distinct from the
+      // settlement deposit wallet which is tracked separately in
+      // the settlement profile. Deposit address is intentionally
+      // NOT used here; it represents the settlement wallet.
+      const walletAddress = operatorAuth.walletAddress;
       if (!walletPortfolioSyncService) {
         response.status(200).json({
           institutionId,
@@ -132,12 +130,10 @@ export function createPortfoliosRouter(
         return;
       }
       if (!walletAddress) {
-        if (operatorAuth.depositAddress === undefined && operatorAuth.walletAddress === undefined) {
-          logger.warn(
-            { institutionId },
-            "Chain-rail institution has no deposit wallet on session; returning stored portfolio.",
-          );
-        }
+        logger.warn(
+          { institutionId },
+          "No connected wallet address on session; returning stored portfolio.",
+        );
         const portfolio = await portfolioService.getPortfolio(institutionId);
         response.status(200).json(portfolio);
         return;
@@ -183,14 +179,11 @@ export function createPortfoliosRouter(
         return;
       }
 
-      // Keep portfolio in sync with the settlement wallet: for
-      // chain-rail institutions the deposit address is the
-      // balance source of truth (the wallet `settle()` pays out
-      // of), distinct from the login wallet. Fall back to the
-      // connected wallet for non-chain institutions. If a
-      // chain-rail institution has no deposit address on its
-      // session, warn and return stored history.
-      const walletAddress = operatorAuth.depositAddress ?? operatorAuth.walletAddress;
+      // Keep portfolio in sync with the operator's connected wallet
+      // address for the mirrored trading inventory. The deposit
+      // address (settlement wallet) is tracked separately via the
+      // settlement profile.
+      const walletAddress = operatorAuth.walletAddress;
       if (walletPortfolioSyncService && walletAddress) {
         try {
           await walletPortfolioSyncService.syncInstitutionPortfolio({
@@ -206,7 +199,7 @@ export function createPortfoliosRouter(
       } else if (walletPortfolioSyncService && !walletAddress) {
         logger.warn(
           { institutionId },
-          "Chain-rail institution has no deposit wallet on session; returning stored history.",
+          "No connected wallet address on session; returning stored history.",
         );
       }
 

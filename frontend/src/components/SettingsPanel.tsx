@@ -581,7 +581,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
             </div>
 
             <div className="status-badge" style={{ justifyContent: 'flex-start', padding: 'var(--spacing-sm) var(--spacing-md)', fontSize: '0.72rem', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', width: '100%', boxSizing: 'border-box' }}>
-              <Shield01Icon size={14} /> The connected DID authenticates this console. Settlement funds live in the deposit wallet below, while mirrored inventory remains a separate secondary ledger view.
+              <Shield01Icon size={14} /> The connected DID authenticates this console. Deposit wallet holds settlement funds; mirrored inventory reflects your connected wallet balances on Sepolia.
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 'var(--spacing-lg)', width: '100%', alignItems: 'start' }}>
