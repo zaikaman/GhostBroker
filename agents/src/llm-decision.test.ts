@@ -4,12 +4,16 @@ import type { DecisionContext } from "./llm-decision.js";
 
 const baseCtx: DecisionContext = {
   side: "buy",
-  referencePriceUsdcPerWbtc: 70_000,
+  assetCode: "WBTC",
+  quoteAssetCode: "USDC",
+  referencePrice: 70_000,
   priceBandBps: 200,
-  quantityMinWbtc: 0.05,
-  quantityMaxWbtc: 1.0,
-  availableUsdc: 100_000,
-  availableWbtc: 0,
+  minPrice: 70_000 * 0.98,
+  maxPrice: 70_000 * 1.02,
+  quantityMin: 0.05,
+  quantityMax: 1.0,
+  availableQuoteBalance: 100_000,
+  availableBaseBalance: 0,
   completedTradeCount: 0,
   tickNumber: 1,
   maxTicks: 40,
@@ -149,7 +153,7 @@ describe("clampDecision (buy side)", () => {
   });
 
   it("downgrades to wait when notional exceeds available USDC", () => {
-    const tightCtx: DecisionContext = { ...baseCtx, availableUsdc: 100 };
+    const tightCtx: DecisionContext = { ...baseCtx, availableQuoteBalance: 100 };
     const out = clampDecision(
       { action: "submit", quantity: 1.0, price: 70_000, reasoning: "all in" },
       tightCtx,
@@ -159,7 +163,7 @@ describe("clampDecision (buy side)", () => {
   });
 
   it("scales quantity down to fit a tight USDC budget", () => {
-    const tightCtx: DecisionContext = { ...baseCtx, availableUsdc: 35_000 };
+    const tightCtx: DecisionContext = { ...baseCtx, availableQuoteBalance: 35_000 };
     const out = clampDecision(
       { action: "submit", quantity: 1.0, price: 70_000, reasoning: "big" },
       tightCtx,
@@ -170,7 +174,12 @@ describe("clampDecision (buy side)", () => {
 });
 
 describe("clampDecision (sell side)", () => {
-  const sellCtx: DecisionContext = { ...baseCtx, side: "sell", availableUsdc: 0, availableWbtc: 5 };
+  const sellCtx: DecisionContext = {
+    ...baseCtx,
+    side: "sell",
+    availableQuoteBalance: 0,
+    availableBaseBalance: 5,
+  };
 
   it("clamps quantity above available WBTC", () => {
     const out = clampDecision(
@@ -182,7 +191,7 @@ describe("clampDecision (sell side)", () => {
   });
 
   it("downgrades to wait when WBTC is below the minimum", () => {
-    const tooLittle: DecisionContext = { ...sellCtx, availableWbtc: 0.01 };
+    const tooLittle: DecisionContext = { ...sellCtx, availableBaseBalance: 0.01 };
     const out = clampDecision(
       { action: "submit", quantity: 1, price: 70_000, reasoning: "hope" },
       tooLittle,
@@ -209,6 +218,6 @@ describe("clampDecision (wait + abort)", () => {
     );
     expect(out.action).toBe("wait");
     expect(out.quantity).toBe(0);
-    expect(out.price).toBe(baseCtx.referencePriceUsdcPerWbtc);
+    expect(out.price).toBe(baseCtx.referencePrice);
   });
 });
