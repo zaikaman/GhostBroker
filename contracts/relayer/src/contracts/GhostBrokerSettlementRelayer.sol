@@ -25,8 +25,8 @@ interface IERC20 {
  * settlement layer. The relayer is the party that holds
  * pre-approved ERC-20 allowances from each institution's
  * deposit address; the backend relayer account calls
- * `settle(...)` to atomically pull the asset from the buyer's
- * deposit and the payment from the seller's deposit.
+ * `settle(...)` to atomically pull the asset from the seller's
+ * deposit and the payment from the buyer's deposit.
  *
  * The relayer is **not** the dark-pool's settlement authority
  * — that authority is the TEE's `SettlementCommand`. The
@@ -98,7 +98,7 @@ contract GhostBrokerSettlementRelayer {
 
     /**
      * @notice Settle a match. Atomically pulls the asset from
-     * the buyer's deposit and the payment from the seller's
+     * the seller's deposit and the payment from the buyer's
      * deposit. Both deposit addresses must have pre-approved
      * the relayer for the respective ERC-20 tokens.
      *
@@ -147,40 +147,40 @@ contract GhostBrokerSettlementRelayer {
             sellerDeposit == address(0)
         ) revert ZeroAddress();
 
-        // Asset leg: pull the asset from the buyer's deposit
-        // and send it to the seller's deposit. The buyer
+        // Asset leg: pull the asset from the seller's deposit
+        // and send it to the buyer's deposit. The seller
         // deposit must have pre-approved the relayer for the
         // asset token.
         if (
             !IERC20(assetToken).transferFrom(
-                buyerDeposit,
                 sellerDeposit,
+                buyerDeposit,
                 assetAmount
             )
         ) {
             revert TransferFailed(
                 assetToken,
-                buyerDeposit,
                 sellerDeposit,
+                buyerDeposit,
                 assetAmount
             );
         }
 
         // Payment leg: pull the payment asset (USDC) from
-        // the seller's deposit and send it to the buyer's
-        // deposit. The seller deposit must have pre-approved
+        // the buyer's deposit and send it to the seller's
+        // deposit. The buyer deposit must have pre-approved
         // the relayer for the payment token.
         if (
             !IERC20(paymentToken).transferFrom(
-                sellerDeposit,
                 buyerDeposit,
+                sellerDeposit,
                 paymentAmount
             )
         ) {
             revert TransferFailed(
                 paymentToken,
-                sellerDeposit,
                 buyerDeposit,
+                sellerDeposit,
                 paymentAmount
             );
         }
@@ -274,37 +274,37 @@ contract GhostBrokerSettlementRelayer {
         if (reversedOutcomes[outcomeRef]) revert AlreadyReversed(outcomeRef);
 
         // Reverse the asset leg: pull the asset from the
-        // seller's deposit (where the forward settle put it)
-        // and send it back to the buyer's deposit.
+        // buyer's deposit (where the forward settle put it)
+        // and send it back to the seller's deposit.
         if (
             !IERC20(assetToken).transferFrom(
-                sellerDeposit,
                 buyerDeposit,
+                sellerDeposit,
                 assetAmount
             )
         ) {
             revert TransferFailed(
                 assetToken,
-                sellerDeposit,
                 buyerDeposit,
+                sellerDeposit,
                 assetAmount
             );
         }
 
         // Reverse the payment leg: pull the payment from the
-        // buyer's deposit and return it to the seller's
+        // seller's deposit and return it to the buyer's
         // deposit.
         if (
             !IERC20(paymentToken).transferFrom(
-                buyerDeposit,
                 sellerDeposit,
+                buyerDeposit,
                 paymentAmount
             )
         ) {
             revert TransferFailed(
                 paymentToken,
-                buyerDeposit,
                 sellerDeposit,
+                buyerDeposit,
                 paymentAmount
             );
         }
@@ -318,8 +318,8 @@ contract GhostBrokerSettlementRelayer {
             assetAmount,
             paymentToken,
             paymentAmount,
-            sellerDeposit,
-            buyerDeposit
+            buyerDeposit,
+            sellerDeposit
         );
     }
 }

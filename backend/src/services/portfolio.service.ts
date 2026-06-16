@@ -89,14 +89,12 @@ export class InsufficientBalanceError extends Error {
 
 export class PortfolioService {
   private readonly client: SupabasePortfolioClient;
-  private readonly settlementAssetCode: string;
 
   public constructor(
     client: SupabasePortfolioClient,
-    settlementAssetCode = "USDC",
+    _settlementAssetCode = "USDC",
   ) {
     this.client = client;
-    this.settlementAssetCode = settlementAssetCode.trim().toUpperCase();
   }
 
   public async getPortfolio(institutionId: string): Promise<Portfolio> {
@@ -177,77 +175,6 @@ export class PortfolioService {
     }
 
     return this.getPortfolio(institutionId);
-  }
-
-  /**
-   * Apply settlement adjustments for both buyer and seller atomically.
-   * Buyer: cash decreases (-price * qty), asset increases (+qty)
-   * Seller: asset decreases (-qty), cash increases (+price * qty)
-   */
-  public async applySettlement(params: {
-    buyerInstitutionId: string;
-    sellerInstitutionId: string;
-    assetCode: string;
-    quantity: number;
-    price: number;
-  }): Promise<void> {
-    const totalCost = params.quantity * params.price;
-
-    // First check buyer has enough settlement asset
-    const buyerPortfolio = await this.getPortfolio(params.buyerInstitutionId);
-    const buyerCash = buyerPortfolio.holdings.find(
-      (h) => h.assetCode === this.settlementAssetCode,
-    );
-    if (!buyerCash || buyerCash.balance < totalCost) {
-      throw new InsufficientBalanceError(
-        this.settlementAssetCode,
-        totalCost,
-        buyerCash?.balance ?? 0,
-      );
-    }
-
-    // Check seller has enough of the asset
-    const sellerPortfolio = await this.getPortfolio(
-      params.sellerInstitutionId,
-    );
-    const sellerAsset = sellerPortfolio.holdings.find(
-      (h) => h.assetCode === params.assetCode,
-    );
-    if (!sellerAsset || sellerAsset.balance < params.quantity) {
-      throw new InsufficientBalanceError(
-        params.assetCode,
-        params.quantity,
-        sellerAsset?.balance ?? 0,
-      );
-    }
-
-    // Apply buyer adjustments with settlement change type
-    await this.applyAdjustmentWithHistory({
-      institutionId: params.buyerInstitutionId,
-      assetCode: this.settlementAssetCode,
-      delta: -totalCost,
-      changeType: "settlement_buy",
-    });
-    await this.applyAdjustmentWithHistory({
-      institutionId: params.buyerInstitutionId,
-      assetCode: params.assetCode,
-      delta: params.quantity,
-      changeType: "settlement_buy",
-    });
-
-    // Apply seller adjustments with settlement change type
-    await this.applyAdjustmentWithHistory({
-      institutionId: params.sellerInstitutionId,
-      assetCode: params.assetCode,
-      delta: -params.quantity,
-      changeType: "settlement_sell",
-    });
-    await this.applyAdjustmentWithHistory({
-      institutionId: params.sellerInstitutionId,
-      assetCode: this.settlementAssetCode,
-      delta: totalCost,
-      changeType: "settlement_sell",
-    });
   }
 
   /**
@@ -350,51 +277,6 @@ export class PortfolioService {
         `[PortfolioService] Failed to record history: ${error.message}`,
       );
     }
-  }
-
-  /**
-   * Apply a single portfolio adjustment with history tracking.
-   * Used for settlement operations where change_type differs from 'adjustment'.
-   */
-  private async applyAdjustmentWithHistory(params: {
-    institutionId: string;
-    assetCode: string;
-    delta: number;
-    changeType: PortfolioHistoryChangeType;
-  }): Promise<void> {
-    // Fetch current balance before update
-    const before = await this.getPortfolio(params.institutionId);
-    const currentBalance =
-      before.holdings.find((h) => h.assetCode === params.assetCode)?.balance ?? 0;
-
-    const { error } = await (this.client as unknown as RpcQuery<undefined>).rpc(
-      "portfolio_update_balance",
-      {
-        p_institution_id: params.institutionId,
-        p_asset_code: params.assetCode,
-        p_delta: params.delta.toString(),
-      },
-    );
-
-    if (error) {
-      if (error.message?.includes("insufficient balance")) {
-        throw new InsufficientBalanceError(
-          params.assetCode,
-          Math.abs(params.delta),
-          0,
-        );
-      }
-      throw new PublicError("service_unavailable", 503, error);
-    }
-
-    const balanceAfter = Math.max(0, currentBalance + params.delta);
-    await this.recordHistory({
-      institutionId: params.institutionId,
-      assetCode: params.assetCode,
-      delta: params.delta,
-      balanceAfter,
-      changeType: params.changeType,
-    });
   }
 
   /**

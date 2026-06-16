@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 describe("audit receipts migration", () => {
   it("stores encrypted receipts and exposes an atomic persistence function", () => {
     const sql = readFileSync(
-      new URL("../../../../database/migrations/003_create_audit_receipts.sql", import.meta.url),
+      new URL("../../../../database/migrations/004_create_audit_receipts.sql", import.meta.url),
       "utf8",
     );
 

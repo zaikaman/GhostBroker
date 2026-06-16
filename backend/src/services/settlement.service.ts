@@ -202,6 +202,15 @@ export interface SettlementRepository {
   persistCompletedSettlement(value: {
     command: SettlementCommand;
     encryptedTradeFields: SettlementExecutionRequest["encryptedTradeFields"];
+    settlementPlaintext: {
+      buyerInstitutionId: string;
+      sellerInstitutionId: string;
+      assetCode: string;
+      quantity: number;
+      executionPrice: number;
+      buyerLockedAmount: number;
+      sellerLockedAmount: number;
+    };
     receipts: SettlementExecutionRequest["receipts"];
     /**
      * WS1: the rail transport proof produced by
@@ -255,6 +264,15 @@ export class SupabaseSettlementRepository implements SettlementRepository {
   public async persistCompletedSettlement(value: {
     command: SettlementCommand;
     encryptedTradeFields: SettlementExecutionRequest["encryptedTradeFields"];
+    settlementPlaintext: {
+      buyerInstitutionId: string;
+      sellerInstitutionId: string;
+      assetCode: string;
+      quantity: number;
+      executionPrice: number;
+      buyerLockedAmount: number;
+      sellerLockedAmount: number;
+    };
     receipts: SettlementExecutionRequest["receipts"];
     railProof: RailSettlementProof;
   }): Promise<SettlementPersistenceResult> {
@@ -282,6 +300,15 @@ export class SupabaseSettlementRepository implements SettlementRepository {
         t3_attestation_ref: receipt.t3AttestationRef,
         access_scope: receipt.accessScope,
       })),
+      settlement_plaintext: {
+        buyer_institution_id: value.settlementPlaintext.buyerInstitutionId,
+        seller_institution_id: value.settlementPlaintext.sellerInstitutionId,
+        asset_code: value.settlementPlaintext.assetCode,
+        quantity: value.settlementPlaintext.quantity,
+        execution_price: value.settlementPlaintext.executionPrice,
+        buyer_locked_amount: value.settlementPlaintext.buyerLockedAmount,
+        seller_locked_amount: value.settlementPlaintext.sellerLockedAmount,
+      },
     });
 
     if (error || !data) {
@@ -418,21 +445,22 @@ export class SettlementService {
       const persisted = await this.repository.persistCompletedSettlement({
         command,
         encryptedTradeFields: request.encryptedTradeFields,
-        receipts: request.receipts,
-        railProof,
-      });
+          settlementPlaintext: {
+            buyerInstitutionId: request.matchOutcome.buyerInstitutionId,
+            sellerInstitutionId: request.matchOutcome.sellerInstitutionId,
+            assetCode: request.assetCode,
+            quantity: request.quantity,
+            executionPrice: request.executionPrice,
+            buyerLockedAmount: request.quantity * request.executionPrice,
+            sellerLockedAmount: request.quantity,
+          },
+          receipts: request.receipts,
+          railProof,
+        });
       await this.emitAudit("settlement", command, correlationRef);
 
-      // Update portfolio balances with plaintext trade params from TEE
+      // Portfolio mutation now happens inside the settlement persistence RPC.
       if (this.portfolioService) {
-        await this.portfolioService.applySettlement({
-          buyerInstitutionId: request.matchOutcome.buyerInstitutionId,
-          sellerInstitutionId: request.matchOutcome.sellerInstitutionId,
-          assetCode: request.assetCode,
-          quantity: request.quantity,
-          price: request.executionPrice,
-        });
-
         // Notify both institutions that their portfolio has been updated
         this.telemetryBus.publish({
           institutionId: request.matchOutcome.buyerInstitutionId,

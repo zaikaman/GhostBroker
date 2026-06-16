@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 describe("completed trades migration", () => {
   it("defines participant constraints and encrypted trade columns", () => {
     const sql = readFileSync(
-      new URL("../../../../database/migrations/002_create_completed_trades.sql", import.meta.url),
+      new URL("../../../../database/migrations/003_create_completed_trades.sql", import.meta.url),
       "utf8",
     );
 

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -71,11 +71,39 @@ interface SpawnedAnvil {
   stop: () => void;
 }
 
+function resolveAnvilCommand(): string {
+  const configured = process.env.FOUNDRY_ANVIL_PATH;
+  if (configured && configured.length > 0) {
+    return configured;
+  }
+
+  if (process.platform === "win32") {
+    const userProfile = process.env.USERPROFILE;
+    if (userProfile) {
+      const windowsFoundryPath = join(
+        userProfile,
+        ".foundry",
+        "bin",
+        "anvil.exe",
+      );
+      if (existsSync(windowsFoundryPath)) {
+        return windowsFoundryPath;
+      }
+    }
+  }
+
+  return "anvil";
+}
+
 async function startAnvil(): Promise<SpawnedAnvil> {
   const stateDir = mkdtempSync(join(tmpdir(), "anvil-ws25-"));
-  const child = spawn("anvil", ["--port", String(ANVIL_PORT), "--state", join(stateDir, "state.json")], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawn(
+    resolveAnvilCommand(),
+    ["--port", String(ANVIL_PORT), "--state", join(stateDir, "state.json")],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 
   const ready = new Promise<void>((resolveReady, rejectReady) => {
     let resolved = false;
@@ -201,20 +229,20 @@ describeIf("settlement rail (WS2.5 — chain sepolia erc20, real relayer)", () =
     const buyerDeposit = buyerAccount.address;
     const sellerDeposit = sellerAccount.address;
 
-    // Fund the buyer with WBTC and the seller with USDC (the
-    // exact opposite of what they will pay; this proves the
-    // relayer's `transferFrom` calls actually move tokens).
-    const buyerFundingAmount = parseUnits("10", 8); // 10 WBTC
-    const sellerFundingAmount = parseUnits("1000000", 6); // 1M USDC
+    // Fund the buyer with payment token (USDC) and the seller
+    // with the traded asset (WBTC), which is the real settlement
+    // direction the relayer must enforce.
+    const buyerFundingAmount = parseUnits("1000000", 6); // 1M USDC
+    const sellerFundingAmount = parseUnits("10", 8); // 10 WBTC
     await walletClient.writeContract({
       abi: MinimalErc20Abi,
-      address: assetToken,
+      address: paymentToken,
       functionName: "mint",
       args: [buyerDeposit, buyerFundingAmount],
     });
     await walletClient.writeContract({
       abi: MinimalErc20Abi,
-      address: paymentToken,
+      address: assetToken,
       functionName: "mint",
       args: [sellerDeposit, sellerFundingAmount],
     });
@@ -235,13 +263,13 @@ describeIf("settlement rail (WS2.5 — chain sepolia erc20, real relayer)", () =
     });
     await buyerWallet.writeContract({
       abi: MinimalErc20Abi,
-      address: assetToken,
+      address: paymentToken,
       functionName: "approve",
       args: [relayerContractAddress, buyerFundingAmount],
     });
     await sellerWallet.writeContract({
       abi: MinimalErc20Abi,
-      address: paymentToken,
+      address: assetToken,
       functionName: "approve",
       args: [relayerContractAddress, sellerFundingAmount],
     });
@@ -322,10 +350,9 @@ describeIf("settlement rail (WS2.5 — chain sepolia erc20, real relayer)", () =
     expect(settled.matched).toBe(true);
     expect(settled.log).not.toBeNull();
 
-    // ERC-20 balances: the buyer should have 10 - 0.5 = 9.5
-    // WBTC; the seller should have 0.5 WBTC; the buyer
-    // should have 0.5 * 70_000 = 35_000 USDC; the seller
-    // should have 1_000_000 - 35_000 = 965_000 USDC.
+    // ERC-20 balances: the buyer should receive 0.5 WBTC and
+    // pay 35,000 USDC; the seller should deliver 0.5 WBTC and
+    // receive 35,000 USDC.
     const buyerWbtcBalance = (await ctx.publicClient.readContract({
       abi: MinimalErc20Abi,
       address: ctx.assetToken,
@@ -351,10 +378,10 @@ describeIf("settlement rail (WS2.5 — chain sepolia erc20, real relayer)", () =
       args: [ctx.sellerDeposit],
     })) as bigint;
 
-    expect(buyerWbtcBalance).toBe(parseUnits("9.5", 8));
-    expect(sellerWbtcBalance).toBe(expectedAssetAmount);
-    expect(buyerUsdcBalance).toBe(expectedPaymentAmount);
-    expect(sellerUsdcBalance).toBe(parseUnits("965000", 6));
+    expect(buyerWbtcBalance).toBe(expectedAssetAmount);
+    expect(sellerWbtcBalance).toBe(parseUnits("9.5", 8));
+    expect(buyerUsdcBalance).toBe(parseUnits("965000", 6));
+    expect(sellerUsdcBalance).toBe(expectedPaymentAmount);
   }, 60_000);
 
   it("is idempotent on retry (process-local cache)", async () => {
@@ -615,15 +642,15 @@ describeIf("settlement rail (WS2.5 — chain sepolia erc20, real relayer)", () =
     });
     await buyerWallet.writeContract({
       abi: MinimalErc20Abi,
-      address: ctx.assetToken,
-      functionName: "approve",
-      args: [teeRelayerContractAddress, parseUnits("10", 8)],
-    });
-    await sellerWallet.writeContract({
-      abi: MinimalErc20Abi,
       address: ctx.paymentToken,
       functionName: "approve",
       args: [teeRelayerContractAddress, parseUnits("1000000", 6)],
+    });
+    await sellerWallet.writeContract({
+      abi: MinimalErc20Abi,
+      address: ctx.assetToken,
+      functionName: "approve",
+      args: [teeRelayerContractAddress, parseUnits("10", 8)],
     });
 
     // Build the TEE-attested signer + rail.

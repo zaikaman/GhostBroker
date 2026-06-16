@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import {
   createPublicClient,
   createWalletClient,
   http,
   defineChain,
+  toFunctionSelector,
   parseUnits,
   decodeEventLog,
   type Address,
@@ -145,12 +145,9 @@ const SETTLED_EVENT = getSettledEvent();
 export const SETTLE_FUNCTION_SELECTOR = computeSettleSelector();
 
 function computeSettleSelector(): Hex {
-  // The selector is `keccak256("settle(bytes32,bytes32,address,address,address,address,uint256,uint256)")`
-  // truncated to 4 bytes. We compute it deterministically so
-  // the rail can assert the on-the-wire calldata in tests.
-  const sig =
-    "settle(bytes32,bytes32,address,address,address,address,uint256,uint256)";
-  return ("0x" + createHash("sha256").update(sig).digest("hex").slice(0, 8)) as Hex;
+  return toFunctionSelector(
+    "settle(bytes32,bytes32,address,address,address,address,uint256,uint256)",
+  );
 }
 
 /**
@@ -434,15 +431,15 @@ export class SepoliaErc20Rail implements SettlementRail {
       assetMovements: [
         {
           assetCode: plaintext.assetCode,
-          fromInstitutionId: command.buyerInstitutionId,
-          toInstitutionId: command.sellerInstitutionId,
+          fromInstitutionId: command.sellerInstitutionId,
+          toInstitutionId: command.buyerInstitutionId,
           quantity: plaintext.quantity.toString(),
           railAssetRef: resolved.assetToken,
         },
         {
           assetCode: "USDC",
-          fromInstitutionId: command.sellerInstitutionId,
-          toInstitutionId: command.buyerInstitutionId,
+          fromInstitutionId: command.buyerInstitutionId,
+          toInstitutionId: command.sellerInstitutionId,
           quantity: (plaintext.quantity * plaintext.executionPrice).toString(),
           railAssetRef: resolved.paymentToken,
         },

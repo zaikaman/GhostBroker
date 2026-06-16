@@ -9,7 +9,6 @@ import {
 } from "../support/in-memory-portfolio-client.js";
 
 const buyerInstitutionId = "00000000-0000-4000-8000-000000000401";
-const sellerInstitutionId = "00000000-0000-4000-8000-000000000402";
 const snapshotInstitutionId = "00000000-0000-4000-8000-000000000403";
 
 describe("portfolio service", () => {
@@ -71,55 +70,43 @@ describe("portfolio service", () => {
     ).toEqual(["custody:snapshot:001", "custody:snapshot:001", "custody:snapshot:001"]);
   });
 
-  it("uses the configured settlement asset when applying trades", async () => {
+  it("applies additive adjustments and records history", async () => {
     const client = new InMemoryPortfolioClient([
       makePortfolioRecord({
         institutionId: buyerInstitutionId,
         assetCode: "USDC",
         balance: 1000,
       }),
-      makePortfolioRecord({
-        institutionId: sellerInstitutionId,
-        assetCode: "WBTC",
-        balance: 5,
-      }),
-      makePortfolioRecord({
-        institutionId: sellerInstitutionId,
-        assetCode: "USDC",
-        balance: 0,
-      }),
     ]);
     const service = new PortfolioService(client as never, "USDC");
 
-    await service.applySettlement({
-      buyerInstitutionId,
-      sellerInstitutionId,
-      assetCode: "WBTC",
-      quantity: 2,
-      price: 100,
-    });
+    const portfolio = await service.applyAdjustments([
+      {
+        institutionId: buyerInstitutionId,
+        assetCode: "USDC",
+        delta: -200,
+      },
+      {
+        institutionId: buyerInstitutionId,
+        assetCode: "WBTC",
+        delta: 2,
+      },
+    ]);
 
     expect(
       client.rpcCalls
         .filter((call) => call.functionName === "portfolio_update_balance")
         .map((call) => String(call.parameters.p_asset_code)),
-    ).toEqual(["USDC", "WBTC", "WBTC", "USDC"]);
+    ).toEqual(["USDC", "WBTC"]);
 
-    expect(await service.getPortfolio(buyerInstitutionId)).toEqual({
+    expect(portfolio).toEqual({
       institutionId: buyerInstitutionId,
       holdings: [
         { assetCode: "USDC", balance: 800, locked: 0 },
         { assetCode: "WBTC", balance: 2, locked: 0 },
       ],
     });
-
-    expect(await service.getPortfolio(sellerInstitutionId)).toEqual({
-      institutionId: sellerInstitutionId,
-      holdings: [
-        { assetCode: "USDC", balance: 200, locked: 0 },
-        { assetCode: "WBTC", balance: 3, locked: 0 },
-      ],
-    });
+    expect(client.historyInserts).toHaveLength(2);
   });
 
   describe("lockBalance / releaseBalance", () => {

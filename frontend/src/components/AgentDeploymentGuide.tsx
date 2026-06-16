@@ -357,16 +357,15 @@ export function AgentDeploymentGuide({
 
       {/* Main Control Panel and Diagnostics Deck */}
       <div className="deploy-factory-grid">
-        {/* Left Column: Configs & Launcher */}
-        <div className="deploy-panel-stack" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-          
+        {/* Top Row: Enclave Status & Fleet List (aligned heights) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'inherit', gap: 'inherit', gridColumn: '1 / -1' }}>
           {/* Card 1: Attestation Enclave Status */}
-          <section className="card">
+          <section className="card" style={{ display: 'flex', flexDirection: 'column' }}>
             <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
               <Shield01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Attestation Enclave Status
             </h2>
 
-            <div className="enclave-visualizer-block">
+            <div className="enclave-visualizer-block" style={{ flex: 1 }}>
               <div className="enclave-svg-wrapper">
                 <div className="enclave-pulse-glow" />
                 <svg className="enclave-svg-orbits" viewBox="0 0 100 100" fill="none">
@@ -442,239 +441,24 @@ export function AgentDeploymentGuide({
             </div>
           </section>
 
-          {/* Card 2: Creation Parameter Panel */}
-          <section className="card">
-            <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
-              <Robot01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Configure Trading Mandate
-            </h2>
-
-            {/* Presets Sequencer Selector */}
-            <div className="deploy-preset-row" style={{ marginTop: 0 }}>
-              {(['buyer', 'seller', 'custom'] as HostedAgentPreset[]).map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  className={`deploy-preset-button ${form.mode === preset ? 'active' : ''}`}
-                  onClick={() => applyPreset(preset)}
-                >
-                  {preset === 'buyer' ? 'Buyer Mandate' : preset === 'seller' ? 'Seller Mandate' : 'Custom'}
-                </button>
-              ))}
-            </div>
-
-            {/* Form Fields Grid */}
-            <div className="deploy-form-grid" style={{ marginTop: 'var(--spacing-md)' }}>
-              
-              <div className="form-group">
-                <label className="form-label">Agent Label</label>
-                <input
-                  className="form-input"
-                  value={form.label}
-                  onChange={(event) => updateField('label', event.target.value)}
-                  placeholder="Enter custom identifier..."
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Execution Side</label>
-                <select
-                  className="form-select"
-                  value={form.side}
-                  onChange={(event) => updateField('side', event.target.value as 'buy' | 'sell')}
-                >
-                  <option value="buy">BUY MANDATE</option>
-                  <option value="sell">SELL MANDATE</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Target Asset</label>
-                <input
-                  className="form-input font-mono"
-                  value={form.assetCode}
-                  onChange={(event) => updateField('assetCode', event.target.value.toUpperCase())}
-                  placeholder="e.g. WBTC"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Quote Asset</label>
-                <input
-                  className="form-input font-mono"
-                  value={form.quoteAssetCode}
-                  onChange={(event) => updateField('quoteAssetCode', event.target.value.toUpperCase())}
-                  placeholder="e.g. USDC"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">LLM Engine</label>
-                <input
-                  className="form-input font-mono"
-                  value={form.groqModel}
-                  onChange={(event) => updateField('groqModel', event.target.value)}
-                  placeholder="Model details..."
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Reference Price</label>
-                <input
-                  className="form-input font-mono"
-                  inputMode="decimal"
-                  value={form.referencePrice}
-                  onChange={(event) => updateField('referencePrice', event.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Execution Band (bps)</label>
-                <input
-                  className="form-input font-mono"
-                  inputMode="numeric"
-                  value={form.priceBandBps}
-                  onChange={(event) => updateField('priceBandBps', event.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Interval (ms)</label>
-                <input
-                  className="form-input font-mono"
-                  inputMode="numeric"
-                  value={form.tickIntervalMs}
-                  onChange={(event) => updateField('tickIntervalMs', event.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Quantity Min</label>
-                <input
-                  className="form-input font-mono"
-                  inputMode="decimal"
-                  value={form.quantityMin}
-                  onChange={(event) => updateField('quantityMin', event.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Quantity Max</label>
-                <input
-                  className="form-input font-mono"
-                  inputMode="decimal"
-                  value={form.quantityMax}
-                  onChange={(event) => updateField('quantityMax', event.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Max Iterations</label>
-                <input
-                  className="form-input font-mono"
-                  inputMode="numeric"
-                  value={form.maxTicks}
-                  onChange={(event) => updateField('maxTicks', event.target.value)}
-                />
-              </div>
-
-              {/* Dry Run Toggle Switch */}
-              <div className="form-group" style={{ justifyContent: 'center' }}>
-                <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={form.dryRun}
-                    onChange={(event) => updateField('dryRun', event.target.checked)}
-                  />
-                  <span>Dry Run Simulation Mode</span>
-                </label>
-              </div>
-
-              {/* Operator Directives Textarea Box */}
-              <div className="form-group deploy-form-span-full" style={{ marginBottom: 0 }}>
-                <label className="form-label">Operator Directive Prompt</label>
-                <textarea
-                  className="form-input deploy-textarea font-mono"
-                  value={form.operatorPrompt}
-                  onChange={(event) => updateField('operatorPrompt', event.target.value)}
-                  placeholder="Enter policy prompt constraints for autonomous agent decision-making..."
-                />
-              </div>
-            </div>
-
-            {/* Form CTAs */}
-            <div className="deploy-form-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--spacing-md)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setIsLoading(true);
-                  loadState().finally(() => setIsLoading(false));
-                }}
-                disabled={isLoading || isSubmitting}
-                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
-                Synchronize Fleet
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleCreate}
-                disabled={isLoading || isSubmitting}
-                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-              >
-                {isSubmitting ? (
-                  <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                ) : (
-                  <RocketIcon size={14} />
-                )}
-                Deploy Attested Agent
-              </button>
-            </div>
-          </section>
-
-          {/* Card 3: Pre-Flight Launch Checklist */}
-          <section className="card">
-            <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
-              <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Pre-Flight Launch Readiness
-            </h2>
-            <div className="preflight-checklist">
-              {readiness.map((item) => (
-                <div key={item.label} className="preflight-cell">
-                  <div className={`preflight-status-circle ${item.ready ? 'ready' : ''}`}>
-                    {item.ready ? <CheckmarkCircle01Icon size={12} /> : <AlertCircleIcon size={12} />}
-                  </div>
-                  <div className="preflight-info">
-                    <span className="preflight-label">{item.label}</span>
-                    <span className="preflight-desc">{item.detail}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        {/* Right Column: Fleet List, Process Telemetry, and Secure Terminal */}
-        <div className="deploy-side-stack" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-          
-          {/* Card 1: Attested Worker Fleet */}
-          <section className="card">
+          {/* Card 2: Attested Worker Fleet */}
+          <section className="card" style={{ display: 'flex', flexDirection: 'column' }}>
             <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
               <Key01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Attested Worker Fleet
             </h2>
 
             {isLoading ? (
-              <div className="deploy-loading-state-premium" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontSize: '0.75rem', gap: 'var(--spacing-sm)' }}>
+              <div className="deploy-loading-state-premium" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontSize: '0.75rem', gap: 'var(--spacing-sm)' }}>
                 <Loading03Icon size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--color-accent)' }} />
                 <span>Streaming cluster information...</span>
               </div>
             ) : hostedAgents.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 'var(--spacing-lg) var(--spacing-xl)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
                 <AlertCircleIcon size={20} style={{ color: 'var(--color-text-muted)', marginBottom: '8px' }} />
                 <p style={{ margin: 0 }}>No active attested agents launched. Deploy an autonomous agent using the mandate panel.</p>
               </div>
             ) : (
-              <div className="deploy-agent-fleet">
+              <div className="deploy-agent-fleet" style={{ flex: 1 }}>
                 {hostedAgents.map((record) => {
                   const isActive = selectedAgentId === record.agent.id;
                   const isRunning = record.runtime.running;
@@ -717,19 +501,235 @@ export function AgentDeploymentGuide({
               </div>
             )}
           </section>
+        </div>
 
-          {/* Card 2: Enclave Telemetry Feed & Logs */}
+        {/* Bottom Row: Forms (Left) and Terminal (Right) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'inherit', gap: 'inherit', gridColumn: '1 / -1', alignItems: 'start' }}>
+          {/* Left Column Stack */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+            {/* Card 3: Creation Parameter Panel */}
+            <section className="card">
+              <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
+                <Robot01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Configure Trading Mandate
+              </h2>
+
+              {/* Presets Sequencer Selector */}
+              <div className="deploy-preset-row" style={{ marginTop: 0 }}>
+                {(['buyer', 'seller', 'custom'] as HostedAgentPreset[]).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={`deploy-preset-button ${form.mode === preset ? 'active' : ''}`}
+                    onClick={() => applyPreset(preset)}
+                  >
+                    {preset === 'buyer' ? 'Buyer Mandate' : preset === 'seller' ? 'Seller Mandate' : 'Custom'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Form Fields Grid */}
+              <div className="deploy-form-grid" style={{ marginTop: 'var(--spacing-md)' }}>
+                <div className="form-group">
+                  <label className="form-label">Agent Label</label>
+                  <input
+                    className="form-input"
+                    value={form.label}
+                    onChange={(event) => updateField('label', event.target.value)}
+                    placeholder="Enter custom identifier..."
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Execution Side</label>
+                  <select
+                    className="form-select"
+                    value={form.side}
+                    onChange={(event) => updateField('side', event.target.value as 'buy' | 'sell')}
+                  >
+                    <option value="buy">BUY MANDATE</option>
+                    <option value="sell">SELL MANDATE</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Target Asset</label>
+                  <input
+                    className="form-input font-mono"
+                    value={form.assetCode}
+                    onChange={(event) => updateField('assetCode', event.target.value.toUpperCase())}
+                    placeholder="e.g. WBTC"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Quote Asset</label>
+                  <input
+                    className="form-input font-mono"
+                    value={form.quoteAssetCode}
+                    onChange={(event) => updateField('quoteAssetCode', event.target.value.toUpperCase())}
+                    placeholder="e.g. USDC"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">LLM Engine</label>
+                  <input
+                    className="form-input font-mono"
+                    value={form.groqModel}
+                    onChange={(event) => updateField('groqModel', event.target.value)}
+                    placeholder="Model details..."
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Reference Price</label>
+                  <input
+                    className="form-input font-mono"
+                    inputMode="decimal"
+                    value={form.referencePrice}
+                    onChange={(event) => updateField('referencePrice', event.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Execution Band (bps)</label>
+                  <input
+                    className="form-input font-mono"
+                    inputMode="numeric"
+                    value={form.priceBandBps}
+                    onChange={(event) => updateField('priceBandBps', event.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Interval (ms)</label>
+                  <input
+                    className="form-input font-mono"
+                    inputMode="numeric"
+                    value={form.tickIntervalMs}
+                    onChange={(event) => updateField('tickIntervalMs', event.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Quantity Min</label>
+                  <input
+                    className="form-input font-mono"
+                    inputMode="decimal"
+                    value={form.quantityMin}
+                    onChange={(event) => updateField('quantityMin', event.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Quantity Max</label>
+                  <input
+                    className="form-input font-mono"
+                    inputMode="decimal"
+                    value={form.quantityMax}
+                    onChange={(event) => updateField('quantityMax', event.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Max Iterations</label>
+                  <input
+                    className="form-input font-mono"
+                    inputMode="numeric"
+                    value={form.maxTicks}
+                    onChange={(event) => updateField('maxTicks', event.target.value)}
+                  />
+                </div>
+
+                {/* Dry Run Toggle Switch */}
+                <div className="form-group" style={{ justifyContent: 'center' }}>
+                  <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={form.dryRun}
+                      onChange={(event) => updateField('dryRun', event.target.checked)}
+                    />
+                    <span>Dry Run Simulation Mode</span>
+                  </label>
+                </div>
+
+                {/* Operator Directives Textarea Box */}
+                <div className="form-group deploy-form-span-full" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Operator Directive Prompt</label>
+                  <textarea
+                    className="form-input deploy-textarea font-mono"
+                    value={form.operatorPrompt}
+                    onChange={(event) => updateField('operatorPrompt', event.target.value)}
+                    placeholder="Enter policy prompt constraints for autonomous agent decision-making..."
+                  />
+                </div>
+              </div>
+
+              {/* Form CTAs */}
+              <div className="deploy-form-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--spacing-md)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setIsLoading(true);
+                    loadState().finally(() => setIsLoading(false));
+                  }}
+                  disabled={isLoading || isSubmitting}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
+                  Synchronize Fleet
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleCreate}
+                  disabled={isLoading || isSubmitting}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                  {isSubmitting ? (
+                    <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <RocketIcon size={14} />
+                  )}
+                  Deploy Attested Agent
+                </button>
+              </div>
+            </section>
+
+            {/* Card 4: Pre-Flight Launch Checklist */}
+            <section className="card">
+              <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
+                <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Pre-Flight Launch Readiness
+              </h2>
+              <div className="preflight-checklist">
+                {readiness.map((item) => (
+                  <div key={item.label} className="preflight-cell">
+                    <div className={`preflight-status-circle ${item.ready ? 'ready' : ''}`}>
+                      {item.ready ? <CheckmarkCircle01Icon size={12} /> : <AlertCircleIcon size={12} />}
+                    </div>
+                    <div className="preflight-info">
+                      <span className="preflight-label">{item.label}</span>
+                      <span className="preflight-desc">{item.detail}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          {/* Card 5: Enclave Telemetry Feed & Logs */}
           <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
             <h2 className="card-title" style={{ margin: 0 }}>
               <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Enclave Telemetry Feed
             </h2>
 
             {!selectedAgent ? (
-              <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+              <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontSize: '0.75rem', margin: 'auto 0' }}>
                 <p style={{ margin: 0 }}>Select an attested worker pod to inspect its secure enclave runtime feed.</p>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
                 {/* Process Details */}
                 <div className="process-dashboard">
                   <div className="process-cell">
@@ -781,7 +781,7 @@ export function AgentDeploymentGuide({
                 </div>
 
                 {/* Terminal Emulator Box */}
-                <div className="sec-terminal">
+                <div className="sec-terminal" style={{ flex: 1 }}>
                   <div className="sec-terminal-header">
                     <div className="sec-terminal-window-dots">
                       <span className="sec-terminal-dot red" />

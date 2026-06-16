@@ -115,10 +115,130 @@ export class InMemoryPortfolioClient {
       return { data: null, error: null };
     }
 
+    if (functionName === "persist_completed_settlement") {
+      const settlementPlaintext = parameters.settlement_plaintext as
+        | Record<string, unknown>
+        | undefined;
+      const completedTrade = parameters.completed_trade as
+        | Record<string, unknown>
+        | undefined;
+
+      if (!settlementPlaintext || !completedTrade) {
+        return {
+          data: null,
+          error: new Error("persist_completed_settlement missing payload"),
+        };
+      }
+
+      const buyerInstitutionId = String(
+        settlementPlaintext.buyer_institution_id ?? "",
+      );
+      const sellerInstitutionId = String(
+        settlementPlaintext.seller_institution_id ?? "",
+      );
+      const tradeAssetCode = String(
+        settlementPlaintext.asset_code ?? "",
+      ).toUpperCase();
+      const quantity = Number(settlementPlaintext.quantity ?? 0);
+      const executionPrice = Number(settlementPlaintext.execution_price ?? 0);
+      const totalCost = quantity * executionPrice;
+      const buyerLockedAmount = Number(
+        settlementPlaintext.buyer_locked_amount ?? totalCost,
+      );
+      const sellerLockedAmount = Number(
+        settlementPlaintext.seller_locked_amount ?? quantity,
+      );
+
+      const buyerCash = this.findOrCreatePortfolio(
+        buyerInstitutionId,
+        "USDC",
+      );
+      const buyerAsset = this.findOrCreatePortfolio(
+        buyerInstitutionId,
+        tradeAssetCode,
+      );
+      const sellerAsset = this.findOrCreatePortfolio(
+        sellerInstitutionId,
+        tradeAssetCode,
+      );
+      const sellerCash = this.findOrCreatePortfolio(
+        sellerInstitutionId,
+        "USDC",
+      );
+
+      if (Number(buyerCash.balance) < totalCost) {
+        return {
+          data: null,
+          error: new Error(
+            `insufficient balance for USDC: requested ${totalCost}, available ${buyerCash.balance}`,
+          ),
+        };
+      }
+
+      if (Number(sellerAsset.balance) < quantity) {
+        return {
+          data: null,
+          error: new Error(
+            `insufficient balance for ${tradeAssetCode}: requested ${quantity}, available ${sellerAsset.balance}`,
+          ),
+        };
+      }
+
+      buyerCash.balance = (Number(buyerCash.balance) - totalCost).toString();
+      buyerCash.locked = Math.max(
+        Number(buyerCash.locked) - buyerLockedAmount,
+        0,
+      ).toString();
+
+      buyerAsset.balance = (Number(buyerAsset.balance) + quantity).toString();
+      buyerAsset.locked = Math.min(
+        Number(buyerAsset.locked),
+        Number(buyerAsset.balance),
+      ).toString();
+
+      sellerAsset.balance = (Number(sellerAsset.balance) - quantity).toString();
+      sellerAsset.locked = Math.max(
+        Number(sellerAsset.locked) - sellerLockedAmount,
+        0,
+      ).toString();
+
+      sellerCash.balance = (Number(sellerCash.balance) + totalCost).toString();
+      sellerCash.locked = Math.min(
+        Number(sellerCash.locked),
+        Number(sellerCash.balance),
+      ).toString();
+
+      return { data: null, error: null };
+    }
+
     return {
       data: null,
       error: new Error(`Unexpected RPC: ${functionName}`),
     };
+  }
+
+  private findOrCreatePortfolio(
+    institutionId: string,
+    assetCode: string,
+  ): PortfolioRecord {
+    const existing = this.portfolios.find(
+      (record) =>
+        record.institution_id === institutionId && record.asset_code === assetCode,
+    );
+
+    if (existing) {
+      return existing;
+    }
+
+    const created: PortfolioRecord = {
+      id: `${institutionId}:${assetCode}`,
+      institution_id: institutionId,
+      asset_code: assetCode,
+      balance: "0",
+      locked: "0",
+    };
+    this.portfolios.push(created);
+    return created;
   }
 
   private applyDelta(

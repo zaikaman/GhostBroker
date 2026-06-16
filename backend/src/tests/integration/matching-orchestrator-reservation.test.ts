@@ -304,9 +304,9 @@ describe("matching orchestrator — balance reservations", () => {
   it("settlement implicitly releases both buyer and seller locks", async () => {
     // The buyer's USDC is locked for the trade total; the seller's
     // WBTC is locked for the trade quantity. When settlement runs,
-    // the SQL `portfolio_update_balance` function clamps
-    // `locked = LEAST(locked, new_balance)`, which releases any
-    // portion of the lock that is now backed by zero balance.
+    // the atomic persistence path must release exactly the matched
+    // reservation amounts, while preserving any unrelated locks that
+    // were already present on the same rows.
 
     // Build a settlement that uses the same PortfolioService the
     // orchestrator uses, so the SQL clamping runs end-to-end.
@@ -316,7 +316,8 @@ describe("matching orchestrator — balance reservations", () => {
       makePortfolioRecord({
         institutionId: buyerId,
         assetCode: "USDC",
-        balance: 10_000_000,
+        balance: 11_000_000,
+        locked: 1_000_000,
       }),
       makePortfolioRecord({
         institutionId: buyerId,
@@ -327,6 +328,7 @@ describe("matching orchestrator — balance reservations", () => {
         institutionId: sellerId,
         assetCode: "WBTC",
         balance: 1000,
+        locked: 20,
       }),
       makePortfolioRecord({
         institutionId: sellerId,
@@ -358,18 +360,25 @@ describe("matching orchestrator — balance reservations", () => {
     class SettlingSettlement
       implements Pick<SettlementService, "executeSettlement">
     {
-      constructor(private readonly ps: PortfolioService) {}
+      constructor(private readonly settlementClient: InMemoryPortfolioClient) {}
       public async executeSettlement(): Promise<never> {
-        // Mirrors what SettlementService does in production:
-        // applySettlement calls applyAdjustmentWithHistory for
-        // each leg, each of which calls portfolio_update_balance
-        // (LEAST(locked, new_balance) clamp).
-        await this.ps.applySettlement({
-          buyerInstitutionId: buyerId,
-          sellerInstitutionId: sellerId,
-          assetCode: "WBTC",
-          quantity: 100,
-          price: 50000,
+        // Mirrors what SettlementService now does in production:
+        // `persist_completed_settlement` is the transactional
+        // boundary for the completed trade + balance mutation.
+        await this.settlementClient.rpc("persist_completed_settlement", {
+          completed_trade: {
+            trade_ref: "outcome_test",
+            buy_institution_id: buyerId,
+            sell_institution_id: sellerId,
+          },
+          receipts: [],
+          settlement_plaintext: {
+            buyer_institution_id: buyerId,
+            seller_institution_id: sellerId,
+            asset_code: "WBTC",
+            quantity: 100,
+            execution_price: 50000,
+          },
         });
         throw new Error("test-only stub does not return a trade record");
       }
@@ -377,7 +386,7 @@ describe("matching orchestrator — balance reservations", () => {
 
     const orchestrator = new MatchingOrchestrator(
       new MatchedClient(),
-      new SettlingSettlement(portfolioService) as unknown as SettlementService,
+      new SettlingSettlement(client) as unknown as SettlementService,
       new TelemetryBus(),
       portfolioService,
     );
@@ -414,40 +423,47 @@ describe("matching orchestrator — balance reservations", () => {
 
     // Both locks should be in place.
     let buyerPortfolio = await portfolioService.getPortfolio(buyerId);
-    expect(buyerPortfolio.holdings.find((h) => h.assetCode === "USDC")?.locked).toBe(5_000_000);
+    expect(buyerPortfolio.holdings.find((h) => h.assetCode === "USDC")?.locked).toBe(6_000_000);
     let sellerPortfolio = await portfolioService.getPortfolio(sellerId);
-    expect(sellerPortfolio.holdings.find((h) => h.assetCode === "WBTC")?.locked).toBe(100);
+    expect(sellerPortfolio.holdings.find((h) => h.assetCode === "WBTC")?.locked).toBe(120);
 
     // The orchestrator's matching attempt runs on the second submit.
     // We let it process: the matching loop is fire-and-forget after
     // submission, so we wait for it to settle.
-    // The matching will call applySettlement which throws
-    // (expected in the stub). We catch via a small wait.
+    // The matching will call the atomic settlement RPC via
+    // the stub above, then throw to short-circuit the rest
+    // of the production settlement return path.
     await new Promise((r) => setTimeout(r, 50));
 
-    // After settlement, buyer's USDC drained by 5_000_000 (now 5_000_000
-    // remaining). The LEAST(locked, balance) clamp drops the lock to
-    // balance = 5_000_000, then to 0 after seller-side cash credit
-    // is added. We just assert both rows are healthy: locked is
-    // never above balance.
+    // After settlement, the matched 5_000_000 USDC and 100 WBTC locks
+    // are released, while the pre-existing 1_000_000 USDC and 20 WBTC
+    // reservations remain intact.
     buyerPortfolio = await portfolioService.getPortfolio(buyerId);
     const buyerCash = buyerPortfolio.holdings.find((h) => h.assetCode === "USDC");
-    if (buyerCash) {
-      expect(buyerCash.locked).toBeLessThanOrEqual(buyerCash.balance);
-    }
+    expect(buyerCash).toEqual({
+      assetCode: "USDC",
+      balance: 6_000_000,
+      locked: 1_000_000,
+    });
     const buyerAsset = buyerPortfolio.holdings.find((h) => h.assetCode === "WBTC");
-    if (buyerAsset) {
-      expect(buyerAsset.locked).toBeLessThanOrEqual(buyerAsset.balance);
-    }
+    expect(buyerAsset).toEqual({
+      assetCode: "WBTC",
+      balance: 100,
+      locked: 0,
+    });
     sellerPortfolio = await portfolioService.getPortfolio(sellerId);
     const sellerAsset = sellerPortfolio.holdings.find((h) => h.assetCode === "WBTC");
-    if (sellerAsset) {
-      expect(sellerAsset.locked).toBeLessThanOrEqual(sellerAsset.balance);
-    }
+    expect(sellerAsset).toEqual({
+      assetCode: "WBTC",
+      balance: 900,
+      locked: 20,
+    });
     const sellerCash = sellerPortfolio.holdings.find((h) => h.assetCode === "USDC");
-    if (sellerCash) {
-      expect(sellerCash.locked).toBeLessThanOrEqual(sellerCash.balance);
-    }
+    expect(sellerCash).toEqual({
+      assetCode: "USDC",
+      balance: 5_000_000,
+      locked: 0,
+    });
   });
 
   it("releases the counterparty's lock on a pre-match balance failure (not just TTL)", async () => {

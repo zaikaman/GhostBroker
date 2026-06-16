@@ -52,7 +52,7 @@ export interface CompletedTradeRecord {
    * Optional rail columns. The DB columns are nullable for
    * pre-WS1 rows; the TypeScript fields are `string | null` for
    * the same reason. Both new columns were added in migration
-   * `011_completed_trades_rail_columns.sql`.
+   * `012_completed_trades_rail_columns.sql`.
    */
   rail_id?: string | null;
   rail_trade_ref?: string | null;
