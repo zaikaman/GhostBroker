@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   apiClient,
   type AuthSession,
@@ -183,7 +183,7 @@ export function AgentDeploymentGuide({
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
 
   const loadState = useCallback(async () => {
     const records = await apiClient.listHostedAgents();
@@ -577,301 +577,335 @@ export function AgentDeploymentGuide({
                 <Robot01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Configure Trading Mandate
               </h2>
 
-              {/* Guided Mandate Setup */}
-              <div className="deploy-guide-intro">
-                <span className="deploy-guide-kicker">Operator Setup</span>
-                <p className="deploy-guide-copy">
-                  Start by describing the trade in plain language. Once the intent is clear, tune how patient or aggressive the agent should be.
-                </p>
+              {/* Wizard Progress Stepper Nav */}
+              <div className="deploy-wizard-nav">
+                {[
+                  { step: 1, label: 'Goal Setup', kicker: 'Step 01' },
+                  { step: 2, label: 'Execution Rules', kicker: 'Step 02' },
+                  { step: 3, label: 'Engine Options', kicker: 'Step 03' },
+                ].map((item) => {
+                  const isCurrent = activeStep === item.step;
+                  const isCompleted = activeStep > item.step;
+                  return (
+                    <button
+                      key={item.step}
+                      type="button"
+                      className={`deploy-wizard-nav-item ${isCurrent ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}
+                      onClick={() => !isSubmitting && setActiveStep(item.step as 1 | 2 | 3)}
+                    >
+                      <span className="deploy-wizard-nav-step">0{item.step}</span>
+                      <div className="deploy-wizard-nav-content">
+                        <span className="deploy-wizard-nav-kicker">{item.kicker}</span>
+                        <span className="deploy-wizard-nav-label">{item.label}</span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
-              <section className="deploy-guide-section" aria-labelledby="deploy-goal-heading">
-                <div className="deploy-guide-section-header">
-                  <span className="deploy-guide-step">1</span>
-                  <div>
-                    <h3 id="deploy-goal-heading" className="deploy-guide-heading">Choose the trading goal</h3>
+              {/* Step 1: Goal Definition */}
+              {activeStep === 1 && (
+                <div className="deploy-wizard-step-body">
+                  <div className="deploy-guide-intro">
+                    <span className="deploy-guide-kicker">Goal Definition</span>
                     <p className="deploy-guide-copy">
-                      Pick a starting template, then confirm exactly what the agent is buying or selling.
+                      Pick a template to auto-fill execution presets, then choose your target trade asset and side.
                     </p>
                   </div>
-                </div>
 
-                <div className="deploy-preset-row" style={{ marginTop: 0 }}>
-                  {(['buyer', 'seller', 'custom'] as HostedAgentPreset[]).map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      className={`deploy-preset-button ${form.mode === preset ? 'active' : ''}`}
-                      onClick={() => applyPreset(preset)}
-                    >
-                      <span className="deploy-preset-title">
-                        {preset === 'buyer' ? 'Accumulate' : preset === 'seller' ? 'Distribute' : 'Custom'}
-                      </span>
-                      <span className="deploy-preset-copy">
-                        {preset === 'buyer'
-                          ? 'Buy the trade asset over time'
-                          : preset === 'seller'
-                            ? 'Sell the trade asset over time'
-                            : 'Set every rule manually'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <p className="deploy-context-note">
-                  {isPresetTemplate
-                    ? 'Template loaded. Editing any field turns this into a custom mandate.'
-                    : 'Custom mandate. Review the summary below before deploying the agent.'}
-                </p>
-                <p className="deploy-context-note deploy-context-note-tight">{templateGuidance}</p>
+                  <div className="deploy-preset-row" style={{ marginTop: 'var(--spacing-md)' }}>
+                    {(['buyer', 'seller', 'custom'] as HostedAgentPreset[]).map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={`deploy-preset-button ${form.mode === preset ? 'active' : ''}`}
+                        onClick={() => applyPreset(preset)}
+                      >
+                        <span className="deploy-preset-title">
+                          {preset === 'buyer' ? 'Accumulate' : preset === 'seller' ? 'Distribute' : 'Custom'}
+                        </span>
+                        <span className="deploy-preset-copy">
+                          {preset === 'buyer'
+                            ? 'Accumulate the trade asset over time'
+                            : preset === 'seller'
+                              ? 'Offload the trade asset over time'
+                              : 'Set all properties manually'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
 
-                <div className="deploy-mandate-summary" aria-live="polite">
-                  <span className="deploy-mandate-summary-label">Mandate Summary</span>
-                  <strong className="deploy-mandate-summary-title">{mandateHeadline}</strong>
-                  <p className="deploy-mandate-summary-copy">{mandateDescription}</p>
-                  <div className="deploy-mandate-summary-grid">
-                    <div className="deploy-mandate-summary-item">
-                      <span className="deploy-mandate-summary-item-label">Reference</span>
-                      <span className="deploy-mandate-summary-item-value">{referencePriceSummary}</span>
+                  <p className="deploy-context-note">
+                    {isPresetTemplate
+                      ? 'Template loaded. Customizing any parameter below changes the mode to Custom.'
+                      : 'Custom configuration mode. Specify all rules manually.'}
+                  </p>
+                  <p className="deploy-context-note deploy-context-note-tight">{templateGuidance}</p>
+
+                  <div className="deploy-mandate-summary" style={{ marginTop: 'var(--spacing-md)' }}>
+                    <span className="deploy-mandate-summary-label">Mandate Live Summary</span>
+                    <strong className="deploy-mandate-summary-title">{mandateHeadline}</strong>
+                    <p className="deploy-mandate-summary-copy">{mandateDescription}</p>
+                    <div className="deploy-mandate-summary-grid">
+                      <div className="deploy-mandate-summary-item">
+                        <span className="deploy-mandate-summary-item-label">Target Rate</span>
+                        <span className="deploy-mandate-summary-item-value">{referencePriceSummary}</span>
+                      </div>
+                      <div className="deploy-mandate-summary-item">
+                        <span className="deploy-mandate-summary-item-label">Rhythm</span>
+                        <span className="deploy-mandate-summary-item-value">{cadenceSummary}</span>
+                      </div>
+                      <div className="deploy-mandate-summary-item">
+                        <span className="deploy-mandate-summary-item-label">Settlement Mode</span>
+                        <span className="deploy-mandate-summary-item-value">{settlementModeSummary}</span>
+                      </div>
                     </div>
-                    <div className="deploy-mandate-summary-item">
-                      <span className="deploy-mandate-summary-item-label">Execution Rhythm</span>
-                      <span className="deploy-mandate-summary-item-value">{cadenceSummary}</span>
+                  </div>
+
+                  <div className="deploy-form-grid deploy-guide-grid" style={{ marginTop: 'var(--spacing-lg)' }}>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-label">Agent Label</label>
+                      <input
+                        id="hosted-agent-label"
+                        className="form-input"
+                        value={form.label}
+                        onChange={(event) => updateField('label', event.target.value)}
+                        placeholder="Enter custom identifier..."
+                      />
                     </div>
-                    <div className="deploy-mandate-summary-item">
-                      <span className="deploy-mandate-summary-item-label">Settlement Mode</span>
-                      <span className="deploy-mandate-summary-item-value">{settlementModeSummary}</span>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-side">I Want This Agent To</label>
+                      <select
+                        id="hosted-agent-side"
+                        className="form-select"
+                        value={form.side}
+                        onChange={(event) => updateField('side', event.target.value as 'buy' | 'sell')}
+                      >
+                        <option value="buy">BUY THE TARGET ASSET</option>
+                        <option value="sell">SELL THE TARGET ASSET</option>
+                      </select>
+                      <span className="deploy-field-hint">{mandateSideHint}</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-asset">Trade Asset</label>
+                      <input
+                        id="hosted-agent-asset"
+                        className="form-input font-mono"
+                        value={form.assetCode}
+                        onChange={(event) => updateField('assetCode', event.target.value.toUpperCase())}
+                        placeholder="e.g. WBTC"
+                      />
+                      <span className="deploy-field-hint">The asset the agent is accumulating or selling.</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-quote-asset">Settlement Asset</label>
+                      <input
+                        id="hosted-agent-quote-asset"
+                        className="form-input font-mono"
+                        value={form.quoteAssetCode}
+                        onChange={(event) => updateField('quoteAssetCode', event.target.value.toUpperCase())}
+                        placeholder="e.g. USDC"
+                      />
+                      <span className="deploy-field-hint">The asset used to pay for buys or received from sells.</span>
                     </div>
                   </div>
                 </div>
+              )}
 
-                <div className="deploy-form-grid deploy-guide-grid">
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-label">Agent Label</label>
-                    <input
-                      id="hosted-agent-label"
-                      className="form-input"
-                      value={form.label}
-                      onChange={(event) => updateField('label', event.target.value)}
-                      placeholder="Enter custom identifier..."
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-side">I Want This Agent To</label>
-                    <select
-                      id="hosted-agent-side"
-                      className="form-select"
-                      value={form.side}
-                      onChange={(event) => updateField('side', event.target.value as 'buy' | 'sell')}
-                    >
-                      <option value="buy">BUY THE TRADE ASSET</option>
-                      <option value="sell">SELL THE TRADE ASSET</option>
-                    </select>
-                    <span className="deploy-field-hint">{mandateSideHint}</span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-asset">Trade Asset</label>
-                    <input
-                      id="hosted-agent-asset"
-                      className="form-input font-mono"
-                      value={form.assetCode}
-                      onChange={(event) => updateField('assetCode', event.target.value.toUpperCase())}
-                      placeholder="e.g. WBTC"
-                    />
-                    <span className="deploy-field-hint">The asset the agent is accumulating or offloading.</span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-quote-asset">Settlement Asset</label>
-                    <input
-                      id="hosted-agent-quote-asset"
-                      className="form-input font-mono"
-                      value={form.quoteAssetCode}
-                      onChange={(event) => updateField('quoteAssetCode', event.target.value.toUpperCase())}
-                      placeholder="e.g. USDC"
-                    />
-                    <span className="deploy-field-hint">The asset used to pay for buys or received from sells.</span>
-                  </div>
-                </div>
-              </section>
-
-              <section className="deploy-guide-section" aria-labelledby="deploy-rules-heading">
-                <div className="deploy-guide-section-header">
-                  <span className="deploy-guide-step">2</span>
-                  <div>
-                    <h3 id="deploy-rules-heading" className="deploy-guide-heading">Set the execution rules</h3>
+              {/* Step 2: Execution Rules */}
+              {activeStep === 2 && (
+                <div className="deploy-wizard-step-body">
+                  <div className="deploy-guide-intro">
+                    <span className="deploy-guide-kicker">Execution Boundaries</span>
                     <p className="deploy-guide-copy">
-                      These limits tell the agent what price range, trade size, and timing are acceptable.
+                      Define the acceptable price constraints, sizes, and evaluation speeds for trade matching.
                     </p>
                   </div>
+
+                  <div className="deploy-form-grid deploy-guide-grid" style={{ marginTop: 'var(--spacing-md)' }}>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-reference-price">{referencePriceLabel}</label>
+                      <input
+                        id="hosted-agent-reference-price"
+                        className="form-input font-mono"
+                        inputMode="decimal"
+                        value={form.referencePrice}
+                        onChange={(event) => updateField('referencePrice', event.target.value)}
+                      />
+                      <span className="deploy-field-hint">The target base price used for evaluating match execution.</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-price-band">Allowed Price Drift (bps)</label>
+                      <input
+                        id="hosted-agent-price-band"
+                        className="form-input font-mono"
+                        inputMode="numeric"
+                        value={form.priceBandBps}
+                        onChange={(event) => updateField('priceBandBps', event.target.value)}
+                      />
+                      <span className="deploy-field-hint">Maximum deviation from reference price.</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-quantity-min">Minimum Slice Size</label>
+                      <input
+                        id="hosted-agent-quantity-min"
+                        className="form-input font-mono"
+                        inputMode="decimal"
+                        value={form.quantityMin}
+                        onChange={(event) => updateField('quantityMin', event.target.value)}
+                      />
+                      <span className="deploy-field-hint">Smallest slice quantity the agent can trade per match.</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-quantity-max">Maximum Slice Size</label>
+                      <input
+                        id="hosted-agent-quantity-max"
+                        className="form-input font-mono"
+                        inputMode="decimal"
+                        value={form.quantityMax}
+                        onChange={(event) => updateField('quantityMax', event.target.value)}
+                      />
+                      <span className="deploy-field-hint">Largest slice quantity the agent can trade per match.</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-interval">Evaluation Interval (ms)</label>
+                      <input
+                        id="hosted-agent-interval"
+                        className="form-input font-mono"
+                        inputMode="numeric"
+                        value={form.tickIntervalMs}
+                        onChange={(event) => updateField('tickIntervalMs', event.target.value)}
+                      />
+                      <span className="deploy-field-hint">How frequently the agent scans for matched counterparts.</span>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-max-cycles">Maximum Evaluation Cycles</label>
+                      <input
+                        id="hosted-agent-max-cycles"
+                        className="form-input font-mono"
+                        inputMode="numeric"
+                        value={form.maxTicks}
+                        onChange={(event) => updateField('maxTicks', event.target.value)}
+                      />
+                      <span className="deploy-field-hint">Number of ticks the agent will run before shutting down.</span>
+                    </div>
+                  </div>
                 </div>
+              )}
 
-                <div className="deploy-form-grid deploy-guide-grid">
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-reference-price">{referencePriceLabel}</label>
-                    <input
-                      id="hosted-agent-reference-price"
-                      className="form-input font-mono"
-                      inputMode="decimal"
-                      value={form.referencePrice}
-                      onChange={(event) => updateField('referencePrice', event.target.value)}
-                    />
-                    <span className="deploy-field-hint">The anchor price the agent uses when deciding if a match is acceptable.</span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-price-band">Allowed Price Drift (bps)</label>
-                    <input
-                      id="hosted-agent-price-band"
-                      className="form-input font-mono"
-                      inputMode="numeric"
-                      value={form.priceBandBps}
-                      onChange={(event) => updateField('priceBandBps', event.target.value)}
-                    />
-                    <span className="deploy-field-hint">Maximum deviation from the reference price before the agent waits.</span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-quantity-min">Minimum Slice Size</label>
-                    <input
-                      id="hosted-agent-quantity-min"
-                      className="form-input font-mono"
-                      inputMode="decimal"
-                      value={form.quantityMin}
-                      onChange={(event) => updateField('quantityMin', event.target.value)}
-                    />
-                    <span className="deploy-field-hint">Smallest amount the agent can trade in one matched slice.</span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-quantity-max">Maximum Slice Size</label>
-                    <input
-                      id="hosted-agent-quantity-max"
-                      className="form-input font-mono"
-                      inputMode="decimal"
-                      value={form.quantityMax}
-                      onChange={(event) => updateField('quantityMax', event.target.value)}
-                    />
-                    <span className="deploy-field-hint">Largest amount the agent can trade in one matched slice.</span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-interval">Evaluation Interval (ms)</label>
-                    <input
-                      id="hosted-agent-interval"
-                      className="form-input font-mono"
-                      inputMode="numeric"
-                      value={form.tickIntervalMs}
-                      onChange={(event) => updateField('tickIntervalMs', event.target.value)}
-                    />
-                    <span className="deploy-field-hint">How often the agent re-checks the market for eligible matches.</span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="hosted-agent-max-cycles">Maximum Evaluation Cycles</label>
-                    <input
-                      id="hosted-agent-max-cycles"
-                      className="form-input font-mono"
-                      inputMode="numeric"
-                      value={form.maxTicks}
-                      onChange={(event) => updateField('maxTicks', event.target.value)}
-                    />
-                    <span className="deploy-field-hint">The agent stops after this many evaluation loops unless you restart it.</span>
-                  </div>
-                </div>
-              </section>
-
-              <section className="deploy-guide-section" aria-labelledby="deploy-advanced-heading">
-                <div className="deploy-guide-section-header deploy-guide-section-header-compact">
-                  <span className="deploy-guide-step">3</span>
-                  <div>
-                    <h3 id="deploy-advanced-heading" className="deploy-guide-heading">Advanced operator settings</h3>
+              {/* Step 3: Engine Configuration */}
+              {activeStep === 3 && (
+                <div className="deploy-wizard-step-body">
+                  <div className="deploy-guide-intro">
+                    <span className="deploy-guide-kicker">Engine Settings</span>
                     <p className="deploy-guide-copy">
-                      Keep these defaults unless you need a different model, simulation mode, or stricter trading instructions.
+                      Select the LLM engine running inside the attested secure hardware enclave, and tune operator directives.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary deploy-advanced-toggle"
-                    onClick={() => setShowAdvancedSettings((current) => !current)}
-                    aria-expanded={showAdvancedSettings}
-                    aria-controls="deploy-advanced-panel"
-                  >
-                    {showAdvancedSettings ? 'Hide Advanced Settings' : 'Show Advanced Settings'}
-                  </button>
-                </div>
 
-                {showAdvancedSettings ? (
-                  <div id="deploy-advanced-panel" className="deploy-advanced-panel">
-                    <div className="deploy-form-grid deploy-guide-grid">
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="hosted-agent-model">LLM Engine</label>
+                  <div className="deploy-form-grid deploy-guide-grid" style={{ marginTop: 'var(--spacing-md)' }}>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="hosted-agent-model">LLM Engine</label>
+                      <input
+                        id="hosted-agent-model"
+                        className="form-input font-mono"
+                        value={form.groqModel}
+                        onChange={(event) => updateField('groqModel', event.target.value)}
+                        placeholder="Model details..."
+                      />
+                      <span className="deploy-field-hint">Model identifier executing within the secure TEE enclave.</span>
+                    </div>
+
+                    <div className="form-group deploy-advanced-toggle-group">
+                      <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
                         <input
-                          id="hosted-agent-model"
-                          className="form-input font-mono"
-                          value={form.groqModel}
-                          onChange={(event) => updateField('groqModel', event.target.value)}
-                          placeholder="Model details..."
+                          type="checkbox"
+                          checked={form.dryRun}
+                          onChange={(event) => updateField('dryRun', event.target.checked)}
                         />
-                        <span className="deploy-field-hint">The reasoning model running inside the hosted agent loop.</span>
-                      </div>
+                        <span>Simulation Mode (Dry Run)</span>
+                      </label>
+                      <span className="deploy-field-hint">Enclave will execute but won't settle real transactions.</span>
+                    </div>
 
-                      <div className="form-group deploy-advanced-toggle-group">
-                        <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
-                          <input
-                            type="checkbox"
-                            checked={form.dryRun}
-                            onChange={(event) => updateField('dryRun', event.target.checked)}
-                          />
-                          <span>Simulation Only, Do Not Settle Live Trades</span>
-                        </label>
-                        <span className="deploy-field-hint">Use this to test the mandate without allowing live settlement.</span>
-                      </div>
-
-                      <div className="form-group deploy-form-span-full" style={{ marginBottom: 0 }}>
-                        <label className="form-label" htmlFor="hosted-agent-instructions">Trading Instructions</label>
-                        <textarea
-                          id="hosted-agent-instructions"
-                          className="form-input deploy-textarea font-mono"
-                          value={form.operatorPrompt}
-                          onChange={(event) => updateField('operatorPrompt', event.target.value)}
-                          placeholder="Add operator constraints and execution priorities for the agent..."
-                        />
-                        <span className="deploy-field-hint">Describe execution priorities, pacing, and risk discipline in plain language.</span>
-                      </div>
+                    <div className="form-group deploy-form-span-full" style={{ marginBottom: 0 }}>
+                      <label className="form-label" htmlFor="hosted-agent-instructions">Trading Instructions Prompt</label>
+                      <textarea
+                        id="hosted-agent-instructions"
+                        className="form-input deploy-textarea font-mono"
+                        value={form.operatorPrompt}
+                        onChange={(event) => updateField('operatorPrompt', event.target.value)}
+                        placeholder="Configure special trading instructions, bounds or behaviors..."
+                      />
+                      <span className="deploy-field-hint">Set policy guidelines, pacing instructions, or risk tolerances.</span>
                     </div>
                   </div>
-                ) : null}
-              </section>              {/* Form CTAs */}
-              <div className="deploy-form-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--spacing-md)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setIsLoading(true);
-                    loadState().finally(() => setIsLoading(false));
-                  }}
-                  disabled={isLoading || isSubmitting}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
-                  Synchronize Fleet
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleCreate}
-                  disabled={isLoading || isSubmitting}
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                >
-                  {isSubmitting ? (
-                    <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                  ) : (
-                    <RocketIcon size={14} />
+                </div>
+              )}
+
+              {/* Wizard Footer Navigation Controls */}
+              <div className="deploy-wizard-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--color-border)', marginTop: 'var(--spacing-lg)', paddingTop: 'var(--spacing-md)' }}>
+                <div className="deploy-wizard-footer-left">
+                  {activeStep > 1 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setActiveStep((prev) => (prev - 1) as 1 | 2 | 3)}
+                      disabled={isSubmitting}
+                    >
+                      Back
+                    </button>
                   )}
-                  Deploy Attested Agent
-                </button>
+                </div>
+                <div className="deploy-wizard-footer-right" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
+                  {activeStep < 3 ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => setActiveStep((prev) => (prev + 1) as 1 | 2 | 3)}
+                    >
+                      Continue
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setIsLoading(true);
+                          loadState().finally(() => setIsLoading(false));
+                        }}
+                        disabled={isLoading || isSubmitting}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
+                        Synchronize Fleet
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={handleCreate}
+                        disabled={isLoading || isSubmitting}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                      >
+                        {isSubmitting ? (
+                          <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                        ) : (
+                          <RocketIcon size={14} />
+                        )}
+                        Deploy Attested Agent
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </section>
 
