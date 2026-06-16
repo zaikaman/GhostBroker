@@ -87,7 +87,12 @@ export function booleanEnv(name: string, fallback: boolean): boolean {
 
 export const agentEnvSchema = z.object({
   GHOSTBROKER_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)),
-  GHOSTBROKER_API_KEY: z.string().regex(/^gbk_/u, "must start with the gbk_ prefix"),
+  GHOSTBROKER_API_KEY: z.string().regex(/^gbk_/u, "must start with the gbk_ prefix").optional(),
+  GHOSTBROKER_SESSION_TOKEN: z.string().trim().min(1).optional(),
+  GHOSTBROKER_SESSION_EXPIRES_AT: z.string().trim().min(1).optional(),
+  GHOSTBROKER_INSTITUTION_ID: z.string().uuid().optional(),
+  GHOSTBROKER_INSTITUTION_DISPLAY_NAME: z.string().trim().min(1).optional(),
+  GHOSTBROKER_INSTITUTION_TENANT_DID: z.string().trim().min(1).optional(),
   T3N_API_KEY: z.string().min(1).optional(),
   T3N_API_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)).optional(),
   AGENT_IDENTITY_CONFIG_PATH: z.string().min(1).optional(),
@@ -120,6 +125,11 @@ export function loadAgentEnv(): AgentEnv {
   const parsed = agentEnvSchema.safeParse({
     GHOSTBROKER_URL: process.env.GHOSTBROKER_URL,
     GHOSTBROKER_API_KEY: process.env.GHOSTBROKER_API_KEY,
+    GHOSTBROKER_SESSION_TOKEN: process.env.GHOSTBROKER_SESSION_TOKEN,
+    GHOSTBROKER_SESSION_EXPIRES_AT: process.env.GHOSTBROKER_SESSION_EXPIRES_AT,
+    GHOSTBROKER_INSTITUTION_ID: process.env.GHOSTBROKER_INSTITUTION_ID,
+    GHOSTBROKER_INSTITUTION_DISPLAY_NAME: process.env.GHOSTBROKER_INSTITUTION_DISPLAY_NAME,
+    GHOSTBROKER_INSTITUTION_TENANT_DID: process.env.GHOSTBROKER_INSTITUTION_TENANT_DID,
     T3N_API_KEY: process.env.T3N_API_KEY === "" ? undefined : process.env.T3N_API_KEY,
     T3N_API_URL: process.env.T3N_API_URL,
     AGENT_IDENTITY_CONFIG_PATH: process.env.AGENT_IDENTITY_CONFIG_PATH,

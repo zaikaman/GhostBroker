@@ -29,16 +29,54 @@ export interface AgentRunResult {
   admissionAuthorityRef: string | undefined;
 }
 
+function buildSessionFromEnv(env: AgentEnv): AuthSession | undefined {
+  if (
+    !env.GHOSTBROKER_SESSION_TOKEN ||
+    !env.GHOSTBROKER_INSTITUTION_ID ||
+    !env.GHOSTBROKER_INSTITUTION_DISPLAY_NAME ||
+    !env.GHOSTBROKER_INSTITUTION_TENANT_DID
+  ) {
+    return undefined;
+  }
+
+  return {
+    token: env.GHOSTBROKER_SESSION_TOKEN,
+    expiresAt:
+      env.GHOSTBROKER_SESSION_EXPIRES_AT ??
+      new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    institution: {
+      id: env.GHOSTBROKER_INSTITUTION_ID,
+      displayName: env.GHOSTBROKER_INSTITUTION_DISPLAY_NAME,
+      t3TenantDid: env.GHOSTBROKER_INSTITUTION_TENANT_DID,
+    },
+  };
+}
+
 export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunResult> {
   const { side, env, llm, dryRun, assetCode, quoteAssetCode = env.AGENT_QUOTE_ASSET_CODE } = options;
   const identity = loadOrGenerateIdentity(env.AGENT_IDENTITY_CONFIG_PATH);
 
   log(side, `Hosted agent booting with DID ${identity.did}`);
 
-  const client = new GhostBrokerClient({ baseUrl: env.GHOSTBROKER_URL });
+  const seededSession = buildSessionFromEnv(env);
+  const client = new GhostBrokerClient({
+    baseUrl: env.GHOSTBROKER_URL,
+    ...(seededSession
+      ? {
+          token: seededSession.token,
+          institutionId: seededSession.institution.id,
+        }
+      : {}),
+  });
   let session: AuthSession;
   try {
-    session = await client.authenticateWithApiKey(env.GHOSTBROKER_API_KEY);
+    if (seededSession) {
+      session = seededSession;
+    } else if (env.GHOSTBROKER_API_KEY) {
+      session = await client.authenticateWithApiKey(env.GHOSTBROKER_API_KEY);
+    } else {
+      throw new Error("Missing GhostBroker session token and API key.");
+    }
   } catch (err) {
     log(side, `Authentication failed: ${formatError(err)}`);
     return {
@@ -215,9 +253,14 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       const friendly = formatError(err);
       if (err instanceof GhostBrokerApiError) {
         if (err.isAuthError) {
-          log(side, `Submit auth error ${err.status}; refreshing session.`);
-          await client.authenticateWithApiKey(env.GHOSTBROKER_API_KEY);
-          lastOutcome = `auth retry after ${err.status}`;
+          if (env.GHOSTBROKER_API_KEY) {
+            log(side, `Submit auth error ${err.status}; refreshing session.`);
+            await client.authenticateWithApiKey(env.GHOSTBROKER_API_KEY);
+            lastOutcome = `auth retry after ${err.status}`;
+          } else {
+            log(side, `Submit auth error ${err.status}; hosted session cannot be refreshed in-process.`);
+            lastOutcome = `auth failed ${err.status}`;
+          }
           await sleep(env.TICK_INTERVAL_MS);
           continue;
         }

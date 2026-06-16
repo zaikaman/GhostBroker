@@ -1,4 +1,4 @@
-﻿import cors from "cors";
+import cors from "cors";
 import express, {
   type ErrorRequestHandler,
   type Express,
@@ -28,7 +28,6 @@ import {
   SupabaseApiKeyRepository,
   type ApiKeyManagementService,
 } from "./services/api-key.service.js";
-import { createApiKeysRouter } from "./api/api-keys.routes.js";
 import { createDevTokenRouter } from "./api/dev-token.routes.js";
 import {
   InstitutionService,
@@ -522,6 +521,12 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   );
 
   const apiKeyService = new ApiKeyService(apiKeyRepository);
+  const institutionService = new InstitutionService(
+    institutionRepository,
+    new AdkTenantDidRegistry(t3NetworkClient),
+    depositWalletService,
+    defaultChainTokenAddresses,
+  );
   const agentService = buildAgentService({
     authorizationFacade,
     matchingOrchestrator,
@@ -530,12 +535,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   });
 
   return {
-    institutionService: new InstitutionService(
-      institutionRepository,
-      new AdkTenantDidRegistry(t3NetworkClient),
-      depositWalletService,
-      defaultChainTokenAddresses,
-    ),
+    institutionService,
     portfolioService,
     ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
     agentService,
@@ -566,8 +566,11 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     hostedAgentService: new ChildProcessHostedAgentService({
       agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
       backendUrl: `http://localhost:${env.PORT}`,
-      apiKeyService,
+      authSessionSecret:
+        env.AUTH_SESSION_SECRET ??
+        "development-only-auth-session-secret-change-before-production",
       agentService,
+      institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
       tenantSigner: tenantDelegationSigner,
     }),
     authService: new DidAuthService({
@@ -654,11 +657,6 @@ export function createApp(
       services.walletPortfolioSyncService,
       services.matchingOrchestrator,
     ),
-  );
-  app.use(
-    "/api",
-    operatorAuthMiddleware(env, services.apiKeyService),
-    createApiKeysRouter(services.apiKeyService),
   );
   app.use(
     "/api",

@@ -59,7 +59,7 @@ export interface HostedAgentRuntimeStatus {
   stoppedAt: string | undefined;
   lastExitCode: number | undefined;
   lastSignal: string | undefined;
-  apiKeyId: string | undefined;
+  sessionExpiresAt: string | undefined;
   lastError: string | undefined;
   logTail: string;
 }
@@ -75,4 +75,3 @@ export function readHostedAgentConfig(agent: Agent): HostedAgentConfig | null {
   const parsed = hostedAgentConfigSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
 }
-

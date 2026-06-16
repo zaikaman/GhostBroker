@@ -20,7 +20,6 @@ import { PortfolioHistory } from '../components/PortfolioHistory';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
-import { ApiKeysPanel } from '../components/ApiKeysPanel';
 import { AgentsPanel } from '../components/AgentsPanel';
 import { SettingsPanel } from '../components/SettingsPanel';
 import { apiClient, type AuthSession } from '../services/api-client';
@@ -250,11 +249,7 @@ function DashboardView({
                   </button>
                 </div>
               )}
-              <AgentsPanel onNavigateToDeveloperKeys={() => {
-                const el = document.getElementById('api-keys-panel');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }} />
-              <ApiKeysPanel />
+              <AgentsPanel />
             </div>
             <div className="enclaves-side" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               <div className="card enclave-health-card" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -282,14 +277,6 @@ function DashboardView({
             </div>
           </div>
         );
-
-      case 'developer':
-        return (
-          <div className="dashboard-grid-developer" style={{ animation: 'fadeIn 0.3s ease' }}>
-            <ApiKeysPanel />
-          </div>
-        );
-
       case 'deploy':
         return (
           <div style={{ animation: 'fadeIn 0.3s ease' }}>

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
+import { issueOperatorSessionToken } from "../auth/session-token.js";
 import { PublicError } from "../errors/public-error.js";
 import {
   type CreateHostedAgentRequest,
@@ -9,10 +10,12 @@ import {
   readHostedAgentConfig,
 } from "../models/hosted-agent.js";
 import type { AgentManagementService } from "./agent.service.js";
-import type { ApiKeyManagementService } from "./api-key.service.js";
+import type { InstitutionManagementService } from "./institution.service.js";
 import type { TenantDelegationSigner } from "./tenant-delegation-signer.js";
 
 const LOG_TAIL_BYTES = 8192;
+const HOSTED_SESSION_BUFFER_SECONDS = 15 * 60;
+const HOSTED_SESSION_MINIMUM_SECONDS = 30 * 60;
 
 interface HostedAgentRuntimeState {
   agentId: string;
@@ -22,7 +25,7 @@ interface HostedAgentRuntimeState {
   stoppedAt: string | undefined;
   lastExitCode: number | undefined;
   lastSignal: string | undefined;
-  apiKeyId: string | undefined;
+  sessionExpiresAt: string | undefined;
   lastError: string | undefined;
   logTail: string;
 }
@@ -39,8 +42,9 @@ export interface HostedAgentManagementService {
 export interface ChildProcessHostedAgentServiceOptions {
   agentsDir: string;
   backendUrl: string;
-  apiKeyService: ApiKeyManagementService;
+  authSessionSecret: string;
   agentService: AgentManagementService;
+  institutionService: Required<Pick<InstitutionManagementService, "getInstitution">>;
   tenantSigner: TenantDelegationSigner;
   runner?: readonly string[];
   hostedScript?: string;
@@ -50,8 +54,9 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
   private readonly runtimeStates = new Map<string, HostedAgentRuntimeState>();
   private readonly agentsDir: string;
   private readonly backendUrl: string;
-  private readonly apiKeyService: ApiKeyManagementService;
+  private readonly authSessionSecret: string;
   private readonly agentService: AgentManagementService;
+  private readonly institutionService: Required<Pick<InstitutionManagementService, "getInstitution">>;
   private readonly tenantSigner: TenantDelegationSigner;
   private readonly runner: readonly string[];
   private readonly hostedScript: string | undefined;
@@ -59,8 +64,9 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
   public constructor(options: ChildProcessHostedAgentServiceOptions) {
     this.agentsDir = resolve(options.agentsDir);
     this.backendUrl = options.backendUrl;
-    this.apiKeyService = options.apiKeyService;
+    this.authSessionSecret = options.authSessionSecret;
     this.agentService = options.agentService;
+    this.institutionService = options.institutionService;
     this.tenantSigner = options.tenantSigner;
     this.runner = options.runner ?? ["npm", "run"];
     this.hostedScript = options.hostedScript;
@@ -139,13 +145,33 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       throw new PublicError("service_unavailable", 409);
     }
 
-    const apiKey = await this.apiKeyService.createKey(
+    const institution = await this.institutionService.getInstitution(institutionId);
+    const sessionExpiresAt = new Date(
+      Date.now() + this.computeHostedSessionTtlMs(record.config),
+    ).toISOString();
+    const sessionToken = issueOperatorSessionToken({
+      secret: this.authSessionSecret,
+      did: record.agent.agentDid,
       institutionId,
-      `hosted-${record.config.label.toLowerCase().replace(/\s+/gu, "-")}`,
-      ["agent:operate"],
-    );
+      ttlSeconds: Math.ceil(
+        (new Date(sessionExpiresAt).getTime() - Date.now()) / 1000,
+      ),
+    });
 
-    const child = this.spawnHostedAgent(record.agent.agentDid, apiKey.key, record.config, id);
+    const child = this.spawnHostedAgent(
+      {
+        agentDid: record.agent.agentDid,
+        agentId: id,
+        config: record.config,
+      },
+      {
+        token: sessionToken,
+        expiresAt: sessionExpiresAt,
+        institutionId: institution.id,
+        displayName: institution.displayName,
+        tenantDid: institution.t3TenantDid,
+      },
+    );
     const state: HostedAgentRuntimeState = {
       agentId: id,
       institutionId,
@@ -154,7 +180,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       stoppedAt: undefined,
       lastExitCode: undefined,
       lastSignal: undefined,
-      apiKeyId: apiKey.id,
+      sessionExpiresAt,
       lastError: undefined,
       logTail: "",
     };
@@ -196,14 +222,6 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       }
     }
 
-    if (state.apiKeyId) {
-      try {
-        await this.apiKeyService.revokeKey(state.apiKeyId, institutionId);
-      } catch {
-        // best effort
-      }
-    }
-
     state.child = undefined;
     state.stoppedAt = new Date().toISOString();
     return this.getHostedAgent(id, institutionId);
@@ -242,7 +260,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
         stoppedAt: undefined,
         lastExitCode: undefined,
         lastSignal: undefined,
-        apiKeyId: undefined,
+        sessionExpiresAt: undefined,
         lastError: undefined,
         logTail: "",
       };
@@ -255,38 +273,57 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       stoppedAt: state.stoppedAt,
       lastExitCode: state.lastExitCode,
       lastSignal: state.lastSignal,
-      apiKeyId: state.apiKeyId,
+      sessionExpiresAt: state.sessionExpiresAt,
       lastError: state.lastError,
       logTail: state.logTail,
     };
   }
 
+  private computeHostedSessionTtlMs(config: HostedAgentConfig): number {
+    const sessionWindowMs =
+      config.tickIntervalMs * config.maxTicks +
+      HOSTED_SESSION_BUFFER_SECONDS * 1000;
+    return Math.max(sessionWindowMs, HOSTED_SESSION_MINIMUM_SECONDS * 1000);
+  }
+
   private spawnHostedAgent(
-    agentDid: string,
-    apiKey: string,
-    config: HostedAgentConfig,
-    agentId: string,
+    runtime: {
+      agentDid: string;
+      agentId: string;
+      config: HostedAgentConfig;
+    },
+    session: {
+      token: string;
+      expiresAt: string;
+      institutionId: string;
+      displayName: string;
+      tenantDid: string;
+    },
   ): ChildProcess {
     const isScriptMode = this.hostedScript !== undefined;
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       GHOSTBROKER_URL: this.backendUrl,
-      GHOSTBROKER_API_KEY: apiKey,
-      AGENT_IDENTITY_DID: agentDid,
-      HOSTED_AGENT_ID: agentId,
-      HOSTED_AGENT_LABEL: config.label,
-      AGENT_SIDE: config.side,
-      AGENT_ASSET_CODE: config.assetCode,
-      AGENT_QUOTE_ASSET_CODE: config.quoteAssetCode,
-      AGENT_OPERATOR_PROMPT: config.operatorPrompt,
-      AGENT_REFERENCE_PRICE: String(config.referencePrice),
-      PRICE_BAND_BPS: String(config.priceBandBps),
-      AGENT_QUANTITY_MIN: String(config.quantityMin),
-      AGENT_QUANTITY_MAX: String(config.quantityMax),
-      TICK_INTERVAL_MS: String(config.tickIntervalMs),
-      MAX_TICKS: String(config.maxTicks),
-      DRY_RUN: config.dryRun ? "true" : "false",
-      ...(config.groqModel ? { GROQ_MODEL: config.groqModel } : {}),
+      GHOSTBROKER_SESSION_TOKEN: session.token,
+      GHOSTBROKER_SESSION_EXPIRES_AT: session.expiresAt,
+      GHOSTBROKER_INSTITUTION_ID: session.institutionId,
+      GHOSTBROKER_INSTITUTION_DISPLAY_NAME: session.displayName,
+      GHOSTBROKER_INSTITUTION_TENANT_DID: session.tenantDid,
+      AGENT_IDENTITY_DID: runtime.agentDid,
+      HOSTED_AGENT_ID: runtime.agentId,
+      HOSTED_AGENT_LABEL: runtime.config.label,
+      AGENT_SIDE: runtime.config.side,
+      AGENT_ASSET_CODE: runtime.config.assetCode,
+      AGENT_QUOTE_ASSET_CODE: runtime.config.quoteAssetCode,
+      AGENT_OPERATOR_PROMPT: runtime.config.operatorPrompt,
+      AGENT_REFERENCE_PRICE: String(runtime.config.referencePrice),
+      PRICE_BAND_BPS: String(runtime.config.priceBandBps),
+      AGENT_QUANTITY_MIN: String(runtime.config.quantityMin),
+      AGENT_QUANTITY_MAX: String(runtime.config.quantityMax),
+      TICK_INTERVAL_MS: String(runtime.config.tickIntervalMs),
+      MAX_TICKS: String(runtime.config.maxTicks),
+      DRY_RUN: runtime.config.dryRun ? "true" : "false",
+      ...(runtime.config.groqModel ? { GROQ_MODEL: runtime.config.groqModel } : {}),
     };
     const isWin = process.platform === "win32";
     const shell = isWin && this.runner[0] === "npm";
@@ -316,4 +353,3 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     proc.stderr?.on("data", append);
   }
 }
-

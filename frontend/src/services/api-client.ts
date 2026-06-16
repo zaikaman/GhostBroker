@@ -1,4 +1,4 @@
-﻿export interface HealthResponse {
+export interface HealthResponse {
   status: 'ok' | 'degraded' | 'unavailable';
   services: Record<string, 'ok' | 'degraded' | 'unavailable'>;
 }
@@ -198,20 +198,6 @@ export interface AuditReceipt {
   t3AttestationRef: string;
 }
 
-export interface ApiKey {
-  id: string;
-  institutionId: string;
-  label: string;
-  prefix: string;
-  scopes: string[];
-  createdAt: string;
-  revokedAt: string | null;
-}
-
-export interface CreatedApiKey extends ApiKey {
-  key: string;
-}
-
 export type HostedAgentPreset = 'buyer' | 'seller' | 'custom';
 
 export interface HostedAgentConfig {
@@ -238,7 +224,7 @@ export interface HostedAgentRuntimeStatus {
   stoppedAt?: string;
   lastExitCode?: number;
   lastSignal?: string;
-  apiKeyId?: string;
+  sessionExpiresAt?: string;
   lastError?: string;
   logTail: string;
 }
@@ -675,34 +661,6 @@ export const apiClient = {
       },
     );
     return handleResponse<{ authorityRef: string; policyHash: string }>(res);
-  },
-
-  // â”€â”€ API Key Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-  async listApiKeys(): Promise<ApiKey[]> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/keys`,
-    );
-    return handleResponse<ApiKey[]>(res);
-  },
-
-  async createApiKey(label: string, scopes?: string[]): Promise<CreatedApiKey> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/keys`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label, scopes: scopes ?? ['agent:operate'] }),
-      },
-    );
-    return handleResponse<CreatedApiKey>(res);
-  },
-
-  async revokeApiKey(id: string): Promise<void> {
-    await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/keys/${id}/revoke`,
-      { method: 'POST' },
-    );
   },
 
   async listHostedAgents(running?: boolean): Promise<HostedAgentRecord[]> {

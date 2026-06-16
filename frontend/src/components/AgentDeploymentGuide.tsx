@@ -953,9 +953,9 @@ export function AgentDeploymentGuide({
                     <span className="process-value">{selectedAgent.runtime.pid || 'OFFLINE'}</span>
                   </div>
                   <div className="process-cell">
-                    <span className="process-label">API Key Ref</span>
+                    <span className="process-label">Session Expires</span>
                     <span className="process-value">
-                      {selectedAgent.runtime.apiKeyId ? truncateMiddle(selectedAgent.runtime.apiKeyId, 8) : 'NONE'}
+                      {selectedAgent.runtime.sessionExpiresAt ? formatTimestamp(selectedAgent.runtime.sessionExpiresAt) : 'Not issued'}
                     </span>
                   </div>
                 </div>

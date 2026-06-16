@@ -10,8 +10,20 @@ async function main(): Promise<void> {
     console.error("Missing GHOSTBROKER_URL");
     process.exit(2);
   }
-  if (!env.GHOSTBROKER_API_KEY) {
-    console.error("Missing GHOSTBROKER_API_KEY");
+  if (!env.GHOSTBROKER_SESSION_TOKEN) {
+    console.error("Missing GHOSTBROKER_SESSION_TOKEN");
+    process.exit(2);
+  }
+  if (!env.GHOSTBROKER_INSTITUTION_ID) {
+    console.error("Missing GHOSTBROKER_INSTITUTION_ID");
+    process.exit(2);
+  }
+  if (!env.GHOSTBROKER_INSTITUTION_DISPLAY_NAME) {
+    console.error("Missing GHOSTBROKER_INSTITUTION_DISPLAY_NAME");
+    process.exit(2);
+  }
+  if (!env.GHOSTBROKER_INSTITUTION_TENANT_DID) {
+    console.error("Missing GHOSTBROKER_INSTITUTION_TENANT_DID");
     process.exit(2);
   }
   if (!env.GROQ_API_KEY) {
