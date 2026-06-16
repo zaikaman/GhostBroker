@@ -17,7 +17,6 @@ import { LandingPage } from '../components/LandingPage';
 import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
 import { DepositWalletOverviewCard } from '../components/DepositWalletOverviewCard';
 import { PortfolioHistory } from '../components/PortfolioHistory';
-import { DemoControlPanel } from '../components/DemoControlPanel';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
@@ -293,13 +292,8 @@ function DashboardView({
 
       case 'deploy':
         return (
-          <div className="dashboard-grid-overview" style={{ animation: 'fadeIn 0.3s ease' }}>
-            <div className="layout-col-1" style={{ display: 'flex', flexDirection: 'column' }}>
-              <AgentDeploymentGuide session={session} onBack={() => handleTabChange('enclaves')} />
-            </div>
-            <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)', marginTop: '2rem' }}>
-              <DemoControlPanel institutionId={session.institution.id} />
-            </div>
+          <div style={{ animation: 'fadeIn 0.3s ease' }}>
+            <AgentDeploymentGuide session={session} onBack={() => handleTabChange('enclaves')} />
           </div>
         );
 
@@ -408,7 +402,7 @@ function DashboardView({
               onClick={() => handleTabChange('deploy')}
               style={{ marginTop: 'var(--spacing-md)' }}
             >
-              <RocketIcon size={16} style={{ color: 'var(--color-accent)' }} /> Developer Sandbox
+              <RocketIcon size={16} style={{ color: 'var(--color-accent)' }} /> Deploy Agent
             </button>
           </nav>
 
