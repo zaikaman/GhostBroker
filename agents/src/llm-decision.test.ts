@@ -221,3 +221,45 @@ describe("clampDecision (wait + abort)", () => {
     expect(out.price).toBe(baseCtx.referencePrice);
   });
 });
+
+describe("clampDecision (rounds to zero)", () => {
+  it("waits when the affordable buy quantity rounds down to zero", () => {
+    const dustCtx: DecisionContext = {
+      ...baseCtx,
+      quantityMin: 0.0000001,
+      availableQuoteBalance: 0.004,
+    };
+    const out = clampDecision(
+      { action: "submit", quantity: 1.0, price: 10_000, reasoning: "probe" },
+      dustCtx,
+    );
+    expect(out.action).toBe("wait");
+    expect(out.quantity).toBe(0);
+    expect(out.price).toBe(dustCtx.referencePrice);
+  });
+
+  it("waits when the affordable sell quantity rounds down to zero", () => {
+    const dustSellCtx: DecisionContext = {
+      ...baseCtx,
+      side: "sell",
+      quantityMin: 0.0000001,
+      availableQuoteBalance: 0,
+      availableBaseBalance: 0.0000004,
+    };
+    const out = clampDecision(
+      { action: "submit", quantity: 1.0, price: 70_000, reasoning: "dump" },
+      dustSellCtx,
+    );
+    expect(out.action).toBe("wait");
+    expect(out.quantity).toBe(0);
+  });
+
+  it("still submits when the rounded quantity stays positive", () => {
+    const out = clampDecision(
+      { action: "submit", quantity: 0.5, price: 70_000, reasoning: "ok" },
+      baseCtx,
+    );
+    expect(out.action).toBe("submit");
+    expect(out.quantity).toBeGreaterThan(0);
+  });
+});

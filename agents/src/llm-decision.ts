@@ -146,9 +146,19 @@ export function clampDecision(decision: Decision, ctx: DecisionContext): Decisio
     reasoning = `${reasoning} [clamped to base balance]`.slice(0, 280);
   }
 
+  const finalQuantity = roundQty(quantity);
+  if (finalQuantity <= 0 || finalQuantity < roundQty(ctx.quantityMin)) {
+    return {
+      action: "wait",
+      quantity: 0,
+      price: roundPrice(ctx.referencePrice),
+      reasoning: `Affordable ${ctx.assetCode} quantity below minimum after rounding; waiting.`,
+    };
+  }
+
   return {
     action: "submit",
-    quantity: roundQty(quantity),
+    quantity: finalQuantity,
     price: roundPrice(price),
     reasoning,
   };
