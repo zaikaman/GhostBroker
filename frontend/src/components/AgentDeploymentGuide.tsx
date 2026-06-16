@@ -6,6 +6,8 @@ import {
   type HostedAgentConfig,
   type HostedAgentPreset,
   type HostedAgentRecord,
+  type Institution,
+  type RelayerApprovalResponse,
 } from '../services/api-client';
 import {
   Activity01Icon,
@@ -179,6 +181,8 @@ export function AgentDeploymentGuide({
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [form, setForm] = useState<HostedFormState>(defaultFormState);
   const [isLoading, setIsLoading] = useState(true);
+  const [institution, setInstitution] = useState<Institution | null>(null);
+  const [depositStatus, setDepositStatus] = useState<RelayerApprovalResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -188,13 +192,32 @@ export function AgentDeploymentGuide({
   const loadState = useCallback(async () => {
     const records = await apiClient.listHostedAgents();
     setHostedAgents(records);
+
+    const institutionId = session.institution.id;
+    try {
+      const inst = await apiClient.getInstitution(institutionId);
+      setInstitution(inst);
+      if (inst.settlementProfileRef === 'chain:sepolia:erc20') {
+        try {
+          const status = await apiClient.getDepositStatus(institutionId);
+          setDepositStatus(status);
+        } catch {
+          // Deposit status check is best-effort for UI readiness
+        }
+      } else {
+        setDepositStatus(null);
+      }
+    } catch {
+      // Institution fetch is best-effort
+    }
+
     setSelectedAgentId((current) => {
       if (current && records.some((record) => record.agent.id === current)) {
         return current;
       }
       return records[0]?.agent.id ?? null;
     });
-  }, []);
+  }, [session.institution.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,6 +254,11 @@ export function AgentDeploymentGuide({
 
   const runningCount = hostedAgents.filter((record) => record.runtime.running).length;
 
+  const isChainRail = institution?.settlementProfileRef === 'chain:sepolia:erc20';
+  const settlementReady = isChainRail
+    ? Boolean(depositStatus?.approved.wbtc && depositStatus?.approved.usdc)
+    : true;
+
   const readiness = useMemo(
     () => [
       {
@@ -249,12 +277,23 @@ export function AgentDeploymentGuide({
         detail: `${runningCount} live runtime${runningCount !== 1 ? 's' : ''}`,
       },
       {
+        label: 'Settlement Rail Approval',
+        ready: institution ? settlementReady : false,
+        detail: !institution
+          ? 'Loading…'
+          : isChainRail
+            ? depositStatus
+              ? `${depositStatus.approved.wbtc ? 'WBTC✓' : 'WBTC✗'} | ${depositStatus.approved.usdc ? 'USDC✓' : 'USDC✗'}`
+              : 'Status unavailable'
+            : 'Not required (noop rail)',
+      },
+      {
         label: 'Prompt Control Status',
         ready: true,
         detail: 'Operator policy active',
       },
     ],
-    [hostedAgents.length, runningCount, session.institution.displayName, session.institution.id, session.token],
+    [hostedAgents.length, runningCount, session.institution.displayName, session.institution.id, session.token, institution, settlementReady, isChainRail, depositStatus],
   );
 
   const applyPreset = useCallback((preset: HostedAgentPreset) => {
@@ -537,7 +576,7 @@ export function AgentDeploymentGuide({
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>{record.config.label}</span>
                           <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>
-                            {record.config.side.toUpperCase()} MANDATE â€¢ {record.config.assetCode}/{record.config.quoteAssetCode}
+                            {record.config.side.toUpperCase()} MANDATE • {record.config.assetCode}/{record.config.quoteAssetCode}
                           </span>
                         </div>
                         <span className={`status-badge ${isRunning ? 'secure' : 'processing'}`} style={{ display: 'inline-flex', fontSize: '0.62rem', padding: '2px 8px', borderRadius: '4px' }}>
@@ -893,8 +932,9 @@ export function AgentDeploymentGuide({
                         type="button"
                         className="btn btn-primary"
                         onClick={handleCreate}
-                        disabled={isLoading || isSubmitting}
+                        disabled={isLoading || isSubmitting || (isChainRail && !settlementReady)}
                         style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                        title={isChainRail && !settlementReady ? 'Approve the settlement relayer for WBTC and USDC in Settings before deploying.' : ''}
                       >
                         {isSubmitting ? (
                           <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
@@ -965,9 +1005,10 @@ export function AgentDeploymentGuide({
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={busyAgentId === selectedAgent.agent.id || selectedAgent.runtime.running}
+                    disabled={busyAgentId === selectedAgent.agent.id || selectedAgent.runtime.running || (isChainRail && !settlementReady)}
                     onClick={() => handleStart(selectedAgent.agent.id)}
                     style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    title={isChainRail && !settlementReady ? 'Approve the settlement relayer for WBTC and USDC in Settings before launching.' : ''}
                   >
                     {busyAgentId === selectedAgent.agent.id && !selectedAgent.runtime.running ? (
                       <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />

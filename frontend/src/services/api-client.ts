@@ -8,10 +8,10 @@ export interface CreateInstitutionRequest {
   displayName: string;
   /**
    * WS3: settlement profile ref. One of:
-   *   - `wallet:default`            â€” noop rail (system default)
-   *   - `chain:sepolia:erc20`       â€” Sepolia ERC-20 chain rail
-   *   - `custody:<partner>`         â€” future custody rail
-   *   - `settlement-profile:<name>`  â€” legacy free-form (back-compat)
+   *   - `wallet:default`            — noop rail (system default)
+   *   - `chain:sepolia:erc20`       — Sepolia ERC-20 chain rail
+   *   - `custody:<partner>`         — future custody rail
+   *   - `settlement-profile:<name>`  — legacy free-form (back-compat)
    *
    * The chain rail requires `metadata.depositAddress` and
    * `metadata.tokenAddresses` (a `Record<assetCode, address>`
@@ -394,7 +394,7 @@ export const apiClient = {
     }
 
     // No valid session. Never fabricate a synthetic session with a fake
-    // `e2e-bypass-token` â€” the backend has no way to validate it and every
+    // `e2e-bypass-token` — the backend has no way to validate it and every
     // authenticated request would fail with 401. Callers must use the real
     // DID challenge/verify flow (wallet auth) to obtain a signed JWT.
     return null;
@@ -606,7 +606,7 @@ export const apiClient = {
     return handleResponse<AuditReceipt>(res);
   },
 
-  // â”€â”€ Agent Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Agent Management ──────────────────────────────────────────────────────
 
   async listAgents(status?: "admitted" | "revoked"): Promise<Agent[]> {
     const url = new URL(`${API_BASE_URL}/api/agents`);

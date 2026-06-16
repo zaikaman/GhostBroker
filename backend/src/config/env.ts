@@ -76,7 +76,7 @@ const envSchema = z.object({
   AGENTS_WORKSPACE_DIR: z.string().min(1).optional(),
 
   /**
-   * WS2 â€” chain rail (Sepolia ERC-20). The rail is opt-in: a
+   * WS2 — chain rail (Sepolia ERC-20). The rail is opt-in: a
    * missing or empty value means the rail is not registered and
    * every profile `chain:sepolia:erc20` falls through to the
    * noop rail. In production all three are required when the

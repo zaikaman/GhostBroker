@@ -12,6 +12,7 @@ import {
 import type { AgentManagementService } from "./agent.service.js";
 import type { InstitutionManagementService } from "./institution.service.js";
 import type { TenantDelegationSigner } from "./tenant-delegation-signer.js";
+import type { InstitutionApprovalService } from "./institution-approval.service.js";
 
 const LOG_TAIL_BYTES = 8192;
 const HOSTED_SESSION_BUFFER_SECONDS = 15 * 60;
@@ -46,6 +47,7 @@ export interface ChildProcessHostedAgentServiceOptions {
   agentService: AgentManagementService;
   institutionService: Required<Pick<InstitutionManagementService, "getInstitution">>;
   tenantSigner: TenantDelegationSigner;
+  institutionApprovalService?: InstitutionApprovalService;
   runner?: readonly string[];
   hostedScript?: string;
 }
@@ -58,6 +60,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
   private readonly agentService: AgentManagementService;
   private readonly institutionService: Required<Pick<InstitutionManagementService, "getInstitution">>;
   private readonly tenantSigner: TenantDelegationSigner;
+  private readonly institutionApprovalService: InstitutionApprovalService | undefined;
   private readonly runner: readonly string[];
   private readonly hostedScript: string | undefined;
 
@@ -68,11 +71,13 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     this.agentService = options.agentService;
     this.institutionService = options.institutionService;
     this.tenantSigner = options.tenantSigner;
+    this.institutionApprovalService = options.institutionApprovalService;
     this.runner = options.runner ?? ["npm", "run"];
     this.hostedScript = options.hostedScript;
   }
 
   public async createHostedAgent(input: CreateHostedAgentRequest): Promise<HostedAgentRecord> {
+    await this.assertSettlementReady(input.institutionId);
     const maxSpendUsd = Math.ceil(
       input.config.referencePrice *
         input.config.quantityMax *
@@ -139,6 +144,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
   }
 
   public async startHostedAgent(id: string, institutionId: string): Promise<HostedAgentRecord> {
+    await this.assertSettlementReady(institutionId);
     const record = await this.getHostedAgent(id, institutionId);
     const existingState = this.runtimeStates.get(id);
     if (existingState?.child && existingState.child.exitCode === null) {
@@ -214,11 +220,13 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       return this.getHostedAgent(id, institutionId);
     }
 
-    if (state.child && state.child.exitCode === null) {
-      state.child.kill("SIGTERM");
+    const child = state.child;
+    if (child && child.exitCode === null) {
+      child.kill("SIGTERM");
       await new Promise((resolveStop) => setTimeout(resolveStop, 1000));
-      if (state.child.exitCode === null) {
-        state.child.kill("SIGKILL");
+      const currentChild = state.child;
+      if (currentChild && currentChild.exitCode === null) {
+        currentChild.kill("SIGKILL");
       }
     }
 
@@ -277,6 +285,35 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       lastError: state.lastError,
       logTail: state.logTail,
     };
+  }
+
+  private async assertSettlementReady(institutionId: string): Promise<void> {
+    const institution = await this.institutionService.getInstitution(institutionId);
+
+    if (institution.settlementProfileRef !== "chain:sepolia:erc20") {
+      return;
+    }
+
+    if (!this.institutionApprovalService) {
+      throw new PublicError(
+        "service_unavailable",
+        503,
+        undefined,
+        "Settlement readiness checks are unavailable. Hosted agents cannot launch until deposit wallet approval status can be verified.",
+      );
+    }
+
+    const depositStatus = await this.institutionApprovalService.getDepositStatus(institutionId);
+    if (depositStatus.approved.wbtc && depositStatus.approved.usdc) {
+      return;
+    }
+
+    throw new PublicError(
+      "validation_failed",
+      422,
+      undefined,
+      "Approve the settlement relayer for both WBTC and USDC in Settings before deploying or starting hosted agents.",
+    );
   }
 
   private computeHostedSessionTtlMs(config: HostedAgentConfig): number {
