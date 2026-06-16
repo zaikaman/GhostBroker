@@ -223,6 +223,10 @@ export class SepoliaErc20Rail implements SettlementRail {
     string,
     { txHash: string; from: Address }
   >();
+  private readonly reverseCache = new Map<
+    string,
+    { request: RelayerSettleRequest; from: Address }
+  >();
 
   public constructor(config: SepoliaErc20RailConfig, deps: SepoliaErc20RailDeps = {}) {
     if (!/^0x[0-9a-f]{64}$/iu.test(config.relayerPrivateKey)) {
@@ -337,6 +341,10 @@ export class SepoliaErc20Rail implements SettlementRail {
       txHash,
       from: broadcastedFrom,
     });
+    this.reverseCache.set(txHash, {
+      request: settleRequest,
+      from: broadcastedFrom,
+    });
     // Best-effort confirmation wait; the reconciler (WS4) is
     // the production authority on confirm-timeout / re-org
     // recovery. The rail returns the broadcast tx hash
@@ -356,23 +364,24 @@ export class SepoliaErc20Rail implements SettlementRail {
     tradeRef: string,
     _reason: string,
   ): Promise<RailSettlementProof> {
-    // WS2.5: real `writeContract` against the relayer's
-    // `reverse(...)` ABI. Production: the reverser endpoint
-    // (WS4.2) calls this with the original settlement
-    // arguments. The v1 test path passes the tradeRef
-    // verbatim; a full reverser integration test asserts the
-    // on-chain state.
+    const cached = this.reverseCache.get(tradeRef);
+    if (!cached) {
+      throw new Error(
+        `SepoliaErc20Rail.reverse: no cached settlement details for trade ${tradeRef}.`,
+      );
+    }
+
+    const reverseResult = await this.relayerSigner.signReverse(
+      cached.request,
+      this.relayerContractAddress,
+    );
+    await this.waitForConfirmation(reverseResult.txHash);
+
     return {
       railId: this.id,
-      railTradeRef: tradeRef,
-      // WS2.5: the chain rail's v1 reverse is a
-      // typed "not yet implemented" stub. The on-chain
-      // signer address is unknown (no broadcast
-      // happened); surface `null` so the settlement
-      // service does not emit a TEE-attestation event
-      // for the un-broadcast reverse.
-      railSignerAddress: null,
-      railState: "failed",
+      railTradeRef: reverseResult.txHash,
+      railSignerAddress: reverseResult.from,
+      railState: "reversed",
       assetMovements: [],
       observedAt: new Date().toISOString(),
     };

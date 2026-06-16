@@ -83,6 +83,11 @@ export interface RelayerTransactionSigner {
     request: RelayerSettleRequest,
     relayerContractAddress: Address,
   ): Promise<RelayerSettleResult>;
+
+  signReverse(
+    request: RelayerSettleRequest,
+    relayerContractAddress: Address,
+  ): Promise<RelayerSettleResult>;
 }
 
 /**
@@ -118,6 +123,34 @@ export class ViemWalletRelayerSigner implements RelayerTransactionSigner {
       chain: this.walletClient.chain ?? null,
       account: this.account,
     });
+    return {
+      txHash,
+      from: this.account.address,
+    };
+  }
+
+  public async signReverse(
+    request: RelayerSettleRequest,
+    relayerContractAddress: Address,
+  ): Promise<RelayerSettleResult> {
+    const txHash = await this.walletClient.writeContract({
+      abi: RelayerAbi,
+      address: relayerContractAddress,
+      functionName: "reverse",
+      args: [
+        request.outcomeRef,
+        request.encryptedTradeFieldsRef,
+        request.assetToken,
+        request.paymentToken,
+        request.buyerDeposit,
+        request.sellerDeposit,
+        request.assetAmount,
+        request.paymentAmount,
+      ],
+      chain: this.walletClient.chain ?? null,
+      account: this.account,
+    });
+
     return {
       txHash,
       from: this.account.address,
@@ -202,6 +235,35 @@ export class TeeAttestedRelayerSigner implements RelayerTransactionSigner {
       abi: RelayerAbi,
       address: relayerContractAddress,
       functionName: "settle",
+      args: [
+        request.outcomeRef,
+        request.encryptedTradeFieldsRef,
+        request.assetToken,
+        request.paymentToken,
+        request.buyerDeposit,
+        request.sellerDeposit,
+        request.assetAmount,
+        request.paymentAmount,
+      ],
+      chain: this.walletClient.chain ?? null,
+      account,
+    });
+
+    return {
+      txHash,
+      from: account.address,
+    };
+  }
+
+  public async signReverse(
+    request: RelayerSettleRequest,
+    relayerContractAddress: Address,
+  ): Promise<RelayerSettleResult> {
+    const account = privateKeyToAccount(this.tenantPrivateKey);
+    const txHash = await this.walletClient.writeContract({
+      abi: RelayerAbi,
+      address: relayerContractAddress,
+      functionName: "reverse",
       args: [
         request.outcomeRef,
         request.encryptedTradeFieldsRef,

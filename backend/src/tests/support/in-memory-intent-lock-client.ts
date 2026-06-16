@@ -13,6 +13,7 @@ export interface IntentLockCall {
   method:
     | "create"
     | "delete"
+    | "setAmount"
     | "findOlderThan"
     | "findByInstitution";
   parameters?: unknown;
@@ -110,6 +111,29 @@ export class InMemoryIntentLockClient {
     this.calls.push({
       method: "delete",
       parameters: { intentHandle },
+      result: true,
+    });
+    return true;
+  }
+
+  public async setAmount(
+    intentHandle: string,
+    amount: number,
+  ): Promise<boolean> {
+    const row = this.rows.find((candidate) => candidate.intent_handle === intentHandle);
+    if (!row) {
+      this.calls.push({
+        method: "setAmount",
+        parameters: { intentHandle, amount },
+        result: false,
+      });
+      return false;
+    }
+
+    row.amount = amount.toString();
+    this.calls.push({
+      method: "setAmount",
+      parameters: { intentHandle, amount },
       result: true,
     });
     return true;

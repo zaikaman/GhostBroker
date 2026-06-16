@@ -104,26 +104,21 @@ export class T3MatchContractClient implements MatchContractClient {
     return {
       outcomeRef: requireOpaque(response.body.outcome_ref, "outcome_ref"),
       executionRef: response.body.execution_ref ?? `t3exec_${randomUUID()}`,
-      buyerInstitutionId: requireOpaque(
-        response.body.buyer_institution_id,
-        "buyer_institution_id",
-      ),
-      sellerInstitutionId: requireOpaque(
-        response.body.seller_institution_id,
-        "seller_institution_id",
-      ),
+      // The TEE match contract intentionally returns empty strings
+      // for the buyer/seller institution ids and authority refs:
+      // it does not have that context inside the enclave. The
+      // orchestrator already verified both agents and stamps the
+      // actual values from its pending-intent queue before
+      // settlement. Requiring these to be non-empty here would make
+      // every real T3-backed match evaluation fail.
+      buyerInstitutionId: response.body.buyer_institution_id ?? "",
+      sellerInstitutionId: response.body.seller_institution_id ?? "",
       encryptedTradeFieldsRef: requireOpaque(
         response.body.encrypted_trade_fields_ref,
         "encrypted_trade_fields_ref",
       ),
-      buyerAuthorityRef: requireOpaque(
-        response.body.buyer_authority_ref,
-        "buyer_authority_ref",
-      ),
-      sellerAuthorityRef: requireOpaque(
-        response.body.seller_authority_ref,
-        "seller_authority_ref",
-      ),
+      buyerAuthorityRef: response.body.buyer_authority_ref ?? "",
+      sellerAuthorityRef: response.body.seller_authority_ref ?? "",
       expiresAt: requireOpaque(response.body.expires_at, "expires_at"),
       status: response.body.status ?? "matched",
     };

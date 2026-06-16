@@ -41,10 +41,21 @@ interface DeleteQuery {
   };
 }
 
+interface UpdateResult<TResult> {
+  select(columns?: string): Promise<{ data: TResult[] | null; error: Error | null }>;
+}
+
+interface UpdateQuery<TResult> {
+  update(value: Record<string, unknown>): {
+    eq(column: string, value: string): UpdateResult<TResult>;
+  };
+}
+
 interface SupabaseIntentLockClient {
   from(table: "intent_locks"): InsertQuery<IntentLockRecord> &
     SelectQuery<IntentLockRecord> &
-    DeleteQuery;
+    DeleteQuery &
+    UpdateQuery<IntentLockRecord>;
 }
 
 // ─── Repository ──────────────────────────────────────────────────────────
@@ -85,6 +96,13 @@ export interface IntentLockRepository {
     institutionId: string,
     agentDid?: string,
   ): Promise<readonly IntentLock[]>;
+
+  /**
+   * Update the remaining reserved amount for an existing lock row.
+   * Used when a partial fill leaves the intent pending with a
+   * reduced quantity.
+   */
+  setAmount(intentHandle: string, amount: number): Promise<boolean>;
 }
 
 export class SupabaseIntentLockRepository implements IntentLockRepository {
@@ -183,5 +201,24 @@ export class SupabaseIntentLockRepository implements IntentLockRepository {
     }
 
     return data.map(intentLockFromRecord);
+  }
+
+  public async setAmount(
+    intentHandle: string,
+    amount: number,
+  ): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("intent_locks")
+      .update({
+        amount: amount.toString(),
+      })
+      .eq("intent_handle", intentHandle)
+      .select("*");
+
+    if (error) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
+
+    return Array.isArray(data) && data.length > 0;
   }
 }

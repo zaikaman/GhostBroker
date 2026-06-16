@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import type { Address, PublicClient, WalletClient } from "viem";
 import type { SettlementCommand } from "@ghostbroker/t3-enclave";
 import { SepoliaErc20Rail } from "../../services/settlement-rails/chain-sepolia-rail.js";
@@ -184,11 +184,17 @@ describe("SepoliaErc20Rail (WS2 unit)", () => {
     ).rejects.toThrow(/identical/i);
   });
 
-  it("reverse() returns a typed 'failed' state (WS2 v1 has no reversal path)", async () => {
+  it("reverse() throws when there is no cached settlement for the trade", async () => {
+    // The chain rail can only reverse a settlement it actually
+    // dispatched (it caches the original settle arguments so it can
+    // replay them as a reverse call). A reverse without a prior
+    // dispatch must surface as an error so the settlement service's
+    // compensation path doesn't silently report a reversal that never
+    // happened.
     const rail = makeRail();
-    const result = await rail.reverse("0xabc", "test reason");
-    expect(result.railId).toBe("chain:sepolia:erc20");
-    expect(result.railState).toBe("failed");
-    expect(result.assetMovements).toEqual([]);
+    await expect(rail.reverse("0xabc", "test reason")).rejects.toThrow(
+      /no cached settlement details/i,
+    );
   });
 });
+

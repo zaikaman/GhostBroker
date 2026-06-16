@@ -161,6 +161,55 @@ export class MatchingOrchestrator {
   }
 
   /**
+   * Update the durable lock ref after a partial fill leaves the
+   * intent pending with a reduced reserved amount.
+   */
+  private updateLockRefFor(intent: PendingIntent, amount: number): void {
+    if (!this.intentLockRepository) {
+      return;
+    }
+    void this.intentLockRepository.setAmount(intent.intentHandle, amount).catch(
+      (error: unknown) => {
+        console.error(
+          `[MatchingOrchestrator] Failed to update lock ref for ${intent.intentHandle}:`,
+          error,
+        );
+      },
+    );
+  }
+
+  /**
+   * Apply a successful fill to an intent. Full fills remove the
+   * queue entry and delete the durable lock ref. Partial fills keep
+   * the intent pending with the unfilled quantity and a reduced
+   * durable lock ref.
+   *
+   * Balance locks are NOT touched here: the settlement RPC already
+   * released exactly the matched portion of each side's reservation
+   * via the buyerLockedAmount / sellerLockedAmount it was passed.
+   * After that release the DB lock already equals the residual
+   * (originalLock - matchedPortion), so this method only keeps the
+   * in-memory queue and the durable lock ref in sync with it.
+   */
+  private applyFillToIntent(
+    intent: PendingIntent,
+    matchedQuantity: number,
+  ): void {
+    const remainingQuantity = intent.quantity - matchedQuantity;
+    if (remainingQuantity <= 0) {
+      this.removeIntent(intent);
+      this.deleteLockRefFor(intent);
+      return;
+    }
+
+    intent.quantity = remainingQuantity;
+    const remainingLockAmount = intent.side === "buy"
+      ? remainingQuantity * intent.price
+      : remainingQuantity;
+    this.updateLockRefFor(intent, remainingLockAmount);
+  }
+
+  /**
    * Called after an intent has been sealed AND the balance lock
    * has been acquired by the service. Adds the intent to the
    * pending queue and attempts to find a match.
@@ -194,6 +243,13 @@ export class MatchingOrchestrator {
       const matchPrice = Math.round(
         (buyIntent.price + sellIntent.price) / 2,
       );
+
+      // A trade may only execute when the buyer's bid crosses the
+      // seller's ask. Without this guard, the midpoint pricing above
+      // would execute trades that neither side actually agreed to.
+      if (buyIntent.price < sellIntent.price) {
+        continue;
+      }
 
       // Pre-match check 1: Verify buyer has sufficient balance
       if (this.portfolioService) {
@@ -308,8 +364,19 @@ export class MatchingOrchestrator {
       });
 
       if (outcome.status === "matched") {
+        // The TEE match contract cannot see the buyer/seller
+        // institution ids or authority refs, so it returns empty
+        // strings for them. The queued intents hold the canonical
+        // values that were already verified during submit.
+        const normalizedOutcome = {
+          ...outcome,
+          buyerInstitutionId: buyIntent.institutionId,
+          sellerInstitutionId: sellIntent.institutionId,
+          buyerAuthorityRef: buyIntent.authorityRef,
+          sellerAuthorityRef: sellIntent.authorityRef,
+        };
         // Generate receipt ciphertexts deterministically from the outcome
-        const receiptBase = `t3receipt.${outcome.outcomeRef}.${outcome.executionRef}`;
+        const receiptBase = `t3receipt.${normalizedOutcome.outcomeRef}.${normalizedOutcome.executionRef}`;
 
         // WS2: resolve per-side settlement profile refs (if the
         // orchestrator has an institution-config resolver). The
@@ -328,7 +395,7 @@ export class MatchingOrchestrator {
         }
 
         const request: SettlementExecutionRequest = {
-          matchOutcome: outcome,
+          matchOutcome: normalizedOutcome,
           buyerAgentDid: buyIntent.agentDid,
           sellerAgentDid: sellIntent.agentDid,
           buyerDelegationCredential: buyIntent.delegationCredential,
@@ -341,23 +408,28 @@ export class MatchingOrchestrator {
           assetCode: buyIntent.assetCode,
           quantity: matchQuantity,
           executionPrice: matchPrice,
+          // Release exactly the matched portion of each side's
+          // reservation. Buyer locks are at the original bid price,
+          // seller locks are pure quantity.
+          buyerLockedAmount: matchQuantity * buyIntent.price,
+          sellerLockedAmount: matchQuantity,
           buyerSettlementProfileRef,
           sellerSettlementProfileRef,
           receipts: [
             {
               institutionId: buyIntent.institutionId,
               receiptCiphertext: `${receiptBase}.buyer`,
-              receiptHash: `sha256:${outcome.outcomeRef}:buyer`,
+              receiptHash: `sha256:${normalizedOutcome.outcomeRef}:buyer`,
               keyVersion: "match-v1",
-              t3AttestationRef: outcome.executionRef,
+              t3AttestationRef: normalizedOutcome.executionRef,
               accessScope: "buyer",
             },
             {
               institutionId: sellIntent.institutionId,
               receiptCiphertext: `${receiptBase}.seller`,
-              receiptHash: `sha256:${outcome.outcomeRef}:seller`,
+              receiptHash: `sha256:${normalizedOutcome.outcomeRef}:seller`,
               keyVersion: "match-v1",
-              t3AttestationRef: outcome.executionRef,
+              t3AttestationRef: normalizedOutcome.executionRef,
               accessScope: "seller",
             },
           ],
@@ -365,22 +437,17 @@ export class MatchingOrchestrator {
 
         await this.settlementService.executeSettlement(
           request,
-          `${outcome.outcomeRef}:${randomUUID()}`,
+          `${normalizedOutcome.outcomeRef}:${randomUUID()}`,
         );
 
-        // Capture refs to the matched intents before we mutate
-        // the queue — we need them to delete the durable lock
-        // refs. Settlement itself releases the `portfolios.locked`
-        // amount implicitly via the SQL clamp in
-        // `portfolio_update_balance`; here we just need to
-        // remove the rows from `intent_locks` so the janitor
-        // does not see them.
-        this.deleteLockRefFor(intent);
-        this.deleteLockRefFor(other);
-
-        // Remove matched intents from queue
-        this.pendingIntents.splice(i, 1);
-        this.removeIntent(other);
+        // Apply the matched quantity to each side. A fully filled
+        // intent is removed and its durable lock ref deleted; a
+        // partially filled intent stays queued with a reduced
+        // quantity and reduced lock ref. The settlement RPC already
+        // released the matched portion of each balance lock, so we
+        // do not touch balances here — we only update queue/ref state.
+        this.applyFillToIntent(buyIntent, matchQuantity);
+        this.applyFillToIntent(sellIntent, matchQuantity);
         return;
       }
     }

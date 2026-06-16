@@ -61,4 +61,70 @@ describe("match contract client", () => {
       correlation_ref: request.correlationRef,
     });
   });
+
+  it("accepts a matched outcome whose institution/authority fields are empty", async () => {
+    // The TEE matching contract cannot see the buyer/seller
+    // institution ids or authority refs, so it returns empty
+    // strings for them (contracts/matching-policy/src/matching.rs).
+    // The client must NOT reject this — the orchestrator stamps the
+    // canonical values from its verified pending-intent queue before
+    // settlement. Requiring them here made every real match throw.
+    class EmptyFieldsNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            outcome_ref: "match_outcome_empty",
+            execution_ref: "t3exec_empty",
+            buyer_institution_id: "",
+            seller_institution_id: "",
+            encrypted_trade_fields_ref: "encrypted_trade_fields_empty",
+            buyer_authority_ref: "",
+            seller_authority_ref: "",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "matched",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new EmptyFieldsNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).resolves.toMatchObject({
+      outcomeRef: "match_outcome_empty",
+      buyerInstitutionId: "",
+      sellerInstitutionId: "",
+      buyerAuthorityRef: "",
+      sellerAuthorityRef: "",
+      status: "matched",
+    });
+  });
+
+  it("still rejects a response missing the opaque outcome ref", async () => {
+    // The genuinely-required opaque fields (outcome_ref,
+    // encrypted_trade_fields_ref, expires_at) must still throw when
+    // absent — relaxing the institution/authority fields must not
+    // weaken these.
+    class MissingOutcomeRefNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            execution_ref: "t3exec_x",
+            encrypted_trade_fields_ref: "fields_x",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "matched",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new MissingOutcomeRefNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).rejects.toThrow(/outcome_ref/);
+  });
 });

@@ -172,6 +172,8 @@ export interface SettlementExecutionRequest {
   assetCode: string;
   quantity: number;
   executionPrice: number;
+  buyerLockedAmount?: number;
+  sellerLockedAmount?: number;
   /**
    * WS2: per-side settlement profile. The settlement service
    * looks up the rail via the dispatcher keyed by the buyer's
@@ -367,6 +369,8 @@ export class SettlementService {
     request: SettlementExecutionRequest,
     correlationRef: string,
   ): Promise<CompletedTrade> {
+    let settlementProfileRef: SettlementProfileRef | undefined;
+    let railProof: RailSettlementProof | undefined;
     this.publish(
       request.matchOutcome.buyerInstitutionId,
       "settlement_pending",
@@ -401,7 +405,7 @@ export class SettlementService {
       // legacy callers) or the institution lookup is absent
       // (test paths), the service falls back to the noop rail's
       // hard-coded default.
-      const settlementProfileRef: SettlementProfileRef =
+      settlementProfileRef =
         (await this.resolveEffectiveProfile(
           request.buyerSettlementProfileRef,
           request.sellerSettlementProfileRef,
@@ -422,22 +426,23 @@ export class SettlementService {
       // WS4: track rail dispatch latency so the
       // `rail_settled` telemetry event can graph p50 / p99.
       const railDispatchStartedAt = Date.now();
-      const { proof: railProof } = await this.railDispatcher.dispatch(
+      const { proof } = await this.railDispatcher.dispatch(
         settlementProfileRef,
         command,
         plaintext,
         railContext,
       );
+      railProof = proof;
       const railLatencyMs = Date.now() - railDispatchStartedAt;
       this.publishRailSettled(
         request.matchOutcome.buyerInstitutionId,
-        railProof,
+        proof,
         correlationRef,
         railLatencyMs,
       );
       this.publishRailSettled(
         request.matchOutcome.sellerInstitutionId,
-        railProof,
+        proof,
         correlationRef,
         railLatencyMs,
       );
@@ -451,11 +456,14 @@ export class SettlementService {
             assetCode: request.assetCode,
             quantity: request.quantity,
             executionPrice: request.executionPrice,
-            buyerLockedAmount: request.quantity * request.executionPrice,
-            sellerLockedAmount: request.quantity,
+            buyerLockedAmount:
+              request.buyerLockedAmount ??
+              request.quantity * request.executionPrice,
+            sellerLockedAmount:
+              request.sellerLockedAmount ?? request.quantity,
           },
           receipts: request.receipts,
-          railProof,
+          railProof: proof,
         });
       await this.emitAudit("settlement", command, correlationRef);
 
@@ -506,6 +514,15 @@ export class SettlementService {
 
       return completedTradeFromRecord(persisted.completedTrade, receiptIds);
     } catch (error) {
+      if (settlementProfileRef && railProof) {
+        await this.compensateRailDispatch(
+          settlementProfileRef,
+          railProof,
+          request.matchOutcome.buyerInstitutionId,
+          request.matchOutcome.sellerInstitutionId,
+          correlationRef,
+        );
+      }
       this.publishFailure(request, correlationRef, error);
       throw this.toPublicSettlementError(error);
     }
@@ -556,6 +573,24 @@ export class SettlementService {
         railTradeRef: proof.railTradeRef,
       },
       ...(latencyMs !== undefined ? { latencyMs } : {}),
+    });
+  }
+
+  private publishRailReversed(
+    institutionId: string,
+    proof: RailSettlementProof,
+    correlationRef: string,
+  ): void {
+    this.telemetryBus.publish({
+      institutionId,
+      type: "telemetry.processing.changed",
+      phase: "rail_reversed",
+      severity: "warning",
+      correlationRef,
+      railProofRef: {
+        railId: proof.railId,
+        railTradeRef: proof.railTradeRef,
+      },
     });
   }
 
@@ -682,6 +717,27 @@ export class SettlementService {
 
     this.publish(request.matchOutcome.buyerInstitutionId, phase, correlationRef);
     this.publish(request.matchOutcome.sellerInstitutionId, phase, correlationRef);
+  }
+
+  private async compensateRailDispatch(
+    settlementProfileRef: string,
+    proof: RailSettlementProof,
+    buyerInstitutionId: string,
+    sellerInstitutionId: string,
+    correlationRef: string,
+  ): Promise<void> {
+    try {
+      const reversed = await this.railDispatcher
+        .resolve(settlementProfileRef)
+        .reverse(proof.railTradeRef, "post_dispatch_persist_failure");
+      this.publishRailReversed(buyerInstitutionId, reversed, correlationRef);
+      this.publishRailReversed(sellerInstitutionId, reversed, correlationRef);
+    } catch (reverseError) {
+      console.error(
+        `[SettlementService] Failed to compensate rail dispatch for ${proof.railTradeRef}:`,
+        reverseError,
+      );
+    }
   }
 
   private toPublicSettlementError(error: unknown): PublicError {
