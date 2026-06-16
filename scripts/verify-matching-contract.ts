@@ -59,6 +59,7 @@ async function main(): Promise<void> {
   const apiKey = env.T3N_API_KEY;
   const networkEnv = env.T3N_ENV ?? "testnet";
   const networkUrl = env.T3_NETWORK_URL;
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.2.0";
   if (!apiKey) {
     throw new Error("T3N_API_KEY is missing from backend/.env");
   }
@@ -87,7 +88,7 @@ async function main(): Promise<void> {
     t3n,
   });
 
-  console.log(`── Verifying matching contract on tenant ${tenantDid} ──\n`);
+  console.log(`── Verifying matching contract v${version} on tenant ${tenantDid} ──\n`);
 
   // Call seal-intent.
   const sealInput = {
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
   console.log("→ calling seal-intent...");
   const sealResult = await tenant.contracts
     .execute("matching", {
-      version: "0.1.0",
+      version,
       functionName: "seal-intent",
       input: { input: JSON.stringify(sealInput) },
     })
@@ -115,32 +116,79 @@ async function main(): Promise<void> {
 
   console.log();
 
-  // Call evaluate-match.
-  const matchInput = {
+  // Call evaluate-match with a CROSSING pair: buyer bids 51000,
+  // seller asks 49000 → the enclave should return `matched` with
+  // matched_quantity = min(10, 4) = 4 and execution_price = midpoint
+  // = 50000. Prices and quantities travel as decimal strings for
+  // exact integer transport (see contracts/matching-policy/
+  // src/matching.rs).
+  const crossInput = {
     buy_intent_handle: "intent_verify_buy_abc",
     sell_intent_handle: "intent_verify_sell_def",
-    correlation_ref: "verify-match-corr-" + Date.now(),
+    correlation_ref: "verify-match-cross-" + Date.now(),
+    asset_code: "WBTC",
+    buy_price: "51000",
+    buy_quantity: "10",
+    sell_price: "49000",
+    sell_quantity: "4",
   };
 
-  console.log("→ calling evaluate-match...");
-  const matchResult = await tenant.contracts
+  console.log("→ calling evaluate-match (crossing pair)...");
+  const crossResult = await tenant.contracts
     .execute("matching", {
-      version: "0.1.0",
+      version,
       functionName: "evaluate-match",
-      input: { input: JSON.stringify(matchInput) },
+      input: { input: JSON.stringify(crossInput) },
     })
     .catch((err: unknown) => {
       console.error(
-        `✗ evaluate-match FAILED: ${err instanceof Error ? err.message : err}`,
+        `✗ evaluate-match (cross) FAILED: ${err instanceof Error ? err.message : err}`,
       );
       return null;
     });
-  if (matchResult) {
+  if (crossResult) {
     console.log(
-      "✓ evaluate-match response:",
-      JSON.stringify(matchResult, null, 2),
+      "✓ evaluate-match (cross) response:",
+      JSON.stringify(crossResult, null, 2),
     );
   }
+
+  console.log();
+
+  // Call evaluate-match with a NON-CROSSING pair: buyer bids 40000,
+  // seller asks 50000 → the enclave should return `no_match` with
+  // empty fill fields.
+  const noCrossInput = {
+    buy_intent_handle: "intent_verify_buy_nox",
+    sell_intent_handle: "intent_verify_sell_nox",
+    correlation_ref: "verify-match-nocross-" + Date.now(),
+    asset_code: "WBTC",
+    buy_price: "40000",
+    buy_quantity: "10",
+    sell_price: "50000",
+    sell_quantity: "10",
+  };
+
+  console.log("→ calling evaluate-match (non-crossing pair)...");
+  const noCrossResult = await tenant.contracts
+    .execute("matching", {
+      version,
+      functionName: "evaluate-match",
+      input: { input: JSON.stringify(noCrossInput) },
+    })
+    .catch((err: unknown) => {
+      console.error(
+        `✗ evaluate-match (no-cross) FAILED: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    });
+  if (noCrossResult) {
+    console.log(
+      "✓ evaluate-match (no-cross) response:",
+      JSON.stringify(noCrossResult, null, 2),
+    );
+  }
+
 
   console.log();
   console.log("── Done ──");

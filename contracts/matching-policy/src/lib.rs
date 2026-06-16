@@ -3,16 +3,18 @@
 //! Two exports:
 //!   - `seal-intent`    — mints an opaque intent handle + execution ref
 //!                        for a sealed blind intent.
-//!   - `evaluate-match` — produces an opaque match outcome + required
-//!                        authority refs for a (buy, sell) intent pair.
+//!   - `evaluate-match` — decides whether a (buy, sell) intent pair
+//!                        crosses, and if so at what fill quantity and
+//!                        execution price, then returns an opaque match
+//!                        outcome the orchestrator settles on.
 //!
-//! Both functions are pure: deterministic SHA-256 of the inputs produces
-//! the opaque handles, and a fresh UUID v4 fills the execution-ref
-//! slot. The TEE surface gives the orchestrator a tamper-evident
-//! execution environment (the dispatcher verifies the WASM at seal
-//! time) without putting real matching logic inside the TEE — that
-//! stays in the GhostBroker orchestrator where it has the full
-//! portfolio, settlement, and revocation context.
+//! As of v0.2.0, match authority lives inside the enclave: the caller
+//! sends both sides' asset code, prices, and quantities, and the
+//! contract returns `status: "matched"` with `matched_quantity` and
+//! `execution_price` only when the buyer's bid crosses the seller's
+//! ask. The backend orchestrator is a verifier/orchestrator around
+//! the enclave outcome, not the price matcher. The functions stay
+//! pure and deterministic — no new enclave state is required.
 
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
@@ -37,7 +39,7 @@ wit_bindgen::generate!({
 
 mod matching;
 
-pub const CONTRACT_VERSION: &str = "0.1.0";
+pub const CONTRACT_VERSION: &str = "0.2.0";
 
 struct Component;
 
@@ -109,6 +111,20 @@ pub struct EvaluateMatchInput {
     pub buy_intent_handle: String,
     pub sell_intent_handle: String,
     pub correlation_ref: String,
+    /// Shared traded asset code (e.g. "WBTC"). Both sides must be on
+    /// the same instrument; the orchestrator already filters this, but
+    /// the enclave checks it too so a mismatch is a `no_match`, not a
+    /// silent cross-asset fill.
+    pub asset_code: String,
+    /// Buy/sell prices and quantities, carried as decimal strings so
+    /// the contract parses them into exact `u128` integers. JSON
+    /// numbers may be IEEE-754 doubles on some hosts; rounding them
+    /// would make the midpoint non-deterministic, so the wire form
+    /// is always a string.
+    pub buy_price: String,
+    pub buy_quantity: String,
+    pub sell_price: String,
+    pub sell_quantity: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,6 +138,14 @@ pub struct EvaluateMatchOutput {
     pub seller_authority_ref: String,
     pub expires_at: String,
     pub status: String,
+    /// Filled quantity = `min(buy_quantity, sell_quantity)` when the
+    /// pair crosses. Emitted as a decimal string so the backend
+    /// parses it without float drift. Empty on `no_match`.
+    pub matched_quantity: String,
+    /// Execution price = deterministic midpoint of the buy and sell
+    /// prices, rounded half-up on the smallest unit. Emitted as a
+    /// decimal string. Empty on `no_match`.
+    pub execution_price: String,
 }
 
 // ─── Shared helpers ───

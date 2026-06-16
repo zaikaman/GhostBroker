@@ -89,15 +89,22 @@ stale.
   stores the actual settlement fields under this ref.
 - `expires_at` — now + 300s, formatted ISO 8601 UTC. Matches the
   orchestrator's default intent TTL.
-- `status` — always `"matched"`. The TEE doesn't actually
-  validate a match — the orchestrator does, before calling us.
-  The TEE's job is to mint a tamper-evident opaque handle for
-  the outcome.
+- `status` — `"matched"` when the buyer's bid crosses the seller's
+  ask (`buy_price >= sell_price`) and all price/quantity fields are
+  valid positive integers; `"no_match"` otherwise. As of v0.2.0 the
+  enclave is the match authority.
+- `matched_quantity` — `min(buy_quantity, sell_quantity)` on a
+  `matched` outcome (decimal string); empty on `no_match`.
+- `execution_price` — deterministic midpoint `(buy_price +
+  sell_price) / 2` rounded half-up (decimal string); empty on
+  `no_match`.
 
-The contract is intentionally non-validating. All policy checks
-(admit VC, authority scope, balance lock) happen in the
-GhostBroker orchestrator *before* it calls us. The TEE provides
-a verifiable execution surface, not a policy engine.
+The backend orchestrator is a verifier/orchestrator around the
+enclave outcome: it filters obvious non-candidates (same
+institution, same side, different asset) locally, then trusts the
+enclave's `matched`/`no_match` decision and the returned
+`matched_quantity` / `execution_price` for settlement. It never
+recomputes the crossing, fill, or price locally.
 
 ## Adding a new contract
 

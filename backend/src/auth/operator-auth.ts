@@ -10,6 +10,15 @@ export interface OperatorAuthContext {
   institutionId: string;
   did?: string;
   walletAddress?: string;
+  /**
+   * The chain-rail settlement/deposit wallet for the institution.
+   * This is the balance source of truth for chain-rail
+   * institutions: the address settle() pays out of, distinct
+   * from walletAddress (the login wallet). Only present when the
+   * session was issued for a chain-rail institution with a derived
+   * deposit address.
+   */
+  depositAddress?: string;
 }
 
 export const operatorAuthLocalKey = "operatorAuth";
@@ -82,6 +91,9 @@ export function operatorAuthMiddleware(
 
     if (claims.walletAddress) {
       authContext.walletAddress = claims.walletAddress;
+    }
+    if (claims.depositAddress) {
+      authContext.depositAddress = claims.depositAddress;
     }
 
     response.locals[operatorAuthLocalKey] = authContext;

@@ -62,12 +62,20 @@ class StaticBlindIntentClient implements BlindIntentClient {
 class MatchedClient implements MatchContractClient {
   public calls = 0;
   public async evaluateMatch(
-    _request: MatchEvaluationRequest,
+    request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
-    void _request;
     this.calls++;
-    // The TEE returns empty buyer/seller fields; the orchestrator
-    // normalizes them from its queue before settlement.
+    // Mirrors the real enclave's match-authoritative logic
+    // (contracts/matching-policy/src/matching.rs): fill quantity is
+    // min(buy, sell), execution price is the midpoint of bid/ask.
+    // The orchestrator must use these values verbatim for
+    // settlement — it no longer computes them locally.
+    const buyQty = Number(request.buyQuantity);
+    const sellQty = Number(request.sellQuantity);
+    const buyPrice = Number(request.buyPrice);
+    const sellPrice = Number(request.sellPrice);
+    const matchedQuantity = Math.min(buyQty, sellQty);
+    const executionPrice = Math.round((buyPrice + sellPrice) / 2);
     return {
       status: "matched",
       outcomeRef: `outcome_${this.calls}`,
@@ -78,6 +86,8 @@ class MatchedClient implements MatchContractClient {
       buyerAuthorityRef: "",
       sellerAuthorityRef: "",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      matchedQuantity,
+      executionPrice,
     };
   }
 }
@@ -148,6 +158,8 @@ class NoMatchClient implements MatchContractClient {
       buyerAuthorityRef: "",
       sellerAuthorityRef: "",
       expiresAt: new Date(0).toISOString(),
+      matchedQuantity: 0,
+      executionPrice: 0,
     };
   }
 }
@@ -216,9 +228,12 @@ describe("matching orchestrator - fills and crossing", () => {
     );
     await new Promise((r) => setTimeout(r, 30));
 
-    // The TEE match contract was never even consulted: the
-    // crossing guard short-circuits first.
-    expect(matchClient.calls).toBe(0);
+    // Match authority now lives in the enclave: the orchestrator
+    // consults it for the candidate pair instead of short-circuiting
+    // on a local crossing guard. The enclave returns no_match (the
+    // bid does not cross the ask), so no settlement runs and both
+    // intents stay pending.
+    expect(matchClient.calls).toBeGreaterThanOrEqual(1);
     expect(orchestrator.pendingCount()).toBe(2);
   });
 
@@ -356,4 +371,120 @@ describe("matching orchestrator - fills and crossing", () => {
     expect(settlement.requests[0]?.buyerDelegationCredential).toEqual(buyerCredential);
     expect(settlement.requests[0]?.sellerDelegationCredential).toEqual(sellerCredential);
     });
+
+  it("uses the enclave-decided matched_quantity and execution_price, not local calculations", async () => {
+    // Match authority lives in the enclave. The orchestrator must
+    // settle on the enclave's matched_quantity / execution_price
+    // verbatim, even when those values differ from a local min() /
+    // midpoint() would have produced. We return fill terms that no
+    // local formula could derive and assert they flow through to
+    // settlement unchanged.
+    const client = new InMemoryPortfolioClient([
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "WBTC", balance: 0 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "USDC", balance: 0 }),
+    ]);
+    const lockClient = new InMemoryIntentLockClient();
+    const settlement = new ForwardingSettlement(client);
+
+    // Local formulas would give qty=min(10,10)=10 and
+    // price=midpoint(50000,50000)=50000. The enclave returns
+    // different authoritative values; the orchestrator must honour
+    // them.
+    const ENCLAVE_QUANTITY = 7;
+    const ENCLAVE_PRICE = 48000;
+    class AuthoritativeClient implements MatchContractClient {
+      public async evaluateMatch(
+        _request: MatchEvaluationRequest,
+      ): Promise<OpaqueMatchOutcome> {
+        return {
+          status: "matched",
+          outcomeRef: "outcome_authoritative",
+          executionRef: "exec_authoritative",
+          buyerInstitutionId: "",
+          sellerInstitutionId: "",
+          encryptedTradeFieldsRef: "fields_authoritative",
+          buyerAuthorityRef: "",
+          sellerAuthorityRef: "",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          matchedQuantity: ENCLAVE_QUANTITY,
+          executionPrice: ENCLAVE_PRICE,
+        };
+      }
+    }
+
+    const { service } = buildStack(
+      client,
+      new AuthoritativeClient(),
+      settlement,
+      lockClient,
+    );
+
+    await service.submitIntent(
+      buildHiddenIntentRequest({
+        institutionId: buyerId,
+        settlementMetadata: { assetCode: "WBTC", side: "buy", quantity: 10, price: 50000 },
+      }),
+      { correlationRef: "corr_auth_buy" },
+    );
+    await service.submitIntent(
+      buildHiddenIntentRequest({
+        institutionId: sellerId,
+        agentDid: "did:t3n:agent:seller-auth",
+        settlementMetadata: { assetCode: "WBTC", side: "sell", quantity: 10, price: 50000 },
+      }),
+      { correlationRef: "corr_auth_sell" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(settlement.requests).toHaveLength(1);
+    const req = settlement.requests[0];
+    expect(req?.quantity).toBe(ENCLAVE_QUANTITY);
+    expect(req?.executionPrice).toBe(ENCLAVE_PRICE);
+    // buyerLockedAmount uses the enclave fill qty at the buyer's
+    // original bid price (the reservation was at bid, not fill).
+    expect(req?.buyerLockedAmount).toBe(ENCLAVE_QUANTITY * 50000);
+    expect(req?.sellerLockedAmount).toBe(ENCLAVE_QUANTITY);
+  });
+
+  it("keeps both intents pending when the enclave returns no_match", async () => {
+    // A no_match outcome leaves both intents queued and never calls
+    // settlement, regardless of the local price/quantity. The
+    // crossing decision is the enclave's, not a local guard.
+    const client = new InMemoryPortfolioClient([
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
+    ]);
+    const lockClient = new InMemoryIntentLockClient();
+    const matchClient = new NoMatchClient();
+    const { service, orchestrator } = buildStack(
+      client,
+      matchClient,
+      { executeSettlement: async () => { throw new Error("must not settle"); } },
+      lockClient,
+    );
+
+    // Even though these prices WOULD cross locally (bid >= ask),
+    // the enclave says no_match, so nothing settles.
+    await service.submitIntent(
+      buildHiddenIntentRequest({
+        institutionId: buyerId,
+        settlementMetadata: { assetCode: "WBTC", side: "buy", quantity: 10, price: 50000 },
+      }),
+      { correlationRef: "corr_nm_buy" },
+    );
+    await service.submitIntent(
+      buildHiddenIntentRequest({
+        institutionId: sellerId,
+        agentDid: "did:t3n:agent:seller-nm",
+        settlementMetadata: { assetCode: "WBTC", side: "sell", quantity: 10, price: 40000 },
+      }),
+      { correlationRef: "corr_nm_sell" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(matchClient.calls).toBeGreaterThanOrEqual(1);
+    expect(orchestrator.pendingCount()).toBe(2);
+  });
 });

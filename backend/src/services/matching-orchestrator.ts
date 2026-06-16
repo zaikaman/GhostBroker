@@ -16,6 +16,20 @@ const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 30 * 1000;
 
 /**
+ * Render a price/quantity as a plain non-negative decimal string for
+ * exact integer transport to the enclave contract. JSON numbers may
+ * serialize with an exponent or trailing float artifacts on some
+ * hosts; the Rust `parse_decimal_u128` only accepts plain digits, so
+ * we round to the nearest integer and stringify. Prices and
+ * quantities in GhostBroker are always whole units (the matching
+ * policy rounds the midpoint the same way), so no fractional
+ * precision is lost.
+ */
+function decimalString(value: number): string {
+  return String(Math.round(value));
+}
+
+/**
  * A balance reservation is the per-intent lock on an institution's
  * available balance. The orchestrator holds the lock while the
  * intent is pending and releases it on cancel, eviction, or
@@ -30,17 +44,27 @@ interface BalanceReservation {
 }
 
 /**
- * Orchestrates intent matching and settlement with pre-match
- * authorization enforcement.
+ * Orchestrates intent matching and settlement around the TEE match
+ * contract, which is the match authority.
  *
- * Before calling the TEE match contract, the orchestrator checks:
+ * The orchestrator only filters obvious non-candidates locally
+ * (same institution, same side, different asset, same handle). The
+ * crossing decision, the matched quantity, and the execution price
+ * are decided by the enclave contract (`evaluate-match` v0.2.0) and
+ * treated as authoritative for settlement — the backend does not
+ * recompute them.
+ *
+ * After the enclave returns `matched`, the orchestrator runs
+ * defensive checks against the enclave-decided fill terms:
  * 1. Buyer has sufficient settlement asset balance (quantity × price)
  * 2. Seller has sufficient asset balance
  * 3. Intent side matches the agent's direction scope (if available)
  * 4. Asset is within the agent's instrument scope (if available)
  * 5. Notional value does not exceed agent's maxNotional (if available)
  *
- * On match, it calls the TEE match contract and triggers settlement.
+ * These are not match authority (that lives in the enclave) — they
+ * guard against settling a trade the institution cannot cover or the
+ * agent is not scoped for. On match, it triggers settlement.
  * Pending intents that expire (TTL) are automatically evicted.
  */
 export class MatchingOrchestrator {
@@ -224,7 +248,12 @@ export class MatchingOrchestrator {
     this.evictExpired();
     this.pendingIntents.push(intent);
 
-    // Try to match against each pending intent from other institutions
+    // Try to match against each pending intent from other institutions.
+    // The orchestrator only filters obvious non-candidates locally
+    // (same institution, same side, different asset, same handle);
+    // the actual crossing decision, fill quantity, and execution
+    // price are decided by the enclave contract and treated as
+    // authoritative for settlement.
     for (let i = 0; i < this.pendingIntents.length; i++) {
       const other = this.pendingIntents[i];
       if (!other) continue;
@@ -233,25 +262,42 @@ export class MatchingOrchestrator {
       if (other.assetCode !== intent.assetCode) continue;
       if (other.side === intent.side) continue;
 
-      // Found a potential counterparty — run pre-match checks
       const buyIntent = intent.side === "buy" ? intent : other;
       const sellIntent = intent.side === "sell" ? intent : other;
-      const matchQuantity = Math.min(
-        buyIntent.quantity,
-        sellIntent.quantity,
-      );
-      const matchPrice = Math.round(
-        (buyIntent.price + sellIntent.price) / 2,
-      );
 
-      // A trade may only execute when the buyer's bid crosses the
-      // seller's ask. Without this guard, the midpoint pricing above
-      // would execute trades that neither side actually agreed to.
-      if (buyIntent.price < sellIntent.price) {
+      // Evaluate the match via the TEE. The enclave receives both
+      // sides' asset code, prices, and quantities (as decimal
+      // strings for exact integer transport) and returns the
+      // authoritative `matchedQuantity` / `executionPrice` plus a
+      // `matched` / `no_match` decision. The orchestrator no longer
+      // computes the crossing guard, the midpoint price, or the min
+      // fill locally — it trusts the enclave outcome.
+      const outcome = await this.matchClient.evaluateMatch({
+        buyIntentHandle: buyIntent.intentHandle,
+        sellIntentHandle: sellIntent.intentHandle,
+        correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+        assetCode: buyIntent.assetCode,
+        buyPrice: decimalString(buyIntent.price),
+        buyQuantity: decimalString(buyIntent.quantity),
+        sellPrice: decimalString(sellIntent.price),
+        sellQuantity: decimalString(sellIntent.quantity),
+      });
+
+      if (outcome.status !== "matched") {
+        // The enclave decided this pair does not cross (or a fill
+        // field was invalid). Leave both intents pending and keep
+        // scanning for another counterparty.
         continue;
       }
 
-      // Pre-match check 1: Verify buyer has sufficient balance
+      const matchQuantity = outcome.matchedQuantity;
+      const matchPrice = outcome.executionPrice;
+
+      // Defensive checks run AFTER the enclave decision, against
+      // the enclave-decided fill terms. These are not match
+      // authority (that stays in the enclave) — they guard against
+      // settling a trade the institution cannot cover or the agent
+      // is not scoped for. A failure evicts the offending intent.
       if (this.portfolioService) {
         const balanceCheck = await this.checkBalance(
           buyIntent,
@@ -282,7 +328,6 @@ export class MatchingOrchestrator {
         }
       }
 
-      // Pre-match check 2: Verify agent direction scope
       const directionCheck = this.checkDirectionScope(
         buyIntent,
         sellIntent,
@@ -296,9 +341,6 @@ export class MatchingOrchestrator {
           correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
           agentId: directionCheck.agentDid,
         });
-        // Pre-match check failed: release the counterparty's
-        // lock + ref so its available balance is restored
-        // immediately, rather than waiting for TTL eviction.
         this.releaseLockFor(other);
         this.deleteLockRefFor(other);
         this.pendingIntents.splice(i, 1);
@@ -306,7 +348,6 @@ export class MatchingOrchestrator {
         return;
       }
 
-      // Pre-match check 3: Verify instrument scope
       const instrumentCheck = this.checkInstrumentScope(
         buyIntent,
         sellIntent,
@@ -320,9 +361,6 @@ export class MatchingOrchestrator {
           correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
           agentId: instrumentCheck.agentDid,
         });
-        // Pre-match check failed: release the counterparty's
-        // lock + ref so its available balance is restored
-        // immediately, rather than waiting for TTL eviction.
         this.releaseLockFor(other);
         this.deleteLockRefFor(other);
         this.pendingIntents.splice(i, 1);
@@ -330,7 +368,6 @@ export class MatchingOrchestrator {
         return;
       }
 
-      // Pre-match check 4: Verify max notional
       const notionalCheck = this.checkMaxNotional(
         buyIntent,
         sellIntent,
@@ -346,9 +383,6 @@ export class MatchingOrchestrator {
           correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
           agentId: notionalCheck.agentDid,
         });
-        // Pre-match check failed: release the counterparty's
-        // lock + ref so its available balance is restored
-        // immediately, rather than waiting for TTL eviction.
         this.releaseLockFor(other);
         this.deleteLockRefFor(other);
         this.pendingIntents.splice(i, 1);
@@ -356,100 +390,92 @@ export class MatchingOrchestrator {
         return;
       }
 
-      // Evaluate match via TEE
-      const outcome = await this.matchClient.evaluateMatch({
-        buyIntentHandle: buyIntent.intentHandle,
-        sellIntentHandle: sellIntent.intentHandle,
-        correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
-      });
+      // The TEE match contract cannot see the buyer/seller
+      // institution ids or authority refs, so it returns empty
+      // strings for them. The queued intents hold the canonical
+      // values that were already verified during submit.
+      const normalizedOutcome = {
+        ...outcome,
+        buyerInstitutionId: buyIntent.institutionId,
+        sellerInstitutionId: sellIntent.institutionId,
+        buyerAuthorityRef: buyIntent.authorityRef,
+        sellerAuthorityRef: sellIntent.authorityRef,
+      };
+      // Generate receipt ciphertexts deterministically from the outcome
+      const receiptBase = `t3receipt.${normalizedOutcome.outcomeRef}.${normalizedOutcome.executionRef}`;
 
-      if (outcome.status === "matched") {
-        // The TEE match contract cannot see the buyer/seller
-        // institution ids or authority refs, so it returns empty
-        // strings for them. The queued intents hold the canonical
-        // values that were already verified during submit.
-        const normalizedOutcome = {
-          ...outcome,
-          buyerInstitutionId: buyIntent.institutionId,
-          sellerInstitutionId: sellIntent.institutionId,
-          buyerAuthorityRef: buyIntent.authorityRef,
-          sellerAuthorityRef: sellIntent.authorityRef,
-        };
-        // Generate receipt ciphertexts deterministically from the outcome
-        const receiptBase = `t3receipt.${normalizedOutcome.outcomeRef}.${normalizedOutcome.executionRef}`;
-
-        // WS2: resolve per-side settlement profile refs (if the
-        // orchestrator has an institution-config resolver). The
-        // settlement service uses the buyer's profile to pick
-        // the rail; the seller must match. Mismatched profiles
-        // cause the service to throw a typed error.
-        let buyerSettlementProfileRef: string | undefined;
-        let sellerSettlementProfileRef: string | undefined;
-        if (this.institutionConfigResolver) {
-          const [buyerConfig, sellerConfig] = await Promise.all([
-            this.institutionConfigResolver.resolve(buyIntent.institutionId),
-            this.institutionConfigResolver.resolve(sellIntent.institutionId),
-          ]);
-          buyerSettlementProfileRef = buyerConfig?.settlementProfileRef;
-          sellerSettlementProfileRef = sellerConfig?.settlementProfileRef;
-        }
-
-        const request: SettlementExecutionRequest = {
-          matchOutcome: normalizedOutcome,
-          buyerAgentDid: buyIntent.agentDid,
-          sellerAgentDid: sellIntent.agentDid,
-          buyerDelegationCredential: buyIntent.delegationCredential,
-          sellerDelegationCredential: sellIntent.delegationCredential,
-          encryptedTradeFields: {
-            assetCodeCiphertext: buyIntent.encryptedEnvelope,
-            quantityCiphertext: buyIntent.encryptedEnvelope,
-            executionPriceCiphertext: buyIntent.encryptedEnvelope,
-          },
-          assetCode: buyIntent.assetCode,
-          quantity: matchQuantity,
-          executionPrice: matchPrice,
-          // Release exactly the matched portion of each side's
-          // reservation. Buyer locks are at the original bid price,
-          // seller locks are pure quantity.
-          buyerLockedAmount: matchQuantity * buyIntent.price,
-          sellerLockedAmount: matchQuantity,
-          buyerSettlementProfileRef,
-          sellerSettlementProfileRef,
-          receipts: [
-            {
-              institutionId: buyIntent.institutionId,
-              receiptCiphertext: `${receiptBase}.buyer`,
-              receiptHash: `sha256:${normalizedOutcome.outcomeRef}:buyer`,
-              keyVersion: "match-v1",
-              t3AttestationRef: normalizedOutcome.executionRef,
-              accessScope: "buyer",
-            },
-            {
-              institutionId: sellIntent.institutionId,
-              receiptCiphertext: `${receiptBase}.seller`,
-              receiptHash: `sha256:${normalizedOutcome.outcomeRef}:seller`,
-              keyVersion: "match-v1",
-              t3AttestationRef: normalizedOutcome.executionRef,
-              accessScope: "seller",
-            },
-          ],
-        };
-
-        await this.settlementService.executeSettlement(
-          request,
-          `${normalizedOutcome.outcomeRef}:${randomUUID()}`,
-        );
-
-        // Apply the matched quantity to each side. A fully filled
-        // intent is removed and its durable lock ref deleted; a
-        // partially filled intent stays queued with a reduced
-        // quantity and reduced lock ref. The settlement RPC already
-        // released the matched portion of each balance lock, so we
-        // do not touch balances here — we only update queue/ref state.
-        this.applyFillToIntent(buyIntent, matchQuantity);
-        this.applyFillToIntent(sellIntent, matchQuantity);
-        return;
+      // WS2: resolve per-side settlement profile refs (if the
+      // orchestrator has an institution-config resolver). The
+      // settlement service uses the buyer's profile to pick
+      // the rail; the seller must match. Mismatched profiles
+      // cause the service to throw a typed error.
+      let buyerSettlementProfileRef: string | undefined;
+      let sellerSettlementProfileRef: string | undefined;
+      if (this.institutionConfigResolver) {
+        const [buyerConfig, sellerConfig] = await Promise.all([
+          this.institutionConfigResolver.resolve(buyIntent.institutionId),
+          this.institutionConfigResolver.resolve(sellIntent.institutionId),
+        ]);
+        buyerSettlementProfileRef = buyerConfig?.settlementProfileRef;
+        sellerSettlementProfileRef = sellerConfig?.settlementProfileRef;
       }
+
+      const request: SettlementExecutionRequest = {
+        matchOutcome: normalizedOutcome,
+        buyerAgentDid: buyIntent.agentDid,
+        sellerAgentDid: sellIntent.agentDid,
+        buyerDelegationCredential: buyIntent.delegationCredential,
+        sellerDelegationCredential: sellIntent.delegationCredential,
+        encryptedTradeFields: {
+          assetCodeCiphertext: buyIntent.encryptedEnvelope,
+          quantityCiphertext: buyIntent.encryptedEnvelope,
+          executionPriceCiphertext: buyIntent.encryptedEnvelope,
+        },
+        assetCode: buyIntent.assetCode,
+        quantity: matchQuantity,
+        executionPrice: matchPrice,
+        // Release exactly the matched portion of each side's
+        // reservation. Buyer locks are at the original bid price,
+        // seller locks are pure quantity. The matched quantity is
+        // the enclave's authoritative fill, not a local min().
+        buyerLockedAmount: matchQuantity * buyIntent.price,
+        sellerLockedAmount: matchQuantity,
+        buyerSettlementProfileRef,
+        sellerSettlementProfileRef,
+        receipts: [
+          {
+            institutionId: buyIntent.institutionId,
+            receiptCiphertext: `${receiptBase}.buyer`,
+            receiptHash: `sha256:${normalizedOutcome.outcomeRef}:buyer`,
+            keyVersion: "match-v1",
+            t3AttestationRef: normalizedOutcome.executionRef,
+            accessScope: "buyer",
+          },
+          {
+            institutionId: sellIntent.institutionId,
+            receiptCiphertext: `${receiptBase}.seller`,
+            receiptHash: `sha256:${normalizedOutcome.outcomeRef}:seller`,
+            keyVersion: "match-v1",
+            t3AttestationRef: normalizedOutcome.executionRef,
+            accessScope: "seller",
+          },
+        ],
+      };
+
+      await this.settlementService.executeSettlement(
+        request,
+        `${normalizedOutcome.outcomeRef}:${randomUUID()}`,
+      );
+
+      // Apply the matched quantity to each side. A fully filled
+      // intent is removed and its durable lock ref deleted; a
+      // partially filled intent stays queued with a reduced
+      // quantity and reduced lock ref. The settlement RPC already
+      // released the matched portion of each balance lock, so we
+      // do not touch balances here — we only update queue/ref state.
+      this.applyFillToIntent(buyIntent, matchQuantity);
+      this.applyFillToIntent(sellIntent, matchQuantity);
+      return;
     }
   }
 

@@ -19,6 +19,44 @@ use crate::{
     SealIntentInput, SealIntentOutput,
 };
 
+/// Parse a non-negative decimal string into a `u128`. Rejects empty
+/// strings, leading `+`, signs, exponents, fractions, and underscores
+/// — the wire form is always a plain integer of base-10 digits, so a
+/// anything else means the caller (the backend) sent a malformed
+/// quantity/price and the pair must be a `no_match`, not a silent
+/// fill at a garbage price.
+fn parse_decimal_u128(value: &str) -> Option<u128> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut accumulated: u128 = 0;
+    for byte in trimmed.bytes() {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        accumulated = match accumulated.checked_mul(10) {
+            Some(v) => v,
+            None => return None,
+        };
+        let digit = u128::from(byte - b'0');
+        accumulated = match accumulated.checked_add(digit) {
+            Some(v) => v,
+            None => return None,
+        };
+    }
+    Some(accumulated)
+}
+
+/// Deterministic midpoint of two unsigned prices: `(a + b) / 2`
+/// rounded half-up. Uses `u128` throughout so there is no float
+/// drift, and `checked_add` so an overflow is reported as `None`
+/// (the caller treats that as `no_match` rather than wrapping).
+fn midpoint(a: u128, b: u128) -> Option<u128> {
+    let sum = a.checked_add(b)?;
+    Some(sum / 2 + (sum & 1))
+}
+
 /// Monotonic per-instance counter used to derive fresh execution
 /// refs without pulling in a randomness source. The value is
 /// scoped to the contract instance's lifetime in the TEE, so two
@@ -161,14 +199,9 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         return Err("evaluate-match: correlation_ref is required".to_string());
     }
 
-    // The orchestrator hands us the two sealed intent handles
-    // + a correlation ref. We mint a deterministic outcome ref
-    // by hashing the ordered (buy, sell, correlation) tuple.
-    // The orchestrator can then look up the trade details it
-    // already has in its in-memory queue (it knew about both
-    // intents before calling us) and stitch them into a
-    // settlement command using the authority refs we echo
-    // back.
+    // Outcome / trade-field refs are deterministic regardless of
+    // whether the pair crosses, so the orchestrator can correlate
+    // a `no_match` back to the exact handle pair it submitted.
     let outcome_ref = hex_handle(
         "outcome",
         format!(
@@ -178,33 +211,14 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .as_bytes(),
     );
     let execution_ref = fresh_execution_ref();
-
-    // The "trade fields" ref is the encrypted blob the
-    // settlement command will eventually read. We mint a
-    // deterministic ref the orchestrator can store in its
-    // own KV map keyed by the (buy, sell) handle pair — the
-    // actual settlement command builder will write the
-    // encrypted fields under this ref.
     let encrypted_trade_fields_ref = hex_handle(
         "t3fields",
         format!("{}:{}", parsed.buy_intent_handle, parsed.sell_intent_handle).as_bytes(),
     );
 
-    // We don't actually know the buyer / seller institution
-    // ids or authority refs inside the TEE — the orchestrator
-    // already verified the VCs before calling, and the
-    // institution context comes from the envelope. We echo
-    // the T3 host's tenant context (via the
-    // host:tenant/tenant-context import) for the *issuing
-    // tenant*; the actual buyer/seller split is something
-    // the orchestrator stamps onto the settlement command.
-    // We default the buyer/seller institution ids to the
-    // tenant DID and the authority refs to empty strings;
-    // the orchestrator fills in the real values when it
-    // reads the matching intent from its queue. This keeps
-    // the TEE surface non-validating (it cannot leak info
-    // it doesn't have) while still returning a valid
-    // response shape.
+    // The TEE does not have buyer/seller institution context, so
+    // these stay empty and the orchestrator stamps the verified
+    // values from its pending-intent queue before settlement.
     let buyer_institution_id = String::new();
     let seller_institution_id = String::new();
     let buyer_authority_ref = String::new();
@@ -213,6 +227,112 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // 5-minute settlement window — matches the
     // `MatchingOrchestrator`'s default intent TTL.
     let expires_at = format_expires_at(300);
+
+    // Parse the price/quantity wire fields into exact u128. Any
+    // malformed or missing value is a hard `no_match` — the
+    // contract must never fill at a price it could not parse.
+    let buy_price = match parse_decimal_u128(&parsed.buy_price) {
+        Some(v) if v > 0 => v,
+        _ => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                buyer_institution_id,
+                seller_institution_id,
+                buyer_authority_ref,
+                seller_authority_ref,
+                expires_at,
+            );
+        }
+    };
+    let buy_quantity = match parse_decimal_u128(&parsed.buy_quantity) {
+        Some(v) if v > 0 => v,
+        _ => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                buyer_institution_id,
+                seller_institution_id,
+                buyer_authority_ref,
+                seller_authority_ref,
+                expires_at,
+            );
+        }
+    };
+    let sell_price = match parse_decimal_u128(&parsed.sell_price) {
+        Some(v) if v > 0 => v,
+        _ => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                buyer_institution_id,
+                seller_institution_id,
+                buyer_authority_ref,
+                seller_authority_ref,
+                expires_at,
+            );
+        }
+    };
+    let sell_quantity = match parse_decimal_u128(&parsed.sell_quantity) {
+        Some(v) if v > 0 => v,
+        _ => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                buyer_institution_id,
+                seller_institution_id,
+                buyer_authority_ref,
+                seller_authority_ref,
+                expires_at,
+            );
+        }
+    };
+
+    // A pair only matches when an asset code is present and the
+    // buyer's bid crosses the seller's ask. The orchestrator
+    // already filters counterparty candidates by asset locally;
+    // the enclave re-checks that the asset code is non-empty so a
+    // malformed request is `no_match`, not a silent fill on an
+    // unknown instrument.
+    let asset_ok = !parsed.asset_code.trim().is_empty();
+    let crosses = asset_ok && buy_price >= sell_price;
+
+    if !crosses {
+        return no_match_output(
+            outcome_ref,
+            execution_ref,
+            encrypted_trade_fields_ref,
+            buyer_institution_id,
+            seller_institution_id,
+            buyer_authority_ref,
+            seller_authority_ref,
+            expires_at,
+        );
+    }
+
+    // Match authority: the enclave decides the fill quantity and
+    // execution price. The backend trusts these values for
+    // settlement and stops computing them locally.
+    let matched_quantity = core::cmp::min(buy_quantity, sell_quantity);
+    let execution_price = match midpoint(buy_price, sell_price) {
+        Some(v) => v,
+        None => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                buyer_institution_id,
+                seller_institution_id,
+                buyer_authority_ref,
+                seller_authority_ref,
+                expires_at,
+            );
+        }
+    };
 
     let output = EvaluateMatchOutput {
         outcome_ref,
@@ -224,10 +344,45 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         seller_authority_ref,
         expires_at,
         status: "matched".to_string(),
+        matched_quantity: matched_quantity.to_string(),
+        execution_price: execution_price.to_string(),
     };
 
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-match: response encode failed: {}", err))
+}
+
+/// Build a `no_match` outcome. Every opaque ref the caller needs to
+/// correlate the decision is still present (outcome_ref, trade-field
+/// ref, expiry); the fill fields are empty so the client can detect
+/// the non-cross without parsing the status.
+#[allow(clippy::too_many_arguments)]
+fn no_match_output(
+    outcome_ref: String,
+    execution_ref: String,
+    encrypted_trade_fields_ref: String,
+    buyer_institution_id: String,
+    seller_institution_id: String,
+    buyer_authority_ref: String,
+    seller_authority_ref: String,
+    expires_at: String,
+) -> Result<Vec<u8>, String> {
+    let output = EvaluateMatchOutput {
+        outcome_ref,
+        execution_ref,
+        buyer_institution_id,
+        seller_institution_id,
+        encrypted_trade_fields_ref,
+        buyer_authority_ref,
+        seller_authority_ref,
+        expires_at,
+        status: "no_match".to_string(),
+        matched_quantity: String::new(),
+        execution_price: String::new(),
+    };
+
+    serde_json::to_vec(&output)
+        .map_err(|err| format!("evaluate-match: no_match encode failed: {}", err))
 }
 
 // ─── helpers ───

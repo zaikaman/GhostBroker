@@ -73,6 +73,8 @@ class NoOpMatchClient implements MatchContractClient {
       buyerAuthorityRef: "",
       sellerAuthorityRef: "",
       expiresAt: new Date(0).toISOString(),
+      matchedQuantity: 0,
+      executionPrice: 0,
     };
   }
 }
@@ -343,6 +345,8 @@ describe("matching orchestrator — balance reservations", () => {
 
     class MatchedClient implements MatchContractClient {
       public async evaluateMatch(): Promise<OpaqueMatchOutcome> {
+        // Enclave-decided fill: 100 WBTC @ 50000 midpoint. The
+        // orchestrator settles on these authoritative values.
         return {
           status: "matched",
           outcomeRef: "outcome_test",
@@ -353,6 +357,8 @@ describe("matching orchestrator — balance reservations", () => {
           buyerAuthorityRef: "auth_buyer",
           sellerAuthorityRef: "auth_seller",
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          matchedQuantity: 100,
+          executionPrice: 50000,
         };
       }
     }
@@ -466,13 +472,17 @@ describe("matching orchestrator — balance reservations", () => {
     });
   });
 
-  it("releases the counterparty's lock on a pre-match balance failure (not just TTL)", async () => {
+  it("releases the counterparty's lock on a post-match balance failure (not just TTL)", async () => {
     // Regression test: before the lock-ref work, the four
-    // pre-match failure paths (balance, direction scope,
+    // defensive failure paths (balance, direction scope,
     // instrument scope, max notional) spliced the counterparty
     // from the queue but did NOT release its `portfolios.locked`
     // amount. The counterparty's lock would then be stranded
     // for up to 5 minutes until TTL eviction.
+    //
+    // These checks now run AFTER the enclave returns `matched`
+    // (the enclave is match authority), so this stub returns
+    // `matched` to reach the balance-check path.
     //
     // Setup:
     // - buyer has 10M USDC (enough to lock 5M)
@@ -482,13 +492,15 @@ describe("matching orchestrator — balance reservations", () => {
     // (available = 100 - 0 = 100). After the lock, the
     // seller's available becomes 100 - 100 = 0.
     //
-    // The orchestrator's matching loop then evaluates the
-    // (buyer, seller) pair. The buyer's pre-match check
-    // passes (USDC available = 5M ≥ 5M trade cost). The
-    // seller's pre-match check FAILS (WBTC available = 0 <
-    // 100 match qty). The orchestrator splices the buyer
-    // (the counterparty = `other` in the loop) from the
-    // queue AND releases the buyer's lock.
+    // The orchestrator's matching loop evaluates the (buyer, seller)
+    // pair via the enclave, which returns `matched`. The post-match
+    // defensive checks then run against the enclave-decided fill.
+    // The buyer's balance check passes (USDC available = 5M >= 5M
+    // trade cost). The seller's balance check FAILS (WBTC available
+    // = 0 < 100 match qty, because the seller's own submit-time lock
+    // consumed its balance). The orchestrator splices the buyer
+    // (the counterparty = `other` in the loop) from the queue AND
+    // releases the buyer's lock.
     //
     // The seller stays in the queue, waiting for a different
     // counterparty.
@@ -506,8 +518,39 @@ describe("matching orchestrator — balance reservations", () => {
         balance: 100,
       }),
     ]);
-    const { orchestrator: orch2, portfolioService: ps2 } =
-      buildOrchestrator(clientWithLocks);
+    // Match authority lives in the enclave, so the defensive
+    // balance check now runs AFTER the enclave returns `matched`.
+    // This stub returns `matched` (qty 100 @ 50000) so the
+    // balance check executes; the seller's available WBTC is 0
+    // (consumed by its own submit-time lock), so the check fails
+    // and the counterparty (buyer) is evicted with its lock
+    // released.
+    class MatchedForBalanceCheckClient implements MatchContractClient {
+      public async evaluateMatch(
+        _request: MatchEvaluationRequest,
+      ): Promise<OpaqueMatchOutcome> {
+        return {
+          status: "matched",
+          outcomeRef: "outcome_balance_check",
+          executionRef: "exec_balance_check",
+          buyerInstitutionId: "",
+          sellerInstitutionId: "",
+          encryptedTradeFieldsRef: "fields_balance_check",
+          buyerAuthorityRef: "",
+          sellerAuthorityRef: "",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          matchedQuantity: 100,
+          executionPrice: 50000,
+        };
+      }
+    }
+    const ps2 = new PortfolioService(clientWithLocks as never, "USDC");
+    const orch2 = new MatchingOrchestrator(
+      new MatchedForBalanceCheckClient(),
+      new NoOpSettlement() as unknown as SettlementService,
+      new TelemetryBus(),
+      ps2,
+    );
     const service2 = buildHiddenIntentService(orch2, ps2);
 
     // Buyer submits first, locks 5_000_000 USDC.

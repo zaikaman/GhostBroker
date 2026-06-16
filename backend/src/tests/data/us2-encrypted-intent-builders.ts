@@ -22,6 +22,7 @@ export function buildBackendTestEnv(
     T3_NETWORK_URL: "",
     T3_TENANT_DID: "did:t3n:institution:us2",
     T3_MATCH_CONTRACT_ID: "match-contract-us2",
+    T3_MATCHING_CONTRACT_VERSION: "0.2.0",
     RECEIPT_KEY_VERSION: "receipt-key-v1",
     SETTLEMENT_ASSET_CODE: "USDC",
     ...overrides,

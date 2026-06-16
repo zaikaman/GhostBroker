@@ -7,6 +7,15 @@ export interface OperatorSessionClaims {
   institutionId: string;
   operatorId: string;
   walletAddress?: string;
+  /**
+   * The per-institution deposit wallet used by the chain settlement
+   * rail (`settle()` pays out of this address). For chain-rail
+   * institutions this is the balance source of truth, distinct
+   * from `walletAddress` (the login wallet used for identity).
+   * Only present for chain-rail institutions that have a derived
+   * deposit address stamped in their metadata.
+   */
+  depositAddress?: string;
   iat: number;
   exp: number;
 }
@@ -17,6 +26,7 @@ const claimsSchema = z.object({
   institutionId: z.string().uuid(),
   operatorId: z.string().min(1),
   walletAddress: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
+  depositAddress: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
   iat: z.number().int().positive(),
   exp: z.number().int().positive(),
 });
@@ -40,6 +50,7 @@ export function issueOperatorSessionToken(params: {
   did: string;
   institutionId: string;
   walletAddress?: string;
+  depositAddress?: string;
   ttlSeconds?: number;
 }): string {
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -54,6 +65,9 @@ export function issueOperatorSessionToken(params: {
 
   if (params.walletAddress) {
     claims.walletAddress = params.walletAddress;
+  }
+  if (params.depositAddress) {
+    claims.depositAddress = params.depositAddress;
   }
 
   const header = encode({ alg: "HS256", typ: "JWT" });
@@ -74,6 +88,9 @@ function toOperatorSessionClaims(parsed: ParsedClaims): OperatorSessionClaims {
 
   if (parsed.walletAddress) {
     claims.walletAddress = parsed.walletAddress;
+  }
+  if (parsed.depositAddress) {
+    claims.depositAddress = parsed.depositAddress;
   }
 
   return claims;

@@ -93,6 +93,8 @@ class NoOpMatchClient implements MatchContractClient {
       buyerAuthorityRef: "",
       sellerAuthorityRef: "",
       expiresAt: new Date(0).toISOString(),
+      matchedQuantity: 0,
+      executionPrice: 0,
     };
   }
 }

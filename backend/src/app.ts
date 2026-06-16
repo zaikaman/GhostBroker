@@ -495,6 +495,11 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     tokenBalanceClient,
     tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
     minimumTokenBalance: 1n,
+    // Pin the match-authoritative contract version so the T3N
+    // adapter routes `evaluate-match` to the published build that
+    // decides the cross, fill quantity, and execution price
+    // (rather than relying on the tenant's default registration).
+    contractVersion: env.T3_MATCHING_CONTRACT_VERSION,
   });
 
   const matchingOrchestrator = new MatchingOrchestrator(

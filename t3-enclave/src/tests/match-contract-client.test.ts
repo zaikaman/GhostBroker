@@ -28,6 +28,8 @@ class CapturingNetworkClient implements T3NetworkClient {
         seller_authority_ref: "authority:seller:settle",
         expires_at: "2026-06-13T00:00:00.000Z",
         status: "matched",
+        matched_quantity: "4",
+        execution_price: "50000",
       } as TBody,
     };
   }
@@ -37,10 +39,15 @@ const request: MatchEvaluationRequest = {
   buyIntentHandle: "intent_buy_opaque",
   sellIntentHandle: "intent_sell_opaque",
   correlationRef: "corr_us3",
+  assetCode: "WBTC",
+  buyPrice: "51000",
+  buyQuantity: "10",
+  sellPrice: "49000",
+  sellQuantity: "4",
 };
 
 describe("match contract client", () => {
-  it("returns opaque match outcomes only", async () => {
+  it("returns opaque match outcomes with enclave-decided fill terms", async () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3MatchContractClient({ networkClient });
 
@@ -49,16 +56,24 @@ describe("match contract client", () => {
       executionRef: "t3exec_us3",
       encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
       status: "matched",
+      matchedQuantity: 4,
+      executionPrice: 50000,
     });
     // The on-the-wire body is snake_case to match the TEE
     // contract's `EvaluateMatchInput` deserializer in
-    // contracts/matching-policy/src/lib.rs. The public
-    // `MatchEvaluationRequest` is camelCase; the translation
-    // lives in `T3MatchContractClient.evaluateMatch`.
+    // contracts/matching-policy/src/lib.rs, and carries the
+    // explicit contract version so the T3N adapter routes to the
+    // match-authoritative v0.2.0 build.
     expect(networkClient.requests[0]?.body).toEqual({
+      version: "0.2.0",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
+      asset_code: request.assetCode,
+      buy_price: request.buyPrice,
+      buy_quantity: request.buyQuantity,
+      sell_price: request.sellPrice,
+      sell_quantity: request.sellQuantity,
     });
   });
 
@@ -83,6 +98,8 @@ describe("match contract client", () => {
             seller_authority_ref: "",
             expires_at: "2026-06-13T00:00:00.000Z",
             status: "matched",
+            matched_quantity: "4",
+            execution_price: "50000",
           } as TBody,
         };
       }
@@ -99,6 +116,8 @@ describe("match contract client", () => {
       buyerAuthorityRef: "",
       sellerAuthorityRef: "",
       status: "matched",
+      matchedQuantity: 4,
+      executionPrice: 50000,
     });
   });
 
@@ -116,6 +135,8 @@ describe("match contract client", () => {
             encrypted_trade_fields_ref: "fields_x",
             expires_at: "2026-06-13T00:00:00.000Z",
             status: "matched",
+            matched_quantity: "4",
+            execution_price: "50000",
           } as TBody,
         };
       }
@@ -126,5 +147,105 @@ describe("match contract client", () => {
     });
 
     await expect(client.evaluateMatch(request)).rejects.toThrow(/outcome_ref/);
+  });
+
+  it("rejects a matched response whose matched_quantity is missing", async () => {
+    // A `matched` outcome without a positive fill quantity is
+    // malformed and must not be trusted for settlement — the
+    // client rejects rather than letting the backend fall back
+    // to a local recomputation, which would silently
+    // re-centralize match authority.
+    class MissingQuantityNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            outcome_ref: "match_outcome_no_qty",
+            execution_ref: "t3exec_no_qty",
+            encrypted_trade_fields_ref: "fields_no_qty",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "matched",
+            execution_price: "50000",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new MissingQuantityNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).rejects.toThrow(
+      /matched_quantity/,
+    );
+  });
+
+  it("rejects a matched response whose execution_price is non-positive", async () => {
+    class ZeroPriceNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            outcome_ref: "match_outcome_zero_price",
+            execution_ref: "t3exec_zero_price",
+            encrypted_trade_fields_ref: "fields_zero_price",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "matched",
+            matched_quantity: "4",
+            execution_price: "0",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new ZeroPriceNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).rejects.toThrow(
+      /execution_price/,
+    );
+  });
+
+  it("returns zeroed fill fields on a no_match outcome", async () => {
+    class NoMatchNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            outcome_ref: "match_outcome_nomatch",
+            execution_ref: "t3exec_nomatch",
+            encrypted_trade_fields_ref: "fields_nomatch",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "no_match",
+            matched_quantity: "",
+            execution_price: "",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new NoMatchNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).resolves.toMatchObject({
+      status: "no_match",
+      matchedQuantity: 0,
+      executionPrice: 0,
+    });
+  });
+
+  it("honours an explicit contractVersion override", async () => {
+    const networkClient = new CapturingNetworkClient();
+    const client = new T3MatchContractClient({
+      networkClient,
+      contractVersion: "0.2.5",
+    });
+
+    await client.evaluateMatch(request);
+
+    const body = networkClient.requests[0]?.body as Record<string, unknown>;
+    expect(body.version).toBe("0.2.5");
   });
 });

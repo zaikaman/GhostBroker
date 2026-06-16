@@ -17,6 +17,8 @@ const outcome: OpaqueMatchOutcome = {
   sellerAuthorityRef: "authority:seller:settle",
   expiresAt: "2026-06-13T00:00:00.000Z",
   status: "matched",
+  matchedQuantity: 4,
+  executionPrice: 50000,
 };
 
 const buyerVc = { id: "buyer-vc", issuer: "did:t3n:buyer" };

@@ -9,7 +9,7 @@
 //
 // Tail: `matching` (must match the T3 contract-name + the
 // `contractPath` defaults in the t3-enclave clients).
-package ghostbroker:matching-policy@0.1.0;
+package ghostbroker:matching-policy@0.2.0;
 
 world contract {
   import host:tenant/tenant-context@1.0.0;
@@ -51,31 +51,38 @@ interface contracts {
   seal-intent: func(req: generic-input) -> result<list<u8>, string>;
 
   // Evaluate whether two sealed intents (one buy, one sell) can
-  // match. The host returns an opaque match outcome the
-  // orchestrator hands to the settlement command builder. The
-  // contract is intentionally thin: it echoes the required
-  // authority refs + a deterministic outcome ref derived from
-  // the two intent handles. All real matching logic lives in
-  // the orchestrator; the TEE provides a verifiable execution
-  // surface, not a policy engine.
+  // match, and if so decide the fill quantity and execution price.
+  // As of v0.2.0 the enclave is match-authoritative: the caller
+  // sends both sides' asset code, prices, and quantities, and the
+  // contract returns `status: "matched"` with `matched_quantity`
+  // and `execution_price` only when the buyer's bid crosses the
+  // seller's ask. The orchestrator is a verifier around the
+  // enclave outcome, not the price matcher.
   //
   // Input  (JSON): EvaluateMatchInput
   //   {
   //     "buy_intent_handle":  "intent_...",
   //     "sell_intent_handle": "intent_...",
   //     "correlation_ref":    "corr_...",
+  //     "asset_code":         "WBTC",
+  //     "buy_price":          "<decimal-string>",
+  //     "buy_quantity":       "<decimal-string>",
+  //     "sell_price":         "<decimal-string>",
+  //     "sell_quantity":      "<decimal-string>",
   //   }
   // Output (JSON): EvaluateMatchOutput
   //   {
   //     "outcome_ref":               "outcome_<32-hex>",
   //     "execution_ref":             "t3exec_<uuid>",
-  //     "buyer_institution_id":      "<uuid>",
-  //     "seller_institution_id":     "<uuid>",
+  //     "buyer_institution_id":      "",   // stamped by orchestrator
+  //     "seller_institution_id":     "",   // stamped by orchestrator
   //     "encrypted_trade_fields_ref": "t3fields_<32-hex>",
-  //     "buyer_authority_ref":       "ghostbroker-delegation:...",
-  //     "seller_authority_ref":      "ghostbroker-delegation:...",
+  //     "buyer_authority_ref":       "",   // stamped by orchestrator
+  //     "seller_authority_ref":      "",   // stamped by orchestrator
   //     "expires_at":                "<iso8601>",
   //     "status":                    "matched" | "no_match",
+  //     "matched_quantity":          "<decimal-string>",  // "" on no_match
+  //     "execution_price":           "<decimal-string>",  // "" on no_match
   //   }
   evaluate-match: func(req: generic-input) -> result<list<u8>, string>;
 }

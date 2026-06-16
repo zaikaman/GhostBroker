@@ -56,6 +56,8 @@ export function buildSettlementExecutionRequest(
       sellerAuthorityRef: "authority:seller:settle",
       expiresAt: "2026-06-13T00:00:00.000Z",
       status: "matched",
+      matchedQuantity: 100,
+      executionPrice: 45000,
     },
     buyerAgentDid: "did:t3n:agent:buyer-us3",
     sellerAgentDid: "did:t3n:agent:seller-us3",

@@ -56,6 +56,24 @@ function extractWalletAddressFromDid(did: string): string | undefined {
   return addressMatch?.[1]?.toLowerCase();
 }
 
+/**
+ * Read the chain-rail deposit address from institution metadata.
+ * The address is the one `settle()` pays out of (see the
+ * `chain-sepolia-rail`), so it is the balance source of truth
+ * for chain-rail institutions. Returns `undefined` when the
+ * metadata has no `depositAddress` or it is not a valid 0x
+ * address — callers must treat that as "no chain balance
+ * source available" and fall back to stored DB balances.
+ */
+function readDepositAddress(institution: Institution): string | undefined {
+  const raw = institution.metadata?.depositAddress;
+  if (typeof raw !== "string" || raw.length === 0) {
+    return undefined;
+  }
+  const match = /^(0x[0-9a-fA-F]{40})$/u.exec(raw.trim());
+  return match?.[1]?.toLowerCase();
+}
+
 export class DidAuthService implements AuthSessionService {
   public constructor(params: {
     institutions: AuthInstitutionRepository;
@@ -212,19 +230,33 @@ export class DidAuthService implements AuthSessionService {
     const connectedWalletAddress =
       request.walletAddress ?? extractWalletAddressFromDid(request.did);
 
-    // Sync portfolio from Sepolia on authentication
-    if (connectedWalletAddress && this.walletPortfolioSyncService) {
+    // For chain-rail institutions, the deposit wallet (not the
+    // login wallet) is the balance source of truth: `settle()`
+    // pays out of `metadata.depositAddress`. Portfolio sync must
+    // therefore follow the deposit address when it exists, so the
+    // DB portfolio mirrors the wallet the rail actually moves
+    // funds from. For `wallet:default` (or a chain-rail
+    // institution missing a deposit address), we fall back to the
+    // connected login wallet, preserving the legacy behaviour.
+    const depositAddress = readDepositAddress(institution);
+    const chainRailDepositAddress =
+      institution.settlementProfileRef === "chain:sepolia:erc20"
+        ? depositAddress
+        : undefined;
+    const syncWalletAddress = chainRailDepositAddress ?? connectedWalletAddress;
+
+    if (syncWalletAddress && this.walletPortfolioSyncService) {
       try {
         await this.walletPortfolioSyncService.syncInstitutionPortfolio({
           institutionId: institution.id,
-          walletAddress: connectedWalletAddress,
+          walletAddress: syncWalletAddress,
         });
       } catch (error) {
         logger.warn(
           {
             err: error,
             institutionId: institution.id,
-            walletAddress: connectedWalletAddress,
+            walletAddress: syncWalletAddress,
           },
           "Failed to sync Sepolia wallet portfolio.",
         );
@@ -236,6 +268,7 @@ export class DidAuthService implements AuthSessionService {
       did: string;
       institutionId: string;
       walletAddress?: string;
+      depositAddress?: string;
     } = {
       secret: this.sessionSecret,
       did: request.did,
@@ -244,6 +277,9 @@ export class DidAuthService implements AuthSessionService {
 
     if (connectedWalletAddress) {
       tokenParams.walletAddress = connectedWalletAddress;
+    }
+    if (chainRailDepositAddress) {
+      tokenParams.depositAddress = chainRailDepositAddress;
     }
 
     const token = issueOperatorSessionToken(tokenParams);
