@@ -15,7 +15,7 @@ import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
 import { AuthGateway } from '../components/AuthGateway';
 import { LandingPage } from '../components/LandingPage';
 import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
-import { PortfolioCard } from '../components/PortfolioCard';
+import { DepositWalletOverviewCard } from '../components/DepositWalletOverviewCard';
 import { PortfolioHistory } from '../components/PortfolioHistory';
 import { DemoControlPanel } from '../components/DemoControlPanel';
 import { useTradeHistory } from '../hooks/useTradeHistory';
@@ -184,7 +184,7 @@ function DashboardView({
         return (
           <div className="dashboard-grid-overview" style={{ animation: 'fadeIn 0.3s ease' }}>
             <div className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-              <PortfolioCard institutionId={session.institution.id} />
+              <DepositWalletOverviewCard institutionId={session.institution.id} />
               <PortfolioHistory institutionId={session.institution.id} />
             </div>
             <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>

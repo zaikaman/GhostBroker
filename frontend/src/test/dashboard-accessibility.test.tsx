@@ -5,6 +5,40 @@ import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
 import { buildMockCompletedTrade, buildMockAuditReceipt } from './dashboard-test-data';
 import { vi } from 'vitest';
 
+vi.mock('../services/api-client', () => ({
+  apiClient: {
+    getAuthSession: () => ({
+      token: 'session.jwt.test',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      institution: {
+        id: '00000000-0000-4000-8000-000000000101',
+        displayName: 'Northstar Capital',
+        t3TenantDid: 'did:t3:0x0000000000000000000000000000000000000301',
+      },
+    }),
+    clearAuthSession: vi.fn(),
+    getInstitution: vi.fn().mockResolvedValue({
+      id: '00000000-0000-4000-8000-000000000101',
+      legalName: 'Northstar Capital LLC',
+      displayName: 'Northstar Capital',
+      status: 'active',
+      t3TenantDid: 'did:t3:0x0000000000000000000000000000000000000301',
+      settlementProfileRef: 'chain:sepolia:erc20',
+      metadata: {
+        depositAddress: '0x1111111111111111111111111111111111111111',
+      },
+    }),
+    getDepositStatus: vi.fn().mockResolvedValue({
+      depositAddress: '0x1111111111111111111111111111111111111111',
+      relayerContractAddress: '0x2222222222222222222222222222222222222222',
+      txHashes: {},
+      balances: { eth: '0.5', wbtc: '1', usdc: '1000' },
+      approved: { wbtc: true, usdc: true },
+    }),
+    getPortfolioHistory: vi.fn().mockResolvedValue([]),
+  },
+}));
+
 // Mock the telemetry hook to return stable values
 vi.mock('../hooks/useConnectionTelemetry', () => ({
   useConnectionTelemetry: () => ({

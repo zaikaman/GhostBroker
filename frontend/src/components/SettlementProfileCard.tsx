@@ -15,8 +15,11 @@ import {
 } from "../services/wallet-deposit";
 import {
   AlertCircleIcon,
+  BitcoinIcon,
   CheckmarkCircle01Icon,
   Copy01Icon,
+  Dollar01Icon,
+  EthereumIcon,
   Link01Icon,
   Loading03Icon,
   RocketIcon,
@@ -273,164 +276,255 @@ export function SettlementProfileCard({
   const allApproved = Boolean(approved?.wbtc && approved?.usdc);
 
   return (
-    <div className="settlement-profile-card">
-      <div className="settlement-profile-card__header">
-        <Shield01Icon size={16} style={{ color: "var(--color-accent)" }} />
-        <h3>Settlement Profile</h3>
-      </div>
-      <div className="settlement-profile-card__row">
-        <span className="settlement-profile-card__label">Profile ref</span>
-        <code className="settlement-profile-card__value">
+    <div className="card settlement-profile-card">
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--spacing-sm)', marginBottom: 'var(--spacing-xs)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Shield01Icon size={18} style={{ color: "var(--color-accent)" }} />
+          <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--color-text-primary)' }}>
+            Settlement Profile
+          </h3>
+        </div>
+        
+        {/* Profile Ref Badge */}
+        <span style={{ 
+          fontFamily: 'var(--font-mono)', 
+          fontSize: '0.65rem', 
+          background: 'rgba(255, 255, 255, 0.03)', 
+          color: 'var(--color-text-secondary)',
+          padding: '4px 8px', 
+          borderRadius: '4px',
+          border: '1px solid var(--color-border)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em'
+        }}>
           {institution.settlementProfileRef}
-        </code>
+        </span>
       </div>
-      {isChainRail && (
-        <>
-          <div className="settlement-profile-card__row">
-            <span className="settlement-profile-card__label">
-              <Wallet01Icon size={12} /> Deposit address
+
+      {/* Main content grid */}
+      {isChainRail ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+          
+          {/* Deposit Rail Address Widget */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Wallet01Icon size={12} /> Deposit Rail Address
             </span>
-            <span className="settlement-profile-card__value-group">
-              <code className="settlement-profile-card__value">
-                {depositAddress ?? <em>not set</em>}
+            
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px', 
+              background: 'var(--color-input-bg)', 
+              border: '1px solid var(--color-border)', 
+              borderRadius: 'var(--radius-md)', 
+              padding: 'var(--spacing-sm) var(--spacing-md)',
+              minWidth: 0
+            }}>
+              <code style={{ 
+                fontFamily: 'var(--font-mono)', 
+                fontSize: '0.75rem', 
+                color: 'var(--color-accent)', 
+                wordBreak: 'break-all', 
+                flex: 1 
+              }}>
+                {depositAddress ?? 'Address not initialized'}
               </code>
               {depositAddress && (
                 <button
                   type="button"
-                  className="settlement-profile-card__icon-btn"
                   onClick={handleCopyDeposit}
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    color: 'var(--color-text-muted)', 
+                    cursor: 'pointer',
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    borderRadius: 'var(--radius-sm)'
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.color = 'var(--color-text-primary)'}
+                  onMouseOut={(e) => e.currentTarget.style.color = 'var(--color-text-muted)'}
                   title="Copy deposit address"
                   aria-label="Copy deposit address"
                 >
-                  <Copy01Icon size={12} />
+                  <Copy01Icon size={14} />
                 </button>
               )}
-            </span>
+            </div>
           </div>
 
+          {/* Deposit Wallet Balances Grid */}
           {depositStatus && (
-            <div className="settlement-profile-card__row settlement-profile-card__row--block">
-              <span className="settlement-profile-card__label">
-                Deposit wallet balances
-              </span>
-              <ul className="settlement-profile-card__token-list">
-                <li>
-                  <code>sepETH</code> -&gt; <code>{depositStatus.balances.eth}</code>
-                </li>
-                <li>
-                  <code>WBTC</code> -&gt; <code>{depositStatus.balances.wbtc}</code>
-                </li>
-                <li>
-                  <code>USDC</code> -&gt; <code>{depositStatus.balances.usdc}</code>
-                </li>
-              </ul>
-              <div
-                className={
-                  allApproved
-                    ? "status-badge success settlement-profile-card__action-status"
-                    : "status-badge settlement-profile-card__action-status"
-                }
-              >
-                {allApproved ? (
-                  <>
-                    <CheckmarkCircle01Icon size={14} /> Relayer approved
-                  </>
-                ) : (
-                  <>
-                    <AlertCircleIcon size={14} /> Relayer approval pending
-                  </>
-                )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                  Deposit Wallet Balances
+                </span>
+                
+                {/* Relayer Approval Status Badge */}
+                <div className={`status-badge ${allApproved ? 'secure' : ''}`} style={{ fontSize: '0.6rem', padding: '2px 8px' }}>
+                  {allApproved ? (
+                    <>
+                      <CheckmarkCircle01Icon size={10} /> Relayer Approved
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircleIcon size={10} /> Approval Pending
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--spacing-sm)' }}>
+                {/* sepETH Balance Card */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: 'var(--spacing-sm) var(--spacing-md)', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.03)', borderRadius: '8px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--color-text-muted)' }}>
+                    <EthereumIcon size={12} />
+                    <span style={{ fontSize: '0.65rem', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>sepETH</span>
+                  </div>
+                  <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)', wordBreak: 'break-all' }}>
+                    {depositStatus.balances.eth}
+                  </code>
+                </div>
+
+                {/* WBTC Balance Card */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: 'var(--spacing-sm) var(--spacing-md)', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.03)', borderRadius: '8px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--color-text-muted)' }}>
+                    <BitcoinIcon size={12} />
+                    <span style={{ fontSize: '0.65rem', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>WBTC</span>
+                  </div>
+                  <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)', wordBreak: 'break-all' }}>
+                    {depositStatus.balances.wbtc}
+                  </code>
+                </div>
+
+                {/* USDC Balance Card */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: 'var(--spacing-sm) var(--spacing-md)', background: 'rgba(255, 255, 255, 0.01)', border: '1px solid rgba(255, 255, 255, 0.03)', borderRadius: '8px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--color-text-muted)' }}>
+                    <Dollar01Icon size={12} />
+                    <span style={{ fontSize: '0.65rem', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>USDC</span>
+                  </div>
+                  <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)', wordBreak: 'break-all' }}>
+                    {depositStatus.balances.usdc}
+                  </code>
+                </div>
               </div>
             </div>
           )}
 
+          {/* Active Token Contract Scope Addresses */}
           {tokenAddresses && Object.keys(tokenAddresses).length > 0 && (
-            <div className="settlement-profile-card__row settlement-profile-card__row--block">
-              <span className="settlement-profile-card__label">Token addresses</span>
-              <ul className="settlement-profile-card__token-list">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                Token Contract Scopes
+              </span>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--spacing-sm)' }}>
                 {Object.entries(tokenAddresses).map(([asset, address]) => (
-                  <li key={asset}>
-                    <code>{asset}</code> -&gt; <code>{address}</code>
-                  </li>
+                  <div key={asset} style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between', 
+                    padding: '8px 12px', 
+                    background: 'rgba(255, 255, 255, 0.01)', 
+                    border: '1px solid rgba(255, 255, 255, 0.03)',
+                    borderRadius: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {asset === 'WBTC' ? <BitcoinIcon size={12} style={{ color: 'var(--color-accent)' }} /> : <Dollar01Icon size={12} style={{ color: 'var(--color-accent)' }} />}
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                        {asset}
+                      </span>
+                    </div>
+                    <code style={{ 
+                      fontFamily: 'var(--font-mono)', 
+                      fontSize: '0.7rem', 
+                      color: 'var(--color-text-muted)',
+                      marginLeft: '8px'
+                    }}>
+                      {address.slice(0, 8)}...{address.slice(-6)}
+                    </code>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
 
-          <div className="settlement-profile-card__actions">
+          {/* Operator Action Buttons */}
+          <div style={{ display: 'flex', gap: 'var(--spacing-sm)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)', marginTop: 'var(--spacing-xs)' }}>
             <button
               type="button"
-              className="btn btn-primary settlement-profile-card__action-btn"
+              className="btn btn-primary"
+              style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', padding: '8px 12px', flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               onClick={() => togglePanel("deposit")}
               aria-pressed={activePanel === "deposit"}
             >
-              <Wallet01Icon size={14} /> Deposit
+              <Wallet01Icon size={12} /> Deposit
             </button>
+            
             <button
               type="button"
-              className="btn btn-secondary settlement-profile-card__action-btn"
+              className="btn btn-secondary"
+              style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', padding: '8px 12px', flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               onClick={handleApprove}
               disabled={approveBusy}
             >
               {approveBusy ? (
                 <>
-                  <Loading03Icon
-                    size={14}
-                    style={{ animation: "spin 1s linear infinite" }}
-                  />{" "}
-                  Approving...
+                  <Loading03Icon size={12} style={{ animation: "spin 1s linear infinite" }} /> Approving...
                 </>
               ) : (
                 <>
-                  <Shield01Icon size={14} /> Approve relayer
+                  <Shield01Icon size={12} /> Approve Relayer
                 </>
               )}
             </button>
+            
             <button
               type="button"
-              className="btn btn-secondary settlement-profile-card__action-btn"
+              className="btn btn-secondary"
+              style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', padding: '8px 12px', flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               onClick={() => togglePanel("withdraw")}
               aria-pressed={activePanel === "withdraw"}
             >
-              <RocketIcon size={14} /> Withdraw
+              <RocketIcon size={12} /> Withdraw
             </button>
           </div>
 
+          {/* Action Error Banner */}
           {actionError && (
-            <div className="status-badge error settlement-profile-card__action-status">
+            <div className="status-badge error" style={{ padding: '6px 12px', fontSize: '0.72rem', width: '100%', boxSizing: 'border-box', justifyContent: 'flex-start', margin: 'var(--spacing-xs) 0' }}>
               <AlertCircleIcon size={14} /> {actionError}
             </div>
           )}
 
+          {/* Relayer Approval Success Banner */}
           {approveResult && (
-            <div className="settlement-profile-card__result">
-              <div className="settlement-profile-card__result-head">
-                <CheckmarkCircle01Icon
-                  size={14}
-                  style={{ color: "var(--color-success)" }}
-                />
-                <span>Relayer approval submitted</span>
+            <div style={{ background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: 'var(--spacing-sm) var(--spacing-md)', borderRadius: 'var(--radius-sm)', margin: 'var(--spacing-xs) 0' }}>
+              <div style={{ color: 'var(--color-success)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem' }}>
+                <CheckmarkCircle01Icon size={14} /> Relayer approval submitted successfully
               </div>
               <ApprovalTxLinks result={approveResult} />
             </div>
           )}
 
+          {/* Inline Action Panels */}
           {activePanel === "deposit" && (
-            <div className="settlement-profile-card__panel">
-              <p className="settlement-profile-card__panel-hint">
-                Send assets from your own wallet to the deposit address. Your
-                wallet signs the transfer on Sepolia; nothing is custodied by
-                the browser.
+            <div className="settlement-profile-card__panel" style={{ padding: 'var(--spacing-md)', background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--color-text-muted)', lineHeight: '1.4' }}>
+                Transfer assets from your connected browser wallet directly to the enclave deposit address on Sepolia.
               </p>
-              <div className="settlement-profile-card__field-grid">
-                <label className="settlement-profile-card__field">
-                  <span>Asset</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-sm)' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Asset</label>
                   <select
                     className="form-select"
                     value={depositAsset}
-                    onChange={(e) =>
-                      setDepositAsset(e.target.value as DepositAsset)
-                    }
+                    onChange={(e) => setDepositAsset(e.target.value as DepositAsset)}
+                    style={{ height: '34px', padding: '6px 12px', fontSize: '0.75rem' }}
                   >
                     {DEPOSIT_ASSETS.map((asset) => (
                       <option key={asset} value={asset}>
@@ -438,9 +532,10 @@ export function SettlementProfileCard({
                       </option>
                     ))}
                   </select>
-                </label>
-                <label className="settlement-profile-card__field settlement-profile-card__field--wide">
-                  <span>Amount</span>
+                </div>
+                
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Amount</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -448,75 +543,62 @@ export function SettlementProfileCard({
                     placeholder="0.0"
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(e.target.value)}
+                    style={{ height: '34px', padding: '6px 12px', fontSize: '0.75rem' }}
                   />
-                </label>
+                </div>
               </div>
-              <div className="settlement-profile-card__panel-actions">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleDeposit}
-                  disabled={depositBusy || !depositAmount.trim()}
-                >
-                  {depositBusy ? (
-                    <>
-                      <Loading03Icon
-                        size={14}
-                        style={{ animation: "spin 1s linear infinite" }}
-                      />{" "}
-                      Confirm in wallet...
-                    </>
-                  ) : (
-                    "Deposit"
-                  )}
-                </button>
-              </div>
+              
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ alignSelf: 'flex-end', padding: '6px 16px', fontSize: '0.72rem', fontFamily: 'var(--font-mono)' }}
+                onClick={handleDeposit}
+                disabled={depositBusy || !depositAmount.trim()}
+              >
+                {depositBusy ? (
+                  <>
+                    <Loading03Icon size={12} style={{ animation: "spin 1s linear infinite" }} /> Confirming...
+                  </>
+                ) : (
+                  "Execute Deposit"
+                )}
+              </button>
+
               {depositResult && (
-                <div className="settlement-profile-card__result">
-                  <div className="settlement-profile-card__result-head">
-                    <CheckmarkCircle01Icon
-                      size={14}
-                      style={{ color: "var(--color-success)" }}
-                    />
-                    <span>
-                      Sent {depositResult.amount}{" "}
-                      {assetLabel(depositResult.asset)}
-                    </span>
+                <div style={{ padding: '8px 12px', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--color-success)', fontWeight: 600 }}>
+                    <CheckmarkCircle01Icon size={14} /> Sent {depositResult.amount} {assetLabel(depositResult.asset)}
                   </div>
-                  <ul className="settlement-profile-card__result-list">
-                    <li>
-                      Tx:{" "}
-                      <a
-                        href={SEPOLIA_ETHERSCAN_TX_BASE + depositResult.txHash}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="settlement-profile-card__rail-link"
-                      >
-                        {shortenTxHash(depositResult.txHash)}{" "}
-                        <Link01Icon size={10} />
-                      </a>
-                    </li>
-                  </ul>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+                    Tx:{" "}
+                    <a
+                      href={SEPOLIA_ETHERSCAN_TX_BASE + depositResult.txHash}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="settlement-profile-card__rail-link"
+                    >
+                      {shortenTxHash(depositResult.txHash)} <Link01Icon size={10} />
+                    </a>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {activePanel === "withdraw" && (
-            <div className="settlement-profile-card__panel">
-              <p className="settlement-profile-card__panel-hint">
-                Sends assets out of the deposit wallet. The backend signs and
-                broadcasts the transfer.
+            <div className="settlement-profile-card__panel" style={{ padding: 'var(--spacing-md)', background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--color-text-muted)', lineHeight: '1.4' }}>
+                Initiate withdrawal out of the deposit wallet. Backend enclave authorizes and signs on-chain wallet transfer.
               </p>
-              <div className="settlement-profile-card__field-grid">
-                <label className="settlement-profile-card__field">
-                  <span>Asset</span>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-sm)' }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Asset</label>
                   <select
                     className="form-select"
                     value={withdrawAsset}
-                    onChange={(e) =>
-                      setWithdrawAsset(e.target.value as WithdrawalAsset)
-                    }
+                    onChange={(e) => setWithdrawAsset(e.target.value as WithdrawalAsset)}
+                    style={{ height: '34px', padding: '6px 12px', fontSize: '0.75rem' }}
                   >
                     {WITHDRAW_ASSETS.map((asset) => (
                       <option key={asset} value={asset}>
@@ -524,9 +606,10 @@ export function SettlementProfileCard({
                       </option>
                     ))}
                   </select>
-                </label>
-                <label className="settlement-profile-card__field">
-                  <span>Amount</span>
+                </div>
+                
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Amount</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -534,61 +617,47 @@ export function SettlementProfileCard({
                     placeholder="0.0"
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
+                    style={{ height: '34px', padding: '6px 12px', fontSize: '0.75rem' }}
                   />
-                </label>
-                <label className="settlement-profile-card__field settlement-profile-card__field--wide">
-                  <span>Destination address</span>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="0x..."
-                    value={withdrawTo}
-                    onChange={(e) => setWithdrawTo(e.target.value)}
-                  />
-                </label>
+                </div>
               </div>
-              <div className="settlement-profile-card__panel-actions">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleWithdraw}
-                  disabled={
-                    withdrawBusy ||
-                    !withdrawAmount.trim() ||
-                    !withdrawTo.trim()
-                  }
-                >
-                  {withdrawBusy ? (
-                    <>
-                      <Loading03Icon
-                        size={14}
-                        style={{ animation: "spin 1s linear infinite" }}
-                      />{" "}
-                      Sending...
-                    </>
-                  ) : (
-                    "Withdraw"
-                  )}
-                </button>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Destination address</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="0x..."
+                  value={withdrawTo}
+                  onChange={(e) => setWithdrawTo(e.target.value)}
+                  style={{ height: '34px', padding: '6px 12px', fontSize: '0.75rem' }}
+                />
               </div>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ alignSelf: 'flex-end', padding: '6px 16px', fontSize: '0.72rem', fontFamily: 'var(--font-mono)', marginTop: '4px' }}
+                onClick={handleWithdraw}
+                disabled={withdrawBusy || !withdrawAmount.trim() || !withdrawTo.trim()}
+              >
+                {withdrawBusy ? (
+                  <>
+                    <Loading03Icon size={12} style={{ animation: "spin 1s linear infinite" }} /> Processing...
+                  </>
+                ) : (
+                  "Withdraw"
+                )}
+              </button>
+
               {withdrawResult && (
-                <div className="settlement-profile-card__result">
-                  <div className="settlement-profile-card__result-head">
-                    <CheckmarkCircle01Icon
-                      size={14}
-                      style={{ color: "var(--color-success)" }}
-                    />
-                    <span>
-                      Sent {withdrawResult.amount}{" "}
-                      {assetLabel(withdrawResult.asset)}
-                    </span>
+                <div style={{ padding: '8px 12px', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--color-success)', fontWeight: 600 }}>
+                    <CheckmarkCircle01Icon size={14} /> Sent {withdrawResult.amount} {assetLabel(withdrawResult.asset)}
                   </div>
-                  <ul className="settlement-profile-card__result-list">
-                    <li>
-                      Remaining:{" "}
-                      <code>{withdrawResult.remainingBalance}</code>
-                    </li>
-                    <li>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: '4px', fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <div>Remaining: <code>{withdrawResult.remainingBalance}</code></div>
+                    <div>
                       Tx:{" "}
                       <a
                         href={SEPOLIA_ETHERSCAN_TX_BASE + withdrawResult.txHash}
@@ -596,31 +665,47 @@ export function SettlementProfileCard({
                         rel="noopener noreferrer"
                         className="settlement-profile-card__rail-link"
                       >
-                        {shortenTxHash(withdrawResult.txHash)}{" "}
-                        <Link01Icon size={10} />
+                        {shortenTxHash(withdrawResult.txHash)} <Link01Icon size={10} />
                       </a>
-                    </li>
-                  </ul>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
           )}
-        </>
+
+        </div>
+      ) : (
+        <div style={{ padding: 'var(--spacing-md) 0', color: 'var(--color-text-muted)', fontSize: '0.78rem', fontStyle: 'italic' }}>
+          No active on-chain settlement rails for this profile type.
+        </div>
       )}
-      <div className="settlement-profile-card__row settlement-profile-card__row--block">
-        <span className="settlement-profile-card__label">
-          <RocketIcon size={12} /> Recent rail trade refs
+
+      {/* Bottom Section: Recent Rail Activity */}
+      <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)', marginTop: 'var(--spacing-xs)' }}>
+        <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px' }}>
+          <RocketIcon size={12} /> Recent Rail Trade Refs
         </span>
+        
         {recentRailRefs.length === 0 ? (
-          <em className="settlement-profile-card__empty">No rail trades yet.</em>
+          <div style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+            No rail trades yet.
+          </div>
         ) : (
-          <ul className="settlement-profile-card__rail-list">
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {recentRailRefs.map((trade) => (
-              <li key={trade.id}>
-                <code className="settlement-profile-card__rail-id">
+              <li key={trade.id} style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                padding: '6px 10px', 
+                background: 'rgba(255, 255, 255, 0.01)', 
+                borderRadius: '6px',
+                fontSize: '0.72rem'
+              }}>
+                <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>
                   {trade.railId ?? "wallet:default"}
                 </code>
-                {" - "}
                 {isChainRailTxHash(trade.railTradeRef) ? (
                   <a
                     href={SEPOLIA_ETHERSCAN_TX_BASE + trade.railTradeRef}
@@ -632,7 +717,7 @@ export function SettlementProfileCard({
                     <Link01Icon size={10} />
                   </a>
                 ) : (
-                  <code>{shortenTxHash(trade.railTradeRef)}</code>
+                  <code style={{ fontFamily: 'var(--font-mono)' }}>{shortenTxHash(trade.railTradeRef)}</code>
                 )}
               </li>
             ))}

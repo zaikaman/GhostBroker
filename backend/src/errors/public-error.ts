@@ -18,8 +18,13 @@ export class PublicError extends Error {
   public readonly statusCode: number;
   public readonly expose = true;
 
-  public constructor(code: PublicErrorCode, statusCode: number, cause?: unknown) {
-    super(publicMessages[code], { cause });
+  public constructor(
+    code: PublicErrorCode,
+    statusCode: number,
+    cause?: unknown,
+    publicMessage?: string,
+  ) {
+    super(publicMessage ?? publicMessages[code], { cause });
     this.name = "PublicError";
     this.code = code;
     this.statusCode = statusCode;

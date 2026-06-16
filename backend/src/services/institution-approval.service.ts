@@ -140,26 +140,24 @@ export class InstitutionApprovalService {
 
     const wbtcAllowance = await this.readAllowance(this.wbtcAddress, depositAddress);
     if (wbtcAllowance < APPROVAL_THRESHOLD) {
-      txHashes.wbtcApprove = await walletClient.writeContract({
-        abi: Erc20Abi,
-        address: this.wbtcAddress,
-        functionName: "approve",
-        args: [this.relayerContractAddress, MAX_UINT256],
-        chain: this.chain,
+      txHashes.wbtcApprove = await this.writeApproval(
+        walletClient,
         account,
-      });
+        depositAddress,
+        this.wbtcAddress,
+        "WBTC",
+      );
     }
 
     const usdcAllowance = await this.readAllowance(this.usdcAddress, depositAddress);
     if (usdcAllowance < APPROVAL_THRESHOLD) {
-      txHashes.usdcApprove = await walletClient.writeContract({
-        abi: Erc20Abi,
-        address: this.usdcAddress,
-        functionName: "approve",
-        args: [this.relayerContractAddress, MAX_UINT256],
-        chain: this.chain,
+      txHashes.usdcApprove = await this.writeApproval(
+        walletClient,
         account,
-      });
+        depositAddress,
+        this.usdcAddress,
+        "USDC",
+      );
     }
 
     return {
@@ -261,4 +259,43 @@ export class InstitutionApprovalService {
       args: [owner, this.relayerContractAddress],
     })) as bigint;
   }
+
+  private async writeApproval(
+    walletClient: ApprovalWalletClient,
+    account: ReturnType<typeof privateKeyToAccount>,
+    depositAddress: Address,
+    tokenAddress: Address,
+    tokenSymbol: "WBTC" | "USDC",
+  ): Promise<Hash> {
+    try {
+      return await walletClient.writeContract({
+        abi: Erc20Abi,
+        address: tokenAddress,
+        functionName: "approve",
+        args: [this.relayerContractAddress, MAX_UINT256],
+        chain: this.chain,
+        account,
+      });
+    } catch (error) {
+      if (isInsufficientFundsForApproval(error)) {
+        const ethBalance = await this.publicClient.getBalance({ address: depositAddress });
+        throw new PublicError(
+          "validation_failed",
+          422,
+          undefined,
+          `Deposit wallet ${depositAddress} needs Sepolia ETH for gas before ${tokenSymbol} relayer approval can be submitted. Current ETH balance: ${formatUnits(ethBalance, 18)}.`,
+        );
+      }
+      throw error;
+    }
+  }
+}
+
+function isInsufficientFundsForApproval(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("insufficient funds") ||
+    message.includes("exceeds the balance of the account") ||
+    message.includes("insufficient funds for transfer")
+  );
 }

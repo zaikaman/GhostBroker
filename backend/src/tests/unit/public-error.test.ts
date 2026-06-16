@@ -56,6 +56,21 @@ describe("PublicError.toResponse", () => {
     expect("cause" in response).toBe(false);
   });
 
+  it("allows a custom public message without exposing the internal cause for validation_failed", () => {
+    const cause = new Error("internal reason: insufficient funds for transfer");
+    const error = new PublicError(
+      "validation_failed",
+      422,
+      cause,
+      "Deposit wallet needs Sepolia ETH for gas.",
+    );
+
+    expect(error.toResponse()).toEqual({
+      code: "validation_failed",
+      message: "Deposit wallet needs Sepolia ETH for gas.",
+    });
+  });
+
   it("does NOT expose the `cause` field for not_found (no internal context to leak)", () => {
     const cause = new Error("internal reason: no row for institutionId=...");
     const error = new PublicError("not_found", 404, cause);

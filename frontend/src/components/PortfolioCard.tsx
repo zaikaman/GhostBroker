@@ -148,10 +148,10 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', padding: 'var(--spacing-xl)', gap: 'var(--spacing-sm)' }}>
         <Wallet01Icon size={32} style={{ opacity: 0.5, color: 'var(--color-text-muted)' }} />
         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-          Awaiting portfolio snapshot
+          Awaiting mirrored inventory snapshot
         </div>
         <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', maxWidth: '22rem' }}>
-          Balances are loaded from a Sepolia custody or testnet snapshot. T3N operational credits are tracked separately.
+          Trading inventory appears here after the enclave imports a custody or Sepolia snapshot. Settlement wallet funds are tracked separately.
         </div>
       </div>
     );
@@ -161,7 +161,7 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-sm)' }}>
         <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
-          <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Mirrored Portfolio
+          <Wallet01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Mirrored Trading Inventory
         </h2>
         <button
           type="button"
@@ -176,7 +176,7 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
         </button>
       </div>
       <div style={{ marginBottom: 'var(--spacing-sm)', fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-        Tradeable Sepolia assets mirrored from custody or a signed snapshot.
+        Secondary ledger view imported from custody or a signed Sepolia snapshot, separate from the settlement deposit wallet.
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
         {filteredHoldings.map((holding) => (
@@ -249,7 +249,7 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
             lineHeight: 1.4,
           }}
         >
-          Fund your mirrored enclave portfolio with Sepolia testnet assets.
+          Use faucet assets to seed the imported trading inventory when you are testing end-to-end flows.
         </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-sm)' }}>
           <a

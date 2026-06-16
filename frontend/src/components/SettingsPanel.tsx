@@ -12,6 +12,7 @@ import {
   Shield01Icon,
 } from 'hugeicons-react';
 import { EnclaveHealthMonitor } from './EnclaveHealthMonitor';
+import { PortfolioCard } from './PortfolioCard';
 import { SettlementProfileCard } from './SettlementProfileCard';
 
 // Custom SVG Gear Icon for Settings to guarantee compatibility
@@ -551,9 +552,9 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
 
         {/* Tab 4: Settlement Profile */}
         {activeSubTab === 'settlement' && (
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', animation: 'fadeIn 0.2s ease' }}>
             <div style={{ borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--spacing-sm)' }}>
-              <h2 className="card-title" style={{ margin: 0, border: 'none', padding: 0 }}>
+              <h2 className="view-title" style={{ margin: 0 }}>
                 <GearIcon size={18} style={{ color: 'var(--color-accent)' }} /> Settlement Profile & Configurations
               </h2>
               <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
@@ -561,8 +562,13 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
               </p>
             </div>
 
-            <div style={{ maxWidth: '800px', width: '100%', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+            <div className="status-badge" style={{ justifyContent: 'flex-start', padding: 'var(--spacing-sm) var(--spacing-md)', fontSize: '0.72rem', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', width: '100%', boxSizing: 'border-box' }}>
+              <Shield01Icon size={14} /> The connected DID authenticates this console. Settlement funds live in the deposit wallet below, while mirrored inventory remains a separate secondary ledger view.
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 'var(--spacing-lg)', width: '100%', alignItems: 'start' }}>
               <SettlementProfileCard institutionId={session.institution.id} />
+              <PortfolioCard institutionId={session.institution.id} />
             </div>
           </div>
         )}

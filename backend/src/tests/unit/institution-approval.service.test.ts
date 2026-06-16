@@ -176,6 +176,38 @@ describe("InstitutionApprovalService", () => {
     ).rejects.toMatchObject({ statusCode: 422 });
   });
 
+  it("returns a validation error when the deposit wallet lacks ETH for approval gas", async () => {
+    const clients = makeClients({
+      balances: { eth: 0n, wbtc: 0n, usdc: 0n },
+      allowances: { wbtc: 0n, usdc: 0n },
+      decimals: { wbtc: 8, usdc: 6 },
+    });
+    const walletClient = {
+      writeContract: async () => {
+        throw new Error("insufficient funds for transfer");
+      },
+    };
+    const service = new InstitutionApprovalService({
+      institutionRepository: makeRepository(chainInstitution()),
+      depositWalletService,
+      rpcUrl: "http://127.0.0.1:8545",
+      chainId: 31337,
+      relayerContractAddress: RELAYER_CONTRACT,
+      wbtcAddress: WBTC,
+      usdcAddress: USDC,
+      publicClient: clients.publicClient as never,
+      makeWalletClient: () => walletClient as never,
+    });
+
+    await expect(
+      service.approveRelayer("00000000-0000-4000-8000-0000000000f1"),
+    ).rejects.toMatchObject({
+      statusCode: 422,
+      code: "validation_failed",
+      message: `Deposit wallet ${DEPOSIT} needs Sepolia ETH for gas before WBTC relayer approval can be submitted. Current ETH balance: 0.`,
+    });
+  });
+
   it("rejects an unknown institution with a 404", async () => {
     const clients = makeClients({
       balances: { eth: 0n, wbtc: 0n, usdc: 0n },

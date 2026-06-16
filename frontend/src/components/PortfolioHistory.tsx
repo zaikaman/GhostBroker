@@ -145,10 +145,10 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
         <ScrollIcon size={28} style={{ color: 'var(--color-text-muted)', opacity: 0.4 }} />
         <div>
           <h4 style={{ margin: 0, fontWeight: 600, fontSize: '0.85rem', color: 'var(--color-text-primary)' }}>
-            No balance changes recorded
+            No mirrored inventory changes recorded
           </h4>
           <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-            Awaiting the first Sepolia snapshot or a completed settlement.
+            Awaiting the first imported snapshot or a completed settlement update.
           </p>
         </div>
       </div>
@@ -158,7 +158,7 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
   return (
     <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '350px' }}>
       <h3 className="card-title" style={{ fontSize: '0.85rem', marginBottom: 'var(--spacing-md)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Balance Change History
+        <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Mirrored Inventory History
       </h3>
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
         {filteredHistory.map((entry) => {
