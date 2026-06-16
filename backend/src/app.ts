@@ -82,13 +82,13 @@ import {
   BackendTenantDelegationSigner,
   type TenantDelegationSigner,
 } from "./services/tenant-delegation-signer.js";
-import {
-  ChildProcessDemoAgentOrchestrator,
-  type DemoAgentOrchestrator,
-} from "./services/demo-orchestrator.js";
 import { InstitutionApprovalService } from "./services/institution-approval.service.js";
 import { InstitutionWithdrawalService } from "./services/institution-withdrawal.service.js";
-import { createDemoRouter } from "./api/demo.routes.js";
+import { createHostedAgentsRouter } from "./api/hosted-agents.routes.js";
+import {
+  ChildProcessHostedAgentService,
+  type HostedAgentManagementService,
+} from "./services/hosted-agent.service.js";
 import {
   AdkTenantDidRegistry,
   SandboxTokenBalanceClient,
@@ -169,14 +169,7 @@ export interface BackendServices {
    * t3-enclave) can omit it.
    */
   tenantDelegationSigner?: TenantDelegationSigner;
-  /**
-   * Phase 2.5: Demo Mode orchestrator. Owns the
-   * lifecycle of the buyer + seller child processes
-   * spawned on the dashboard's "Spin up demo agents"
-   * button. Optional so the test composition root can
-   * omit it; production boots it in `createDefaultServices`.
-   */
-  demoAgentOrchestrator?: DemoAgentOrchestrator;
+  hostedAgentService?: HostedAgentManagementService;
   institutionApprovalService?: InstitutionApprovalService;
   institutionWithdrawalService?: InstitutionWithdrawalService;
 }
@@ -528,6 +521,14 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     { telemetryBus },
   );
 
+  const apiKeyService = new ApiKeyService(apiKeyRepository);
+  const agentService = buildAgentService({
+    authorizationFacade,
+    matchingOrchestrator,
+    supabase: supabase as never,
+    authorityRevocationRepository,
+  });
+
   return {
     institutionService: new InstitutionService(
       institutionRepository,
@@ -537,12 +538,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     ),
     portfolioService,
     ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
-    agentService: buildAgentService({
-      authorizationFacade,
-      matchingOrchestrator,
-      supabase: supabase as never,
-      authorityRevocationRepository,
-    }),
+    agentService,
     hiddenIntentService: new HiddenIntentService(
       authorizationFacade,
       blindIntentClient,
@@ -560,23 +556,25 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       new SupabaseTradeHistoryRepository(supabase as never),
     ),
     receiptService: new ReceiptService(new SupabaseReceiptRepository(supabase as never)),
-    apiKeyService: new ApiKeyService(apiKeyRepository),
+    apiKeyService,
     matchingOrchestrator,
     intentLockRepository,
     intentLockJanitor,
     tenantDelegationSigner,
     ...(institutionApprovalService ? { institutionApprovalService } : {}),
     ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),
-    demoAgentOrchestrator: new ChildProcessDemoAgentOrchestrator({
+    hostedAgentService: new ChildProcessHostedAgentService({
       agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
       backendUrl: `http://localhost:${env.PORT}`,
-      apiKeyService: new ApiKeyService(apiKeyRepository),
+      apiKeyService,
+      agentService,
+      tenantSigner: tenantDelegationSigner,
     }),
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
       ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
-      apiKeyService: new ApiKeyService(apiKeyRepository),
+      apiKeyService,
       ...(depositWalletService ? { depositWalletService } : {}),
       ...(Object.keys(defaultChainTokenAddresses).length > 0
         ? { defaultChainTokenAddresses }
@@ -685,21 +683,11 @@ export function createApp(
       createReceiptsRouter(services.receiptService),
     );
   }
-  if (services.demoAgentOrchestrator) {
+  if (services.hostedAgentService) {
     app.use(
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
-      createDemoRouter({
-        orchestrator: services.demoAgentOrchestrator,
-        apiKeyService: services.apiKeyService,
-        agentService: services.agentService,
-        // With exactOptionalPropertyTypes, we use a spread to
-        // omit the key entirely when the signer is absent
-        // rather than passing `undefined` explicitly.
-        ...(services.tenantDelegationSigner
-          ? { tenantSigner: services.tenantDelegationSigner }
-          : {}),
-      }),
+      createHostedAgentsRouter(services.hostedAgentService),
     );
   }
   // WS4.2: admin reverser route. The rail dispatcher is

@@ -1,26 +1,16 @@
 import {
-  GhostBrokerClient,
   GhostBrokerApiError,
+  GhostBrokerClient,
+  type AgentAdmission,
   type AgentPortfolio,
   type AuthSession,
-  type AgentAdmission,
   type CompletedTrade,
   type TelemetryEvent,
 } from "@ghostbroker/agent-client";
 import type { AgentEnv } from "./env.js";
-import type { Decision, LlmClient } from "./llm-decision.js";
-import { buildSealedEnvelope } from "./sealed-envelope.js";
+import type { Decision, DecisionContext, LlmClient } from "./llm-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
-
-/**
- * Shared loop runtime for the buyer and seller.
- *
- * The agent boots from an on-disk identity file (DID + keypair,
- * produced by `setup:identity`) and an on-disk W3C Verifiable
- * Credential (produced by `setup:delegation`), passes the VC to
- * the server's Ghostbroker delegation verifier, and then submits encrypted
- * intents through the regular matching pipeline.
- */
+import { buildSealedEnvelope } from "./sealed-envelope.js";
 
 export interface AgentRunOptions {
   side: "buy" | "sell";
@@ -28,6 +18,7 @@ export interface AgentRunOptions {
   llm: LlmClient;
   dryRun: boolean;
   assetCode: string;
+  quoteAssetCode?: string;
 }
 
 export interface AgentRunResult {
@@ -39,28 +30,17 @@ export interface AgentRunResult {
 }
 
 export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunResult> {
-  const { side, env, llm, dryRun, assetCode } = options;
-
-  // Agent identity. Post-Phase 1: the backend owns the
-  // delegation VC. The agent DID is still the agent's
-  // public identifier — but the agent process no longer
-  // needs to hold a long-lived keypair. For the demo
-  // orchestrator path (no `AGENT_IDENTITY_CONFIG_PATH`
-  // on disk) we mint a fresh keypair at process boot.
-  // For the legacy path (the env var points at a JSON
-  // file) we read it from disk so existing
-  // installations keep working.
+  const { side, env, llm, dryRun, assetCode, quoteAssetCode = env.AGENT_QUOTE_ASSET_CODE } = options;
   const identity = loadOrGenerateIdentity(env.AGENT_IDENTITY_CONFIG_PATH);
 
-  log(side, `→ Using identity ${identity.did} (eth ${identity.ethAddress})`);
+  log(side, `Hosted agent booting with DID ${identity.did}`);
 
-  // Authenticate against the GhostBroker backend.
   const client = new GhostBrokerClient({ baseUrl: env.GHOSTBROKER_URL });
   let session: AuthSession;
   try {
     session = await client.authenticateWithApiKey(env.GHOSTBROKER_API_KEY);
   } catch (err) {
-    log(side, `✗ Auth failed: ${formatError(err)}`);
+    log(side, `Authentication failed: ${formatError(err)}`);
     return {
       outcome: "admit_failed",
       ticksRun: 0,
@@ -69,15 +49,8 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       admissionAuthorityRef: undefined,
     };
   }
-  log(side, `✓ Authenticated as ${session.institution.displayName} (${session.institution.id})`);
+  log(side, `Authenticated for ${session.institution.displayName}`);
 
-  // Admit via the Ghostbroker delegation path. Post-Phase
-  // 1: the delegation VC is owned by the backend. The
-  // dashboard mints + signs + persists it at "Configure
-  // Agent" time; the agent process only sends its
-  // `institutionId` + `agentDid`. The backend's
-  // `loadAndVerify` facade looks up the persisted VC on
-  // admit.
   let admission: AgentAdmission;
   try {
     admission = await client.admitAgent({
@@ -85,7 +58,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       agentDid: identity.did,
     });
   } catch (err) {
-    log(side, `✗ Admit failed: ${formatError(err)}`);
+    log(side, `Admit failed: ${formatError(err)}`);
     return {
       outcome: "admit_failed",
       ticksRun: 0,
@@ -94,64 +67,47 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       admissionAuthorityRef: undefined,
     };
   }
-  log(side, `✓ Admitted. Authority ref: ${admission.authorityRef}`);
+  log(side, `Admitted with authority ${admission.authorityRef}`);
 
-  // Read the live portfolio via the SDK. This is the agent's
-  // primary balance source. If the call fails (e.g. transient
-  // 503), we log a warning and fall back to the optional
-  // AGENT_AVAILABLE_USDC / AGENT_AVAILABLE_WBTC env vars. The
-  // orchestrator's balance-lock check is the real authority on
-  // whether a submit will succeed; this read is informational.
   let livePortfolio: AgentPortfolio | undefined;
   try {
     livePortfolio = await client.getAgentPortfolio({
       institutionId: session.institution.id,
       agentDid: identity.did,
     });
-    const usdcHolding = livePortfolio.holdings.find((h) => h.assetCode === "USDC");
-    const wbtcHolding = livePortfolio.holdings.find((h) => h.assetCode === "WBTC");
-    log(
-      side,
-      `✓ Portfolio: USDC ${usdcHolding ? usdcHolding.balance - usdcHolding.locked : 0} available ` +
-        `(held ${usdcHolding?.balance ?? 0}, locked ${usdcHolding?.locked ?? 0}); ` +
-        `WBTC ${wbtcHolding ? wbtcHolding.balance - wbtcHolding.locked : 0} available; ` +
-        `${livePortfolio.pendingReservations.length} pending reservation(s)`,
-    );
+    log(side, describePortfolio(livePortfolio, assetCode, quoteAssetCode));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (env.AGENT_AVAILABLE_USDC === undefined || env.AGENT_AVAILABLE_WBTC === undefined) {
-      log(
-        side,
-        `⚠ Portfolio read failed (${message}). No AGENT_AVAILABLE_* fallback set; ` +
-          "the LLM will see 0 available and wait until the SDK recovers.",
-      );
+    if (
+      env.AGENT_AVAILABLE_BASE_BALANCE === undefined &&
+      env.AGENT_AVAILABLE_QUOTE_BALANCE === undefined
+    ) {
+      log(side, `Portfolio read failed (${message}); using zero balances until recovery.`);
     } else {
       log(
         side,
-        `⚠ Portfolio read failed (${message}). Using env fallback: ` +
-          `USDC=${env.AGENT_AVAILABLE_USDC}, WBTC=${env.AGENT_AVAILABLE_WBTC}.`,
+        `Portfolio read failed (${message}); using fallback balances ${assetCode}=${env.AGENT_AVAILABLE_BASE_BALANCE ?? 0}, ${quoteAssetCode}=${env.AGENT_AVAILABLE_QUOTE_BALANCE ?? 0}.`,
       );
     }
   }
 
-  // Wire telemetry.
   client.telemetry.onMessage((event) => logTelemetry(side, event));
   client.telemetry.onError((phase, ref) =>
-    log(side, `⚠ Telemetry error: ${phase} (ref: ${ref})`),
+    log(side, `Telemetry error: ${phase} (${ref ?? "no-ref"})`),
   );
   client.telemetry.connect();
 
   let settlementCorrelationRef: string | undefined;
   const stopOnSettle = client.telemetry.onSettled((ref) => {
-    log(side, `✓ Settlement finalized: ${ref}`);
     settlementCorrelationRef = ref;
+    log(side, `Settlement finalized: ${ref}`);
   });
 
   let lastDecision: Decision | undefined;
   let lastOutcome = "(start of run)";
 
   for (let tick = 1; tick <= env.MAX_TICKS; tick += 1) {
-    log(side, `— tick ${tick}/${env.MAX_TICKS} —`);
+    log(side, `Tick ${tick}/${env.MAX_TICKS}`);
 
     if (settlementCorrelationRef !== undefined) {
       stopOnSettle();
@@ -166,10 +122,6 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     }
 
     const { items: trades } = await readTrades(client, side);
-    // Refetch the portfolio on every tick so the LLM sees the
-    // post-settlement balance and any new reservation amounts.
-    // A failure here is non-fatal — `availableBalances` falls
-    // back to the env vars or 0.
     if (client.token) {
       try {
         livePortfolio = await client.getAgentPortfolio({
@@ -178,12 +130,15 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        log(side, `⚠ portfolio refresh failed on tick ${tick}: ${message}`);
+        log(side, `Portfolio refresh failed on tick ${tick}: ${message}`);
       }
     }
+
     const ctx = buildDecisionContext({
       side,
       env,
+      assetCode,
+      quoteAssetCode,
       completedTradeCount: trades.length,
       tickNumber: tick,
       lastOutcome,
@@ -195,15 +150,16 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       decision = await llm.decide(ctx);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log(side, `✗ LLM call failed: ${message}`);
+      log(side, `LLM call failed: ${message}`);
       lastOutcome = `LLM call failed: ${message.slice(0, 80)}`;
       await sleep(env.TICK_INTERVAL_MS);
       continue;
     }
+
     lastDecision = decision;
     log(
       side,
-      `  decision: action=${decision.action} qty=${decision.quantity} price=${decision.price} :: ${decision.reasoning}`,
+      `Decision ${decision.action} qty=${decision.quantity} price=${decision.price} (${decision.reasoning})`,
     );
 
     if (decision.action === "abort") {
@@ -220,13 +176,12 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
 
     if (decision.action === "wait" || dryRun) {
       lastOutcome = dryRun
-        ? `DRY_RUN: would have waited (decision=${decision.action})`
+        ? `DRY_RUN: would submit ${decision.quantity} ${assetCode} @ ${decision.price}`
         : "wait chosen by LLM";
       await sleep(env.TICK_INTERVAL_MS);
       continue;
     }
 
-    // Submit path.
     const envelope = buildSealedEnvelope({
       institutionId: session.institution.id,
       agentDid: identity.did,
@@ -238,7 +193,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     });
     log(
       side,
-      `  submitting: ${side} ${decision.quantity} ${assetCode} @ ${decision.price} USDC (envelope ${envelope.length}B, handle ${envelope.handle})`,
+      `Submitting ${side} ${decision.quantity} ${assetCode} @ ${decision.price} ${quoteAssetCode} (envelope ${envelope.length}B, handle ${envelope.handle})`,
     );
 
     try {
@@ -254,47 +209,44 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
           price: decision.price,
         },
       });
-      log(side, `✓ Intent sealed: ${accepted.intentHandle}`);
+      log(side, `Intent sealed: ${accepted.intentHandle}`);
       lastOutcome = `intent sealed (${accepted.intentHandle})`;
     } catch (err) {
       const friendly = formatError(err);
       if (err instanceof GhostBrokerApiError) {
         if (err.isAuthError) {
-          log(side, `✗ ${err.code} on submit (${err.status}). Re-authenticating and continuing.`);
+          log(side, `Submit auth error ${err.status}; refreshing session.`);
           await client.authenticateWithApiKey(env.GHOSTBROKER_API_KEY);
           lastOutcome = `auth retry after ${err.status}`;
           await sleep(env.TICK_INTERVAL_MS);
           continue;
         }
         if (err.status === 403) {
-          log(side, `✗ 403 on submit: ${err.message}. Will wait and retry.`);
+          log(side, `Submit rejected with 403; waiting for next tick.`);
           lastOutcome = `403 on submit (${err.message.slice(0, 60)})`;
           await sleep(env.TICK_INTERVAL_MS);
           continue;
         }
         if (err.isRetryable) {
-          log(side, `⚠ ${err.status} on submit; retrying next tick.`);
+          log(side, `Retryable submit failure ${err.status}; retrying next tick.`);
           lastOutcome = `${err.status} on submit (retryable)`;
           await sleep(env.TICK_INTERVAL_MS);
           continue;
         }
-        log(side, `✗ submit failed: ${err.status} ${err.code} ${err.message}`);
+        log(side, `Submit failed: ${err.status} ${err.code} ${err.message}`);
         lastOutcome = `submit failed ${err.status}`;
         await sleep(env.TICK_INTERVAL_MS);
         continue;
       }
-      log(side, `✗ submit threw: ${friendly}`);
+      log(side, `Submit threw: ${friendly}`);
       lastOutcome = `submit threw: ${friendly.slice(0, 60)}`;
       await sleep(env.TICK_INTERVAL_MS);
       continue;
     }
 
-    // Wait passively for settlement.
     const settledRef = await waitForSettlement({
       client,
-      session,
       side,
-      intentHandle: "(submitted above)",
       timeoutMs: env.TICK_INTERVAL_MS,
     });
     if (settledRef) {
@@ -313,72 +265,78 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
 
   stopOnSettle();
   client.telemetry.disconnect();
-  const outcome: AgentRunResult["outcome"] = dryRun
-    ? "dry_run_complete"
-    : "max_ticks_reached";
   return {
-    outcome,
+    outcome: dryRun ? "dry_run_complete" : "max_ticks_reached",
     ticksRun: env.MAX_TICKS,
     lastDecision,
     settlementCorrelationRef,
     admissionAuthorityRef: admission.authorityRef,
-    };
+  };
 }
 
 interface BuildContextInput {
   side: "buy" | "sell";
   env: AgentEnv;
+  assetCode: string;
+  quoteAssetCode: string;
   completedTradeCount: number;
   tickNumber: number;
   lastOutcome: string;
   livePortfolio: AgentPortfolio | undefined;
 }
 
-/**
- * Resolve the USDC / WBTC balances the LLM should see this tick.
- *
- * Order of preference:
- *  1. Live portfolio from `client.getAgentPortfolio(...)` — the
- *     freshest source, with `balance - locked` per holding.
- *  2. Env-var fallback (`AGENT_AVAILABLE_USDC` /
- *     `AGENT_AVAILABLE_WBTC`) — only used when the SDK call
- *     failed.
- *  3. 0 — the LLM sees "0 available" and waits, which is the safe
- *     default when both the SDK and the env are silent.
- */
+function findAvailableBalance(portfolio: AgentPortfolio | undefined, assetCode: string): number {
+  if (!portfolio) {
+    return 0;
+  }
+  const holding = portfolio.holdings.find((item) => item.assetCode === assetCode);
+  if (!holding) {
+    return 0;
+  }
+  return Math.max(0, holding.balance - holding.locked);
+}
+
 function availableBalances(
   portfolio: AgentPortfolio | undefined,
   env: AgentEnv,
-): { usdc: number; wbtc: number } {
+  assetCode: string,
+  quoteAssetCode: string,
+): { base: number; quote: number } {
   if (portfolio) {
-    const usdcHolding = portfolio.holdings.find((h) => h.assetCode === "USDC");
-    const wbtcHolding = portfolio.holdings.find((h) => h.assetCode === "WBTC");
     return {
-      usdc: usdcHolding ? Math.max(0, usdcHolding.balance - usdcHolding.locked) : 0,
-      wbtc: wbtcHolding ? Math.max(0, wbtcHolding.balance - wbtcHolding.locked) : 0,
+      base: findAvailableBalance(portfolio, assetCode),
+      quote: findAvailableBalance(portfolio, quoteAssetCode),
     };
   }
   return {
-    usdc: env.AGENT_AVAILABLE_USDC ?? 0,
-    wbtc: env.AGENT_AVAILABLE_WBTC ?? 0,
+    base: env.AGENT_AVAILABLE_BASE_BALANCE ?? 0,
+    quote: env.AGENT_AVAILABLE_QUOTE_BALANCE ?? 0,
   };
 }
 
-function buildDecisionContext(input: BuildContextInput) {
-  const { side, env, completedTradeCount, tickNumber, lastOutcome, livePortfolio } = input;
-  const { usdc, wbtc } = availableBalances(livePortfolio, env);
+function buildDecisionContext(input: BuildContextInput): DecisionContext {
+  const { side, env, assetCode, quoteAssetCode, completedTradeCount, tickNumber, lastOutcome, livePortfolio } = input;
+  const { base, quote } = availableBalances(livePortfolio, env, assetCode, quoteAssetCode);
+  const minPrice = roundPrice(env.REFERENCE_PRICE * (1 - env.PRICE_BAND_BPS / 10_000));
+  const maxPrice = roundPrice(env.REFERENCE_PRICE * (1 + env.PRICE_BAND_BPS / 10_000));
+
   return {
     side,
-    referencePriceUsdcPerWbtc: env.REFERENCE_PRICE_USDC_PER_WBTC,
+    assetCode,
+    quoteAssetCode,
+    referencePrice: env.REFERENCE_PRICE,
     priceBandBps: env.PRICE_BAND_BPS,
-    quantityMinWbtc: env.QUANTITY_MIN_WBTC,
-    quantityMaxWbtc: env.QUANTITY_MAX_WBTC,
-    availableUsdc: usdc,
-    availableWbtc: wbtc,
+    minPrice,
+    maxPrice,
+    quantityMin: env.QUANTITY_MIN,
+    quantityMax: env.QUANTITY_MAX,
+    availableQuoteBalance: quote,
+    availableBaseBalance: base,
     completedTradeCount,
     tickNumber,
     maxTicks: env.MAX_TICKS,
     lastOutcome,
+    operatorPrompt: env.AGENT_OPERATOR_PROMPT,
   };
 }
 
@@ -390,7 +348,7 @@ async function readTrades(
     return await client.getCompletedTrades();
   } catch (err) {
     if (err instanceof GhostBrokerApiError) {
-      log(side, `⚠ trades fetch failed: ${err.status} ${err.code}. Assuming none.`);
+      log(side, `Trades fetch failed: ${err.status} ${err.code}. Assuming none.`);
     }
     return { items: [] };
   }
@@ -398,9 +356,7 @@ async function readTrades(
 
 interface WaitInput {
   client: GhostBrokerClient;
-  session: AuthSession;
   side: "buy" | "sell";
-  intentHandle: string;
   timeoutMs: number;
 }
 
@@ -413,17 +369,33 @@ async function waitForSettlement(input: WaitInput): Promise<string | undefined> 
       const { items } = await client.getCompletedTrades();
       if (items.length > lastCount) {
         const newest = items[0];
-        if (newest) return newest.tradeRef;
+        if (newest) {
+          return newest.tradeRef;
+        }
       }
       lastCount = items.length;
     } catch (err) {
       if (err instanceof GhostBrokerApiError) {
-        log(side, `  settlement poll: ${err.status} ${err.code}`);
+        log(side, `Settlement poll: ${err.status} ${err.code}`);
       }
     }
     await sleep(2_000);
   }
   return undefined;
+}
+
+function describePortfolio(
+  portfolio: AgentPortfolio,
+  assetCode: string,
+  quoteAssetCode: string,
+): string {
+  const quote = portfolio.holdings.find((holding) => holding.assetCode === quoteAssetCode);
+  const base = portfolio.holdings.find((holding) => holding.assetCode === assetCode);
+  return (
+    `Portfolio ${quoteAssetCode}=${quote ? quote.balance - quote.locked : 0} available, ` +
+    `${assetCode}=${base ? base.balance - base.locked : 0} available, ` +
+    `${portfolio.pendingReservations.length} pending reservation(s)`
+  );
 }
 
 function log(side: "buy" | "sell", message: string): void {
@@ -434,8 +406,12 @@ function log(side: "buy" | "sell", message: string): void {
 
 function logTelemetry(side: "buy" | "sell", event: TelemetryEvent): void {
   if (event.phase === "settlement_finalized" || event.phase === "settlement_failed") {
-    log(side, `  ↪ telemetry: ${event.phase} (${event.correlationRef ?? "no-ref"})`);
+    log(side, `Telemetry ${event.phase} (${event.correlationRef ?? "no-ref"})`);
   }
+}
+
+function roundPrice(price: number): number {
+  return Math.round(price * 100) / 100;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -446,6 +422,8 @@ function formatError(err: unknown): string {
   if (err instanceof GhostBrokerApiError) {
     return `${err.status} ${err.code} ${err.message}`;
   }
-  if (err instanceof Error) return err.message;
+  if (err instanceof Error) {
+    return err.message;
+  }
   return String(err);
 }

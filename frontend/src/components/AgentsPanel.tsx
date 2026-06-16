@@ -148,7 +148,7 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
           border: '1px dashed var(--color-border)',
           borderRadius: 'var(--radius-md)',
         }}>
-          No agents registered yet. Deploy an agent from the Secure Enclaves tab to get started.
+          No agents registered yet. Launch a hosted agent from the Hosted Agents tab to get started.
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
@@ -224,7 +224,7 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
                       onClick={handleCancelEdit}
                       style={{ padding: '2px 6px', fontSize: '0.65rem', color: 'var(--color-text-muted)' }}
                     >
-                      ✕
+                      âœ•
                     </button>
                   </div>
                 ) : (
@@ -376,7 +376,7 @@ export function AgentsPanel({ onNavigateToDeveloperKeys }: AgentsPanelProps): Re
               }}
               style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}
             >
-              Manage keys below ↓
+              Manage keys below â†“
             </a>
           </span>
         </div>

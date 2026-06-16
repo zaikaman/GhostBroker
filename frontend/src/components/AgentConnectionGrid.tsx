@@ -36,7 +36,7 @@ export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridPro
           type="button"
           className="btn-grid-header-deploy"
           onClick={onDeploy}
-          title="Deploy another agent session"
+          title="Open hosted agent controls"
         >
           <RocketIcon size={10} /> + Deploy
         </button>
@@ -86,7 +86,7 @@ export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridPro
             maxWidth: '220px',
             margin: 0
           }}>
-            GhostBroker is an agent-only dark pool. You must deploy a secure enclave agent to submit intents.
+            GhostBroker is an agent-only dark pool. Launch a hosted secure enclave runtime to submit intents.
           </p>
           <button 
             type="button"
@@ -104,7 +104,7 @@ export function AgentConnectionGrid({ agents, onDeploy }: AgentConnectionGridPro
               gap: '6px'
             }}
           >
-            Launch Onboarding Guide
+            Open Hosted Console
           </button>
         </div>
       ) : (

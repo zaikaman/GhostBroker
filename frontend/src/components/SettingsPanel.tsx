@@ -269,7 +269,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
               </div>
             ) : agents.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-                No active or historical agents found for this institution. Deploy an agent to configure mandates.
+                No active or historical agents found for this institution. Launch a hosted agent to configure mandates.
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -613,7 +613,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                 style={{ padding: '2px 6px' }}
                 onClick={() => setEditingAgent(null)}
               >
-                ✕
+                âœ•
               </button>
             </div>
             

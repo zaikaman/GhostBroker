@@ -8,6 +8,7 @@
   "scripts": {
     "buyer": "tsx src/buyer-agent.ts",
     "seller": "tsx src/seller-agent.ts",
+    "hosted": "tsx src/hosted-agent.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",

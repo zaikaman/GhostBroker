@@ -1,18 +1,10 @@
 import Groq from "groq-sdk";
 import { z } from "zod";
 
-/**
- * The decision the LLM returns. Forced to a strict shape by the system
- * prompt and re-validated by zod after parsing, so a chatty or
- * misformatted response never silently slips into the trade path.
- */
 export const decisionSchema = z.object({
   action: z.enum(["submit", "wait", "abort"]),
-  /** WBTC quantity, between the configured min and max. */
   quantity: z.number().nonnegative(),
-  /** USDC price per WBTC, within the configured band around the reference. */
   price: z.number().nonnegative(),
-  /** A free-text rationale, capped at 280 chars so the log line stays sane. */
   reasoning: z.string().max(280),
 });
 
@@ -20,99 +12,86 @@ export type Decision = z.infer<typeof decisionSchema>;
 
 export interface DecisionContext {
   side: "buy" | "sell";
-  referencePriceUsdcPerWbtc: number;
+  assetCode: string;
+  quoteAssetCode: string;
+  referencePrice: number;
   priceBandBps: number;
-  quantityMinWbtc: number;
-  quantityMaxWbtc: number;
-  /** USDC currently available (balance minus locked) for the agent's institution. */
-  availableUsdc: number;
-  /** WBTC currently available for the agent's institution. */
-  availableWbtc: number;
-  /** Number of completed trades this institution has participated in (read from API). */
+  minPrice: number;
+  maxPrice: number;
+  quantityMin: number;
+  quantityMax: number;
+  availableQuoteBalance: number;
+  availableBaseBalance: number;
   completedTradeCount: number;
-  /** Tick number, 1-indexed, included in the prompt so the LLM can see progression. */
   tickNumber: number;
-  /** Max ticks before the agent gives up. */
   maxTicks: number;
-  /** What happened on the previous tick, if anything. */
   lastOutcome?: string;
+  operatorPrompt?: string;
 }
 
-const SYSTEM_PROMPT = `You are a trading agent inside the GhostBroker institutional dark pool.
-You see only your own institution's portfolio, your own prior intents,
-and a public reference price for WBTC quoted in USDC.
-You cannot see other participants' orders, prices, or queues.
+const SYSTEM_PROMPT = `You are a hosted GhostBroker institutional trading agent.
+You operate inside GhostBroker-managed confidential infrastructure.
+You cannot see other participants' orders, prices, queues, or identities.
+You may only use the information provided in the current tick.
 
-Your job on every tick: pick ONE of three actions and output strict JSON.
-Do not output prose, markdown, code fences, or any text outside the JSON.
+On each tick, choose exactly one action and return strict JSON only.
+Do not output prose, markdown, or code fences.
 
 Actions:
-  - "submit":  place an intent. Choose a WBTC quantity and a USDC price
-                that fall inside the supplied bounds. Your price must
-                be inside [minPrice, maxPrice]. Your quantity must be
-                inside [quantityMin, quantityMax]. If your side is
-                "buy", the implied USDC notional (quantity * price)
-                must not exceed availableUsdc. If your side is
-                "sell", the quantity must not exceed availableWbtc.
-  - "wait":    do nothing this tick. Output quantity = 0, price =
-                referencePrice. Use this when the market is unfavorable
-                or you want to observe more.
-  - "abort":   stop the loop. Output quantity = 0, price = 0.
-                Use this only if you detect a structural problem with
-                the platform (repeated 5xx, missing credentials, etc).
+  - "submit": place an intent using a quantity inside [quantityMin, quantityMax]
+               and a price inside [minPrice, maxPrice].
+               If side is "buy", quantity * price must not exceed availableQuoteBalance.
+               If side is "sell", quantity must not exceed availableBaseBalance.
+  - "wait":   do nothing this tick. Output quantity = 0 and price = referencePrice.
+  - "abort":  stop the loop only when there is a structural platform problem.
+               Output quantity = 0 and price = 0.
 
-Output schema (return EXACTLY this JSON, no other text):
+Output exactly:
 {
   "action": "submit" | "wait" | "abort",
   "quantity": <number>,
   "price": <number>,
-  "reasoning": "<= 280 chars, plain text, no markdown>"
+  "reasoning": "<= 280 chars, plain text>"
 }`;
 
-const userPromptTemplate = (ctx: DecisionContext): string => {
-  const minPrice = roundPrice(
-    ctx.referencePriceUsdcPerWbtc * (1 - ctx.priceBandBps / 10_000),
-  );
-  const maxPrice = roundPrice(
-    ctx.referencePriceUsdcPerWbtc * (1 + ctx.priceBandBps / 10_000),
-  );
+function userPromptTemplate(ctx: DecisionContext): string {
   return [
     `tick: ${ctx.tickNumber}/${ctx.maxTicks}`,
     `side: ${ctx.side}`,
-    `reference_price_usdc_per_wbtc: ${ctx.referencePriceUsdcPerWbtc}`,
+    `asset_code: ${ctx.assetCode}`,
+    `quote_asset_code: ${ctx.quoteAssetCode}`,
+    `reference_price: ${ctx.referencePrice}`,
     `price_band_bps: ${ctx.priceBandBps}`,
-    `min_price: ${minPrice}`,
-    `max_price: ${maxPrice}`,
-    `quantity_min_wbtc: ${ctx.quantityMinWbtc}`,
-    `quantity_max_wbtc: ${ctx.quantityMaxWbtc}`,
-    `available_usdc: ${ctx.availableUsdc}`,
-    `available_wbtc: ${ctx.availableWbtc}`,
+    `min_price: ${ctx.minPrice}`,
+    `max_price: ${ctx.maxPrice}`,
+    `quantity_min: ${ctx.quantityMin}`,
+    `quantity_max: ${ctx.quantityMax}`,
+    `available_quote_balance: ${ctx.availableQuoteBalance}`,
+    `available_base_balance: ${ctx.availableBaseBalance}`,
     `completed_trade_count: ${ctx.completedTradeCount}`,
     ctx.lastOutcome ? `last_tick_outcome: ${ctx.lastOutcome}` : "last_tick_outcome: (none)",
+    ctx.operatorPrompt
+      ? `operator_prompt: ${ctx.operatorPrompt}`
+      : "operator_prompt: (none)",
   ].join("\n");
-};
+}
 
 function roundPrice(price: number): number {
   return Math.round(price * 100) / 100;
 }
 
-/**
- * Strip markdown code fences and any leading prose. Tolerant of the
- * model emitting ```json ...``` or wrapping in extra text. The returned
- * string is fed into `JSON.parse`; a parse failure is a hard error
- * and the agent falls back to "wait".
- */
+function roundQty(quantity: number): number {
+  return Math.round(quantity * 1_000_000) / 1_000_000;
+}
+
 export function extractJsonObject(raw: string): unknown {
   const trimmed = raw.trim();
-  // Strip ```json ... ``` fences if present.
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/u);
   const candidate = fenced ? fenced[1] : trimmed;
 
-  // Try the full candidate first.
   try {
     return JSON.parse(candidate);
   } catch {
-    // Fall back: find the first '{' and the matching '}'.
     const start = candidate.indexOf("{");
     const end = candidate.lastIndexOf("}");
     if (start >= 0 && end > start) {
@@ -122,17 +101,7 @@ export function extractJsonObject(raw: string): unknown {
   }
 }
 
-/**
- * The trade-floor safety net. After the LLM emits a decision we clamp
- * it to the configured bounds. A buyer's price never goes above
- * maxPrice; a seller's price never goes below minPrice. A submit
- * decision is downgraded to "wait" if the implied notional exceeds
- * available balance.
- */
 export function clampDecision(decision: Decision, ctx: DecisionContext): Decision {
-  const minPrice = ctx.referencePriceUsdcPerWbtc * (1 - ctx.priceBandBps / 10_000);
-  const maxPrice = ctx.referencePriceUsdcPerWbtc * (1 + ctx.priceBandBps / 10_000);
-
   const { action, quantity: rawQuantity, price: rawPrice } = decision;
   let quantity = rawQuantity;
   let price = rawPrice;
@@ -143,44 +112,38 @@ export function clampDecision(decision: Decision, ctx: DecisionContext): Decisio
   }
 
   if (action === "wait") {
-    return { action: "wait", quantity: 0, price: ctx.referencePriceUsdcPerWbtc, reasoning };
+    return { action: "wait", quantity: 0, price: roundPrice(ctx.referencePrice), reasoning };
   }
 
-  // action === "submit"
-  quantity = Math.max(ctx.quantityMinWbtc, Math.min(ctx.quantityMaxWbtc, quantity));
-  price = Math.max(minPrice, Math.min(maxPrice, price));
+  quantity = Math.max(ctx.quantityMin, Math.min(ctx.quantityMax, quantity));
+  price = Math.max(ctx.minPrice, Math.min(ctx.maxPrice, price));
 
   if (ctx.side === "buy") {
     const notional = quantity * price;
-    if (notional > ctx.availableUsdc) {
-      // Scale quantity down to fit available USDC; if even the minimum
-      // quantity doesn't fit, downgrade to "wait".
-      const maxQuantityForBudget = ctx.availableUsdc / price;
-      if (maxQuantityForBudget < ctx.quantityMinWbtc) {
+    if (notional > ctx.availableQuoteBalance) {
+      const maxQuantityForBudget = ctx.availableQuoteBalance / price;
+      if (maxQuantityForBudget < ctx.quantityMin) {
         return {
           action: "wait",
           quantity: 0,
-          price: ctx.referencePriceUsdcPerWbtc,
-          reasoning: `Insufficient USDC: ${ctx.availableUsdc} < min notional ${(ctx.quantityMinWbtc * price).toFixed(2)}.`,
+          price: roundPrice(ctx.referencePrice),
+          reasoning: `Insufficient ${ctx.quoteAssetCode} balance for minimum notional.`,
         };
       }
       quantity = Math.min(quantity, maxQuantityForBudget);
-      reasoning = `${reasoning} [clamped to fit USDC budget]`.slice(0, 280);
+      reasoning = `${reasoning} [clamped to quote balance]`.slice(0, 280);
     }
-  } else {
-    // side === "sell"
-    if (quantity > ctx.availableWbtc) {
-      if (ctx.availableWbtc < ctx.quantityMinWbtc) {
-        return {
-          action: "wait",
-          quantity: 0,
-          price: ctx.referencePriceUsdcPerWbtc,
-          reasoning: `Insufficient WBTC: ${ctx.availableWbtc} < min quantity ${ctx.quantityMinWbtc}.`,
-        };
-      }
-      quantity = Math.min(quantity, ctx.availableWbtc);
-      reasoning = `${reasoning} [clamped to available WBTC]`.slice(0, 280);
+  } else if (quantity > ctx.availableBaseBalance) {
+    if (ctx.availableBaseBalance < ctx.quantityMin) {
+      return {
+        action: "wait",
+        quantity: 0,
+        price: roundPrice(ctx.referencePrice),
+        reasoning: `Insufficient ${ctx.assetCode} balance for minimum quantity.`,
+      };
     }
+    quantity = Math.min(quantity, ctx.availableBaseBalance);
+    reasoning = `${reasoning} [clamped to base balance]`.slice(0, 280);
   }
 
   return {
@@ -189,11 +152,6 @@ export function clampDecision(decision: Decision, ctx: DecisionContext): Decisio
     price: roundPrice(price),
     reasoning,
   };
-}
-
-function roundQty(qty: number): number {
-  // 6 decimal places is plenty for WBTC satoshi-level precision.
-  return Math.round(qty * 1_000_000) / 1_000_000;
 }
 
 export interface LlmClient {

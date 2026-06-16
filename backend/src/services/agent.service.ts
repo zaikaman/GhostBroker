@@ -27,6 +27,11 @@ export interface AgentManagementService extends AgentAdmissionService {
   ): Promise<Agent[]>;
   getAgent(id: string, institutionId: string): Promise<Agent>;
   updateAgentLabel(id: string, institutionId: string, label: string): Promise<Agent>;
+  updateAgentMetadata?(input: {
+    id: string;
+    institutionId: string;
+    patch: Record<string, unknown>;
+  }): Promise<Agent>;
   revokeAgent(id: string, institutionId: string): Promise<void>;
   /**
    * Persist a freshly-signed delegation VC on the agent's
@@ -345,6 +350,18 @@ export class AgentService implements AgentManagementService {
     return { ...agent, label };
   }
 
+  public async updateAgentMetadata(input: {
+    id: string;
+    institutionId: string;
+    patch: Record<string, unknown>;
+  }): Promise<Agent> {
+    const agent = await this.repository.findById(input.id, input.institutionId);
+    if (!agent) {
+      throw new PublicError("not_found", 404);
+    }
+    return this.repository.updateMetadata(input.id, input.patch);
+  }
+
   public async revokeAgent(id: string, institutionId: string): Promise<void> {
     // Find the agent to get its agentDid for cascade operations
     const agents = await this.repository.listByInstitution(institutionId);
@@ -483,3 +500,4 @@ export class AgentService implements AgentManagementService {
 function cryptoRandomHex(byteLength: number): string {
   return randomBytes(byteLength).toString("hex");
 }
+

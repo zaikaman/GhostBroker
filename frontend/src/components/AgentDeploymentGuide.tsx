@@ -1,283 +1,564 @@
-import React, { useCallback, useState } from 'react';
-import { type AuthSession } from '../services/api-client';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  EyeIcon,
-  Key01Icon,
-  CodeIcon,
-  Package01Icon,
-  Chart01Icon,
-  Shield01Icon,
+  apiClient,
+  type AuthSession,
+  type CreateHostedAgentRequest,
+  type HostedAgentConfig,
+  type HostedAgentPreset,
+  type HostedAgentRecord,
+} from '../services/api-client';
+import {
+  Activity01Icon,
+  AlertCircleIcon,
+  ArrowLeft01Icon,
   CheckmarkCircle01Icon,
-  ClipboardIcon,
-  Plug01Icon,
-  Link01Icon,
-  ScrollIcon,
-  Idea01Icon,
+  CloudServerIcon,
+  Key01Icon,
+  Loading03Icon,
+  PlayIcon,
+  Refresh01Icon,
+  Robot01Icon,
+  StopIcon,
 } from 'hugeicons-react';
-
-const DEFAULT_API_BASE_URL = 'http://localhost:3001';
-const DEFAULT_TELEMETRY_WS_URL = 'ws://localhost:3001/ws/telemetry';
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '');
-const TELEMETRY_WS_URL = (import.meta.env.VITE_WS_TELEMETRY_URL || DEFAULT_TELEMETRY_WS_URL).replace(/\/$/, '');
 
 interface AgentDeploymentGuideProps {
   session: AuthSession;
   onBack: () => void;
 }
 
-type Section = 'configure' | 'deploy' | 'monitor';
-
-function CodeBlock({ code, language = 'bash' }: { code: string; language?: string }): React.JSX.Element {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [code]);
-  return (
-    <div className="deploy-code-block">
-      <div className="deploy-code-header">
-        <span className="deploy-code-lang">{language}</span>
-        <button type="button" className="deploy-code-copy-btn" onClick={handleCopy} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          {copied ? <><CheckmarkCircle01Icon size={12} style={{ color: 'var(--color-success)' }} /> Copied</> : <><ClipboardIcon size={12} /> Copy</>}
-        </button>
-      </div>
-      <pre className="deploy-code-body"><code>{code}</code></pre>
-    </div>
-  );
+interface HostedFormState {
+  mode: HostedAgentPreset;
+  label: string;
+  side: 'buy' | 'sell';
+  assetCode: string;
+  quoteAssetCode: string;
+  operatorPrompt: string;
+  referencePrice: string;
+  priceBandBps: string;
+  quantityMin: string;
+  quantityMax: string;
+  tickIntervalMs: string;
+  maxTicks: string;
+  dryRun: boolean;
+  groqModel: string;
 }
 
-function CopyField({ label, value }: { label: string; value: string }): React.JSX.Element {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [value]);
-  return (
-    <div className="deploy-copy-field">
-      <span className="deploy-copy-label">{label}</span>
-      <div className="deploy-copy-value-row">
-        <code className="deploy-copy-value">{value}</code>
-        <button type="button" className="deploy-code-copy-btn" onClick={handleCopy} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-          {copied ? <CheckmarkCircle01Icon size={12} style={{ color: 'var(--color-success)' }} /> : <ClipboardIcon size={12} />}
-        </button>
-      </div>
-    </div>
-  );
+const presetConfigs: Record<'buyer' | 'seller', HostedFormState> = {
+  buyer: {
+    mode: 'buyer',
+    label: 'Buyer Mode',
+    side: 'buy',
+    assetCode: 'WBTC',
+    quoteAssetCode: 'USDC',
+    operatorPrompt: 'Work patient liquidity on the buy side. Prefer high-probability matches and avoid spending the full budget on one shot unless conditions are compelling.',
+    referencePrice: '70000',
+    priceBandBps: '125',
+    quantityMin: '0.05',
+    quantityMax: '0.25',
+    tickIntervalMs: '12000',
+    maxTicks: '45',
+    dryRun: false,
+    groqModel: 'qwen/qwen3-32b',
+  },
+  seller: {
+    mode: 'seller',
+    label: 'Seller Mode',
+    side: 'sell',
+    assetCode: 'WBTC',
+    quoteAssetCode: 'USDC',
+    operatorPrompt: 'Work patient liquidity on the sell side. Prioritize clean executions within the configured range and avoid chasing unless repeated inactivity suggests widening urgency.',
+    referencePrice: '70000',
+    priceBandBps: '125',
+    quantityMin: '0.05',
+    quantityMax: '0.25',
+    tickIntervalMs: '12000',
+    maxTicks: '45',
+    dryRun: false,
+    groqModel: 'qwen/qwen3-32b',
+  },
+};
+
+const defaultFormState: HostedFormState = {
+  mode: 'custom',
+  label: 'Institution Agent',
+  side: 'buy',
+  assetCode: 'WBTC',
+  quoteAssetCode: 'USDC',
+  operatorPrompt: 'Trade within the configured band. Favor likely matches, preserve balance discipline, and stop only for genuine structural faults.',
+  referencePrice: '70000',
+  priceBandBps: '150',
+  quantityMin: '0.05',
+  quantityMax: '0.25',
+  tickIntervalMs: '15000',
+  maxTicks: '40',
+  dryRun: false,
+  groqModel: 'qwen/qwen3-32b',
+};
+
+function truncateMiddle(value: string, keep = 12): string {
+  if (value.length <= keep * 2) return value;
+  return `${value.slice(0, keep)}...${value.slice(-keep)}`;
 }
 
-function ConfigureSection({ session }: { session: AuthSession }): React.JSX.Element {
-  return (
-    <div className="deploy-step-content">
-      <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <Key01Icon size={16} style={{ color: 'var(--color-accent)' }} /> 1. Configure Agent
-      </div>
-      <p className="deploy-step-desc" style={{ marginTop: 'var(--spacing-md)' }}>
-        Your agent authenticates with a single GhostBroker API key. The delegation
-        credential is minted and persisted server-side — you never need to handle
-        a W3C VC or a private key.
-      </p>
-      <p className="deploy-step-desc" style={{ marginTop: 'var(--spacing-md)' }}>
-        <strong>Before deploying</strong>, confirm your institution's
-        settlement profile in <em>Settings</em>. The default
-        <code> wallet:default</code> profile is a noop rail (no external
-        transport). If you want real on-chain settlement, switch the
-        institution to <code>chain:sepolia:erc20</code> and configure the
-        deposit address + per-asset token addresses on the
-        <em> Settlement profile</em> card.
-      </p>
-      <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-lg)' }}>
-        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ClipboardIcon size={16} style={{ color: 'var(--color-accent)' }} /> Platform Values
-        </div>
-        <div className="deploy-credentials" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', marginTop: 'var(--spacing-md)' }}>
-          <CopyField label="GhostBroker URL" value={API_BASE_URL} />
-          <CopyField label="Telemetry WebSocket URL" value={TELEMETRY_WS_URL} />
-          <CopyField label="Institution ID" value={session.institution.id} />
-        </div>
-      </div>
-      <div className="deploy-info-card" style={{ marginTop: 'var(--spacing-md)' }}>
-        <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Shield01Icon size={16} style={{ color: 'var(--color-accent)' }} /> Required Secrets
-        </div>
-        <ul className="deploy-info-list" style={{ marginTop: 'var(--spacing-sm)' }}>
-          <li><strong>GhostBroker API Key</strong> - Generate from the Developer Keys tab on the dashboard.</li>
-          <li><strong>LLM API Key</strong> - Your OpenAI, Groq, or Anthropic API key.</li>
-        </ul>
-      </div>
-      <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          <Idea01Icon size={14} style={{ color: 'var(--color-accent)' }} />
-          The backend mints and signs the delegation VC automatically. No CLI steps needed.
-        </span>
-      </div>
-    </div>
-  );
+function formatTimestamp(value?: string): string {
+  if (!value) return 'Not started';
+  return new Date(value).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
-function DeploySection(): React.JSX.Element {
-  const dockerComposeSample = `version: "3.9"
-services:
-  trading-agent:
-    build: .
-    container_name: ghostbroker-agent
-    restart: unless-stopped
-    environment:
-      - GHOSTBROKER_URL=${API_BASE_URL}
-      - GHOSTBROKER_API_KEY=${'${GHOSTBROKER_API_KEY}'}
-      - OPENAI_API_KEY=${'${OPENAI_API_KEY}'}
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"`;
-
-  return (
-    <div className="deploy-step-content">
-      <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <CodeIcon size={16} style={{ color: 'var(--color-accent)' }} /> 2. Deploy Your Agent
-      </div>
-      <p className="deploy-step-desc" style={{ marginTop: 'var(--spacing-md)' }}>
-        Write your agent using the <code>@ghostbroker/agent-client</code> SDK, then
-        deploy it with Docker. The agent only needs two env vars to connect.
-      </p>
-      <CodeBlock code={`import { GhostBrokerClient } from "@ghostbroker/agent-client";
-import { randomBytes } from "node:crypto";
-import { secp256k1 } from "@noble/curves/secp256k1.js";
-
-const GHOSTBROKER_URL = process.env.GHOSTBROKER_URL!;
-const GHOSTBROKER_API_KEY = process.env.GHOSTBROKER_API_KEY!;
-
-
-const ghost = new GhostBrokerClient({ baseUrl: GHOSTBROKER_URL });
-const session = await ghost.authenticateWithApiKey(GHOSTBROKER_API_KEY);
-
-const privateKey = randomBytes(32);
-const publicKey = secp256k1.getPublicKey(privateKey, true);
-const agentDid = \`did:t3n:\${Buffer.from(publicKey).toString("hex").slice(0, 24)}\`;
-
-const admission = await ghost.admitAgent({
-  institutionId: session.institution.id,
-  agentDid,
-});
-console.log("Admitted. Authority ref:", admission.authorityRef);
-
-ghost.telemetry.onSettled(async (ref) => console.log("Trade finalized:", ref));
-ghost.telemetry.connect();
-console.log("Agent running. Waiting for trades...");`} language="typescript" />
-      <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
-        <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          <Package01Icon size={14} style={{ color: 'var(--color-accent)' }} /> Install the SDK:
-        </strong>
-        <CodeBlock code="npm install @ghostbroker/agent-client @noble/curves @noble/hashes" />
-      </div>
-      <h3 style={{ marginTop: 'var(--spacing-xl)', marginBottom: 'var(--spacing-sm)' }}>Docker Compose</h3>
-      <CodeBlock code={dockerComposeSample} />
-      <h3 style={{ marginTop: 'var(--spacing-lg)', marginBottom: 'var(--spacing-sm)' }}>Dockerfile</h3>
-      <CodeBlock code={`FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY agent.ts tsconfig.json ./
-RUN npx tsc --outDir dist
-FROM node:20-alpine
-WORKDIR /app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-CMD ["node", "dist/agent.js"]`} language="dockerfile" />
-    </div>
-  );
+function buildConfig(state: HostedFormState): HostedAgentConfig {
+  return {
+    mode: state.mode,
+    label: state.label.trim(),
+    side: state.side,
+    assetCode: state.assetCode.trim().toUpperCase(),
+    quoteAssetCode: state.quoteAssetCode.trim().toUpperCase(),
+    operatorPrompt: state.operatorPrompt.trim(),
+    referencePrice: Number(state.referencePrice),
+    priceBandBps: Number(state.priceBandBps),
+    quantityMin: Number(state.quantityMin),
+    quantityMax: Number(state.quantityMax),
+    tickIntervalMs: Number(state.tickIntervalMs),
+    maxTicks: Number(state.maxTicks),
+    dryRun: state.dryRun,
+    ...(state.groqModel.trim() ? { groqModel: state.groqModel.trim() } : {}),
+  };
 }
 
-function MonitorSection({ onBack }: { onBack: () => void }): React.JSX.Element {
-  return (
-    <div className="deploy-step-content">
-      <div className="deploy-info-header" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <Chart01Icon size={16} style={{ color: 'var(--color-accent)' }} /> 3. Monitor
-      </div>
-      <p className="deploy-step-desc" style={{ marginTop: 'var(--spacing-md)' }}>
-        Once deployed, your agent appears in the Observatory Console.
-      </p>
-      <div className="deploy-monitor-grid" style={{ marginTop: 'var(--spacing-lg)' }}>
-        <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon"><Plug01Icon size={24} style={{ color: 'var(--color-success)' }} /></div>
-          <div className="deploy-monitor-title">Connection Status</div>
-          <div className="deploy-monitor-desc">Real-time telemetry on the dashboard.</div>
-        </div>
-        <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon"><Chart01Icon size={24} style={{ color: 'var(--color-accent)' }} /></div>
-          <div className="deploy-monitor-title">Activity Feed</div>
-          <div className="deploy-monitor-desc">Agent events: admission, intents, settlements.</div>
-        </div>
-        <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon"><Link01Icon size={24} style={{ color: 'var(--color-accent)' }} /></div>
-          <div className="deploy-monitor-title">Connected Agents</div>
-          <div className="deploy-monitor-desc">All admitted agents with status badges.</div>
-        </div>
-        <div className="deploy-monitor-card">
-          <div className="deploy-monitor-icon"><ScrollIcon size={24} style={{ color: 'var(--color-accent)' }} /></div>
-          <div className="deploy-monitor-title">Trade History</div>
-          <div className="deploy-monitor-desc">Completed trades with audit receipts.</div>
-        </div>
-      </div>
-      <div className="deploy-tip-box" style={{ marginTop: 'var(--spacing-md)' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          <Idea01Icon size={14} style={{ color: 'var(--color-accent)' }} />
-          Open telemetry at <code>{TELEMETRY_WS_URL}?institutionId=&lt;uuid&gt;</code>.
-        </span>
-      </div>
-      <div style={{ marginTop: 'var(--spacing-lg)', textAlign: 'center', padding: 'var(--spacing-lg)' }}>
-        <button type="button" className="btn btn-primary" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-          <EyeIcon size={14} /> Return to Observatory Console
-        </button>
-      </div>
-    </div>
-  );
-}
+export function AgentDeploymentGuide({
+  session,
+  onBack,
+}: AgentDeploymentGuideProps): React.JSX.Element {
+  const [hostedAgents, setHostedAgents] = useState<HostedAgentRecord[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [form, setForm] = useState<HostedFormState>(defaultFormState);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuideProps): React.JSX.Element {
-  const [activeSection, setActiveSection] = useState<Section>('configure');
-  const sections: { id: Section; label: string; icon: React.JSX.Element }[] = [
-    { id: 'configure', label: 'Configure Agent', icon: <Key01Icon size={14} /> },
-    { id: 'deploy', label: 'Deploy', icon: <CodeIcon size={14} /> },
-    { id: 'monitor', label: 'Monitor', icon: <Chart01Icon size={14} /> },
-  ];
+  const loadState = useCallback(async () => {
+    const records = await apiClient.listHostedAgents();
+    setHostedAgents(records);
+    setSelectedAgentId((current) => {
+      if (current && records.some((record) => record.agent.id === current)) {
+        return current;
+      }
+      return records[0]?.agent.id ?? null;
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      loadState()
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : 'Failed to load hosted agents.');
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setIsLoading(false);
+        });
+    });
+
+    const intervalId = window.setInterval(() => {
+      loadState().catch(() => {
+        // keep last successful state
+      });
+    }, 12000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [loadState]);
+
+  const selectedAgent = useMemo(
+    () => hostedAgents.find((record) => record.agent.id === selectedAgentId) ?? null,
+    [hostedAgents, selectedAgentId],
+  );
+
+  const runningCount = hostedAgents.filter((record) => record.runtime.running).length;
+
+  const readiness = useMemo(
+    () => [
+      {
+        label: 'Institution session',
+        ready: Boolean(session.token && session.institution.id),
+        detail: session.institution.displayName,
+      },
+      {
+        label: 'Hosted agents configured',
+        ready: hostedAgents.length > 0,
+        detail: `${hostedAgents.length} configured`,
+      },
+      {
+        label: 'Agents running',
+        ready: runningCount > 0,
+        detail: `${runningCount} live`,
+      },
+      {
+        label: 'Prompt control',
+        ready: true,
+        detail: 'Operator-defined behavior and parameters',
+      },
+    ],
+    [hostedAgents.length, runningCount, session.institution.displayName, session.institution.id, session.token],
+  );
+
+  const applyPreset = useCallback((preset: HostedAgentPreset) => {
+    if (preset === 'custom') {
+      setForm((current) => ({ ...current, mode: 'custom' }));
+      return;
+    }
+    setForm({ ...presetConfigs[preset] });
+  }, []);
+
+  const updateField = useCallback(<K extends keyof HostedFormState>(key: K, value: HostedFormState[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  }, []);
+
+  const handleCreate = useCallback(async () => {
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const request: CreateHostedAgentRequest = {
+        institutionId: session.institution.id,
+        config: buildConfig(form),
+        startOnCreate: true,
+      };
+      const record = await apiClient.createHostedAgent(request);
+      await loadState();
+      setSelectedAgentId(record.agent.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create hosted agent.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [form, loadState, session.institution.id]);
+
+  const handleStart = useCallback(async (id: string) => {
+    setError(null);
+    setBusyAgentId(id);
+    try {
+      await apiClient.startHostedAgent(id);
+      await loadState();
+      setSelectedAgentId(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start hosted agent.');
+    } finally {
+      setBusyAgentId(null);
+    }
+  }, [loadState]);
+
+  const handleStop = useCallback(async (id: string) => {
+    setError(null);
+    setBusyAgentId(id);
+    try {
+      await apiClient.stopHostedAgent(id);
+      await loadState();
+      setSelectedAgentId(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to stop hosted agent.');
+    } finally {
+      setBusyAgentId(null);
+    }
+  }, [loadState]);
+
   return (
-    <div className="deploy-layout">
-      <header className="deploy-header">
+    <div className="deploy-layout deploy-factory-layout">
+      <header className="deploy-header deploy-header-hosted">
         <div className="deploy-header-left">
-          <button type="button" className="btn btn-secondary" onClick={onBack}>&larr; Back</button>
+          <button type="button" className="btn btn-secondary" onClick={onBack}>
+            <ArrowLeft01Icon size={14} /> Back
+          </button>
         </div>
         <div className="deploy-header-center">
-          <h1 className="deploy-title">Deploy Your Agent</h1>
-          <span className="deploy-subtitle">Connect your agent to GhostBroker</span>
+          <h1 className="deploy-title">Hosted Agent Factory</h1>
+          <span className="deploy-subtitle">
+            GhostBroker hosts institution-defined agents with your prompts, your bounds, and live runtime control.
+          </span>
+        </div>
+        <div className="deploy-header-right">
+          <span className={`status-badge ${runningCount > 0 ? 'secure' : 'processing'}`}>
+            GhostBroker Hosted: {runningCount > 0 ? `${runningCount} live` : 'Ready'}
+          </span>
         </div>
       </header>
-      <div className="deploy-steps-indicator" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        {sections.map((section) => (
-          <button
-            key={section.id}
-            type="button"
-            className={`deploy-step-tab ${activeSection === section.id ? 'active' : ''}`}
-            onClick={() => setActiveSection(section.id)}
-          >
-            <div className="deploy-step-tab-content">
-              <div className="deploy-step-tab-icon">{section.icon}</div>
-              <div className="deploy-step-tab-info">
-                <span className="deploy-step-tab-label">{section.label}</span>
+
+      {error ? (
+        <div className="status-badge error deploy-error-banner">
+          <AlertCircleIcon size={14} /> {error}
+        </div>
+      ) : null}
+
+      <div className="deploy-factory-grid">
+        <section className="deploy-panel-stack">
+          <div className="deploy-info-card deploy-factory-intro">
+            <div className="deploy-info-header">
+              <CloudServerIcon size={16} style={{ color: 'var(--color-accent)' }} />
+              Hosted by GhostBroker
+            </div>
+            <div className="deploy-factory-hero">
+              <div className="deploy-factory-copy">
+                <h2 className="deploy-step-title">Launch autonomous agents without a VM setup step</h2>
+                <p className="deploy-step-desc">
+                  Configure a buyer or seller mandate directly in the dashboard. GhostBroker mints the runtime key,
+                  provisions the agent identity, runs the process server-side, and streams the runtime log back here.
+                </p>
+              </div>
+              <div className="deploy-factory-meta">
+                <div className="deploy-copy-field">
+                  <span className="deploy-copy-label">Institution</span>
+                  <code className="deploy-copy-value">{session.institution.displayName}</code>
+                </div>
+                <div className="deploy-copy-field">
+                  <span className="deploy-copy-label">Tenant DID</span>
+                  <code className="deploy-copy-value">{truncateMiddle(session.institution.t3TenantDid, 14)}</code>
+                </div>
+                <div className="deploy-copy-field">
+                  <span className="deploy-copy-label">Live runtimes</span>
+                  <code className="deploy-copy-value">{runningCount}</code>
+                </div>
               </div>
             </div>
-            <div className="deploy-step-tab-indicator-bar" />
-          </button>
-        ))}
-      </div>
-      <div className="deploy-content">
-        {activeSection === 'configure' && <ConfigureSection session={session} />}
-        {activeSection === 'deploy' && <DeploySection />}
-        {activeSection === 'monitor' && <MonitorSection onBack={onBack} />}
+          </div>
+
+          <div className="deploy-info-card">
+            <div className="deploy-info-header">
+              <Robot01Icon size={16} style={{ color: 'var(--color-accent)' }} />
+              Create hosted agent
+            </div>
+            <div className="deploy-preset-row">
+              {(['buyer', 'seller', 'custom'] as HostedAgentPreset[]).map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`deploy-preset-button ${form.mode === preset ? 'active' : ''}`}
+                  onClick={() => applyPreset(preset)}
+                >
+                  {preset === 'buyer' ? 'Buyer Mode' : preset === 'seller' ? 'Seller Mode' : 'Custom'}
+                </button>
+              ))}
+            </div>
+
+            <div className="deploy-form-grid">
+              <label className="form-group">
+                <span className="form-label">Agent label</span>
+                <input className="form-input" value={form.label} onChange={(event) => updateField('label', event.target.value)} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Side</span>
+                <select className="form-select" value={form.side} onChange={(event) => updateField('side', event.target.value as 'buy' | 'sell')}>
+                  <option value="buy">Buy</option>
+                  <option value="sell">Sell</option>
+                </select>
+              </label>
+              <label className="form-group">
+                <span className="form-label">Asset</span>
+                <input className="form-input" value={form.assetCode} onChange={(event) => updateField('assetCode', event.target.value.toUpperCase())} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Quote asset</span>
+                <input className="form-input" value={form.quoteAssetCode} onChange={(event) => updateField('quoteAssetCode', event.target.value.toUpperCase())} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Reference price</span>
+                <input className="form-input" inputMode="decimal" value={form.referencePrice} onChange={(event) => updateField('referencePrice', event.target.value)} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Band (bps)</span>
+                <input className="form-input" inputMode="numeric" value={form.priceBandBps} onChange={(event) => updateField('priceBandBps', event.target.value)} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Quantity min</span>
+                <input className="form-input" inputMode="decimal" value={form.quantityMin} onChange={(event) => updateField('quantityMin', event.target.value)} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Quantity max</span>
+                <input className="form-input" inputMode="decimal" value={form.quantityMax} onChange={(event) => updateField('quantityMax', event.target.value)} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Tick interval (ms)</span>
+                <input className="form-input" inputMode="numeric" value={form.tickIntervalMs} onChange={(event) => updateField('tickIntervalMs', event.target.value)} />
+              </label>
+              <label className="form-group">
+                <span className="form-label">Max ticks</span>
+                <input className="form-input" inputMode="numeric" value={form.maxTicks} onChange={(event) => updateField('maxTicks', event.target.value)} />
+              </label>
+              <label className="form-group deploy-form-span-2">
+                <span className="form-label">Groq model</span>
+                <input className="form-input" value={form.groqModel} onChange={(event) => updateField('groqModel', event.target.value)} />
+              </label>
+              <label className="form-group deploy-form-span-full">
+                <span className="form-label">Operator prompt</span>
+                <textarea className="form-input deploy-textarea" value={form.operatorPrompt} onChange={(event) => updateField('operatorPrompt', event.target.value)} />
+              </label>
+            </div>
+
+            <label className="deploy-inline-toggle">
+              <input type="checkbox" checked={form.dryRun} onChange={(event) => updateField('dryRun', event.target.checked)} />
+              <span>Dry run only</span>
+            </label>
+
+            <div className="deploy-hosted-actions deploy-form-actions">
+              <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={isLoading || isSubmitting}>
+                {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <CloudServerIcon size={14} />}
+                Deploy Autonomous Agent
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setIsLoading(true);
+                  loadState().finally(() => setIsLoading(false));
+                }}
+                disabled={isLoading || isSubmitting}
+              >
+                <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="deploy-info-card">
+            <div className="deploy-info-header">
+              <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} />
+              Launch readiness
+            </div>
+            <div className="deploy-checklist">
+              {readiness.map((item) => (
+                <div key={item.label} className="deploy-check-row">
+                  <div className="deploy-check-state">
+                    {item.ready ? (
+                      <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)' }} />
+                    ) : (
+                      <AlertCircleIcon size={14} style={{ color: 'var(--color-warning)' }} />
+                    )}
+                  </div>
+                  <div className="deploy-check-copy">
+                    <span className="deploy-check-label">{item.label}</span>
+                    <span className="deploy-check-detail">{item.detail}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <aside className="deploy-side-stack">
+          <div className="deploy-info-card">
+            <div className="deploy-info-header">
+              <Key01Icon size={16} style={{ color: 'var(--color-accent)' }} />
+              Hosted fleet
+            </div>
+            {isLoading ? (
+              <div className="deploy-loading-state">
+                <Loading03Icon size={18} style={{ animation: 'spin 1s linear infinite' }} />
+              </div>
+            ) : hostedAgents.length === 0 ? (
+              <div className="deploy-empty-state">No hosted agents yet. Deploy the first one from the console on the left.</div>
+            ) : (
+              <div className="deploy-agent-fleet">
+                {hostedAgents.map((record) => (
+                  <button
+                    key={record.agent.id}
+                    type="button"
+                    className={`deploy-agent-runtime ${selectedAgentId === record.agent.id ? 'active' : ''}`}
+                    onClick={() => setSelectedAgentId(record.agent.id)}
+                  >
+                    <div className="deploy-agent-runtime-main">
+                      <div>
+                        <div className="deploy-agent-name">{record.config.label}</div>
+                        <div className="deploy-check-detail">{record.config.side.toUpperCase()} {record.config.assetCode}/{record.config.quoteAssetCode}</div>
+                      </div>
+                      <span className={`status-badge ${record.runtime.running ? 'secure' : 'processing'}`}>
+                        {record.runtime.running ? 'Running' : 'Stopped'}
+                      </span>
+                    </div>
+                    <div className="deploy-agent-runtime-meta">
+                      <code>{truncateMiddle(record.agent.agentDid, 10)}</code>
+                      <span>{formatTimestamp(record.runtime.startedAt)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="deploy-info-card">
+            <div className="deploy-info-header">
+              <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} />
+              Selected runtime
+            </div>
+            {!selectedAgent ? (
+              <div className="deploy-empty-state">Select a hosted agent to inspect its runtime.</div>
+            ) : (
+              <>
+                <div className="deploy-process-grid">
+                  <div className="deploy-process-cell">
+                    <span className="deploy-process-label">Agent</span>
+                    <code className="deploy-process-value">{selectedAgent.config.label}</code>
+                  </div>
+                  <div className="deploy-process-cell">
+                    <span className="deploy-process-label">PID</span>
+                    <code className="deploy-process-value">{selectedAgent.runtime.pid ?? 'Offline'}</code>
+                  </div>
+                  <div className="deploy-process-cell deploy-process-span">
+                    <span className="deploy-process-label">API key</span>
+                    <code className="deploy-process-value">{selectedAgent.runtime.apiKeyId ? truncateMiddle(selectedAgent.runtime.apiKeyId, 12) : 'Not issued'}</code>
+                  </div>
+                </div>
+                <div className="deploy-hosted-actions deploy-runtime-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busyAgentId === selectedAgent.agent.id || selectedAgent.runtime.running}
+                    onClick={() => handleStart(selectedAgent.agent.id)}
+                  >
+                    {busyAgentId === selectedAgent.agent.id && !selectedAgent.runtime.running ? (
+                      <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <PlayIcon size={14} />
+                    )}
+                    Start
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={busyAgentId === selectedAgent.agent.id || !selectedAgent.runtime.running}
+                    onClick={() => handleStop(selectedAgent.agent.id)}
+                  >
+                    {busyAgentId === selectedAgent.agent.id && selectedAgent.runtime.running ? (
+                      <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      <StopIcon size={14} />
+                    )}
+                    Stop
+                  </button>
+                </div>
+                <div className="deploy-log-grid">
+                  <div className="deploy-log-card">
+                    <div className="deploy-log-label">Live terminal feed</div>
+                    <pre className="deploy-log-body">{selectedAgent.runtime.logTail || 'No logs yet.'}</pre>
+                  </div>
+                </div>
+                {selectedAgent.runtime.lastError ? (
+                  <div className="deploy-runtime-error">
+                    <AlertCircleIcon size={14} /> {selectedAgent.runtime.lastError}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   );

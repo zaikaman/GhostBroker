@@ -227,7 +227,7 @@ function DashboardView({
                         ONBOARDING: NO ACTIVE TRADING AGENT REGISTERED
                       </h4>
                       <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-secondary)', maxWidth: '650px' }}>
-                        GhostBroker operates under Zero-Human Access rules. Standard order entry is disabled. To begin trading in the dark pool, you must first deploy a verified enclave runner agent for your institution.
+                        GhostBroker operates under Zero-Human Access rules. Standard order entry is disabled. To begin trading in the dark pool, launch a verified hosted agent runtime for your institution.
                       </p>
                     </div>
                   </div>
@@ -246,7 +246,7 @@ function DashboardView({
                       border: '1px solid var(--color-accent)'
                     }}
                   >
-                    <RocketIcon size={14} /> Start Onboarding →
+                    <RocketIcon size={14} /> Open Hosted Launch
                   </button>
                 </div>
               )}
@@ -402,7 +402,7 @@ function DashboardView({
               onClick={() => handleTabChange('deploy')}
               style={{ marginTop: 'var(--spacing-md)' }}
             >
-              <RocketIcon size={16} style={{ color: 'var(--color-accent)' }} /> Deploy Agent
+              <RocketIcon size={16} style={{ color: 'var(--color-accent)' }} /> Hosted Agents
             </button>
           </nav>
 
@@ -448,7 +448,7 @@ function DashboardView({
                       className="btn-deploy-premium"
                       onClick={() => handleTabChange('deploy')}
                     >
-                      <RocketIcon size={12} /> Deploy Agent
+                      <RocketIcon size={12} /> Hosted Agents
                     </button>
                   )}
                 </div>
@@ -606,7 +606,7 @@ function AppContent({
                 padding: 'var(--spacing-xs) var(--spacing-md)'
               }}
             >
-              ← Back to Landing
+              &larr; Back to Landing
             </button>
             <AuthGateway onAuthenticated={(newSession) => {
               setSession(newSession);
@@ -634,6 +634,7 @@ export function App(): React.JSX.Element {
 }
 
 export default App;
+
 
 
 

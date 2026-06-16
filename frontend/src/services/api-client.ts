@@ -212,27 +212,47 @@ export interface CreatedApiKey extends ApiKey {
   key: string;
 }
 
-// â”€â”€ Phase 2.5: Demo Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export type HostedAgentPreset = 'buyer' | 'seller' | 'custom';
 
-/**
- * Status of the dashboard's one-click demo spin-up.
- * Mirrors the backend's `DemoStatus` in
- * `backend/src/services/demo-orchestrator.ts`. The
- * `running: false` shape has no PIDs / startedAt /
- * institutionId; the `running: true` shape has all of
- * them. The `logTail` fields are the most recent 4 KB
- * of stdout/stderr from each child process â€” the
- * UI shows a "view logs" affordance on hover.
- */
-export interface DemoStatus {
+export interface HostedAgentConfig {
+  mode: HostedAgentPreset;
+  label: string;
+  side: 'buy' | 'sell';
+  assetCode: string;
+  quoteAssetCode: string;
+  operatorPrompt: string;
+  referencePrice: number;
+  priceBandBps: number;
+  quantityMin: number;
+  quantityMax: number;
+  tickIntervalMs: number;
+  maxTicks: number;
+  dryRun: boolean;
+  groqModel?: string;
+}
+
+export interface HostedAgentRuntimeStatus {
   running: boolean;
-  buyerPid?: number;
-  sellerPid?: number;
+  pid?: number;
   startedAt?: string;
-  institutionId?: string;
+  stoppedAt?: string;
+  lastExitCode?: number;
+  lastSignal?: string;
   apiKeyId?: string;
-  buyerLogTail?: string;
-  sellerLogTail?: string;
+  lastError?: string;
+  logTail: string;
+}
+
+export interface HostedAgentRecord {
+  agent: Agent;
+  config: HostedAgentConfig;
+  runtime: HostedAgentRuntimeStatus;
+}
+
+export interface CreateHostedAgentRequest {
+  institutionId: string;
+  config: HostedAgentConfig;
+  startOnCreate?: boolean;
 }
 
 export type RedactedErrorCode =
@@ -685,40 +705,48 @@ export const apiClient = {
     );
   },
 
-  // â”€â”€ Phase 2.5: Demo Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //
-  // The dashboard's Observatory tab calls these three
-  // methods to drive the one-click "Spin up demo agents"
-  // button. The backend spawns a buyer + seller agent as
-  // child processes, authenticated with a per-run API key
-  // minted at start time and revoked on stop.
+  async listHostedAgents(running?: boolean): Promise<HostedAgentRecord[]> {
+    const url = new URL(`${API_BASE_URL}/api/hosted-agents`);
+    if (running !== undefined) {
+      url.searchParams.set('running', String(running));
+    }
+    const res = await requestWithOperatorFallback(url.toString());
+    return handleResponse<HostedAgentRecord[]>(res);
+  },
 
-  async startDemo(institutionId: string): Promise<DemoStatus> {
+  async getHostedAgent(id: string): Promise<HostedAgentRecord> {
     const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/demo/start`,
+      `${API_BASE_URL}/api/hosted-agents/${id}`,
+    );
+    return handleResponse<HostedAgentRecord>(res);
+  },
+
+  async createHostedAgent(req: CreateHostedAgentRequest): Promise<HostedAgentRecord> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/hosted-agents`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ institutionId }),
+        body: JSON.stringify(req),
       },
     );
-    return handleResponse<DemoStatus>(res);
+    return handleResponse<HostedAgentRecord>(res);
   },
 
-  async stopDemo(): Promise<DemoStatus> {
+  async startHostedAgent(id: string): Promise<HostedAgentRecord> {
     const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/demo/stop`,
+      `${API_BASE_URL}/api/hosted-agents/${id}/start`,
       { method: 'POST' },
     );
-    return handleResponse<DemoStatus>(res);
+    return handleResponse<HostedAgentRecord>(res);
   },
 
-  async getDemoStatus(): Promise<DemoStatus> {
+  async stopHostedAgent(id: string): Promise<HostedAgentRecord> {
     const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/demo/status`,
-      { method: 'GET' },
+      `${API_BASE_URL}/api/hosted-agents/${id}/stop`,
+      { method: 'POST' },
     );
-    return handleResponse<DemoStatus>(res);
+    return handleResponse<HostedAgentRecord>(res);
   },
 };
 
