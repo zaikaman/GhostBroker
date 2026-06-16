@@ -40,6 +40,9 @@ interface SepoliaEtherscanPortfolioSyncConfig {
   wbtcContractAddress: string;
   usdcContractAddress: string;
   fetchImpl?: EtherscanFetch;
+  maxRequestsPerSecond?: number;
+  cacheTtlMs?: number;
+  maxRateLimitRetries?: number;
 }
 
 interface EtherscanApiResponse {
@@ -48,11 +51,19 @@ interface EtherscanApiResponse {
   result?: unknown;
 }
 
+interface CachedBalances {
+  promise: Promise<{ assetCode: string; balance: number }[]>;
+  expiresAt: number;
+}
+
 const ETHERSCAN_API_V2_URL = "https://api.etherscan.io/v2/api";
 const SEPOLIA_CHAIN_ID = "11155111";
 const SEPOLIA_NATIVE_ASSET_CODE = "SEPOLIAETH";
 const WBTC_DECIMALS = 8;
 const USDC_DECIMALS = 6;
+const DEFAULT_MAX_REQUESTS_PER_SECOND = 3;
+const DEFAULT_CACHE_TTL_MS = 15_000;
+const DEFAULT_MAX_RATE_LIMIT_RETRIES = 4;
 
 function normalizeAddress(value: string): string {
   return value.trim().toLowerCase();
@@ -70,6 +81,24 @@ function formatUnits(value: string, decimals: number): number {
 
   const fraction = remainder.toString().padStart(decimals, "0").replace(/0+$/u, "");
   return Number(`${whole.toString()}.${fraction}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isRateLimited(payload: EtherscanApiResponse): boolean {
+  return (
+    payload.status === "0" &&
+    typeof payload.result === "string" &&
+    /rate limit/iu.test(payload.result)
+  );
 }
 
 function assertNumericResult(payload: EtherscanApiResponse, context: string): string {
@@ -91,6 +120,12 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
   private readonly wbtcContractAddress: string;
   private readonly usdcContractAddress: string;
   private readonly fetchImpl: EtherscanFetch;
+  private readonly minRequestIntervalMs: number;
+  private readonly cacheTtlMs: number;
+  private readonly maxRateLimitRetries: number;
+  private throttleChain: Promise<void> = Promise.resolve();
+  private lastRequestStartedAt = 0;
+  private readonly balanceCache = new Map<string, CachedBalances>();
 
   public constructor(
     portfolioService: PortfolioService,
@@ -101,6 +136,12 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
     this.wbtcContractAddress = normalizeAddress(config.wbtcContractAddress);
     this.usdcContractAddress = normalizeAddress(config.usdcContractAddress);
     this.fetchImpl = config.fetchImpl ?? fetch;
+
+    const maxRps = config.maxRequestsPerSecond ?? DEFAULT_MAX_REQUESTS_PER_SECOND;
+    this.minRequestIntervalMs = maxRps > 0 ? Math.ceil(1000 / maxRps) + 20 : 0;
+    this.cacheTtlMs = config.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+    this.maxRateLimitRetries =
+      config.maxRateLimitRetries ?? DEFAULT_MAX_RATE_LIMIT_RETRIES;
   }
 
   /**
@@ -110,7 +151,7 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
     institutionId: string;
     walletAddress: string;
   }): Promise<Portfolio> {
-    const liveBalances = await this.fetchLiveBalances(params.walletAddress);
+    const liveBalances = await this.fetchLiveBalancesCached(params.walletAddress);
 
     return this.portfolioService.syncPortfolioSnapshot({
       institutionId: params.institutionId,
@@ -135,7 +176,7 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
       locked: number;
     }[];
   }> {
-    const liveBalances = await this.fetchLiveBalances(params.walletAddress);
+    const liveBalances = await this.fetchLiveBalancesCached(params.walletAddress);
 
     return {
       institutionId: "",
@@ -145,6 +186,32 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
         locked: 0,
       })),
     };
+  }
+
+  private fetchLiveBalancesCached(
+    walletAddress: string,
+  ): Promise<{ assetCode: string; balance: number }[]> {
+    const addr = normalizeAddress(walletAddress);
+    const now = Date.now();
+    const cached = this.balanceCache.get(addr);
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const promise = this.fetchLiveBalances(addr);
+    this.balanceCache.set(addr, {
+      promise,
+      expiresAt: now + this.cacheTtlMs,
+    });
+
+    promise.catch(() => {
+      const current = this.balanceCache.get(addr);
+      if (current && current.promise === promise) {
+        this.balanceCache.delete(addr);
+      }
+    });
+
+    return promise;
   }
 
   /**
@@ -218,30 +285,64 @@ export class SepoliaEtherscanPortfolioSyncService implements WalletPortfolioSync
       url.searchParams.set("contractaddress", params.contractAddress);
     }
 
-    const response = await this.fetchImpl(url.toString(), {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
+    for (let attempt = 0; ; attempt += 1) {
+      await this.throttle();
+
+      const response = await this.fetchImpl(url.toString(), {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          new Error(`${params.context} request failed with HTTP ${response.status}`),
+        );
+      }
+
+      const payload = (await response.json()) as EtherscanApiResponse;
+      if (typeof payload !== "object" || payload === null) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          new Error(`${params.context} returned an invalid payload`),
+        );
+      }
+
+      if (isRateLimited(payload)) {
+        if (attempt < this.maxRateLimitRetries) {
+          await sleep(this.minRequestIntervalMs * (attempt + 1));
+          continue;
+        }
+
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          new Error(
+            `${params.context} was rate limited by Etherscan after ${attempt + 1} attempts`,
+          ),
+        );
+      }
+
+      return payload;
+    }
+  }
+
+  private async throttle(): Promise<void> {
+    const scheduled = this.throttleChain.then(async () => {
+      const now = Date.now();
+      const earliestStart = this.lastRequestStartedAt + this.minRequestIntervalMs;
+      const delay = earliestStart - now;
+      if (delay > 0) {
+        await sleep(delay);
+      }
+      this.lastRequestStartedAt = Date.now();
     });
 
-    if (!response.ok) {
-      throw new PublicError(
-        "service_unavailable",
-        503,
-        new Error(`${params.context} request failed with HTTP ${response.status}`),
-      );
-    }
-
-    const payload = (await response.json()) as EtherscanApiResponse;
-    if (typeof payload !== "object" || payload === null) {
-      throw new PublicError(
-        "service_unavailable",
-        503,
-        new Error(`${params.context} returned an invalid payload`),
-      );
-    }
-
-    return payload;
+    this.throttleChain = scheduled.catch(() => undefined);
+    await scheduled;
   }
 }
