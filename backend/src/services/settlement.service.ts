@@ -711,7 +711,8 @@ export class SettlementService {
       error instanceof InsufficientT3TokenBalanceError
         ? "token_metering_failed"
         : error instanceof SettlementAuthorityError ||
-            error instanceof InsufficientBalanceError
+            error instanceof InsufficientBalanceError ||
+            (error instanceof PublicError && error.code === "authorization_failed")
           ? "authorization_failed"
           : "settlement_failed";
 

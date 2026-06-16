@@ -120,7 +120,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
           maxNotional = agent.maxNotional ?? undefined;
         }
       } catch {
-        // Agent lookup failure is non-blocking — matching proceeds without limit checks
+        // Agent lookup failure is non-blocking â€” matching proceeds without limit checks
       }
     }
 
@@ -174,7 +174,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
           // gets a clear error and no intent is queued.
           throw error;
         }
-        // Transient DB / network error — log but allow the
+        // Transient DB / network error â€” log but allow the
         // submit to proceed. The orchestrator's `checkBalance`
         // and the settlement service will re-validate balances
         // before any money moves. (See infra-gaps.md Gap 7
@@ -227,6 +227,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         executionRef: string;
         encryptedEnvelope: string;
         authorityRef: string;
+        delegationCredential: unknown;
         assetCode: string;
         side: "buy" | "sell";
         quantity: number;
@@ -243,6 +244,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         executionRef: sealed.executionRef,
         encryptedEnvelope: request.encryptedIntentEnvelope,
         authorityRef: request.authorityRef,
+        delegationCredential: delegationCredential ?? null,
         assetCode: request.settlementMetadata.assetCode,
         side: request.settlementMetadata.side,
         quantity: request.settlementMetadata.quantity,
@@ -263,7 +265,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
       this.matchingOrchestrator.onIntentSealed(
         pendingIntent as Parameters<typeof this.matchingOrchestrator.onIntentSealed>[0],
       ).catch((error: unknown) => {
-        // Matching/settlement failures are non-blocking — intent is already sealed
+        // Matching/settlement failures are non-blocking â€” intent is already sealed
         console.error(
           `[MatchingOrchestrator] Match error for ${context.correlationRef}:`,
           error,
@@ -311,7 +313,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
 
   /**
    * Look up the Ghostbroker delegation VC persisted at admit time. Returns
-   * `null` if the agent record is missing or has no credential —
+   * `null` if the agent record is missing or has no credential â€”
    * the verifier will then reject as `unverified` / `malformed`.
    */
   private async loadDelegationCredential(
@@ -373,7 +375,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         agentDid: request.agentDid,
         authorityRef: request.authorityRef,
         delegationCredential,
-        // Same requested action as submission — the proof is
+        // Same requested action as submission â€” the proof is
         // for the same scope of capabilities.
         requestedAction: "intent.submit",
         revokedAuthorityRefs,
@@ -404,7 +406,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     // (via `releaseLockFor` inside `cancelIntent`); the ref
     // delete is the durable counterpart. If the delete fails
     // here, the janitor will pick it up after the TTL elapses
-    // and call `releaseBalance` again — the second call is a
+    // and call `releaseBalance` again â€” the second call is a
     // no-op because the lock amount is already zero.
     if (this.intentLockRepository) {
       try {

@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   AgentDelegationVerificationRequest,
   AgentDelegationVerificationResult,
@@ -11,6 +11,7 @@ import type {
 } from "@ghostbroker/t3-enclave";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { HiddenIntentService } from "../../services/hidden-intent.service.js";
+import type { AgentRepository } from "../../services/agent-repository.js";
 import { MatchingOrchestrator } from "../../services/matching-orchestrator.js";
 import { PortfolioService } from "../../services/portfolio.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
@@ -156,6 +157,7 @@ function buildStack(
   matchClient: MatchContractClient,
   settlement: Pick<SettlementService, "executeSettlement">,
   lockClient: InMemoryIntentLockClient,
+  agentRepository?: AgentRepository,
 ): { service: HiddenIntentService; orchestrator: MatchingOrchestrator } {
   const portfolioService = new PortfolioService(client as never, "USDC");
   const orchestrator = new MatchingOrchestrator(
@@ -174,7 +176,7 @@ function buildStack(
     new TelemetryBus(),
     undefined,
     orchestrator,
-    undefined,
+    agentRepository,
     portfolioService,
     lockClient as never,
   );
@@ -288,4 +290,70 @@ describe("matching orchestrator - fills and crossing", () => {
     expect(buyerLockRow?.amount).toBe("300000");
     expect(lockClient.rows).toHaveLength(1);
   });
+
+  it("passes persisted delegation credentials through to settlement", async () => {
+    const client = new InMemoryPortfolioClient([
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "WBTC", balance: 0 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "USDC", balance: 0 }),
+    ]);
+    const matchClient = new MatchedClient();
+    const lockClient = new InMemoryIntentLockClient();
+    const settlement = new ForwardingSettlement(client);
+    const buyerCredential = { id: "buyer-credential" };
+    const sellerCredential = { id: "seller-credential" };
+    const agentRepository = {
+      findByAgentDid: async (institutionId: string, agentDid: string) => {
+        if (institutionId === buyerId && agentDid === "did:t3n:agent:buyer-cred") {
+          return { metadata: { delegation_credential: buyerCredential } } as never;
+        }
+        if (institutionId === sellerId && agentDid === "did:t3n:agent:seller-cred") {
+          return { metadata: { delegation_credential: sellerCredential } } as never;
+        }
+        return null;
+      },
+    } as AgentRepository;
+    const { service } = buildStack(
+      client,
+      matchClient,
+      settlement,
+      lockClient,
+      agentRepository,
+    );
+
+    await service.submitIntent(
+      buildHiddenIntentRequest({
+        institutionId: buyerId,
+        agentDid: "did:t3n:agent:buyer-cred",
+        authorityRef: "authority:buyer-cred",
+        settlementMetadata: {
+          assetCode: "WBTC",
+          side: "buy",
+          quantity: 4,
+          price: 50000,
+        },
+      }),
+      { correlationRef: "corr_cred_buy" },
+    );
+    await service.submitIntent(
+      buildHiddenIntentRequest({
+        institutionId: sellerId,
+        agentDid: "did:t3n:agent:seller-cred",
+        authorityRef: "authority:seller-cred",
+        settlementMetadata: {
+          assetCode: "WBTC",
+          side: "sell",
+          quantity: 4,
+          price: 50000,
+        },
+      }),
+      { correlationRef: "corr_cred_sell" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(settlement.requests).toHaveLength(1);
+    expect(settlement.requests[0]?.buyerDelegationCredential).toEqual(buyerCredential);
+    expect(settlement.requests[0]?.sellerDelegationCredential).toEqual(sellerCredential);
+    });
 });
