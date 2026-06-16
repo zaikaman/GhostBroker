@@ -1,0 +1,334 @@
+/* ==========================================================================
+   GhostBroker: Attested Operations & Enclave Console Stylesheet
+   (Optimized for Consistency with the Global Design System)
+   ========================================================================== */
+
+/* Keyframe Animations for Hardware Visualizers */
+@keyframes orbit-clockwise {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes orbit-counter {
+  0% { transform: rotate(360deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(1.03); }
+}
+
+@keyframes pulse-beacon {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+
+/* Attestation Enclave Visualizer (Matches card/input system) */
+.enclave-visualizer-block {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--spacing-lg);
+  align-items: center;
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+}
+
+.enclave-svg-wrapper {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.enclave-pulse-glow {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, rgba(94, 210, 156, 0.05) 0%, transparent 70%);
+  animation: pulse-glow 4s infinite ease-in-out;
+  pointer-events: none;
+}
+
+.enclave-svg-orbits {
+  width: 100%;
+  height: 100%;
+}
+
+.orbit-ring-outer {
+  transform-origin: center;
+  animation: orbit-clockwise 25s infinite linear;
+}
+
+.orbit-ring-mid {
+  transform-origin: center;
+  animation: orbit-counter 18s infinite linear;
+}
+
+.orbit-ring-inner {
+  transform-origin: center;
+  animation: orbit-clockwise 10s infinite linear;
+}
+
+.enclave-telemetry-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.telemetry-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  padding-bottom: 4px;
+}
+
+.telemetry-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.telemetry-value {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+.telemetry-value.success {
+  color: var(--color-accent);
+}
+
+.telemetry-value.hash {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.62rem;
+}
+
+/* Pre-Flight Checklist Grid */
+.preflight-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-md);
+}
+
+.preflight-cell {
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.preflight-status-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(245, 158, 11, 0.03);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-warning);
+}
+
+.preflight-status-circle.ready {
+  background: rgba(16, 185, 129, 0.03);
+  border-color: rgba(16, 185, 129, 0.2);
+  color: var(--color-success);
+}
+
+.preflight-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.preflight-label {
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.preflight-desc {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+}
+
+/* Process Telemetry Matrix */
+.process-dashboard {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.process-cell {
+  background: var(--color-input-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.process-label {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.process-value {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-text-primary);
+  margin-top: 2px;
+  display: block;
+  word-break: break-all;
+}
+
+.process-value.active {
+  color: var(--color-accent);
+}
+
+/* Secure Terminal Emulator */
+.sec-terminal {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #080d1a;
+  overflow: hidden;
+  margin-top: var(--spacing-sm);
+  position: relative;
+}
+
+.sec-terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sec-terminal-window-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.sec-terminal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.sec-terminal-dot.red { background: #F43F5E; }
+.sec-terminal-dot.yellow { background: #F59E0B; }
+.sec-terminal-dot.green { background: #10B981; }
+
+.sec-terminal-title {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+}
+
+.sec-terminal-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color var(--transition-fast);
+}
+
+.sec-terminal-action-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.sec-terminal-body {
+  padding: var(--spacing-md);
+  height: 240px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sec-terminal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sec-terminal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sec-terminal-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.sec-terminal-line.confidential {
+  color: var(--color-accent);
+}
+
+.sec-terminal-line.info {
+  color: var(--color-text-primary);
+}
+
+.sec-terminal-line.warning {
+  color: var(--color-warning);
+}
+
+.sec-terminal-line.error {
+  color: var(--color-error);
+}
+
+.sec-terminal-prompt {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  color: var(--color-accent);
+  margin-top: 4px;
+}
+
+.sec-terminal-cursor {
+  width: 6px;
+  height: 12px;
+  background: var(--color-accent);
+  box-shadow: 0 0 5px var(--color-accent);
+  animation: cursor-blink 1s infinite;
+  display: inline-block;
+}
+
+/* Responsive Overrides */
+@media (max-width: 768px) {
+  .preflight-checklist {
+    grid-template-columns: 1fr;
+  }
+  
+  .process-dashboard {
+    grid-template-columns: 1fr;
+  }
+}

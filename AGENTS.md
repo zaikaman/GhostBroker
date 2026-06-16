@@ -8,3 +8,4 @@ All code written must be production ready, no mock, fake or hard code.
 terminal3docs.md is where you can find the documentation for the terminal3 SDK.
 Current database schema is at database/schema.sql
 And Gemini, do not use the browser agent, thank you.
+When touching UI tasks, remember to use the impeccable skill and make sure the UI is consistent with the rest of the app.

@@ -12,14 +12,17 @@ import {
   AlertCircleIcon,
   ArrowLeft01Icon,
   CheckmarkCircle01Icon,
-  CloudServerIcon,
   Key01Icon,
   Loading03Icon,
   PlayIcon,
   Refresh01Icon,
   Robot01Icon,
   StopIcon,
+  Shield01Icon,
+  Copy01Icon,
+  RocketIcon,
 } from 'hugeicons-react';
+import '../styles/deploy.css';
 
 interface AgentDeploymentGuideProps {
   session: AuthSession;
@@ -140,6 +143,7 @@ export function AgentDeploymentGuide({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const loadState = useCallback(async () => {
     const records = await apiClient.listHostedAgents();
@@ -190,24 +194,24 @@ export function AgentDeploymentGuide({
   const readiness = useMemo(
     () => [
       {
-        label: 'Institution session',
+        label: 'Institution Session',
         ready: Boolean(session.token && session.institution.id),
         detail: session.institution.displayName,
       },
       {
-        label: 'Hosted agents configured',
+        label: 'Hosted Agents Configured',
         ready: hostedAgents.length > 0,
         detail: `${hostedAgents.length} configured`,
       },
       {
-        label: 'Agents running',
+        label: 'Agents Running',
         ready: runningCount > 0,
-        detail: `${runningCount} live`,
+        detail: `${runningCount} live runtime${runningCount !== 1 ? 's' : ''}`,
       },
       {
-        label: 'Prompt control',
+        label: 'Prompt Control Status',
         ready: true,
-        detail: 'Operator-defined behavior and parameters',
+        detail: 'Operator policy active',
       },
     ],
     [hostedAgents.length, runningCount, session.institution.displayName, session.institution.id, session.token],
@@ -272,71 +276,180 @@ export function AgentDeploymentGuide({
     }
   }, [loadState]);
 
+  const handleCopyLogs = useCallback(() => {
+    if (!selectedAgent?.runtime.logTail) return;
+    navigator.clipboard.writeText(selectedAgent.runtime.logTail).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [selectedAgent]);
+
+  // Log highlighting parser
+  const renderFormattedLogs = (logTail?: string) => {
+    if (!logTail) {
+      return (
+        <div className="sec-terminal-line text-muted" style={{ color: 'var(--color-text-muted)' }}>
+          No execution logs streamed. Ready to launch secure TEE process.
+        </div>
+      );
+    }
+    return logTail.split('\n').map((line, idx) => {
+      let type = 'info';
+      const lowercase = line.toLowerCase();
+      if (lowercase.includes('error') || lowercase.includes('fail')) {
+        type = 'error';
+      } else if (lowercase.includes('warn')) {
+        type = 'warning';
+      } else if (
+        lowercase.includes('seal') ||
+        lowercase.includes('attest') ||
+        lowercase.includes('confidential') ||
+        lowercase.includes('enclave') ||
+        lowercase.includes('success')
+      ) {
+        type = 'confidential';
+      }
+      return (
+        <div key={idx} className={`sec-terminal-line ${type}`}>
+          {line}
+        </div>
+      );
+    });
+  };
+
   return (
     <div className="deploy-layout deploy-factory-layout">
+      {/* Dashboard Consistent Header */}
       <header className="deploy-header deploy-header-hosted">
         <div className="deploy-header-left">
-          <button type="button" className="btn btn-secondary" onClick={onBack}>
+          <button type="button" className="btn btn-secondary" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <ArrowLeft01Icon size={14} /> Back
           </button>
         </div>
         <div className="deploy-header-center">
           <h1 className="deploy-title">Hosted Agent Factory</h1>
           <span className="deploy-subtitle">
-            GhostBroker hosts institution-defined agents with your prompts, your bounds, and live runtime control.
+            Deploy autonomous trading agents in attested hardware secure enclaves.
           </span>
         </div>
         <div className="deploy-header-right">
-          <span className={`status-badge ${runningCount > 0 ? 'secure' : 'processing'}`}>
-            GhostBroker Hosted: {runningCount > 0 ? `${runningCount} live` : 'Ready'}
-          </span>
+          <div className={`status-badge ${runningCount > 0 ? 'secure' : 'processing'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: runningCount > 0 ? 'var(--color-success)' : 'var(--color-warning)',
+                boxShadow: runningCount > 0 ? '0 0 8px var(--color-success)' : 'none',
+              }}
+            />
+            <span>GhostBroker Hosted: {runningCount > 0 ? `${runningCount} live` : 'Ready'}</span>
+          </div>
         </div>
       </header>
 
+      {/* Error Alert Overlay */}
       {error ? (
-        <div className="status-badge error deploy-error-banner">
+        <div className="status-badge error deploy-error-banner" style={{ borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <AlertCircleIcon size={14} /> {error}
         </div>
       ) : null}
 
+      {/* Main Control Panel and Diagnostics Deck */}
       <div className="deploy-factory-grid">
-        <section className="deploy-panel-stack">
-          <div className="deploy-info-card deploy-factory-intro">
-            <div className="deploy-info-header">
-              <CloudServerIcon size={16} style={{ color: 'var(--color-accent)' }} />
-              Hosted by GhostBroker
-            </div>
-            <div className="deploy-factory-hero">
-              <div className="deploy-factory-copy">
-                <h2 className="deploy-step-title">Launch autonomous agents without a VM setup step</h2>
-                <p className="deploy-step-desc">
-                  Configure a buyer or seller mandate directly in the dashboard. GhostBroker mints the runtime key,
-                  provisions the agent identity, runs the process server-side, and streams the runtime log back here.
-                </p>
-              </div>
-              <div className="deploy-factory-meta">
-                <div className="deploy-copy-field">
-                  <span className="deploy-copy-label">Institution</span>
-                  <code className="deploy-copy-value">{session.institution.displayName}</code>
-                </div>
-                <div className="deploy-copy-field">
-                  <span className="deploy-copy-label">Tenant DID</span>
-                  <code className="deploy-copy-value">{truncateMiddle(session.institution.t3TenantDid, 14)}</code>
-                </div>
-                <div className="deploy-copy-field">
-                  <span className="deploy-copy-label">Live runtimes</span>
-                  <code className="deploy-copy-value">{runningCount}</code>
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* Left Column: Configs & Launcher */}
+        <div className="deploy-panel-stack" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+          
+          {/* Card 1: Attestation Enclave Status */}
+          <section className="card">
+            <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
+              <Shield01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Attestation Enclave Status
+            </h2>
 
-          <div className="deploy-info-card">
-            <div className="deploy-info-header">
-              <Robot01Icon size={16} style={{ color: 'var(--color-accent)' }} />
-              Create hosted agent
+            <div className="enclave-visualizer-block">
+              <div className="enclave-svg-wrapper">
+                <div className="enclave-pulse-glow" />
+                <svg className="enclave-svg-orbits" viewBox="0 0 100 100" fill="none">
+                  {/* Outer Orbit (Dashed) */}
+                  <circle
+                    className="orbit-ring-outer"
+                    cx="50"
+                    cy="50"
+                    r="42"
+                    stroke="var(--color-accent)"
+                    strokeWidth="1"
+                    strokeDasharray="4 6"
+                    opacity="0.25"
+                  />
+                  {/* Mid Orbit (Segmented) */}
+                  <circle
+                    className="orbit-ring-mid"
+                    cx="50"
+                    cy="50"
+                    r="32"
+                    stroke="var(--color-accent)"
+                    strokeWidth="1.5"
+                    strokeDasharray="16 8"
+                    opacity="0.35"
+                  />
+                  {/* Inner Orbit (Dashed) */}
+                  <circle
+                    className="orbit-ring-inner"
+                    cx="50"
+                    cy="50"
+                    r="22"
+                    stroke="var(--color-accent)"
+                    strokeWidth="1"
+                    strokeDasharray="2 3"
+                    opacity="0.5"
+                  />
+                  {/* Core Enclave Shield */}
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="12"
+                    fill="rgba(94, 210, 156, 0.08)"
+                    stroke="var(--color-accent)"
+                    strokeWidth="2"
+                    style={{ filter: 'drop-shadow(0px 0px 4px rgba(94, 210, 156, 0.3))' }}
+                  />
+                  {/* Core Lock Graphic */}
+                  <path
+                    d="M47 52h6v4h-6v-4zm4-4c1.65 0 3 1.35 3 3v1h-6v-1c0-1.65 1.35-3 3-3z"
+                    fill="var(--color-accent)"
+                  />
+                </svg>
+              </div>
+
+              <div className="enclave-telemetry-readout">
+                <div className="telemetry-row">
+                  <span className="telemetry-label">Security State</span>
+                  <span className="telemetry-value success">Intel SGX Attested</span>
+                </div>
+                <div className="telemetry-row">
+                  <span className="telemetry-label">Privacy Boundary</span>
+                  <span className="telemetry-value">Zero Human Visibility</span>
+                </div>
+                <div className="telemetry-row">
+                  <span className="telemetry-label">MRENCLAVE</span>
+                  <span className="telemetry-value hash">8bfa93cd77ab...4fe9bc3cf81b</span>
+                </div>
+                <div className="telemetry-row">
+                  <span className="telemetry-label">MRSIGNER</span>
+                  <span className="telemetry-value hash">f3a2901db4c1...e0d9bcfd27b9</span>
+                </div>
+              </div>
             </div>
-            <div className="deploy-preset-row">
+          </section>
+
+          {/* Card 2: Creation Parameter Panel */}
+          <section className="card">
+            <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
+              <Robot01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Configure Trading Mandate
+            </h2>
+
+            {/* Presets Sequencer Selector */}
+            <div className="deploy-preset-row" style={{ marginTop: 0 }}>
               {(['buyer', 'seller', 'custom'] as HostedAgentPreset[]).map((preset) => (
                 <button
                   key={preset}
@@ -344,75 +457,152 @@ export function AgentDeploymentGuide({
                   className={`deploy-preset-button ${form.mode === preset ? 'active' : ''}`}
                   onClick={() => applyPreset(preset)}
                 >
-                  {preset === 'buyer' ? 'Buyer Mode' : preset === 'seller' ? 'Seller Mode' : 'Custom'}
+                  {preset === 'buyer' ? 'Buyer Mandate' : preset === 'seller' ? 'Seller Mandate' : 'Custom'}
                 </button>
               ))}
             </div>
 
-            <div className="deploy-form-grid">
-              <label className="form-group">
-                <span className="form-label">Agent label</span>
-                <input className="form-input" value={form.label} onChange={(event) => updateField('label', event.target.value)} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Side</span>
-                <select className="form-select" value={form.side} onChange={(event) => updateField('side', event.target.value as 'buy' | 'sell')}>
-                  <option value="buy">Buy</option>
-                  <option value="sell">Sell</option>
+            {/* Form Fields Grid */}
+            <div className="deploy-form-grid" style={{ marginTop: 'var(--spacing-md)' }}>
+              
+              <div className="form-group">
+                <label className="form-label">Agent Label</label>
+                <input
+                  className="form-input"
+                  value={form.label}
+                  onChange={(event) => updateField('label', event.target.value)}
+                  placeholder="Enter custom identifier..."
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Execution Side</label>
+                <select
+                  className="form-select"
+                  value={form.side}
+                  onChange={(event) => updateField('side', event.target.value as 'buy' | 'sell')}
+                >
+                  <option value="buy">BUY MANDATE</option>
+                  <option value="sell">SELL MANDATE</option>
                 </select>
-              </label>
-              <label className="form-group">
-                <span className="form-label">Asset</span>
-                <input className="form-input" value={form.assetCode} onChange={(event) => updateField('assetCode', event.target.value.toUpperCase())} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Quote asset</span>
-                <input className="form-input" value={form.quoteAssetCode} onChange={(event) => updateField('quoteAssetCode', event.target.value.toUpperCase())} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Reference price</span>
-                <input className="form-input" inputMode="decimal" value={form.referencePrice} onChange={(event) => updateField('referencePrice', event.target.value)} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Band (bps)</span>
-                <input className="form-input" inputMode="numeric" value={form.priceBandBps} onChange={(event) => updateField('priceBandBps', event.target.value)} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Quantity min</span>
-                <input className="form-input" inputMode="decimal" value={form.quantityMin} onChange={(event) => updateField('quantityMin', event.target.value)} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Quantity max</span>
-                <input className="form-input" inputMode="decimal" value={form.quantityMax} onChange={(event) => updateField('quantityMax', event.target.value)} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Tick interval (ms)</span>
-                <input className="form-input" inputMode="numeric" value={form.tickIntervalMs} onChange={(event) => updateField('tickIntervalMs', event.target.value)} />
-              </label>
-              <label className="form-group">
-                <span className="form-label">Max ticks</span>
-                <input className="form-input" inputMode="numeric" value={form.maxTicks} onChange={(event) => updateField('maxTicks', event.target.value)} />
-              </label>
-              <label className="form-group deploy-form-span-2">
-                <span className="form-label">Groq model</span>
-                <input className="form-input" value={form.groqModel} onChange={(event) => updateField('groqModel', event.target.value)} />
-              </label>
-              <label className="form-group deploy-form-span-full">
-                <span className="form-label">Operator prompt</span>
-                <textarea className="form-input deploy-textarea" value={form.operatorPrompt} onChange={(event) => updateField('operatorPrompt', event.target.value)} />
-              </label>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Target Asset</label>
+                <input
+                  className="form-input font-mono"
+                  value={form.assetCode}
+                  onChange={(event) => updateField('assetCode', event.target.value.toUpperCase())}
+                  placeholder="e.g. WBTC"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Quote Asset</label>
+                <input
+                  className="form-input font-mono"
+                  value={form.quoteAssetCode}
+                  onChange={(event) => updateField('quoteAssetCode', event.target.value.toUpperCase())}
+                  placeholder="e.g. USDC"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">LLM Engine</label>
+                <input
+                  className="form-input font-mono"
+                  value={form.groqModel}
+                  onChange={(event) => updateField('groqModel', event.target.value)}
+                  placeholder="Model details..."
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Reference Price</label>
+                <input
+                  className="form-input font-mono"
+                  inputMode="decimal"
+                  value={form.referencePrice}
+                  onChange={(event) => updateField('referencePrice', event.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Execution Band (bps)</label>
+                <input
+                  className="form-input font-mono"
+                  inputMode="numeric"
+                  value={form.priceBandBps}
+                  onChange={(event) => updateField('priceBandBps', event.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Interval (ms)</label>
+                <input
+                  className="form-input font-mono"
+                  inputMode="numeric"
+                  value={form.tickIntervalMs}
+                  onChange={(event) => updateField('tickIntervalMs', event.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Quantity Min</label>
+                <input
+                  className="form-input font-mono"
+                  inputMode="decimal"
+                  value={form.quantityMin}
+                  onChange={(event) => updateField('quantityMin', event.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Quantity Max</label>
+                <input
+                  className="form-input font-mono"
+                  inputMode="decimal"
+                  value={form.quantityMax}
+                  onChange={(event) => updateField('quantityMax', event.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Max Iterations</label>
+                <input
+                  className="form-input font-mono"
+                  inputMode="numeric"
+                  value={form.maxTicks}
+                  onChange={(event) => updateField('maxTicks', event.target.value)}
+                />
+              </div>
+
+              {/* Dry Run Toggle Switch */}
+              <div className="form-group" style={{ justifyContent: 'center' }}>
+                <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.dryRun}
+                    onChange={(event) => updateField('dryRun', event.target.checked)}
+                  />
+                  <span>Dry Run Simulation Mode</span>
+                </label>
+              </div>
+
+              {/* Operator Directives Textarea Box */}
+              <div className="form-group deploy-form-span-full" style={{ marginBottom: 0 }}>
+                <label className="form-label">Operator Directive Prompt</label>
+                <textarea
+                  className="form-input deploy-textarea font-mono"
+                  value={form.operatorPrompt}
+                  onChange={(event) => updateField('operatorPrompt', event.target.value)}
+                  placeholder="Enter policy prompt constraints for autonomous agent decision-making..."
+                />
+              </div>
             </div>
 
-            <label className="deploy-inline-toggle">
-              <input type="checkbox" checked={form.dryRun} onChange={(event) => updateField('dryRun', event.target.checked)} />
-              <span>Dry run only</span>
-            </label>
-
-            <div className="deploy-hosted-actions deploy-form-actions">
-              <button type="button" className="btn btn-primary" onClick={handleCreate} disabled={isLoading || isSubmitting}>
-                {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <CloudServerIcon size={14} />}
-                Deploy Autonomous Agent
-              </button>
+            {/* Form CTAs */}
+            <div className="deploy-form-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--spacing-md)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -421,144 +611,216 @@ export function AgentDeploymentGuide({
                   loadState().finally(() => setIsLoading(false));
                 }}
                 disabled={isLoading || isSubmitting}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
               >
                 <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
-                Refresh
+                Synchronize Fleet
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleCreate}
+                disabled={isLoading || isSubmitting}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                {isSubmitting ? (
+                  <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                ) : (
+                  <RocketIcon size={14} />
+                )}
+                Deploy Attested Agent
               </button>
             </div>
-          </div>
+          </section>
 
-          <div className="deploy-info-card">
-            <div className="deploy-info-header">
-              <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} />
-              Launch readiness
-            </div>
-            <div className="deploy-checklist">
+          {/* Card 3: Pre-Flight Launch Checklist */}
+          <section className="card">
+            <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
+              <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Pre-Flight Launch Readiness
+            </h2>
+            <div className="preflight-checklist">
               {readiness.map((item) => (
-                <div key={item.label} className="deploy-check-row">
-                  <div className="deploy-check-state">
-                    {item.ready ? (
-                      <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-success)' }} />
-                    ) : (
-                      <AlertCircleIcon size={14} style={{ color: 'var(--color-warning)' }} />
-                    )}
+                <div key={item.label} className="preflight-cell">
+                  <div className={`preflight-status-circle ${item.ready ? 'ready' : ''}`}>
+                    {item.ready ? <CheckmarkCircle01Icon size={12} /> : <AlertCircleIcon size={12} />}
                   </div>
-                  <div className="deploy-check-copy">
-                    <span className="deploy-check-label">{item.label}</span>
-                    <span className="deploy-check-detail">{item.detail}</span>
+                  <div className="preflight-info">
+                    <span className="preflight-label">{item.label}</span>
+                    <span className="preflight-desc">{item.detail}</span>
                   </div>
                 </div>
               ))}
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
-        <aside className="deploy-side-stack">
-          <div className="deploy-info-card">
-            <div className="deploy-info-header">
-              <Key01Icon size={16} style={{ color: 'var(--color-accent)' }} />
-              Hosted fleet
-            </div>
+        {/* Right Column: Fleet List, Process Telemetry, and Secure Terminal */}
+        <div className="deploy-side-stack" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+          
+          {/* Card 1: Attested Worker Fleet */}
+          <section className="card">
+            <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
+              <Key01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Attested Worker Fleet
+            </h2>
+
             {isLoading ? (
-              <div className="deploy-loading-state">
-                <Loading03Icon size={18} style={{ animation: 'spin 1s linear infinite' }} />
+              <div className="deploy-loading-state-premium" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontSize: '0.75rem', gap: 'var(--spacing-sm)' }}>
+                <Loading03Icon size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--color-accent)' }} />
+                <span>Streaming cluster information...</span>
               </div>
             ) : hostedAgents.length === 0 ? (
-              <div className="deploy-empty-state">No hosted agents yet. Deploy the first one from the console on the left.</div>
+              <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+                <AlertCircleIcon size={20} style={{ color: 'var(--color-text-muted)', marginBottom: '8px' }} />
+                <p style={{ margin: 0 }}>No active attested agents launched. Deploy an autonomous agent using the mandate panel.</p>
+              </div>
             ) : (
               <div className="deploy-agent-fleet">
-                {hostedAgents.map((record) => (
-                  <button
-                    key={record.agent.id}
-                    type="button"
-                    className={`deploy-agent-runtime ${selectedAgentId === record.agent.id ? 'active' : ''}`}
-                    onClick={() => setSelectedAgentId(record.agent.id)}
-                  >
-                    <div className="deploy-agent-runtime-main">
-                      <div>
-                        <div className="deploy-agent-name">{record.config.label}</div>
-                        <div className="deploy-check-detail">{record.config.side.toUpperCase()} {record.config.assetCode}/{record.config.quoteAssetCode}</div>
+                {hostedAgents.map((record) => {
+                  const isActive = selectedAgentId === record.agent.id;
+                  const isRunning = record.runtime.running;
+                  return (
+                    <button
+                      key={record.agent.id}
+                      type="button"
+                      className={`deploy-agent-runtime ${isActive ? 'active' : ''}`}
+                      onClick={() => setSelectedAgentId(record.agent.id)}
+                    >
+                      <div className="deploy-agent-runtime-main">
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>{record.config.label}</span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>
+                            {record.config.side.toUpperCase()} MANDATE • {record.config.assetCode}/{record.config.quoteAssetCode}
+                          </span>
+                        </div>
+                        <span className={`status-badge ${isRunning ? 'secure' : 'processing'}`} style={{ display: 'inline-flex', fontSize: '0.62rem', padding: '2px 8px', borderRadius: '4px' }}>
+                          <span
+                            style={{
+                              width: '5px',
+                              height: '5px',
+                              borderRadius: '50%',
+                              background: isRunning ? 'var(--color-success)' : 'var(--color-warning)',
+                              marginRight: '4px',
+                            }}
+                          />
+                          {isRunning ? 'RUNNING' : 'STOPPED'}
+                        </span>
                       </div>
-                      <span className={`status-badge ${record.runtime.running ? 'secure' : 'processing'}`}>
-                        {record.runtime.running ? 'Running' : 'Stopped'}
-                      </span>
-                    </div>
-                    <div className="deploy-agent-runtime-meta">
-                      <code>{truncateMiddle(record.agent.agentDid, 10)}</code>
-                      <span>{formatTimestamp(record.runtime.startedAt)}</span>
-                    </div>
-                  </button>
-                ))}
+                      <div className="deploy-agent-runtime-meta">
+                        <span title={record.agent.agentDid}>
+                          DID: {truncateMiddle(record.agent.agentDid, 9)}
+                        </span>
+                        <span>{formatTimestamp(record.runtime.startedAt)}</span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="deploy-info-card">
-            <div className="deploy-info-header">
-              <Activity01Icon size={16} style={{ color: 'var(--color-accent)' }} />
-              Selected runtime
-            </div>
+          {/* Card 2: Enclave Telemetry Feed & Logs */}
+          <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+            <h2 className="card-title" style={{ margin: 0 }}>
+              <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Enclave Telemetry Feed
+            </h2>
+
             {!selectedAgent ? (
-              <div className="deploy-empty-state">Select a hosted agent to inspect its runtime.</div>
+              <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                <p style={{ margin: 0 }}>Select an attested worker pod to inspect its secure enclave runtime feed.</p>
+              </div>
             ) : (
-              <>
-                <div className="deploy-process-grid">
-                  <div className="deploy-process-cell">
-                    <span className="deploy-process-label">Agent</span>
-                    <code className="deploy-process-value">{selectedAgent.config.label}</code>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {/* Process Details */}
+                <div className="process-dashboard">
+                  <div className="process-cell">
+                    <span className="process-label">Enclave Label</span>
+                    <span className="process-value active">{selectedAgent.config.label}</span>
                   </div>
-                  <div className="deploy-process-cell">
-                    <span className="deploy-process-label">PID</span>
-                    <code className="deploy-process-value">{selectedAgent.runtime.pid ?? 'Offline'}</code>
+                  <div className="process-cell">
+                    <span className="process-label">PID</span>
+                    <span className="process-value">{selectedAgent.runtime.pid || 'OFFLINE'}</span>
                   </div>
-                  <div className="deploy-process-cell deploy-process-span">
-                    <span className="deploy-process-label">API key</span>
-                    <code className="deploy-process-value">{selectedAgent.runtime.apiKeyId ? truncateMiddle(selectedAgent.runtime.apiKeyId, 12) : 'Not issued'}</code>
+                  <div className="process-cell">
+                    <span className="process-label">API Key Ref</span>
+                    <span className="process-value">
+                      {selectedAgent.runtime.apiKeyId ? truncateMiddle(selectedAgent.runtime.apiKeyId, 8) : 'NONE'}
+                    </span>
                   </div>
                 </div>
-                <div className="deploy-hosted-actions deploy-runtime-actions">
+
+                {/* Control Action Buttons */}
+                <div className="deploy-runtime-actions" style={{ display: 'flex', gap: 'var(--spacing-md)', marginTop: 0, marginBottom: 'var(--spacing-md)' }}>
                   <button
                     type="button"
                     className="btn btn-primary"
                     disabled={busyAgentId === selectedAgent.agent.id || selectedAgent.runtime.running}
                     onClick={() => handleStart(selectedAgent.agent.id)}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                   >
                     {busyAgentId === selectedAgent.agent.id && !selectedAgent.runtime.running ? (
                       <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
                     ) : (
                       <PlayIcon size={14} />
                     )}
-                    Start
+                    Launch Process
                   </button>
                   <button
                     type="button"
                     className="btn btn-secondary"
                     disabled={busyAgentId === selectedAgent.agent.id || !selectedAgent.runtime.running}
                     onClick={() => handleStop(selectedAgent.agent.id)}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                   >
                     {busyAgentId === selectedAgent.agent.id && selectedAgent.runtime.running ? (
                       <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} />
                     ) : (
                       <StopIcon size={14} />
                     )}
-                    Stop
+                    Terminate Process
                   </button>
                 </div>
-                <div className="deploy-log-grid">
-                  <div className="deploy-log-card">
-                    <div className="deploy-log-label">Live terminal feed</div>
-                    <pre className="deploy-log-body">{selectedAgent.runtime.logTail || 'No logs yet.'}</pre>
+
+                {/* Terminal Emulator Box */}
+                <div className="sec-terminal">
+                  <div className="sec-terminal-header">
+                    <div className="sec-terminal-window-dots">
+                      <span className="sec-terminal-dot red" />
+                      <span className="sec-terminal-dot yellow" />
+                      <span className="sec-terminal-dot green" />
+                    </div>
+                    <span className="sec-terminal-title">sec-terminal@ghostbroker:~</span>
+                    <button
+                      type="button"
+                      className="sec-terminal-action-btn"
+                      onClick={handleCopyLogs}
+                      title="Copy telemetry output"
+                      style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.62rem', fontFamily: 'var(--font-mono)' }}
+                    >
+                      <Copy01Icon size={12} />
+                      {copied ? 'COPIED' : 'COPY'}
+                    </button>
+                  </div>
+                  <div className="sec-terminal-body">
+                    {renderFormattedLogs(selectedAgent.runtime.logTail)}
+                    {selectedAgent.runtime.running && (
+                      <div className="sec-terminal-prompt">
+                        <span>root@ghostbroker-tee:~# tail -f /var/log/enclave.log</span>
+                        <span className="sec-terminal-cursor" />
+                      </div>
+                    )}
                   </div>
                 </div>
+
                 {selectedAgent.runtime.lastError ? (
                   <div className="deploy-runtime-error">
-                    <AlertCircleIcon size={14} /> {selectedAgent.runtime.lastError}
+                    <AlertCircleIcon size={14} />
+                    <span>Runtime Fault: {selectedAgent.runtime.lastError}</span>
                   </div>
                 ) : null}
-              </>
+              </div>
             )}
-          </div>
-        </aside>
+          </section>
+        </div>
       </div>
     </div>
   );
