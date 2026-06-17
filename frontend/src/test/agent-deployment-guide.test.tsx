@@ -337,8 +337,8 @@ describe('AgentDeploymentGuide', () => {
     expect(await screen.findByLabelText('Asset')).toBeInTheDocument();
     expect(screen.getByLabelText('Side')).toBeInTheDocument();
     expect(screen.getByLabelText('Target Quantity')).toBeInTheDocument();
-    expect(screen.getByLabelText('Reference Price')).toBeInTheDocument();
-    expect(screen.getByLabelText('Price Band (bps)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reference Price (USD)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Price Tolerance (bps)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Save Mandate/i })).toBeInTheDocument();
   });
 

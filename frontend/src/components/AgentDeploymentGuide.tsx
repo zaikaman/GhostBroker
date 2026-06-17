@@ -47,9 +47,6 @@ interface MandateFormState {
   deadline: string;
   urgency: CreateNegotiationMandateRequest['urgency'];
   maxNotional: string;
-  disclosableClaims: string;
-  requiredCounterpartyClaims: string;
-  counterpartyConstraints: string;
   operatorPrompt: string;
 }
 
@@ -69,9 +66,6 @@ const defaultMandateForm: MandateFormState = {
   deadline: new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
   urgency: 'normal',
   maxNotional: '70000',
-  disclosableClaims: '',
-  requiredCounterpartyClaims: '{}',
-  counterpartyConstraints: '{}',
   operatorPrompt: 'Trade within mandate bounds. Prefer credible counterparties, preserve policy discipline, and stop only for genuine structural faults.',
 };
 
@@ -88,17 +82,6 @@ function formatTimestamp(value?: string): string {
 function truncateMiddle(value: string, keep = 12): string {
   if (value.length <= keep * 2) return value;
   return `${value.slice(0, keep)}...${value.slice(-keep)}`;
-}
-
-function parseJsonField(label: string, raw: string): Record<string, unknown> {
-  if (!raw.trim()) {
-    return {};
-  }
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${label} must be a JSON object.`);
-  }
-  return parsed as Record<string, unknown>;
 }
 
 function isPositiveNumber(value: string): boolean {
@@ -126,12 +109,9 @@ function buildMandateRequest(
     deadline: new Date(form.deadline).toISOString(),
     urgency: form.urgency,
     maxNotional: form.maxNotional,
-    disclosableClaims: form.disclosableClaims
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean),
-    requiredCounterpartyClaims: parseJsonField('Required counterparty claims', form.requiredCounterpartyClaims),
-    counterpartyConstraints: parseJsonField('Counterparty constraints', form.counterpartyConstraints),
+    disclosableClaims: [],
+    requiredCounterpartyClaims: {},
+    counterpartyConstraints: {},
     operatorPrompt: form.operatorPrompt.trim(),
   };
 }
@@ -151,10 +131,7 @@ function summarizeMandate(mandate: NegotiationMandateSummary | null): Array<{ la
     { label: 'Urgency', value: mandate.urgency.toUpperCase() },
     { label: 'Deadline', value: new Date(mandate.deadline).toLocaleString() },
     { label: 'Max Notional', value: mandate.maxNotional },
-    {
-      label: 'Disclosable Claims',
-      value: mandate.disclosableClaims.length > 0 ? mandate.disclosableClaims.join(', ') : 'None',
-    },
+
   ];
 }
 
@@ -313,9 +290,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         deadline: selectedMandate.deadline.slice(0, 16),
         urgency: selectedMandate.urgency,
         maxNotional: selectedMandate.maxNotional,
-        disclosableClaims: selectedMandate.disclosableClaims.join(', '),
-        requiredCounterpartyClaims: JSON.stringify(selectedMandate.requiredCounterpartyClaims, null, 2),
-        counterpartyConstraints: JSON.stringify(selectedMandate.counterpartyConstraints, null, 2),
         operatorPrompt: selectedMandate.operatorPrompt,
       });
     }
@@ -362,12 +336,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     if (!isPositiveNumber(form.maxNotional)) return 'Max notional must be greater than zero.';
     if (!form.deadline.trim() || Number.isNaN(new Date(form.deadline).getTime())) return 'Deadline must be a valid date and time.';
     if (!form.operatorPrompt.trim()) return 'Operator prompt is required.';
-    try {
-      parseJsonField('Required counterparty claims', form.requiredCounterpartyClaims);
-      parseJsonField('Counterparty constraints', form.counterpartyConstraints);
-    } catch (err) {
-      return err instanceof Error ? err.message : 'Invalid JSON format.';
-    }
     return null;
   }, [mandateForm]);
 
@@ -751,7 +719,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                         />
                       </div>
                       <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-reference-price">Reference Price</label>
+                        <label className="form-label" htmlFor="mandate-reference-price">Reference Price (USD)</label>
                         <input
                           id="mandate-reference-price"
                           className="form-input font-mono"
@@ -760,22 +728,24 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                         />
                       </div>
                       <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-band">Price Band (bps)</label>
+                        <label className="form-label" htmlFor="mandate-band">Price Tolerance (bps)</label>
                         <input
                           id="mandate-band"
                           className="form-input font-mono"
                           value={mandateForm.priceBandBps}
                           onChange={(event) => setMandateForm((current) => ({ ...current, priceBandBps: event.target.value }))}
                         />
+                        <span className="deploy-field-hint">e.g. 150 = 1.5% deviation allowed from reference price.</span>
                       </div>
                       <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-max-notional">Max Notional</label>
+                        <label className="form-label" htmlFor="mandate-max-notional">Max Total (USD)</label>
                         <input
                           id="mandate-max-notional"
                           className="form-input font-mono"
                           value={mandateForm.maxNotional}
                           onChange={(event) => setMandateForm((current) => ({ ...current, maxNotional: event.target.value }))}
                         />
+                        <span className="deploy-field-hint">Maximum dollar value of the trade.</span>
                       </div>
                       <div className="form-group">
                         <label className="form-label" htmlFor="mandate-urgency">Urgency</label>
@@ -798,33 +768,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                       </div>
                     </div>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="mandate-disclosable">Disclosable Claims</label>
-                      <input id="mandate-disclosable" className="form-input" value={mandateForm.disclosableClaims} onChange={(event) => setMandateForm((current) => ({ ...current, disclosableClaims: event.target.value }))} placeholder="accredited_institution, settlement_capacity" />
-                      <span className="deploy-field-hint">Comma-separated claims the agent may reveal during negotiation.</span>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-required-claims">Required Counterparty Claims (JSON)</label>
-                        <textarea
-                          id="mandate-required-claims"
-                          className="form-input deploy-textarea font-mono"
-                          value={mandateForm.requiredCounterpartyClaims}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, requiredCounterpartyClaims: event.target.value }))}
-                        />
-                        <span className="deploy-field-hint">JSON object of claims a counterparty must satisfy.</span>
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-counterparty-constraints">Counterparty Constraints (JSON)</label>
-                        <textarea
-                          id="mandate-counterparty-constraints"
-                          className="form-input deploy-textarea font-mono"
-                          value={mandateForm.counterpartyConstraints}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, counterpartyConstraints: event.target.value }))}
-                        />
-                        <span className="deploy-field-hint">JSON object of additional constraints (e.g. blocked institutions).</span>
-                      </div>
-                    </div>
-                    <div className="form-group">
                       <label className="form-label" htmlFor="mandate-operator-prompt">Operator Prompt</label>
                       <textarea
                         id="mandate-operator-prompt"
@@ -832,7 +775,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                         value={mandateForm.operatorPrompt}
                         onChange={(event) => setMandateForm((current) => ({ ...current, operatorPrompt: event.target.value }))}
                       />
-                      <span className="deploy-field-hint">Behavior and escalation guidance for the agent.</span>
+                      <span className="deploy-field-hint">Brief trading instructions for the agent.</span>
                     </div>
                     {mandateValidationError ? (
                       <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)' }}>
