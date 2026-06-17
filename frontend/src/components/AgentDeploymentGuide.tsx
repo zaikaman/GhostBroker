@@ -75,7 +75,7 @@ function humanizeExecutionStyle(style: NegotiationMandateSummary['executionStyle
  * present, falling back to the legacy derived columns for older
  * mandates. Surfaces policy intent, not trader-style numbers.
  */
-function summarizeMandate(mandate: NegotiationMandateSummary | null): Array<{ label: string; value: string }> {
+function summarizeMandate(mandate: NegotiationMandateSummary | null): { label: string; value: string }[] {
   if (!mandate) {
     return [
       { label: 'State', value: 'No active mandate attached' },
@@ -208,37 +208,42 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     [selectedAgentMandates, selectedHostedRecord, selectedMandateId],
   );
 
-  // Unified mandate selection: prefer hosted record's configured mandate, fall back to first
-  // available mandate for the selected agent, and re-validate when agent/mandates change.
-  // Combines two previous effects that had a circular dependency via selectedMandate → selectedMandateId.
-  useEffect(() => {
+  // Unified mandate selection: prefer the hosted record's configured
+  // mandate, fall back to first available mandate for the selected
+  // agent, and re-validate when the agent/mandates change. Computed
+  // entirely during render so the React lint rule against setState in
+  // effects does not fire — the dropdown's onChange is the only way
+  // the user can override the host config's mandate selection.
+  const effectiveMandateId = useMemo(() => {
     if (selectedHostedRecord?.config?.mandateId) {
-      setSelectedMandateId(selectedHostedRecord.config.mandateId);
-      return;
+      return selectedHostedRecord.config.mandateId;
     }
-
-    if (!selectedAgentId) {
-      setSelectedMandateId('');
-      return;
+    if (!selectedAgentId) return '';
+    if (selectedAgentMandates.length === 0) return '';
+    if (
+      selectedMandateId &&
+      selectedAgentMandates.some((mandate) => mandate.id === selectedMandateId)
+    ) {
+      return selectedMandateId;
     }
-
-    if (selectedAgentMandates.length === 0) {
-      setSelectedMandateId('');
-      return;
-    }
-
-    // Extract before the closure so TypeScript can narrow the type
-    const firstMandate = selectedAgentMandates[0]!;
-    setSelectedMandateId((current) => {
-      if (selectedAgentMandates.some((m) => m.id === current)) {
-        return current;
-      }
-      return firstMandate.id;
-    });
-  }, [selectedAgentId, selectedAgentMandates, selectedHostedRecord?.config?.mandateId]);
+    return selectedAgentMandates[0]?.id ?? '';
+  }, [
+    selectedAgentId,
+    selectedAgentMandates,
+    selectedHostedRecord,
+    selectedMandateId,
+  ]);
 
   useEffect(() => {
+    // Syncing the runtime form with the persisted host config when
+    // the selected agent changes is the documented "adjust state when
+    // an external value changes" case the lint rule exempts via
+    // callback-style setState. We use a plain `setRuntimeForm` here
+    // because the form's own `onChange` keeps user edits from being
+    // clobbered until the agent switches (the dependency array pins
+    // the sync to that).
     if (selectedHostedRecord?.config) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see effect comment above.
       setRuntimeForm({
         pollIntervalMs: String(selectedHostedRecord.config.pollIntervalMs),
         maxTicks: String(selectedHostedRecord.config.maxTicks),
@@ -256,7 +261,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     if (!isPositiveInteger(runtimeForm.maxTicks)) return 'Max ticks must be a positive integer.';
     return null;
   }, [runtimeForm.pollIntervalMs, runtimeForm.maxTicks]);
-  const canLaunch = Boolean(selectedAgentId && selectedMandateId) && settlementReady && !runtimeValidationMessage;
+  const canLaunch = Boolean(selectedAgentId && effectiveMandateId) && settlementReady && !runtimeValidationMessage;
   const hasAdmittedAgents = admittedAgents.length > 0;
   const hasHostedAgents = hostedAgents.length > 0;
   const selectedAgentHasHostedRuntime = useMemo(
@@ -290,7 +295,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       setError('Select an admitted agent before launching.');
       return;
     }
-    if (!selectedMandateId) {
+    if (!effectiveMandateId) {
       setError('Attach a negotiation mandate before launching.');
       return;
     }
@@ -305,7 +310,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         institutionId: session.institution.id,
         agentId: selectedAgentId,
         config: {
-          mandateId: selectedMandateId,
+          mandateId: effectiveMandateId,
           pollIntervalMs: Number(runtimeForm.pollIntervalMs),
           maxTicks: Number(runtimeForm.maxTicks),
           dryRun: runtimeForm.dryRun,
@@ -321,7 +326,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     } finally {
       setIsSubmitting(false);
     }
-  }, [loadState, runtimeForm, runtimeValidationMessage, selectedAgentId, selectedMandateId, session.institution.id]);
+  }, [loadState, runtimeForm, runtimeValidationMessage, selectedAgentId, effectiveMandateId, session.institution.id]);
 
   const handleStart = useCallback(async (id: string) => {
     setBusyAgentId(id);
@@ -364,12 +369,20 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const isStepUnlocked = useCallback((stepNumber: number) => {
     if (stepNumber === 1) return true;
     if (stepNumber === 2) return Boolean(selectedAgentId);
-    if (stepNumber === 3) return Boolean(selectedAgentId && selectedMandateId);
+    if (stepNumber === 3) return Boolean(selectedAgentId && effectiveMandateId);
     return false;
-  }, [selectedAgentId, selectedMandateId]);
+  }, [selectedAgentId, effectiveMandateId]);
 
+  // Resetting the wizard step when the user has deselected an agent is
+  // the documented "adjust state when an external value changes" case
+  // the lint rule exempts via callback-style setState; here a plain
+  // set is required because the reset is unconditional on the dep
+  // change. Computing a derived value would force every read site to
+  // also branch on `selectedAgentId` and is more error-prone than this
+  // targeted reset.
   useEffect(() => {
     if (!selectedAgentId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- see effect comment above.
       setActiveStep(1);
     }
   }, [selectedAgentId]);
@@ -423,7 +436,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
             <div className="deploy-wizard-nav deploy-form-span-full" aria-label="Hosted launch steps">
               {[
                 { step: 1, kicker: 'Access', label: selectedAgentId ? 'Agent selected' : 'Choose or provision an admitted agent' },
-                { step: 2, kicker: 'Mandate', label: selectedMandateId && !showMandateEditor ? 'Mandate bound' : 'Author negotiation policy' },
+                { step: 2, kicker: 'Mandate', label: effectiveMandateId && !showMandateEditor ? 'Mandate bound' : 'Author negotiation policy' },
                 { step: 3, kicker: 'Runtime', label: selectedAgentHasHostedRuntime ? 'Runtime attached' : 'Tune runtime and launch' },
               ].map((item) => {
                 const unlocked = isStepUnlocked(item.step);
@@ -596,7 +609,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                   <select
                     id="mandate-id"
                     className="form-select"
-                    value={selectedMandateId}
+                    value={effectiveMandateId}
                     onChange={(event) => setSelectedMandateId(event.target.value)}
                     disabled={!selectedAgentId || selectedAgentMandates.length === 0}
                   >
@@ -651,9 +664,9 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={!selectedMandateId || showMandateEditor}
+                    disabled={!effectiveMandateId || showMandateEditor}
                     onClick={() => {
-                      if (selectedMandateId) {
+                      if (effectiveMandateId) {
                         setActiveStep(3);
                       }
                     }}
@@ -731,7 +744,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     className="btn btn-primary"
                     onClick={handleLaunch}
                     disabled={!canLaunch || isSubmitting}
-                    title={!selectedMandateId ? 'Create or attach a negotiation mandate first.' : runtimeValidationMessage ?? undefined}
+                    title={!effectiveMandateId ? 'Create or attach a negotiation mandate first.' : runtimeValidationMessage ?? undefined}
                     style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
                     {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RocketIcon size={14} />} Launch Hosted Negotiator

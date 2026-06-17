@@ -109,11 +109,11 @@ function previewDerivedRails(policy: AuthoredMandatePolicy): {
   };
 }
  
-const EXECUTION_STYLE_OPTIONS: Array<{
+const EXECUTION_STYLE_OPTIONS: {
   value: NegotiationExecutionStyle;
   label: string;
   hint: string;
-}> = [
+}[] = [
   { value: 'patient', label: 'Patient', hint: 'Tight bounds, holds for better terms.' },
   { value: 'balanced', label: 'Balanced', hint: 'Steady concession, mid tempo.' },
   { value: 'aggressive', label: 'Aggressive', hint: 'Wide bounds, front-loaded concession.' },
@@ -121,11 +121,11 @@ const EXECUTION_STYLE_OPTIONS: Array<{
   { value: 'trust_first', label: 'Trust-first', hint: 'Tight until disclosure/trust is proven.' },
 ];
  
-const VALUATION_SOURCE_OPTIONS: Array<{
+const VALUATION_SOURCE_OPTIONS: {
   value: NegotiationValuationSource;
   label: string;
   hint: string;
-}> = [
+}[] = [
   { value: 'auto_anchor', label: 'Auto-anchor (oracle)', hint: 'Runtime resolves a market value.' },
   { value: 'internal_fair_value', label: 'Internal fair value', hint: 'Use our treasury fair value.' },
   { value: 'operator_note', label: 'Operator valuation note', hint: 'Anchor on the value you specify below.' },
@@ -162,7 +162,10 @@ export function MandateConfigForm({
     'accredited_institution, settlement_capacity',
   );
   const [disallowedInput, setDisallowedInput] = useState('');
-  const [deadlineLocal, setDeadlineLocal] = useState(
+  // Lazy initializer runs once on mount so the deadline anchor is
+  // computed at component creation time (the lint rule rejects
+  // `Date.now()` calls inside the render body).
+  const [deadlineLocal, setDeadlineLocal] = useState(() =>
     new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);

@@ -48,7 +48,7 @@ const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSP
 );
 
 export function NegotiationMandateWrapper(): React.JSX.Element {
-  const [agents, setAgents] = useState<Array<{ id: string; label: string | null; agentDid: string }>>([]);
+  const [agents, setAgents] = useState<{ id: string; label: string | null; agentDid: string }[]>([]);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { navigate } = useRouter();

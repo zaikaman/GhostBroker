@@ -610,7 +610,37 @@ export class NegotiationOrchestrator {
     // be bounded by the shared strategy validator. The backend is the
     // authoritative source; the agent runtime pre-clamps with the
     // SAME validator to avoid burning rounds on rejected moves.
-    const profile = normalizeStrategy(authoredFromMandate(mandate)!);
+    const authored = authoredFromMandate(mandate);
+    // If the mandate predates the authored columns, the legacy numeric
+    // rails are authoritative and the shared validator still needs a
+    // profile to bound price/quantity. Synthesize one with the rails
+    // we already proved above.
+    const profile: NegotiationStrategyProfile = authored
+      ? normalizeStrategy(authored)
+      : buildLegacyProfileFromRails(mandate, rails);
+    return this.runPricedMove({
+      session,
+      actorSide,
+      institutionId: input.institutionId,
+      mandate,
+      profile,
+      move: input.move,
+      agentDid: input.agentDid,
+      correlationRef: input.correlationRef,
+    });
+  }
+
+  private async runPricedMove(args: {
+    session: NegotiationSessionRecord;
+    actorSide: "buy" | "sell";
+    institutionId: string;
+    mandate: NegotiationMandate;
+    profile: NegotiationStrategyProfile;
+    move: NegotiationMove;
+    agentDid: string;
+    correlationRef: string;
+  }): Promise<{ status: NegotiationSessionRecord["status"] }> {
+    const { session, actorSide, institutionId, mandate, profile, move, agentDid, correlationRef } = args;
     const band = derivedPriceBandFor(profile.rails, actorSide);
     const operatorInstructions =
       (mandate.operatorInstructions as string | null | undefined) ??
@@ -618,7 +648,7 @@ export class NegotiationOrchestrator {
       null;
     const liveSessionView = await this.repository.getSession(
       session.id,
-      input.institutionId,
+      institutionId,
     );
     const ctx = buildTurnContext({
       profile,
@@ -636,23 +666,23 @@ export class NegotiationOrchestrator {
     });
     const validation = validateAgentDecision(
       {
-        action: input.move.action,
-        ...(input.move.price !== undefined ? { price: input.move.price } : {}),
-        ...(input.move.quantity !== undefined ? { quantity: input.move.quantity } : {}),
-        ...(input.move.claimType !== undefined ? { claimType: input.move.claimType } : {}),
-        ...(input.move.strategicIntent !== undefined
-          ? { strategicIntent: input.move.strategicIntent }
+        action: move.action,
+        ...(move.price !== undefined ? { price: move.price } : {}),
+        ...(move.quantity !== undefined ? { quantity: move.quantity } : {}),
+        ...(move.claimType !== undefined ? { claimType: move.claimType } : {}),
+        ...(move.strategicIntent !== undefined
+          ? { strategicIntent: move.strategicIntent }
           : {}),
-        ...(input.move.confidence !== undefined
-          ? { confidence: input.move.confidence }
+        ...(move.confidence !== undefined
+          ? { confidence: move.confidence }
           : {}),
-        ...(input.move.escalationRequested !== undefined
-          ? { escalationRequested: input.move.escalationRequested }
+        ...(move.escalationRequested !== undefined
+          ? { escalationRequested: move.escalationRequested }
           : {}),
-        ...(input.move.settlementReadiness !== undefined
-          ? { settlementReadiness: input.move.settlementReadiness }
+        ...(move.settlementReadiness !== undefined
+          ? { settlementReadiness: move.settlementReadiness }
           : {}),
-        reasoning: input.move.reasoning,
+        reasoning: move.reasoning,
       },
       ctx,
     );
@@ -672,10 +702,10 @@ export class NegotiationOrchestrator {
       await this.repository.appendRound({
         sessionId: session.id,
         roundNumber: session.round_number + 1,
-        actorDid: input.agentDid,
+        actorDid: agentDid,
         actorSide,
         moveType: "hold",
-        reasoning: `out-of-band move clamped to hold: ${input.move.reasoning}`.slice(0, 4000),
+        reasoning: `out-of-band move clamped to hold: ${move.reasoning}`.slice(0, 4000),
         strategicIntent: "hold_for_better_terms",
       });
       await this.advanceTurn(session, actorSide);
@@ -715,7 +745,7 @@ export class NegotiationOrchestrator {
       const evaluation = await this.roundEvaluator.evaluateRound({
         sessionId: session.id,
         roundNumber: session.round_number + 1,
-        correlationRef: input.correlationRef,
+        correlationRef,
         assetCode: session.asset_code,
         buyPrice: decimalString(buySide.price),
         buyQuantity: decimalString(buySide.quantity),
@@ -775,19 +805,19 @@ export class NegotiationOrchestrator {
     const appendedRound = await this.repository.appendRound({
       sessionId: session.id,
       roundNumber: session.round_number + 1,
-      actorDid: input.agentDid,
+      actorDid: agentDid,
       actorSide,
-      moveType: input.move.action,
+      moveType: move.action,
       proposalCiphertext,
       opaqueSignal,
-      reasoning: input.move.reasoning,
-      strategicIntent: input.move.strategicIntent ?? null,
-      confidence: input.move.confidence ?? null,
+      reasoning: move.reasoning,
+      strategicIntent: move.strategicIntent ?? null,
+      confidence: move.confidence ?? null,
       escalationRequested,
-      settlementReadiness: input.move.settlementReadiness ?? null,
+      settlementReadiness: move.settlementReadiness ?? null,
     });
 
-    this.publish(input.institutionId, "negotiation_move_submitted", input.correlationRef, input.agentDid);
+    this.publish(institutionId, "negotiation_move_submitted", correlationRef, agentDid);
 
     // If the priced move exits the actor's preferred envelope under
     // an escalate approval mode, the session pauses for operator
@@ -798,11 +828,11 @@ export class NegotiationOrchestrator {
       await this.openEscalationGate({
         session,
         actorSide,
-        actorInstitutionId: input.institutionId,
+        actorInstitutionId: institutionId,
         initiatingRoundId: appendedRound.id,
         reason:
-          input.move.strategicIntent ?? input.move.reasoning ?? null,
-        correlationRef: input.correlationRef,
+          move.strategicIntent ?? move.reasoning ?? null,
+        correlationRef,
       });
       return { status: "awaiting_approval" };
     }
@@ -817,12 +847,12 @@ export class NegotiationOrchestrator {
         this.publish(
           session.buy_institution_id,
           "negotiation_disclosure_required",
-          input.correlationRef,
+          correlationRef,
         );
         this.publish(
           session.sell_institution_id,
           "negotiation_disclosure_required",
-          input.correlationRef,
+          correlationRef,
         );
         await this.advanceTurn(session, actorSide);
         return { status: "active" };
@@ -831,7 +861,7 @@ export class NegotiationOrchestrator {
         session,
         executionPrice,
         matchedQuantity,
-        correlationRef: input.correlationRef,
+        correlationRef,
       });
       return { status: "settled" };
     }
@@ -840,7 +870,7 @@ export class NegotiationOrchestrator {
     this.publish(
       counterpartSide === "buy" ? session.buy_institution_id : session.sell_institution_id,
       "negotiation_round_open",
-      input.correlationRef,
+      correlationRef,
     );
     return { status: "active" };
   }
@@ -1357,6 +1387,55 @@ function profileForCounterpart(
   const authored = authoredFromMandate(mandate);
   if (!authored) return null;
   return normalizeStrategy(authored);
+}
+
+/**
+ * Build a `NegotiationStrategyProfile` from a legacy-numeric mandate
+ * whose authored columns are absent. The synthesized authored policy
+ * is the legacy-numeric shape the `negotiation-core` normalizer already
+ * understands; we pair it with the rails we just derived from the
+ * same mandate so the shared validator has a single source of truth
+ * for the priced-move bound. Mirrors the synthesized profile the
+ * agent runtime uses in `profileFromRuntimeMandate` for compatibility
+ * — the rails are byte-identical between the two paths.
+ */
+function buildLegacyProfileFromRails(
+  mandate: NegotiationMandate,
+  rails: DerivedExecutionRails,
+): NegotiationStrategyProfile {
+  const reference = Number(mandate.referencePrice);
+  const synthesized: AuthoredMandatePolicy = {
+    objective: mandate.objective ?? mandate.operatorPrompt ?? "Negotiate block exposure.",
+    assetCode: mandate.assetCode,
+    side: mandate.side,
+    sizePolicy: {
+      targetQuantity: Number(mandate.targetQuantity),
+      minimumQuantity: Number(mandate.minimumQuantity ?? 0),
+      partialExecutionAllowed: mandate.partialExecutionAllowed ?? true,
+    },
+    urgency: mandate.urgency,
+    executionStyle: "balanced",
+    valuationPolicy: {
+      source: "operator_note",
+      anchorValue: mandate.derivedAnchorValue !== null
+        ? Number(mandate.derivedAnchorValue)
+        : reference,
+    },
+    concessionPolicy: {
+      pace: "balanced",
+      maxConcessionBps:
+        mandate.derivedConcessionBudgetBps ?? mandate.priceBandBps ?? 150,
+    },
+    disclosurePolicy: { allowLadder: mandate.disclosableClaims ?? [] },
+    counterpartyRequirements: {
+      requiredClaims: Object.keys(mandate.requiredCounterpartyClaims),
+      disallowedTraits: [],
+    },
+    approvalPolicy: { mode: "auto_settle" },
+    timeWindow: { deadline: mandate.deadline },
+    operatorInstructions: mandate.operatorPrompt,
+  };
+  return { authored: synthesized, rails };
 }
 
 /**

@@ -85,7 +85,7 @@ export interface Agent {
 
 export interface ProvisionAgentPolicy {
   maxSpendUsd: number;
-  allowedCategories: Array<'office-supplies' | 'software' | 'hardware' | 'services' | 'travel'>;
+  allowedCategories: ('office-supplies' | 'software' | 'hardware' | 'services' | 'travel')[];
   approverEmail?: string;
   purpose?: string;
   validityMonths?: number;
