@@ -73,6 +73,7 @@ describe("POST /api/agents/admit contract", () => {
         revokeAgent: async () => { throw new Error("not used"); },
         persistDelegation: async () => { throw new Error("not used"); },
         loadDelegationCredential: async () => null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any),
     );
 

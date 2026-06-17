@@ -77,9 +77,9 @@ export interface AgentManagementService extends AgentAdmissionService {
     label?: string;
     policy: {
       maxSpendUsd: number;
-      allowedCategories: ReadonlyArray<
+      allowedCategories: readonly (
         "office-supplies" | "software" | "hardware" | "services" | "travel"
-      >;
+      )[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;
@@ -95,9 +95,9 @@ export interface AgentManagementService extends AgentAdmissionService {
       agentDid: string;
       institutionId: string;
       maxSpendUsd: number;
-      allowedCategories: ReadonlyArray<
+      allowedCategories: readonly (
         "office-supplies" | "software" | "hardware" | "services" | "travel"
-      >;
+      )[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;
@@ -437,9 +437,9 @@ export class AgentService implements AgentManagementService {
     label?: string;
     policy: {
       maxSpendUsd: number;
-      allowedCategories: ReadonlyArray<
+      allowedCategories: readonly (
         "office-supplies" | "software" | "hardware" | "services" | "travel"
-      >;
+      )[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;
@@ -449,9 +449,9 @@ export class AgentService implements AgentManagementService {
       agentDid: string;
       institutionId: string;
       maxSpendUsd: number;
-      allowedCategories: ReadonlyArray<
+      allowedCategories: readonly (
         "office-supplies" | "software" | "hardware" | "services" | "travel"
-      >;
+      )[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;

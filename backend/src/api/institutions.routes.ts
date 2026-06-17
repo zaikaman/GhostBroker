@@ -112,9 +112,14 @@ export function createInstitutionsRouter(
     try {
       const operatorAuth = requireOperatorAuth(response);
       const id = request.params.id as string;
-      assertInstitutionScope(operatorAuth, id);
-
-      const institution = await institutionService.rotateKeys!(id);
+      assertInstitutionScope(operatorAuth, id);      if (!institutionService.rotateKeys) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          "Key rotation is not supported by this institution service implementation.",
+        );
+      }
+      const institution = await institutionService.rotateKeys(id);
       response.status(200).json(institution);
     } catch (error) {
       next(error);

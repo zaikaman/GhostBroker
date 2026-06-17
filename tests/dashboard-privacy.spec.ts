@@ -1,17 +1,16 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { 
   clearDatabase, 
   seedInstitutions, 
   seedCompletedTradeAndReceipt,
   us3UnrelatedInstitutionId,
-  us3BuyerInstitutionId,
-  us3ReceiptId
+  us3BuyerInstitutionId
 } from './support/local-stack';
 import { assertNoPrivacyLeaks } from './support/privacy-assertions';
 
 const API_BASE_URL = process.env.PLAYWRIGHT_API_BASE_URL || 'http://localhost:3001';
 
-async function setAuthContext(page: any, pwRequest: any, institutionId: string, operatorId: string) {
+async function setAuthContext(page: Page, pwRequest: APIRequestContext, institutionId: string, operatorId: string) {
   const tokenRes = await pwRequest.post(`${API_BASE_URL}/api/dev/token`, {
     data: { institutionId },
   });
@@ -24,7 +23,7 @@ async function setAuthContext(page: any, pwRequest: any, institutionId: string, 
 }
 
 test.describe('Dashboard Privacy Guardrails', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page: _page }) => {
     // Reset and seed database
     await clearDatabase();
     await seedInstitutions();

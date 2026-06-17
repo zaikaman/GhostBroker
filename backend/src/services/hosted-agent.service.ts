@@ -100,7 +100,14 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
         }),
     });
 
-    const updated = await this.agentService.updateAgentMetadata!({
+    if (!this.agentService.updateAgentMetadata) {
+      throw new PublicError(
+        "service_unavailable",
+        503,
+        "updateAgentMetadata is not supported by this agent service implementation.",
+      );
+    }
+    const updated = await this.agentService.updateAgentMetadata({
       id: configured.agent.id,
       institutionId: input.institutionId,
       patch: {
@@ -365,8 +372,14 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     const isWin = process.platform === "win32";
     const shell = isWin && this.runner[0] === "npm";
 
+    const runnerBin = this.runner[0];
+    if (!runnerBin) {
+      throw new PublicError("service_unavailable", 503, "Runner command is not configured.");
+    }
+    const runnerArgs = [...this.runner.slice(1)];
+
     if (isScriptMode && this.hostedScript) {
-      return spawn(this.runner[0]!, [...this.runner.slice(1), this.hostedScript], {
+      return spawn(runnerBin, [...runnerArgs, this.hostedScript], {
         cwd: this.agentsDir,
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -374,7 +387,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       });
     }
 
-    return spawn(this.runner[0]!, [...this.runner.slice(1), "hosted"], {
+    return spawn(runnerBin, [...runnerArgs, "hosted"], {
       cwd: this.agentsDir,
       env,
       stdio: ["ignore", "pipe", "pipe"],

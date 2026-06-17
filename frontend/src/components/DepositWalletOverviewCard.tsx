@@ -25,43 +25,43 @@ export function DepositWalletOverviewCard({
   const [error, setError] = useState<string | null>(null);
   const { refreshKey, refresh } = usePortfolioTelemetry();
 
-  const loadData = useCallback(async (): Promise<void> => {
-    const institutionData = await apiClient.getInstitution(institutionId);
-    const isChainRail =
-      institutionData.settlementProfileRef === "chain:sepolia:erc20";
+  const loadData = useCallback(async (signal: AbortSignal): Promise<void> => {
+    try {
+      setIsLoading(true);
+      setError(null);
 
-    const depositData = isChainRail
-      ? await apiClient.getDepositStatus(institutionId)
-      : null;
+      const institutionData = await apiClient.getInstitution(institutionId);
+      if (signal.aborted) return;
 
-    setInstitution(institutionData);
-    setDepositStatus(depositData);
+      const isChainRail =
+        institutionData.settlementProfileRef === "chain:sepolia:erc20";
+
+      if (isChainRail) {
+        const depositData = await apiClient.getDepositStatus(institutionId);
+        if (signal.aborted) return;
+        setDepositStatus(depositData);
+      } else {
+        setDepositStatus(null);
+      }
+
+      setInstitution(institutionData);
+      setIsLoading(false);
+    } catch (err: unknown) {
+      if (signal.aborted) return;
+      setError(
+        err instanceof Error ? err.message : "Failed to load deposit wallet status",
+      );
+      setIsLoading(false);
+    }
   }, [institutionId]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    queueMicrotask(() => {
-      if (cancelled) return;
-      setIsLoading(true);
-      setError(null);
-    });
-
-    loadData()
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(
-          err instanceof Error ? err.message : "Failed to load deposit wallet status",
-        );
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setIsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    const abortController = new AbortController();
+    // setState calls inside loadData happen after Promises resolve
+    // (async callbacks), not synchronously in the effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData(abortController.signal);
+    return () => abortController.abort();
   }, [loadData, refreshKey]);
 
   const handleCopyDepositAddress = async (): Promise<void> => {

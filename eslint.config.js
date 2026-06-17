@@ -13,7 +13,9 @@ export default tseslint.config(
       "**/coverage/**",
       "**/playwright-report/**",
       "**/test-results/**",
-      "**/.supabase/**"
+      "**/.supabase/**",
+      "**/.agents/**",
+      "**/.hermes/**"
     ]
   },
   js.configs.recommended,
@@ -46,6 +48,17 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: "^_"
         }
       ]
+    }
+  },
+  {
+    files: ["**/*.{mjs,js,cjs}"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        ...globals.node,
+        ...globals.es2022
+      }
     }
   },
   {

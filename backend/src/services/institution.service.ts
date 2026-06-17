@@ -303,9 +303,12 @@ export class InstitutionService implements InstitutionManagementService {
       throw new PublicError("not_found", 404, "Institution not found");
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const currentMetadata = (institution.metadata || {}) as Record<string, any>;
-    const currentKeys = currentMetadata.envelopeKeys || {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentKeys = (currentMetadata.envelopeKeys || {}) as Record<string, any>;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nextKeys: Record<string, any> = {};
 
     // 1. Rotate/generate hidden_intent key
@@ -361,7 +364,14 @@ export class InstitutionService implements InstitutionManagementService {
       envelopeKeys: nextKeys,
     };
 
-    return this.repository.updateMetadata!(id, nextMetadata);
+    if (!this.repository.updateMetadata) {
+      throw new PublicError(
+        "service_unavailable",
+        503,
+        "rotateKeys: repository does not support updateMetadata",
+      );
+    }
+    return this.repository.updateMetadata(id, nextMetadata);
   }
 
   private enrichChainRailMetadata(

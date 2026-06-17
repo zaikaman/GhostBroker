@@ -51,19 +51,17 @@ interface ApprovalPublicClient {
     abi: typeof Erc20Abi;
     address: Address;
     functionName: "decimals";
-  }): Promise<number>;
-  readContract(args: {
+  } | {
     abi: typeof Erc20Abi;
     address: Address;
     functionName: "balanceOf";
     args: [Address];
-  }): Promise<bigint>;
-  readContract(args: {
+  } | {
     abi: typeof Erc20Abi;
     address: Address;
     functionName: "allowance";
     args: [Address, Address];
-  }): Promise<bigint>;
+  }): Promise<number | bigint>;
 }
 
 interface ApprovalWalletClient {

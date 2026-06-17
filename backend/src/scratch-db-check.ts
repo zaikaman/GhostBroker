@@ -1,9 +1,14 @@
 import { createSupabaseServiceClient } from "./services/supabase-client.js";
 import { loadEnv } from "./config/env.js";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createAnyClient(env: any): any {
+  return createSupabaseServiceClient(env);
+}
+
 async function main() {
   const env = loadEnv();
-  const supabase = createSupabaseServiceClient(env) as any;
+  const supabase = createAnyClient(env);
   
   const { data: insts, error: instsErr } = await supabase.from("institutions").select("*");
   if (instsErr) {

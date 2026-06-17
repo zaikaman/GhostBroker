@@ -73,7 +73,7 @@ export interface Institution {
   status: 'pending' | 'active' | 'suspended' | 'closed';
   t3TenantDid: string;
   settlementProfileRef: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AdmitAgentRequest {
@@ -102,7 +102,7 @@ export interface Agent {
   maxNotional: string | null;
   limitReference: string | null;
   policyHash: string | null;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

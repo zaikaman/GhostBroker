@@ -101,10 +101,16 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
 
   useEffect(() => {
     let active = true;
-    if (active) {
+
+    // Schedule data loading asynchronously so that setState calls inside
+    // loadAgents/loadInstitution happen outside the effect's synchronous
+    // execution, preventing cascading synchronous renders.
+    queueMicrotask(() => {
+      if (!active) return;
       loadAgents();
       loadInstitution();
-    }
+    });
+
     return () => { active = false; };
   }, [loadAgents, loadInstitution]);
 
@@ -125,16 +131,17 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     setPolicyError(null);
     
     // Parse current delegation policy from agent metadata if exists
-    const meta = agent.metadata as any;
-    const cred = meta?.delegation_credential;
-    const claims = cred?.credentialSubject?.authorityClaims?.[0]?.authorityLimits;
+    const meta = agent.metadata as Record<string, unknown> | undefined;
+    const cred = meta?.delegation_credential as Record<string, unknown> | undefined;
+    const claims = (cred?.credentialSubject as Record<string, unknown> | undefined)?.["authorityClaims"] as Record<string, unknown>[] | undefined;
+    const authorityLimits = claims?.[0]?.authorityLimits as Record<string, unknown> | undefined;
     
-    if (claims) {
-      setMaxSpendUsd(claims.maxSpendUsd || 50000);
-      setAllowedCategories(claims.allowedCategories || ['software', 'services']);
-      setApproverEmail(claims.approverEmail || 'compliance@institution.com');
-      setPurpose(claims.purpose || 'Autonomous market making');
-      setValidityMonths(claims.validityMonths || 12);
+    if (authorityLimits) {
+      setMaxSpendUsd((authorityLimits.maxSpendUsd as number) || 50000);
+      setAllowedCategories((authorityLimits.allowedCategories as string[]) || ['software', 'services']);
+      setApproverEmail((authorityLimits.approverEmail as string) || 'compliance@institution.com');
+      setPurpose((authorityLimits.purpose as string) || 'Autonomous market making');
+      setValidityMonths((authorityLimits.validityMonths as number) || 12);
     } else {
       setMaxSpendUsd(50000);
       setAllowedCategories(['software', 'services']);
@@ -149,7 +156,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     setIsSavingPolicy(true);
     setPolicyError(null);
     try {
-      const policy: any = {
+      const policy: Record<string, unknown> = {
         maxSpendUsd,
         allowedCategories,
         validityMonths,
@@ -295,16 +302,17 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                     </thead>
                     <tbody>
                       {paginatedAgents.map((agent) => {
-                        const meta = agent.metadata as any;
-                        const cred = meta?.delegation_credential;
-                        const claims = cred?.credentialSubject?.authorityClaims?.[0]?.authorityLimits;
+                        const meta = agent.metadata as Record<string, unknown> | undefined;
+                        const cred = meta?.delegation_credential as Record<string, unknown> | undefined;
+                        const claims = (cred?.credentialSubject as Record<string, unknown> | undefined)?.["authorityClaims"] as Record<string, unknown>[] | undefined;
+                        const authorityLimits = claims?.[0]?.authorityLimits as Record<string, unknown> | undefined;
                         
-                        const spendLimit = claims?.maxSpendUsd 
-                          ? `$${claims.maxSpendUsd.toLocaleString()}` 
+                        const spendLimit = authorityLimits?.maxSpendUsd 
+                          ? `$${(authorityLimits.maxSpendUsd as number).toLocaleString()}` 
                           : (agent.maxNotional ? `$${parseInt(agent.maxNotional).toLocaleString()}` : 'No Limit');
                           
-                        const categories = claims?.allowedCategories 
-                          ? claims.allowedCategories.join(', ') 
+                        const categories = authorityLimits?.allowedCategories 
+                          ? (authorityLimits.allowedCategories as string[]).join(', ') 
                           : (agent.instrumentScope ? agent.instrumentScope.join(', ') : 'All');
 
                         const isActive = agent.status === 'admitted';

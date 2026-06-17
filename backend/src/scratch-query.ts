@@ -3,6 +3,7 @@ import { loadEnv } from "./config/env.js";
 
 async function main() {
   const env = loadEnv();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase = createSupabaseServiceClient(env) as any;
   const { data, error } = await supabase.from("institutions").select("*");
   if (error) {
