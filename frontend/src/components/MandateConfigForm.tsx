@@ -9,7 +9,7 @@ const initialState: CreateNegotiationMandateRequest = {
   priceBandBps: 200,
   deadline: new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
   urgency: 'normal',
-  maxNotional: 70000,
+  maxNotional: '70000',
   disclosableClaims: [],
   requiredCounterpartyClaims: {},
   counterpartyConstraints: {},
@@ -160,7 +160,7 @@ export function MandateConfigForm({
             min={0}
             step="any"
             value={form.maxNotional}
-            onChange={(e) => updateField('maxNotional', Number(e.target.value))}
+            onChange={(e) => updateField('maxNotional', e.target.value)}
             required
           />
         </div>

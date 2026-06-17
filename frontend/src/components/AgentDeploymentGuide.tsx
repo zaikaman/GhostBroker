@@ -14,7 +14,6 @@ import {
   Activity01Icon,
   AlertCircleIcon,
   ArrowLeft01Icon,
-  CheckmarkCircle01Icon,
   Copy01Icon,
   Loading03Icon,
   PlayIcon,
@@ -52,15 +51,6 @@ interface MandateFormState {
   requiredCounterpartyClaims: string;
   counterpartyConstraints: string;
   operatorPrompt: string;
-}
-
-interface GuidedJsonFieldState {
-  jurisdiction: string;
-  settlementRail: string;
-  minimumRating: string;
-  allowAnonymousLiquidity: boolean;
-  minimumFillPercent: string;
-  blockedInstitutions: string;
 }
 
 const defaultRuntimeForm: RuntimeFormState = {
@@ -124,85 +114,8 @@ function isNonNegativeNumber(value: string): boolean {
   return Number.isFinite(Number(value)) && Number(value) >= 0;
 }
 
-function toGuidedJsonFieldState(mandate: NegotiationMandateSummary | null): GuidedJsonFieldState {
-  const requiredClaims = mandate?.requiredCounterpartyClaims ?? {};
-  const constraints = mandate?.counterpartyConstraints ?? {};
-  const blockedInstitutions = Array.isArray(constraints.blockedInstitutions)
-    ? constraints.blockedInstitutions.filter((value): value is string => typeof value === 'string').join(', ')
-    : '';
-
-  return {
-    jurisdiction: typeof requiredClaims.jurisdiction === 'string' ? requiredClaims.jurisdiction : '',
-    settlementRail: typeof requiredClaims.settlementRail === 'string' ? requiredClaims.settlementRail : '',
-    minimumRating: typeof requiredClaims.minimumRating === 'string' ? requiredClaims.minimumRating : '',
-    allowAnonymousLiquidity: Boolean(constraints.allowAnonymousLiquidity),
-    minimumFillPercent:
-      typeof constraints.minimumFillPercent === 'number'
-        ? String(constraints.minimumFillPercent)
-        : typeof constraints.minimumFillPercent === 'string'
-          ? constraints.minimumFillPercent
-          : '',
-    blockedInstitutions,
-  };
-}
-
-function buildGuidedJsonFields(state: GuidedJsonFieldState): Pick<CreateNegotiationMandateRequest, 'requiredCounterpartyClaims' | 'counterpartyConstraints'> {
-  const requiredCounterpartyClaims: Record<string, unknown> = {};
-  const counterpartyConstraints: Record<string, unknown> = {};
-
-  if (state.jurisdiction.trim()) {
-    requiredCounterpartyClaims.jurisdiction = state.jurisdiction.trim().toUpperCase();
-  }
-  if (state.settlementRail.trim()) {
-    requiredCounterpartyClaims.settlementRail = state.settlementRail.trim();
-  }
-  if (state.minimumRating.trim()) {
-    requiredCounterpartyClaims.minimumRating = state.minimumRating.trim().toUpperCase();
-  }
-  if (state.allowAnonymousLiquidity) {
-    counterpartyConstraints.allowAnonymousLiquidity = true;
-  }
-  if (state.minimumFillPercent.trim()) {
-    counterpartyConstraints.minimumFillPercent = Number(state.minimumFillPercent);
-  }
-  const blockedInstitutions = state.blockedInstitutions
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (blockedInstitutions.length > 0) {
-    counterpartyConstraints.blockedInstitutions = blockedInstitutions;
-  }
-
-  return { requiredCounterpartyClaims, counterpartyConstraints };
-}
-
-function validateMandateForm(form: MandateFormState, guidedFields: GuidedJsonFieldState): string | null {
-  if (!form.assetCode.trim()) return 'Asset is required.';
-  if (!isPositiveNumber(form.targetQuantity)) return 'Target quantity must be greater than zero.';
-  if (!isPositiveNumber(form.referencePrice)) return 'Reference price must be greater than zero.';
-  if (!isNonNegativeNumber(form.priceBandBps)) return 'Price band must be zero or greater.';
-  if (!isPositiveNumber(form.maxNotional)) return 'Max notional must be greater than zero.';
-  if (!form.deadline.trim() || Number.isNaN(new Date(form.deadline).getTime())) return 'Deadline must be a valid date and time.';
-  if (!form.operatorPrompt.trim()) return 'Operator prompt is required.';
-  if (guidedFields.minimumFillPercent.trim() && !isNonNegativeNumber(guidedFields.minimumFillPercent)) {
-    return 'Minimum fill percent must be zero or greater.';
-  }
-  return null;
-}
-
-function validateRuntimeForm(form: RuntimeFormState): string | null {
-  if (!isPositiveInteger(form.pollIntervalMs)) {
-    return 'Poll interval must be a positive integer.';
-  }
-  if (!isPositiveInteger(form.maxTicks)) {
-    return 'Max ticks must be a positive integer.';
-  }
-  return null;
-}
-
 function buildMandateRequest(
   form: MandateFormState,
-  overrides?: Partial<Pick<CreateNegotiationMandateRequest, 'requiredCounterpartyClaims' | 'counterpartyConstraints'>>,
 ): CreateNegotiationMandateRequest {
   return {
     assetCode: form.assetCode.trim().toUpperCase(),
@@ -212,13 +125,13 @@ function buildMandateRequest(
     priceBandBps: Number(form.priceBandBps),
     deadline: new Date(form.deadline).toISOString(),
     urgency: form.urgency,
-    maxNotional: Number(form.maxNotional),
+    maxNotional: form.maxNotional,
     disclosableClaims: form.disclosableClaims
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean),
-    requiredCounterpartyClaims: overrides?.requiredCounterpartyClaims ?? parseJsonField('Required counterparty claims', form.requiredCounterpartyClaims),
-    counterpartyConstraints: overrides?.counterpartyConstraints ?? parseJsonField('Counterparty constraints', form.counterpartyConstraints),
+    requiredCounterpartyClaims: parseJsonField('Required counterparty claims', form.requiredCounterpartyClaims),
+    counterpartyConstraints: parseJsonField('Counterparty constraints', form.counterpartyConstraints),
     operatorPrompt: form.operatorPrompt.trim(),
   };
 }
@@ -253,9 +166,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const [selectedMandateId, setSelectedMandateId] = useState<string>('');
   const [runtimeForm, setRuntimeForm] = useState<RuntimeFormState>(defaultRuntimeForm);
   const [mandateForm, setMandateForm] = useState<MandateFormState>(defaultMandateForm);
-  const [guidedJsonFields, setGuidedJsonFields] = useState<GuidedJsonFieldState>(() => toGuidedJsonFieldState(null));
   const [showMandateEditor, setShowMandateEditor] = useState(false);
-  const [showAdvancedRuntime, setShowAdvancedRuntime] = useState(false);
   const [showProvisioningForm, setShowProvisioningForm] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [institution, setInstitution] = useState<Institution | null>(null);
@@ -264,10 +175,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mandateValidationError, setMandateValidationError] = useState<string | null>(null);
-  const [runtimeValidationError, setRuntimeValidationError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [showOperationsPanel, setShowOperationsPanel] = useState(false);
-  const [showTelemetryPanel, setShowTelemetryPanel] = useState(false);
+  const [activeStep, setActiveStep] = useState<number>(1);
 
   const loadState = useCallback(async (preferredAgentId?: string | null) => {
     const [records, agents, inst] = await Promise.all([
@@ -382,7 +291,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     }
     const mandates = mandatesByAgentId[selectedAgentId] ?? [];
     if (mandates.length === 0) {
-      setShowMandateEditor(true);
       setSelectedMandateId('');
       return;
     }
@@ -410,9 +318,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         counterpartyConstraints: JSON.stringify(selectedMandate.counterpartyConstraints, null, 2),
         operatorPrompt: selectedMandate.operatorPrompt,
       });
-      setGuidedJsonFields(toGuidedJsonFieldState(selectedMandate));
-    } else {
-      setGuidedJsonFields(toGuidedJsonFieldState(null));
     }
     if (selectedHostedRecord?.config) {
       setRuntimeForm({
@@ -427,87 +332,64 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const runningCount = hostedAgents.filter((record) => record.runtime.running).length;
   const isChainRail = institution?.settlementProfileRef === 'chain:sepolia:erc20';
   const settlementReady = isChainRail ? Boolean(depositStatus?.approved.wbtc && depositStatus?.approved.usdc) : true;
-  const runtimeValidationMessage = useMemo(() => validateRuntimeForm(runtimeForm), [runtimeForm]);
+  const runtimeValidationMessage = useMemo(() => {
+    if (!isPositiveInteger(runtimeForm.pollIntervalMs)) return 'Poll interval must be a positive integer.';
+    if (!isPositiveInteger(runtimeForm.maxTicks)) return 'Max ticks must be a positive integer.';
+    return null;
+  }, [runtimeForm.pollIntervalMs, runtimeForm.maxTicks]);
   const canLaunch = Boolean(selectedAgentId && selectedMandateId) && settlementReady && !runtimeValidationMessage;
   const hasAdmittedAgents = admittedAgents.length > 0;
   const hasHostedAgents = hostedAgents.length > 0;
-
-  const readiness = useMemo(
-    () => [
-      {
-        label: 'Admitted Agent Selected',
-        ready: Boolean(selectedAgent),
-        detail: selectedAgent ? (selectedAgent.label ?? truncateMiddle(selectedAgent.agentDid, 10)) : 'Select an admitted agent',
-      },
-      {
-        label: 'Negotiation Mandate Bound',
-        ready: Boolean(selectedMandateId),
-        detail: selectedMandate ? `${selectedMandate.side.toUpperCase()} ${selectedMandate.assetCode} • ${selectedMandate.targetQuantity}` : 'Create or replace a mandate for the selected agent',
-      },
-      {
-        label: 'Hosted Negotiator Runtime',
-        ready: !runtimeValidationMessage,
-        detail: runtimeValidationMessage ?? `${runtimeForm.pollIntervalMs} ms • ${runtimeForm.maxTicks} ticks`,
-      },
-      {
-        label: 'Settlement Rail Approval',
-        ready: institution ? settlementReady : false,
-        detail: !institution
-          ? 'Loading…'
-          : isChainRail
-            ? depositStatus
-              ? `${depositStatus.approved.wbtc ? 'WBTC✓' : 'WBTC✗'} | ${depositStatus.approved.usdc ? 'USDC✓' : 'USDC✗'}`
-              : 'Status unavailable'
-            : 'Not required (noop rail)',
-      },
-    ],
-    [depositStatus, institution, isChainRail, runtimeForm.maxTicks, runtimeForm.pollIntervalMs, runtimeValidationMessage, selectedAgent, selectedMandate, selectedMandateId, settlementReady],
-  );
-
   const selectedAgentHasHostedRuntime = useMemo(
     () => hostedAgents.some((record) => record.agent.id === selectedAgentId),
     [hostedAgents, selectedAgentId],
   );
-
-  const launchStage = useMemo(() => {
-    if (!selectedAgentId) return 1;
-    if (!selectedMandateId || showMandateEditor) return 2;
-    return 3;
-  }, [selectedAgentId, selectedMandateId, showMandateEditor]);
 
   const handleProvisioned = useCallback(async (agent: Agent) => {
     setShowProvisioningForm(false);
     setShowMandateEditor(true);
     await loadState(agent.id);
     dispatchAgentsUpdated();
+    setActiveStep(2);
   }, [loadState]);
+
+  const validateMandateForm = useCallback((): string | null => {
+    const form = mandateForm;
+    if (!form.assetCode.trim()) return 'Asset is required.';
+    if (!isPositiveNumber(form.targetQuantity)) return 'Target quantity must be greater than zero.';
+    if (!isPositiveNumber(form.referencePrice)) return 'Reference price must be greater than zero.';
+    if (!isNonNegativeNumber(form.priceBandBps)) return 'Price band must be zero or greater.';
+    if (!isPositiveNumber(form.maxNotional)) return 'Max notional must be greater than zero.';
+    if (!form.deadline.trim() || Number.isNaN(new Date(form.deadline).getTime())) return 'Deadline must be a valid date and time.';
+    if (!form.operatorPrompt.trim()) return 'Operator prompt is required.';
+    try {
+      parseJsonField('Required counterparty claims', form.requiredCounterpartyClaims);
+      parseJsonField('Counterparty constraints', form.counterpartyConstraints);
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Invalid JSON format.';
+    }
+    return null;
+  }, [mandateForm]);
 
   const handleCreateOrUpdateMandate = useCallback(async () => {
     if (!selectedAgentId) {
       throw new Error('Select an admitted agent before creating a mandate.');
     }
-    const validationError = validateMandateForm(mandateForm, guidedJsonFields);
+    const validationError = validateMandateForm();
     if (validationError) {
       throw new Error(validationError);
     }
 
-    const rawRequiredClaims = parseJsonField('Required counterparty claims', mandateForm.requiredCounterpartyClaims);
-    const rawConstraints = parseJsonField('Counterparty constraints', mandateForm.counterpartyConstraints);
-    const guidedOverrides = buildGuidedJsonFields(guidedJsonFields);
     const result = await apiClient.createNegotiationMandate(
       selectedAgentId,
-      buildMandateRequest(mandateForm, {
-        requiredCounterpartyClaims:
-          Object.keys(rawRequiredClaims).length > 0 ? rawRequiredClaims : guidedOverrides.requiredCounterpartyClaims,
-        counterpartyConstraints:
-          Object.keys(rawConstraints).length > 0 ? rawConstraints : guidedOverrides.counterpartyConstraints,
-      }),
+      buildMandateRequest(mandateForm),
     );
     setSelectedMandateId(result.mandate.id);
     setShowMandateEditor(false);
     setMandateValidationError(null);
     await loadState(selectedAgentId);
-  }, [guidedJsonFields, loadState, mandateForm, selectedAgentId]);
+    setActiveStep(3);
+  }, [loadState, mandateForm, selectedAgentId, validateMandateForm]);
 
   const handleLaunch = useCallback(async () => {
     if (!selectedAgentId) {
@@ -518,15 +400,12 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       setError('Attach a negotiation mandate before launching.');
       return;
     }
-    const nextRuntimeValidationError = validateRuntimeForm(runtimeForm);
-    if (nextRuntimeValidationError) {
-      setRuntimeValidationError(nextRuntimeValidationError);
-      setError(nextRuntimeValidationError);
+    if (runtimeValidationMessage) {
+      setError(runtimeValidationMessage);
       return;
     }
     setIsSubmitting(true);
     setError(null);
-    setRuntimeValidationError(null);
     try {
       const request: CreateHostedAgentRequest = {
         institutionId: session.institution.id,
@@ -548,21 +427,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     } finally {
       setIsSubmitting(false);
     }
-  }, [loadState, runtimeForm, selectedAgentId, selectedMandateId, session.institution.id]);
-
-  useEffect(() => {
-    setRuntimeValidationError(runtimeValidationMessage);
-  }, [runtimeValidationMessage]);
-
-  useEffect(() => {
-    if (selectedAgentHasHostedRuntime) {
-      setShowOperationsPanel(true);
-      setShowTelemetryPanel(true);
-      return;
-    }
-    setShowOperationsPanel(false);
-    setShowTelemetryPanel(false);
-  }, [selectedAgentHasHostedRuntime]);
+  }, [loadState, runtimeForm, runtimeValidationMessage, selectedAgentId, selectedMandateId, session.institution.id]);
 
   const handleStart = useCallback(async (id: string) => {
     setBusyAgentId(id);
@@ -602,17 +467,41 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
   const mandateSummary = summarizeMandate(selectedMandate);
 
+  const isStepUnlocked = useCallback((stepNumber: number) => {
+    if (stepNumber === 1) return true;
+    if (stepNumber === 2) return Boolean(selectedAgentId);
+    if (stepNumber === 3) return Boolean(selectedAgentId && selectedMandateId);
+    return false;
+  }, [selectedAgentId, selectedMandateId]);
+
+  useEffect(() => {
+    if (!selectedAgentId) {
+      setActiveStep(1);
+    }
+  }, [selectedAgentId]);
+
   return (
     <div className="deploy-layout deploy-factory-layout">
       <header className="deploy-header deploy-header-hosted">
         <div className="deploy-header-left">
-          <button type="button" className="btn btn-secondary" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              if (activeStep > 1) {
+                setActiveStep(activeStep - 1);
+              } else {
+                onBack();
+              }
+            }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
             <ArrowLeft01Icon size={14} /> Back
           </button>
         </div>
         <div className="deploy-header-center">
           <h1 className="deploy-title">Hosted Negotiator</h1>
-          <span className="deploy-subtitle">Mandate-first launch surface for attested negotiation runtimes.</span>
+          <span className="deploy-subtitle">Provision agents, bind mandates, and launch hosted runtimes.</span>
         </div>
         <div className="deploy-header-right">
           <div className={`status-badge ${runningCount > 0 ? 'secure' : 'processing'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -629,475 +518,527 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       ) : null}
 
       <div className="deploy-factory-grid">
+        {/* Launch Controls */}
         <section className="card">
           <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
             <Shield01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Launch Flow
           </h2>
 
           <div className="deploy-form-grid deploy-guide-grid">
+            {/* Wizard Nav */}
             <div className="deploy-wizard-nav deploy-form-span-full" aria-label="Hosted launch steps">
               {[
                 { step: 1, kicker: 'Access', label: selectedAgentId ? 'Agent selected' : 'Choose or provision an admitted agent' },
-                { step: 2, kicker: 'Mandate', label: selectedMandateId && !showMandateEditor ? 'Mandate bound' : 'Define strategy bounds for the selected agent' },
+                { step: 2, kicker: 'Mandate', label: selectedMandateId && !showMandateEditor ? 'Mandate bound' : 'Define strategy bounds' },
                 { step: 3, kicker: 'Runtime', label: selectedAgentHasHostedRuntime ? 'Runtime attached' : 'Tune runtime and launch' },
-              ].map((item) => (
-                <div
-                  key={item.step}
-                  className={`deploy-wizard-nav-item ${launchStage === item.step ? 'active' : launchStage > item.step ? 'completed' : ''}`}
-                >
-                  <span className="deploy-wizard-nav-step">0{item.step}</span>
-                  <div className="deploy-wizard-nav-content">
-                    <span className="deploy-wizard-nav-kicker">{item.kicker}</span>
-                    <span className="deploy-wizard-nav-label">{item.label}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <section className="deploy-guide-section deploy-form-span-full">
-              <div className="deploy-guide-section-header deploy-guide-section-header-compact">
-                <span className="deploy-guide-step">01</span>
-                <div>
-                  <h3 className="deploy-guide-heading">Admitted Agent</h3>
-                  <p className="deploy-guide-copy">Pick the exact operator-approved agent you want to manage. Provisioning here creates the durable delegation layer, then returns directly to mandate binding.</p>
-                </div>
-              </div>
-
-              <div className="form-group deploy-form-span-full">
-                <label className="form-label" htmlFor="deploy-agent-select">Select Admitted Agent</label>
-              {hasAdmittedAgents ? (
-                <>
-                  <select
-                    id="deploy-agent-select"
-                    className="form-select"
-                    value={selectedAgentId ?? ''}
-                    onChange={(event) => {
-                      setSelectedAgentId(event.target.value || null);
-                      setShowMandateEditor(false);
-                      setMandateValidationError(null);
-                      setError(null);
+              ].map((item) => {
+                const unlocked = isStepUnlocked(item.step);
+                return (
+                  <button
+                    key={item.step}
+                    type="button"
+                    onClick={() => {
+                      if (unlocked) {
+                        setActiveStep(item.step);
+                      } else {
+                        if (item.step === 2) {
+                          setError('Please select or provision an admitted agent first.');
+                        } else if (item.step === 3) {
+                          setError('Please bind a negotiation mandate first.');
+                        }
+                      }
+                    }}
+                    className={`deploy-wizard-nav-item ${activeStep === item.step ? 'active' : activeStep > item.step ? 'completed' : ''}`}
+                    aria-current={activeStep === item.step ? 'step' : undefined}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: unlocked ? 'pointer' : 'not-allowed',
+                      opacity: unlocked ? 1 : 0.6,
+                      width: '100%',
+                      textAlign: 'left',
                     }}
                   >
-                    <option value="">Select agent…</option>
-                    {admittedAgents.map((agent) => (
-                      <option key={agent.id} value={agent.id}>
-                        {agent.label ?? agent.agentDid}
+                    <span className="deploy-wizard-nav-step">0{item.step}</span>
+                    <div className="deploy-wizard-nav-content">
+                      <span className="deploy-wizard-nav-kicker">{item.kicker}</span>
+                      <span className="deploy-wizard-nav-label">{item.label}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Step 1: Agent Selection */}
+            <div className="deploy-form-span-full" style={{ display: activeStep === 1 ? 'block' : 'none' }}>
+              <section className="deploy-guide-section" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+                <div className="deploy-guide-section-header">
+                  <span className="deploy-guide-step">01</span>
+                  <div>
+                    <h3 className="deploy-guide-heading">Admitted Agent</h3>
+                    <p className="deploy-guide-copy">Pick the exact operator-approved agent you want to manage. Provisioning creates the durable delegation layer, then returns directly to mandate binding.</p>
+                  </div>
+                </div>
+
+                <div className="form-group deploy-form-span-full">
+                  <label className="form-label" htmlFor="deploy-agent-select">Select Admitted Agent</label>
+                  {hasAdmittedAgents ? (
+                    <>
+                      <select
+                        id="deploy-agent-select"
+                        className="form-select"
+                        value={selectedAgentId ?? ''}
+                        onChange={(event) => {
+                          setSelectedAgentId(event.target.value || null);
+                          setShowMandateEditor(false);
+                          setMandateValidationError(null);
+                          setError(null);
+                        }}
+                      >
+                        <option value="">Select agent…</option>
+                        {admittedAgents.map((agent) => (
+                          <option key={agent.id} value={agent.id}>
+                            {agent.label ?? agent.agentDid}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="deploy-field-hint">
+                        Select an admitted agent, or provision a new one inline.
+                      </span>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--spacing-sm)' }}>
+                        <button type="button" className="btn btn-secondary" onClick={() => setShowProvisioningForm((current) => !current)}>
+                          {showProvisioningForm ? 'Hide Provisioning' : 'Provision Agent'}
+                        </button>
+                      </div>
+                      {showProvisioningForm ? (
+                        <AgentProvisioningForm
+                          institutionId={session.institution.id}
+                          description="Mint delegation and admit a new negotiator without breaking the current launch flow."
+                          onProvisioned={handleProvisioned}
+                        />
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="deploy-context-note" style={{ display: 'grid', gap: '12px' }}>
+                      <div style={{ display: 'grid', gap: '6px' }}>
+                        <strong style={{ fontSize: '0.82rem', color: 'var(--color-text-primary)' }}>No admitted agent available</strong>
+                        <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
+                          Provision an agent here, then continue directly into mandate binding and hosted launch.
+                        </span>
+                      </div>
+                      <AgentProvisioningForm
+                        institutionId={session.institution.id}
+                        submitLabel="Provision Agent"
+                        onProvisioned={handleProvisioned}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="deploy-step-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--spacing-lg)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!selectedAgentId}
+                    onClick={() => {
+                      if (selectedAgentId) {
+                        setActiveStep(2);
+                      }
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    Continue to Mandate Bounds &rarr;
+                  </button>
+                </div>
+              </section>
+            </div>
+
+            {/* Step 2: Mandate Bounds */}
+            <div className="deploy-form-span-full" style={{ display: activeStep === 2 ? 'block' : 'none' }}>
+              <section className="deploy-guide-section" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+                <div className="deploy-guide-section-header">
+                  <span className="deploy-guide-step">02</span>
+                  <div>
+                    <h3 className="deploy-guide-heading">Mandate Bounds</h3>
+                    <p className="deploy-guide-copy">Define the trading strategy the agent will follow.</p>
+                  </div>
+                </div>
+
+                {/* Selected agent summary */}
+                <div className="deploy-context-note" style={{ marginBottom: 'var(--spacing-md)', padding: 'var(--spacing-sm) var(--spacing-md)', background: 'rgba(94, 210, 156, 0.05)', border: '1px solid rgba(94, 210, 156, 0.15)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--color-text-primary)' }}>
+                    Active Agent: <strong style={{ color: 'var(--color-accent)' }}>{selectedAgent?.label ?? (selectedAgent ? truncateMiddle(selectedAgent.agentDid, 12) : '')}</strong>
+                  </span>
+                  <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.7rem', height: 'auto', minHeight: 'unset' }} onClick={() => setActiveStep(1)}>
+                    Change Agent
+                  </button>
+                </div>
+
+                <div className="deploy-mandate-summary deploy-form-span-full" style={{ marginTop: 0 }}>
+                  <span className="deploy-mandate-summary-label">Bound Negotiation Mandate</span>
+                  <strong className="deploy-mandate-summary-title">
+                    {selectedMandate ? `${selectedMandate.side.toUpperCase()} ${selectedMandate.assetCode}` : 'No active mandate attached'}
+                  </strong>
+                  <p className="deploy-mandate-summary-copy">
+                    Strategy limits live exclusively in the negotiation mandate. Hosted runtime settings cannot override these bounds.
+                  </p>
+                  <div className="deploy-mandate-summary-grid">
+                    {mandateSummary.map((item) => (
+                      <div key={item.label} className="deploy-mandate-summary-item">
+                        <span className="deploy-mandate-summary-item-label">{item.label}</span>
+                        <span className="deploy-mandate-summary-item-value">{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="form-group deploy-form-span-full" style={{ marginTop: 'var(--spacing-md)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    <label className="form-label" htmlFor="mandate-id">Mandate Selection</label>
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowMandateEditor((current) => !current)}>
+                      {showMandateEditor ? 'Hide Mandate Editor' : selectedMandate ? 'Edit / Replace Mandate' : 'Create Mandate'}
+                    </button>
+                  </div>
+                  <select
+                    id="mandate-id"
+                    className="form-select"
+                    value={selectedMandateId}
+                    onChange={(event) => setSelectedMandateId(event.target.value)}
+                    disabled={!selectedAgentId || selectedAgentMandates.length === 0}
+                  >
+                    <option value="">{selectedAgentId ? 'No active mandate selected' : 'Select an agent first'}</option>
+                    {selectedAgentMandates.map((mandate) => (
+                      <option key={mandate.id} value={mandate.id}>
+                        {`${mandate.side.toUpperCase()} ${mandate.assetCode} • ${mandate.targetQuantity} • ${new Date(mandate.updatedAt).toLocaleDateString()}`}
                       </option>
                     ))}
                   </select>
                   <span className="deploy-field-hint">
-                    Select an admitted agent, or provision a new one inline without leaving this launch surface.
-                  </span>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowProvisioningForm((current) => !current)}>
-                      {showProvisioningForm ? 'Hide Provisioning' : 'Provision Agent'}
-                    </button>
-                  </div>
-                  {showProvisioningForm ? (
-                    <AgentProvisioningForm
-                      institutionId={session.institution.id}
-                      description="Mint delegation and admit a new negotiator without breaking the current launch flow."
-                      onProvisioned={handleProvisioned}
-                    />
-                  ) : null}
-                </>
-              ) : (
-                <div className="deploy-context-note" style={{ display: 'grid', gap: '12px' }}>
-                  <div style={{ display: 'grid', gap: '6px' }}>
-                    <strong style={{ fontSize: '0.82rem', color: 'var(--color-text-primary)' }}>No admitted agent available</strong>
-                    <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-                      Provision an agent here, then continue directly into mandate binding and hosted launch.
-                    </span>
-                  </div>
-                  <AgentProvisioningForm
-                    institutionId={session.institution.id}
-                    submitLabel="Provision Agent"
-                    onProvisioned={handleProvisioned}
-                  />
-                </div>
-              )}
-              </div>
-            </section>
-
-            <section className="deploy-guide-section deploy-form-span-full">
-              <div className="deploy-guide-section-header deploy-guide-section-header-compact">
-                <span className="deploy-guide-step">02</span>
-                <div>
-                  <h3 className="deploy-guide-heading">Mandate Bounds</h3>
-                  <p className="deploy-guide-copy">Mandates are per-agent trading policy. Selecting another admitted agent swaps the mandate list and summary to that agent only.</p>
-                </div>
-              </div>
-
-            <div className="deploy-mandate-summary deploy-form-span-full">
-              <span className="deploy-mandate-summary-label">2. Bound Negotiation Mandate</span>
-              <strong className="deploy-mandate-summary-title">
-                {selectedMandate ? `${selectedMandate.side.toUpperCase()} ${selectedMandate.assetCode}` : 'No active mandate attached'}
-              </strong>
-              <p className="deploy-mandate-summary-copy">
-                Strategy limits live exclusively in the negotiation mandate. Hosted runtime settings cannot override these bounds.
-              </p>
-              <div className="deploy-mandate-summary-grid">
-                {mandateSummary.map((item) => (
-                  <div key={item.label} className="deploy-mandate-summary-item">
-                    <span className="deploy-mandate-summary-item-label">{item.label}</span>
-                    <span className="deploy-mandate-summary-item-value">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="form-group deploy-form-span-full">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                <label className="form-label" htmlFor="mandate-id">Mandate Selection</label>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowMandateEditor((current) => !current)}>
-                  {showMandateEditor ? 'Hide Mandate Editor' : selectedMandate ? 'Edit / Replace Mandate' : 'Create Mandate'}
-                </button>
-              </div>
-              <select
-                id="mandate-id"
-                className="form-select"
-                value={selectedMandateId}
-                onChange={(event) => setSelectedMandateId(event.target.value)}
-                disabled={!selectedAgentId || selectedAgentMandates.length === 0}
-              >
-                <option value="">{selectedAgentId ? 'No active mandate selected' : 'Select an agent first'}</option>
-                {selectedAgentMandates.map((mandate) => (
-                  <option key={mandate.id} value={mandate.id}>
-                    {`${mandate.side.toUpperCase()} ${mandate.assetCode} • ${mandate.targetQuantity} • ${new Date(mandate.updatedAt).toLocaleDateString()}`}
-                  </option>
-                ))}
-              </select>
-              <span className="deploy-field-hint">
-                {selectedAgentId
-                  ? selectedAgentMandates.length > 0
-                    ? 'Mandates are scoped to the selected agent. Creating or replacing one here only affects that agent, even when other admitted agents exist.'
-                    : 'No mandate exists for this agent yet. Create one now to unlock launch.'
-                  : 'Select or provision an admitted agent before binding a mandate.'}
-              </span>
-            </div>
-
-            {showMandateEditor ? (
-              <div className="deploy-form-span-full" style={{ display: 'grid', gap: '12px' }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gap: '6px',
-                    padding: '12px 14px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid rgba(94, 210, 156, 0.16)',
-                    background: 'rgba(94, 210, 156, 0.04)',
-                  }}
-                >
-                  <strong style={{ color: 'var(--color-text-primary)', fontSize: '0.78rem' }}>Mandate limits govern live negotiation</strong>
-                  <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.72rem', lineHeight: 1.5, maxWidth: '72ch' }}>
-                    Fill the structured policy fields first. Raw JSON is still available for advanced override cases, but it is optional and validated before submit.
+                    {selectedAgentId
+                      ? selectedAgentMandates.length > 0
+                        ? 'Mandates are scoped to the selected agent.'
+                        : 'No mandate exists for this agent yet. Create one now.'
+                      : 'Select an admitted agent before binding a mandate.'}
                   </span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-asset">Asset</label>
-                    <input id="mandate-asset" className="form-input" value={mandateForm.assetCode} onChange={(event) => setMandateForm((current) => ({ ...current, assetCode: event.target.value.toUpperCase() }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-side">Side</label>
-                    <select id="mandate-side" className="form-select" value={mandateForm.side} onChange={(event) => setMandateForm((current) => ({ ...current, side: event.target.value as 'buy' | 'sell' }))}>
-                      <option value="buy">Buy</option>
-                      <option value="sell">Sell</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-target-quantity">Target Quantity</label>
-                    <input id="mandate-target-quantity" className="form-input font-mono" value={mandateForm.targetQuantity} onChange={(event) => setMandateForm((current) => ({ ...current, targetQuantity: event.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-reference-price">Reference Price</label>
-                    <input id="mandate-reference-price" className="form-input font-mono" value={mandateForm.referencePrice} onChange={(event) => setMandateForm((current) => ({ ...current, referencePrice: event.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-band">Price Band (bps)</label>
-                    <input id="mandate-band" className="form-input font-mono" value={mandateForm.priceBandBps} onChange={(event) => setMandateForm((current) => ({ ...current, priceBandBps: event.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-max-notional">Max Notional</label>
-                    <input id="mandate-max-notional" className="form-input font-mono" value={mandateForm.maxNotional} onChange={(event) => setMandateForm((current) => ({ ...current, maxNotional: event.target.value }))} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-urgency">Urgency</label>
-                    <select id="mandate-urgency" className="form-select" value={mandateForm.urgency} onChange={(event) => setMandateForm((current) => ({ ...current, urgency: event.target.value as CreateNegotiationMandateRequest['urgency'] }))}>
-                      <option value="low">Low</option>
-                      <option value="normal">Normal</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-deadline">Deadline</label>
-                    <input id="mandate-deadline" type="datetime-local" className="form-input" value={mandateForm.deadline} onChange={(event) => setMandateForm((current) => ({ ...current, deadline: event.target.value }))} />
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="mandate-disclosable">Disclosable Claims</label>
-                  <input id="mandate-disclosable" className="form-input" value={mandateForm.disclosableClaims} onChange={(event) => setMandateForm((current) => ({ ...current, disclosableClaims: event.target.value }))} placeholder="accredited_institution, settlement_capacity" />
-                  <span className="deploy-field-hint">Comma-separated claims the agent may reveal during negotiation.</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-guided-jurisdiction">Required Jurisdiction</label>
-                    <input id="mandate-guided-jurisdiction" className="form-input" value={guidedJsonFields.jurisdiction} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, jurisdiction: event.target.value }))} placeholder="US" />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-guided-settlement-rail">Settlement Rail Claim</label>
-                    <input id="mandate-guided-settlement-rail" className="form-input" value={guidedJsonFields.settlementRail} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, settlementRail: event.target.value }))} placeholder="chain:sepolia:erc20" />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-guided-rating">Minimum Rating</label>
-                    <input id="mandate-guided-rating" className="form-input" value={guidedJsonFields.minimumRating} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, minimumRating: event.target.value }))} placeholder="A" />
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.9fr) 1fr 1.2fr', gap: '12px', alignItems: 'end' }}>
-                  <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
-                    <input type="checkbox" checked={guidedJsonFields.allowAnonymousLiquidity} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, allowAnonymousLiquidity: event.target.checked }))} />
-                    <span>Allow anonymous liquidity</span>
-                  </label>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-guided-fill">Minimum Fill Percent</label>
-                    <input id="mandate-guided-fill" className="form-input font-mono" value={guidedJsonFields.minimumFillPercent} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, minimumFillPercent: event.target.value }))} placeholder="25" />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-guided-blocked">Blocked Institutions</label>
-                    <input id="mandate-guided-blocked" className="form-input" value={guidedJsonFields.blockedInstitutions} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, blockedInstitutions: event.target.value }))} placeholder="did:t3:competitor-a, did:t3:competitor-b" />
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-required-claims">Required Counterparty Claims (JSON)</label>
-                    <textarea id="mandate-required-claims" className="form-input deploy-textarea font-mono" value={mandateForm.requiredCounterpartyClaims} onChange={(event) => setMandateForm((current) => ({ ...current, requiredCounterpartyClaims: event.target.value }))} />
-                    <span className="deploy-field-hint">Advanced override. Leave as <code>{'{}'}</code> to use the structured claim fields above.</span>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="mandate-counterparty-constraints">Counterparty Constraints (JSON)</label>
-                    <textarea id="mandate-counterparty-constraints" className="form-input deploy-textarea font-mono" value={mandateForm.counterpartyConstraints} onChange={(event) => setMandateForm((current) => ({ ...current, counterpartyConstraints: event.target.value }))} />
-                    <span className="deploy-field-hint">Advanced override. Leave as <code>{'{}'}</code> to use the structured constraint fields above.</span>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="mandate-operator-prompt">Operator Prompt</label>
-                  <textarea id="mandate-operator-prompt" className="form-input deploy-textarea font-mono" value={mandateForm.operatorPrompt} onChange={(event) => setMandateForm((current) => ({ ...current, operatorPrompt: event.target.value }))} />
-                  <span className="deploy-field-hint">Use this for negotiation behavior and escalation guidance, not for numeric policy that already exists in the mandate fields.</span>
-                </div>
-                {mandateValidationError ? (
-                  <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)' }}>
-                    <AlertCircleIcon size={14} /> {mandateValidationError}
+
+                {showMandateEditor ? (
+                  <div className="deploy-form-span-full" style={{ display: 'grid', gap: '12px', marginTop: 'var(--spacing-md)' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-asset">Asset</label>
+                        <input
+                          id="mandate-asset"
+                          className="form-input"
+                          value={mandateForm.assetCode}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, assetCode: event.target.value.toUpperCase() }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-side">Side</label>
+                        <select id="mandate-side" className="form-select" value={mandateForm.side} onChange={(event) => setMandateForm((current) => ({ ...current, side: event.target.value as 'buy' | 'sell' }))}>
+                          <option value="buy">Buy</option>
+                          <option value="sell">Sell</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-target-quantity">Target Quantity</label>
+                        <input
+                          id="mandate-target-quantity"
+                          className="form-input font-mono"
+                          value={mandateForm.targetQuantity}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, targetQuantity: event.target.value }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-reference-price">Reference Price</label>
+                        <input
+                          id="mandate-reference-price"
+                          className="form-input font-mono"
+                          value={mandateForm.referencePrice}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, referencePrice: event.target.value }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-band">Price Band (bps)</label>
+                        <input
+                          id="mandate-band"
+                          className="form-input font-mono"
+                          value={mandateForm.priceBandBps}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, priceBandBps: event.target.value }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-max-notional">Max Notional</label>
+                        <input
+                          id="mandate-max-notional"
+                          className="form-input font-mono"
+                          value={mandateForm.maxNotional}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, maxNotional: event.target.value }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-urgency">Urgency</label>
+                        <select id="mandate-urgency" className="form-select" value={mandateForm.urgency} onChange={(event) => setMandateForm((current) => ({ ...current, urgency: event.target.value as CreateNegotiationMandateRequest['urgency'] }))}>
+                          <option value="low">Low</option>
+                          <option value="normal">Normal</option>
+                          <option value="high">High</option>
+                          <option value="critical">Critical</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-deadline">Deadline</label>
+                        <input
+                          id="mandate-deadline"
+                          type="datetime-local"
+                          className="form-input"
+                          value={mandateForm.deadline}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, deadline: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="mandate-disclosable">Disclosable Claims</label>
+                      <input id="mandate-disclosable" className="form-input" value={mandateForm.disclosableClaims} onChange={(event) => setMandateForm((current) => ({ ...current, disclosableClaims: event.target.value }))} placeholder="accredited_institution, settlement_capacity" />
+                      <span className="deploy-field-hint">Comma-separated claims the agent may reveal during negotiation.</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-required-claims">Required Counterparty Claims (JSON)</label>
+                        <textarea
+                          id="mandate-required-claims"
+                          className="form-input deploy-textarea font-mono"
+                          value={mandateForm.requiredCounterpartyClaims}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, requiredCounterpartyClaims: event.target.value }))}
+                        />
+                        <span className="deploy-field-hint">JSON object of claims a counterparty must satisfy.</span>
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="mandate-counterparty-constraints">Counterparty Constraints (JSON)</label>
+                        <textarea
+                          id="mandate-counterparty-constraints"
+                          className="form-input deploy-textarea font-mono"
+                          value={mandateForm.counterpartyConstraints}
+                          onChange={(event) => setMandateForm((current) => ({ ...current, counterpartyConstraints: event.target.value }))}
+                        />
+                        <span className="deploy-field-hint">JSON object of additional constraints (e.g. blocked institutions).</span>
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="mandate-operator-prompt">Operator Prompt</label>
+                      <textarea
+                        id="mandate-operator-prompt"
+                        className="form-input deploy-textarea font-mono"
+                        value={mandateForm.operatorPrompt}
+                        onChange={(event) => setMandateForm((current) => ({ ...current, operatorPrompt: event.target.value }))}
+                      />
+                      <span className="deploy-field-hint">Behavior and escalation guidance for the agent.</span>
+                    </div>
+                    {mandateValidationError ? (
+                      <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)' }}>
+                        <AlertCircleIcon size={14} /> {mandateValidationError}
+                      </div>
+                    ) : null}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={!selectedAgentId || isSubmitting}
+                        onClick={() => {
+                          setIsSubmitting(true);
+                          setError(null);
+                          setMandateValidationError(null);
+                          handleCreateOrUpdateMandate()
+                            .catch((err) => {
+                              const message = err instanceof Error ? err.message : 'Failed to save mandate.';
+                              setMandateValidationError(message);
+                            })
+                            .finally(() => setIsSubmitting(false));
+                        }}
+                      >
+                        {isSubmitting ? 'Saving…' : 'Save Mandate'}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+
+                <div className="deploy-step-actions" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--spacing-lg)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setActiveStep(1)}>
+                    &larr; Back
+                  </button>
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={!selectedAgentId || isSubmitting}
+                    disabled={!selectedMandateId || showMandateEditor}
                     onClick={() => {
-                      setIsSubmitting(true);
-                      setError(null);
-                      setMandateValidationError(null);
-                      handleCreateOrUpdateMandate()
-                        .catch((err) => {
-                          const message = err instanceof Error ? err.message : 'Failed to save mandate.';
-                          setMandateValidationError(message);
-                        })
-                        .finally(() => setIsSubmitting(false));
+                      if (selectedMandateId) {
+                        setActiveStep(3);
+                      }
                     }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
-                    {isSubmitting ? 'Saving…' : 'Save Mandate'}
+                    Continue to Runtime Controls &rarr;
                   </button>
                 </div>
-              </div>
-            ) : null}
-            </section>
-
-            <section className="deploy-guide-section deploy-form-span-full">
-              <div className="deploy-guide-section-header deploy-guide-section-header-compact">
-                <span className="deploy-guide-step">03</span>
-                <div>
-                  <h3 className="deploy-guide-heading">Runtime Controls</h3>
-                  <p className="deploy-guide-copy">Launch with the minimum required runtime settings first. Fleet state and raw telemetry stay tucked below so the control plane stays easier to scan.</p>
-                </div>
-              </div>
-
-            <div className="form-group deploy-form-span-full">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <label className="form-label">Runtime Settings</label>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowAdvancedRuntime((current) => !current)}>
-                  {showAdvancedRuntime ? 'Hide Advanced Runtime' : 'Show Advanced Runtime'}
-                </button>
-              </div>
-              <span className="deploy-field-hint">Runtime settings are operational only: poll cadence, maximum loop count, dry-run mode, and model selection.</span>
+              </section>
             </div>
 
-            {showAdvancedRuntime ? (
-              <div className="deploy-form-span-full" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="runtime-poll">Poll Interval (ms)</label>
-                  <input id="runtime-poll" className="form-input font-mono" value={runtimeForm.pollIntervalMs} onChange={(event) => setRuntimeForm((current) => ({ ...current, pollIntervalMs: event.target.value }))} />
+            {/* Step 3: Runtime Controls + Launch */}
+            <div className="deploy-form-span-full" style={{ display: activeStep === 3 ? 'block' : 'none' }}>
+              <section className="deploy-guide-section" style={{ borderTop: 'none', marginTop: 0, paddingTop: 0 }}>
+                <div className="deploy-guide-section-header">
+                  <span className="deploy-guide-step">03</span>
+                  <div>
+                    <h3 className="deploy-guide-heading">Runtime Settings</h3>
+                    <p className="deploy-guide-copy">Configure poll cadence, loop count, dry-run mode, and model selection before launching.</p>
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="runtime-max-ticks">Max Ticks</label>
-                  <input id="runtime-max-ticks" className="form-input font-mono" value={runtimeForm.maxTicks} onChange={(event) => setRuntimeForm((current) => ({ ...current, maxTicks: event.target.value }))} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor="runtime-model">Groq Model</label>
-                  <input id="runtime-model" className="form-input font-mono" value={runtimeForm.groqModel} onChange={(event) => setRuntimeForm((current) => ({ ...current, groqModel: event.target.value }))} />
-                </div>
-                <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
-                  <input type="checkbox" checked={runtimeForm.dryRun} onChange={(event) => setRuntimeForm((current) => ({ ...current, dryRun: event.target.checked }))} />
-                  <span>Dry Run</span>
-                </label>
-              </div>
-            ) : null}
 
-            {runtimeValidationError ? (
-              <div className="status-badge error deploy-form-span-full" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)' }}>
-                <AlertCircleIcon size={14} /> {runtimeValidationError}
-              </div>
-            ) : null}
+                {/* Selected agent & mandate summary */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 'var(--spacing-md)', marginBottom: 'var(--spacing-md)' }}>
+                  <div className="deploy-context-note" style={{ margin: 0, padding: 'var(--spacing-sm) var(--spacing-md)', background: 'rgba(94, 210, 156, 0.05)', border: '1px solid rgba(94, 210, 156, 0.15)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
+                      Agent: <strong style={{ color: 'var(--color-accent)' }}>{selectedAgent?.label ?? (selectedAgent ? truncateMiddle(selectedAgent.agentDid, 10) : '')}</strong>
+                    </span>
+                    <button type="button" className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '0.65rem', height: 'auto', minHeight: 'unset' }} onClick={() => setActiveStep(1)}>Edit</button>
+                  </div>
+                  <div className="deploy-context-note" style={{ margin: 0, padding: 'var(--spacing-sm) var(--spacing-md)', background: 'rgba(94, 210, 156, 0.05)', border: '1px solid rgba(94, 210, 156, 0.15)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
+                      Mandate: <strong style={{ color: 'var(--color-accent)' }}>{selectedMandate ? `${selectedMandate.side.toUpperCase()} ${selectedMandate.assetCode}` : 'None'}</strong>
+                    </span>
+                    <button type="button" className="btn btn-secondary" style={{ padding: '2px 6px', fontSize: '0.65rem', height: 'auto', minHeight: 'unset' }} onClick={() => setActiveStep(2)}>Edit</button>
+                  </div>
+                </div>
 
-            <div className="deploy-wizard-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => { setIsLoading(true); loadState().finally(() => setIsLoading(false)); }} disabled={isLoading || isSubmitting}>
-                <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} /> Synchronize
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleLaunch}
-                disabled={!canLaunch || isSubmitting}
-                title={
-                  !selectedMandateId
-                    ? 'Create or attach a negotiation mandate first.'
-                    : runtimeValidationMessage ?? undefined
-                }
-              >
-                {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RocketIcon size={14} />} Launch Hosted Negotiator
-              </button>
+                <div className="deploy-form-span-full" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="runtime-poll">Poll Interval (ms)</label>
+                    <input id="runtime-poll" className="form-input font-mono" value={runtimeForm.pollIntervalMs} onChange={(event) => setRuntimeForm((current) => ({ ...current, pollIntervalMs: event.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="runtime-max-ticks">Max Ticks</label>
+                    <input id="runtime-max-ticks" className="form-input font-mono" value={runtimeForm.maxTicks} onChange={(event) => setRuntimeForm((current) => ({ ...current, maxTicks: event.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="runtime-model">Groq Model</label>
+                    <input id="runtime-model" className="form-input font-mono" value={runtimeForm.groqModel} onChange={(event) => setRuntimeForm((current) => ({ ...current, groqModel: event.target.value }))} />
+                  </div>
+                  <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 'var(--spacing-sm) 0 0' }}>
+                    <input type="checkbox" checked={runtimeForm.dryRun} onChange={(event) => setRuntimeForm((current) => ({ ...current, dryRun: event.target.checked }))} />
+                    <span>Dry Run</span>
+                  </label>
+                </div>
+
+                {runtimeValidationMessage ? (
+                  <div className="status-badge error deploy-form-span-full" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)', marginTop: 'var(--spacing-sm)' }}>
+                    <AlertCircleIcon size={14} /> {runtimeValidationMessage}
+                  </div>
+                ) : null}
+
+                <div className="deploy-wizard-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)', marginTop: 'var(--spacing-lg)' }}>
+                  <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                    <button type="button" className="btn btn-secondary" onClick={() => setActiveStep(2)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      &larr; Back
+                    </button>
+                    <button type="button" className="btn btn-secondary" onClick={() => { setIsLoading(true); loadState().finally(() => setIsLoading(false)); }} disabled={isLoading || isSubmitting}>
+                      <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} /> Synchronize
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleLaunch}
+                    disabled={!canLaunch || isSubmitting}
+                    title={!selectedMandateId ? 'Create or attach a negotiation mandate first.' : runtimeValidationMessage ?? undefined}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RocketIcon size={14} />} Launch Hosted Negotiator
+                  </button>
+                </div>
+              </section>
             </div>
-            </section>
           </div>
         </section>
 
+        {/* Fleet State */}
         <section className="card">
           <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
-            <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Fleet & Migration State
+            <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Fleet & Runtime State
           </h2>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: 'var(--spacing-md)' }}>
-            <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.75rem', maxWidth: '60ch' }}>
-              Runtime inventory is secondary during launch. Expand this when you need to inspect legacy migration state or jump between existing hosted negotiators.
-            </p>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowOperationsPanel((current) => !current)}>
-              {showOperationsPanel ? 'Hide Fleet State' : 'Show Fleet State'}
-            </button>
-          </div>
-          {!showOperationsPanel ? (
-            <div className="deploy-context-note" style={{ color: 'var(--color-text-secondary)' }}>
-              {runningCount > 0
-                ? `${runningCount} hosted runtime${runningCount === 1 ? '' : 's'} currently tracked.`
-                : 'No hosted runtimes attached yet.'}
+          <p style={{ margin: '0 0 var(--spacing-md) 0', color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
+            {runningCount > 0
+              ? `${runningCount} hosted runtime${runningCount === 1 ? '' : 's'} currently tracked.`
+              : 'No hosted runtimes attached yet.'}
+          </p>
+          {isLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-secondary)' }}>
+              <Loading03Icon size={16} style={{ animation: 'spin 1s linear infinite' }} /> Loading hosted negotiators…
             </div>
-          ) : null}
-          {showOperationsPanel ? (
-            isLoading ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-secondary)' }}>
-                <Loading03Icon size={16} style={{ animation: 'spin 1s linear infinite' }} /> Loading hosted negotiators…
-              </div>
-            ) : hostedAgents.length === 0 ? (
-              <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
-                {hasAdmittedAgents
-                  ? 'Admitted agents are available. Bind a mandate above to attach the first hosted negotiator runtime.'
-                  : 'No hosted negotiators configured yet because no agent has been provisioned.'}
-              </p>
-            ) : (
-              <div className="deploy-agent-fleet">
-                {hostedAgents.map((record) => (
-                  <button
-                    key={record.agent.id}
-                    type="button"
-                    className={`deploy-agent-runtime ${record.agent.id === selectedAgentId ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedAgentId(record.agent.id);
-                      setShowMandateEditor(false);
-                      setMandateValidationError(null);
-                      setError(null);
-                    }}
-                  >
-                    <div className="deploy-agent-runtime-main">
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>
-                          {record.agent.label ?? truncateMiddle(record.agent.agentDid, 10)}
-                        </span>
-                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>
-                          {record.mandate ? `${record.mandate.side.toUpperCase()} • ${record.mandate.assetCode} • ${record.mandate.targetQuantity}` : 'No active mandate'}
-                        </span>
-                      </div>
-                      <span className={`status-badge ${record.migrationState === 'ready' ? 'secure' : 'error'}`} style={{ display: 'inline-flex', fontSize: '0.62rem', padding: '2px 8px', borderRadius: '4px' }}>
-                        {record.migrationState === 'ready' ? 'READY' : 'NEEDS MIGRATION'}
+          ) : hostedAgents.length === 0 ? (
+            <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+              {hasAdmittedAgents
+                ? 'Admitted agents are available. Bind a mandate and launch from the controls above.'
+                : 'No hosted negotiators configured yet.'}
+            </p>
+          ) : (
+            <div className="deploy-agent-fleet">
+              {hostedAgents.map((record) => (
+                <button
+                  key={record.agent.id}
+                  type="button"
+                  className={`deploy-agent-runtime ${record.agent.id === selectedAgentId ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedAgentId(record.agent.id);
+                    setShowMandateEditor(false);
+                    setMandateValidationError(null);
+                    setError(null);
+                  }}
+                >
+                  <div className="deploy-agent-runtime-main">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>
+                        {record.agent.label ?? truncateMiddle(record.agent.agentDid, 10)}
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>
+                        {record.mandate ? `${record.mandate.side.toUpperCase()} • ${record.mandate.assetCode} • ${record.mandate.targetQuantity}` : 'No active mandate'}
                       </span>
                     </div>
-                    <div className="deploy-agent-runtime-meta">
-                      <span title={record.agent.agentDid}>DID: {truncateMiddle(record.agent.agentDid, 9)}</span>
-                      <span>{record.runtime.running ? 'RUNNING' : 'STOPPED'} • {formatTimestamp(record.runtime.startedAt)}</span>
+                    <span className={`status-badge ${record.migrationState === 'ready' ? 'secure' : 'error'}`} style={{ display: 'inline-flex', fontSize: '0.62rem', padding: '2px 8px', borderRadius: '4px' }}>
+                      {record.migrationState === 'ready' ? 'READY' : 'NEEDS MIGRATION'}
+                    </span>
+                  </div>
+                  <div className="deploy-agent-runtime-meta">
+                    <span title={record.agent.agentDid}>DID: {truncateMiddle(record.agent.agentDid, 9)}</span>
+                    <span>{record.runtime.running ? 'RUNNING' : 'STOPPED'} • {formatTimestamp(record.runtime.startedAt)}</span>
+                  </div>
+                  {record.migrationState === 'needs_migration' ? (
+                    <div className="deploy-runtime-error" style={{ marginTop: '8px' }}>
+                      <AlertCircleIcon size={14} />
+                      <span>Legacy deploy config detected. Attach a negotiation mandate to relaunch.</span>
                     </div>
-                    {record.migrationState === 'needs_migration' ? (
-                      <div className="deploy-runtime-error" style={{ marginTop: '8px' }}>
-                        <AlertCircleIcon size={14} />
-                        <span>Legacy deploy config detected. Attach a negotiation mandate to relaunch.</span>
-                      </div>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            )
-          ) : null}
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
-        <section className="card">
-          <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
-            <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Pre-Flight Launch Readiness
-          </h2>
-          <div className="preflight-checklist">
-            {readiness.map((item) => (
-              <div key={item.label} className="preflight-cell">
-                <div className={`preflight-status-circle ${item.ready ? 'ready' : ''}`}>
-                  {item.ready ? <CheckmarkCircle01Icon size={12} /> : <AlertCircleIcon size={12} />}
-                </div>
-                <div className="preflight-info">
-                  <span className="preflight-label">{item.label}</span>
-                  <span className="preflight-desc">{item.detail}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
+        {/* Runtime Telemetry */}
         <section className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
           <h2 className="card-title" style={{ margin: 0 }}>
             <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Runtime Telemetry
           </h2>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-            <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.75rem', maxWidth: '60ch' }}>
-              Expand logs only when you need process detail. The launch controls above stay focused on agent, mandate, and runtime readiness.
-            </p>
-            <button type="button" className="btn btn-secondary" onClick={() => setShowTelemetryPanel((current) => !current)} disabled={!selectedHostedRecord}>
-              {showTelemetryPanel ? 'Hide Telemetry' : 'Show Telemetry'}
-            </button>
-          </div>
           {!selectedHostedRecord ? (
             <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
               {selectedAgentId && !selectedAgentHasHostedRuntime
-                ? 'Selected agent does not have a hosted runtime yet. Bind a mandate and launch from the control plane above.'
+                ? 'Selected agent does not have a hosted runtime yet. Bind a mandate and launch from the controls above.'
                 : hasHostedAgents
-                  ? 'Select a hosted negotiator to inspect runtime state.'
-                : hasAdmittedAgents
-                  ? 'No hosted runtime attached yet. Bind a mandate and launch from the control plane above.'
-                  : 'Provision an agent first, then this panel will stream hosted runtime telemetry.'}
+                  ? 'Select a hosted negotiator from the fleet list above to inspect runtime state.'
+                  : hasAdmittedAgents
+                    ? 'No hosted runtime attached yet. Bind a mandate and launch.'
+                    : 'Provision an agent first, then this panel will stream hosted runtime telemetry.'}
             </p>
-          ) : showTelemetryPanel ? (
+          ) : (
             <>
               <div className="process-dashboard">
                 <div className="process-cell">
@@ -1160,10 +1101,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 </div>
               ) : null}
             </>
-          ) : (
-            <div className="deploy-context-note" style={{ color: 'var(--color-text-secondary)' }}>
-              Hosted runtime selected. Expand telemetry to inspect logs, lifecycle, and process state.
-            </div>
           )}
         </section>
       </div>

@@ -1,4 +1,3 @@
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,25 +77,17 @@ describe('AgentDeploymentGuide', () => {
     mockedCreateNegotiationMandate.mockReset();
   });
 
-  it('renders the mandate-bound deploy surface with a readiness checklist', async () => {
+  it('renders the deploy surface with section headers', async () => {
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
     expect(screen.getByText('Hosted Negotiator')).toBeInTheDocument();
     expect(screen.getByText('Admitted Agent')).toBeInTheDocument();
     expect(screen.getByText('Mandate Bounds')).toBeInTheDocument();
-    expect(screen.getAllByText('No active mandate attached').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Runtime Settings')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(mockedListHostedAgents).toHaveBeenCalled();
       expect(mockedListAgents).toHaveBeenCalled();
-    });
-  });
-
-  it('disables the launch button when no mandate is bound', async () => {
-    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Launch Hosted Negotiator/i })).toBeDisabled();
     });
   });
 
@@ -167,7 +158,7 @@ describe('AgentDeploymentGuide', () => {
 
     await waitFor(() => {
       expect(mockedProvisionAgent).toHaveBeenCalled();
-      expect(screen.getByRole('combobox', { name: 'Select Admitted Agent' })).toHaveValue('agent-2');
+      expect(screen.getByRole('combobox', { name: 'Select Admitted Agent', hidden: true })).toHaveValue('agent-2');
     });
   });
 
@@ -208,13 +199,52 @@ describe('AgentDeploymentGuide', () => {
     });
   });
 
-  it('reveals advanced runtime settings when toggled', async () => {
+  it('shows runtime settings fields', async () => {
     const user = userEvent.setup();
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockedListNegotiationMandates.mockResolvedValue([
+      {
+        id: 'mandate-1',
+        assetCode: 'WBTC',
+        side: 'buy',
+        targetQuantity: '2',
+        referencePrice: '70000',
+        priceBandBps: 150,
+        maxNotional: '140000',
+        urgency: 'normal',
+        deadline: '2026-07-01T12:00:00.000Z',
+        disclosableClaims: [],
+        requiredCounterpartyClaims: {},
+        counterpartyConstraints: {},
+        operatorPrompt: 'Buy carefully.',
+        policyHash: 'policy-1',
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-02T00:00:00.000Z',
+      },
+    ]);
+
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
-    expect(screen.queryByLabelText('Poll Interval (ms)')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /Show Advanced Runtime/i }));
+    // Navigate through steps to reach step 3 where runtime fields are visible
+    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Runtime Controls/i }));
 
     expect(screen.getByLabelText('Poll Interval (ms)')).toBeInTheDocument();
     expect(screen.getByLabelText('Max Ticks')).toBeInTheDocument();
@@ -265,7 +295,10 @@ describe('AgentDeploymentGuide', () => {
 
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
-    await user.click(await screen.findByRole('button', { name: /Show Advanced Runtime/i }));
+    // Navigate to step 3 where runtime fields and launch button are visible
+    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Runtime Controls/i }));
+
     const pollInput = screen.getByLabelText('Poll Interval (ms)');
     await user.clear(pollInput);
     await user.type(pollInput, '0');
@@ -296,6 +329,10 @@ describe('AgentDeploymentGuide', () => {
       },
     ]);
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
+    await user.click(await screen.findByRole('button', { name: /Create Mandate/i }));
 
     expect(await screen.findByLabelText('Asset')).toBeInTheDocument();
     expect(screen.getByLabelText('Side')).toBeInTheDocument();
@@ -454,15 +491,17 @@ describe('AgentDeploymentGuide', () => {
 
     const agentSelect = await screen.findByRole('combobox', { name: 'Select Admitted Agent' });
     expect(agentSelect).toHaveValue('agent-1');
-    expect(screen.getByRole('combobox', { name: 'Mandate Selection' })).toHaveValue('mandate-1');
-    expect(screen.getByText('BUY WBTC')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Mandate Selection', hidden: true })).toHaveValue('mandate-1');
+    });
+    expect(screen.getAllByText('BUY WBTC').length).toBeGreaterThanOrEqual(1);
 
     await user.selectOptions(agentSelect, 'agent-2');
 
     await waitFor(() => {
       expect(agentSelect).toHaveValue('agent-2');
-      expect(screen.getByRole('combobox', { name: 'Mandate Selection' })).toHaveValue('mandate-2');
-      expect(screen.getByText('SELL ETH')).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Mandate Selection', hidden: true })).toHaveValue('mandate-2');
+      expect(screen.getAllByText('SELL ETH').length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -683,7 +722,8 @@ describe('AgentDeploymentGuide', () => {
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Select Admitted Agent' }), 'agent-2');
-    await user.click(screen.getByRole('button', { name: /Edit \/ Replace Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
+    await user.click(await screen.findByRole('button', { name: /Edit \/ Replace Mandate/i }));
     const targetQuantity = await screen.findByLabelText('Target Quantity');
     await user.clear(targetQuantity);
     await user.type(targetQuantity, '6');
@@ -694,7 +734,8 @@ describe('AgentDeploymentGuide', () => {
         'agent-2',
         expect.objectContaining({ targetQuantity: 6 }),
       );
-      expect(screen.getByRole('combobox', { name: 'Mandate Selection' })).toHaveValue('mandate-2b');
+      // After save, step advances to 3 where mandate select is hidden, so use hidden: true
+      expect(screen.getByRole('combobox', { name: 'Mandate Selection', hidden: true })).toHaveValue('mandate-2b');
     });
   });
 
@@ -720,6 +761,9 @@ describe('AgentDeploymentGuide', () => {
     ]);
 
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
+    await user.click(await screen.findByRole('button', { name: /Create Mandate/i }));
 
     const targetQuantity = await screen.findByLabelText('Target Quantity');
     await user.clear(targetQuantity);

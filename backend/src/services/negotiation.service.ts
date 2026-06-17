@@ -21,9 +21,6 @@ export interface NegotiationManagementService {
     institutionId: string;
     agentId: string;
     mandate: NegotiationMandateInput;
-    approverEmail?: string;
-    purpose?: string;
-    validityMonths?: number;
   }): Promise<{
     mandate: NegotiationMandate;
     authorityRef: string;
@@ -94,9 +91,6 @@ export class NegotiationService implements NegotiationManagementService {
     institutionId: string;
     agentId: string;
     mandate: NegotiationMandateInput;
-    approverEmail?: string;
-    purpose?: string;
-    validityMonths?: number;
   }): Promise<{
     mandate: NegotiationMandate;
     authorityRef: string;
@@ -112,10 +106,7 @@ export class NegotiationService implements NegotiationManagementService {
       institutionId: agent.institutionId,
       maxSpendUsd: 1,
       allowedCategories: ["services"] as ("office-supplies" | "software" | "hardware" | "services" | "travel")[],
-      ...(input.approverEmail ? { approverEmail: input.approverEmail } : {}),
-      ...(input.purpose ? { purpose: input.purpose } : {}),
       mandate: input.mandate,
-      ...(input.validityMonths ? { validityMonths: input.validityMonths } : {}),
     };
 
     const { credential, policyHash } = await this.tenantSigner.mint(policy);

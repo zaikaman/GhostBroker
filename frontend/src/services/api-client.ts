@@ -365,7 +365,7 @@ export interface CreateNegotiationMandateRequest {
   priceBandBps: number;
   deadline: string;
   urgency: 'low' | 'normal' | 'high' | 'critical';
-  maxNotional: number;
+  maxNotional: string;
   disclosableClaims: string[];
   requiredCounterpartyClaims: Record<string, unknown>;
   counterpartyConstraints: Record<string, unknown>;

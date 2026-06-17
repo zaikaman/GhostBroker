@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { assertInstitutionScope, requireOperatorAuth } from "../auth/operator-auth.js";
 import { PublicError } from "../errors/public-error.js";
 import { revokeAgentParamsSchema } from "../models/agent.js";
@@ -11,6 +12,9 @@ import {
 import type { NegotiationManagementService } from "../services/negotiation.service.js";
 
 const negotiationIdParamsSchema = revokeAgentParamsSchema;
+const agentMandateQuerySchema = z.object({
+  mandateId: z.string().uuid().optional(),
+});
 
 export function createNegotiationsRouter(
   negotiationService: NegotiationManagementService,
@@ -147,12 +151,21 @@ export function mountAgentMandateRoute(input: {
       if (!params.success) {
         throw new PublicError("validation_failed", 400, params.error);
       }
+      const query = agentMandateQuerySchema.safeParse(request.query);
+      if (!query.success) {
+        throw new PublicError("validation_failed", 400, query.error);
+      }
 
       assertInstitutionScope(operatorAuth, operatorAuth.institutionId);
-      const mandate = await input.negotiationService.getMandateByAgent(
-        operatorAuth.institutionId,
-        params.data.id,
-      );
+      const mandate = query.data.mandateId
+        ? await input.negotiationService.getMandate(
+            operatorAuth.institutionId,
+            query.data.mandateId,
+          )
+        : await input.negotiationService.getMandateByAgent(
+            operatorAuth.institutionId,
+            params.data.id,
+          );
       if (!mandate) {
         throw new PublicError("not_found", 404);
       }
@@ -199,13 +212,6 @@ export function mountAgentMandateRoute(input: {
         institutionId: operatorAuth.institutionId,
         agentId: params.data.id,
         mandate: body.data.mandate,
-        ...(body.data.approverEmail
-          ? { approverEmail: body.data.approverEmail }
-          : {}),
-        ...(body.data.purpose ? { purpose: body.data.purpose } : {}),
-        ...(body.data.validityMonths
-          ? { validityMonths: body.data.validityMonths }
-          : {}),
       });
 
       response.status(200).json(result);

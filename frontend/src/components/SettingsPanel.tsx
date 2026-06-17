@@ -64,10 +64,6 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   const [isSavingPolicy, setIsSavingPolicy] = useState(false);
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [maxSpendUsd, setMaxSpendUsd] = useState<number>(50000);
-  const [allowedCategories, setAllowedCategories] = useState<string[]>(['software', 'services']);
-  const [approverEmail, setApproverEmail] = useState<string>('compliance@institution.com');
-  const [purpose, setPurpose] = useState<string>('Autonomous market making and dark pool liquidity provisioning');
-  const [validityMonths, setValidityMonths] = useState<number>(12);
 
   // Pagination State for Mandates
   const [currentPage, setCurrentPage] = useState(1);
@@ -138,16 +134,8 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     
     if (authorityLimits) {
       setMaxSpendUsd((authorityLimits.maxSpendUsd as number) || 50000);
-      setAllowedCategories((authorityLimits.allowedCategories as string[]) || ['software', 'services']);
-      setApproverEmail((authorityLimits.approverEmail as string) || 'compliance@institution.com');
-      setPurpose((authorityLimits.purpose as string) || 'Autonomous market making');
-      setValidityMonths((authorityLimits.validityMonths as number) || 12);
     } else {
       setMaxSpendUsd(50000);
-      setAllowedCategories(['software', 'services']);
-      setApproverEmail('compliance@institution.com');
-      setPurpose('Autonomous market making and dark pool liquidity provisioning');
-      setValidityMonths(12);
     }
   };
 
@@ -159,15 +147,9 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
       const policy: {
         maxSpendUsd: number;
         allowedCategories: string[];
-        approverEmail?: string;
-        purpose?: string;
-        validityMonths?: number;
       } = {
         maxSpendUsd,
-        allowedCategories,
-        validityMonths,
-        ...(approverEmail.trim() ? { approverEmail: approverEmail.trim() } : {}),
-        ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
+        allowedCategories: ['services'],
       };
       await apiClient.mintDelegation(editingAgent.id, policy);
       setEditingAgent(null);
@@ -199,11 +181,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   };
 
 
-  const handleCategoryToggle = (category: string) => {
-    setAllowedCategories((prev) =>
-      prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category]
-    );
-  };
+
 
   const totalPages = Math.ceil(agents.length / itemsPerPage);
   const activePage = Math.min(currentPage, Math.max(1, totalPages));
@@ -304,7 +282,6 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                         <th style={{ padding: '10px var(--spacing-sm)' }}>Agent Label</th>
                         <th style={{ padding: '10px var(--spacing-sm)' }}>DID / Authority Ref</th>
                         <th style={{ padding: '10px var(--spacing-sm)' }}>Max Spend Limit</th>
-                        <th style={{ padding: '10px var(--spacing-sm)' }}>Allowed Categories</th>
                         <th style={{ padding: '10px var(--spacing-sm)', textAlign: 'center' }}>Status</th>
                         <th style={{ padding: '10px var(--spacing-sm)', textAlign: 'right' }}>Actions</th>
                       </tr>
@@ -320,9 +297,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                           ? `$${(authorityLimits.maxSpendUsd as number).toLocaleString()}` 
                           : (agent.maxNotional ? `$${parseInt(agent.maxNotional).toLocaleString()}` : 'No Limit');
                           
-                        const categories = authorityLimits?.allowedCategories 
-                          ? (authorityLimits.allowedCategories as string[]).join(', ') 
-                          : (agent.instrumentScope ? agent.instrumentScope.join(', ') : 'All');
+
 
                         const isActive = agent.status === 'admitted';
 
@@ -338,11 +313,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                             <td style={{ padding: '12px var(--spacing-sm)', fontFamily: 'var(--font-mono)' }}>
                               {spendLimit}
                             </td>
-                            <td style={{ padding: '12px var(--spacing-sm)', color: 'var(--color-text-secondary)' }}>
-                              <span style={{ fontSize: '0.7rem', background: 'rgba(255, 255, 255, 0.03)', padding: '2px 6px', borderRadius: '4px' }}>
-                                {categories}
-                              </span>
-                            </td>
+
                             <td style={{ padding: '12px var(--spacing-sm)', textAlign: 'center' }}>
                               <span className={`status-badge ${isActive ? 'secure' : 'error'}`} style={{ display: 'inline-flex', fontSize: '0.65rem' }}>
                                 {isActive ? 'ACTIVE' : 'SUSPENDED'}
@@ -679,54 +650,9 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Allowed Expense/Trade Categories</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', padding: '8px', background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
-                  {['office-supplies', 'software', 'hardware', 'services', 'travel'].map((cat) => (
-                    <label key={cat} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={allowedCategories.includes(cat)}
-                        onChange={() => handleCategoryToggle(cat)}
-                      />
-                      <span>{cat}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
 
-              <div className="form-group">
-                <label className="form-label">Compliance Approver Email</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  value={approverEmail}
-                  onChange={(e) => setApproverEmail(e.target.value)}
-                />
-              </div>
 
-              <div className="form-group">
-                <label className="form-label">Mandate Purpose</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  maxLength={500}
-                  value={purpose}
-                  onChange={(e) => setPurpose(e.target.value)}
-                />
-              </div>
 
-              <div className="form-group">
-                <label className="form-label">Validity Period (Months)</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  min="1"
-                  max="120"
-                  value={validityMonths}
-                  onChange={(e) => setValidityMonths(parseInt(e.target.value) || 12)}
-                />
-              </div>
 
             </div>
 
@@ -744,7 +670,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                 className="btn btn-primary"
                 style={{ fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                 onClick={handleSavePolicy}
-                disabled={isSavingPolicy || allowedCategories.length === 0}
+                disabled={isSavingPolicy}
               >
                 {isSavingPolicy ? (
                   <Loading03Icon size={12} style={{ animation: 'spin 1s linear infinite' }} />

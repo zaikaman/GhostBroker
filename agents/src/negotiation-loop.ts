@@ -71,7 +71,13 @@ async function fetchHostedMandate(
   env: AgentEnv,
   mandateId: string,
 ): Promise<RuntimeMandate> {
-  const response = await fetch(`${env.GHOSTBROKER_URL}/api/agents/${env.HOSTED_AGENT_ID}/mandate`, {
+  const mandateUrl = new URL(
+    `/api/agents/${env.HOSTED_AGENT_ID}/mandate`,
+    env.GHOSTBROKER_URL,
+  );
+  mandateUrl.searchParams.set("mandateId", mandateId);
+
+  const response = await fetch(mandateUrl, {
     method: "GET",
     headers: {
       Accept: "application/json",

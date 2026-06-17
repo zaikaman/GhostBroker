@@ -64,9 +64,6 @@ export type NegotiationMandateInput = z.infer<typeof negotiationMandateSchema>;
 
 export const createNegotiationMandateRequestSchema = z.object({
   mandate: negotiationMandateSchema,
-  validityMonths: z.number().int().positive().max(120).optional(),
-  approverEmail: z.string().email().optional(),
-  purpose: z.string().trim().min(1).max(500).optional(),
 });
 
 export const createNegotiationTicketSchema = z.object({
