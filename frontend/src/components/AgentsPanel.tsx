@@ -13,12 +13,32 @@ import {
 import { Pagination } from './Pagination';
 import { useRouter } from '../app/use-router';
 
-function agentLifecycleStatus(agent: Agent): 'configured' | 'admitted' | 'revoked' {
+function agentLifecycleStatus(agent: Agent): 'admitted' | 'revoked' {
   if (agent.status === 'revoked') {
     return 'revoked';
   }
+  return 'admitted';
+}
+
+function agentCapabilityBadges(agent: Agent): string[] {
   const metadata = agent.metadata as Record<string, unknown> | undefined;
-  return metadata?.delegation_credential ? 'admitted' : 'configured';
+  const badges: string[] = [];
+
+  if (metadata?.delegation_credential) {
+    badges.push('delegated');
+  }
+  if (
+    metadata?.hosted_runtime ||
+    metadata?.hostedRuntime ||
+    metadata?.hosted_agent_id ||
+    metadata?.hostedAgentId ||
+    metadata?.hostedAgent ||
+    metadata?.hostedNegotiator
+  ) {
+    badges.push('hosted');
+  }
+
+  return badges;
 }
 
 export function AgentsPanel(): React.JSX.Element {
@@ -290,11 +310,20 @@ export function AgentsPanel(): React.JSX.Element {
                   {agent.agentDid.length > 24 ? `${agent.agentDid.slice(0, 22)}...` : agent.agentDid}
                 </code>
 
-                <div>
-                    <span className={`status-badge ${agentLifecycleStatus(agent) === 'revoked' ? 'error' : 'secure'}`} style={{ fontSize: '0.6rem', padding: '2px 8px' }}>
-                      {agentLifecycleStatus(agent).toUpperCase()}
-                    </span>
-                  </div>
+                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                   <span className={`status-badge ${agentLifecycleStatus(agent) === 'revoked' ? 'error' : 'secure'}`} style={{ fontSize: '0.6rem', padding: '2px 8px' }}>
+                     {agentLifecycleStatus(agent).toUpperCase()}
+                   </span>
+                   {agentCapabilityBadges(agent).map((badge) => (
+                     <span
+                       key={badge}
+                       className="status-badge processing"
+                       style={{ fontSize: '0.56rem', padding: '2px 8px' }}
+                     >
+                       {badge.toUpperCase()}
+                     </span>
+                   ))}
+                 </div>
 
                 <span style={{ color: 'var(--color-text-muted)', fontSize: '0.65rem' }}>
                   {formatDate(agent.createdAt)}

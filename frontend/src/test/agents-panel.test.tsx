@@ -44,7 +44,7 @@ describe('AgentsPanel', () => {
     expect(navigateMock).toHaveBeenCalledWith('/deploy');
   });
 
-  it('shows configured lifecycle status when delegation metadata is missing', async () => {
+  it('shows admitted lifecycle status even when delegation metadata is missing', async () => {
     mockedListAgents.mockResolvedValue([
       {
         id: 'agent-1',
@@ -67,7 +67,64 @@ describe('AgentsPanel', () => {
     render(<AgentsPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText('CONFIGURED')).toBeInTheDocument();
+      expect(screen.getByText('ADMITTED')).toBeInTheDocument();
+    });
+  });
+
+  it('adds a delegated badge when delegation metadata is present', async () => {
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Delegated Agent',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: { delegation_credential: { id: 'vc-1' } },
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    render(<AgentsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText('DELEGATED')).toBeInTheDocument();
+    });
+  });
+
+  it('adds a hosted badge when hosted negotiator metadata is present', async () => {
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Hosted Agent',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {
+          hostedAgent: { mandateId: 'mandate-1', pollIntervalMs: 15000, maxTicks: 40, dryRun: false },
+          hostedNegotiator: { migrationState: 'ready' },
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    render(<AgentsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText('HOSTED')).toBeInTheDocument();
     });
   });
 });

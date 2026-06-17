@@ -1,9 +1,18 @@
+import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
+import { NegotiationMandateWrapper } from '../app/App';
 import { apiClient } from '../services/api-client';
+import { AGENTS_UPDATED_EVENT } from '../services/agent-events';
 import type * as ApiClientModule from '../services/api-client';
+
+const navigateMock = vi.fn();
+
+vi.mock('../app/use-router', () => ({
+  useRouter: () => ({ currentPath: '/dashboard', navigate: navigateMock }),
+}));
 
 vi.mock('../services/api-client', async () => {
   const actual = await vi.importActual<typeof ApiClientModule>('../services/api-client');
@@ -31,11 +40,16 @@ vi.mock('../services/api-client', async () => {
   };
 });
 
+vi.mock('../components/MandateConfigForm', () => ({
+  MandateConfigForm: ({ agentId }: { agentId: string }) => <div data-testid="mandate-form-agent">Mandate form for {agentId}</div>,
+}));
+
 const mockedListHostedAgents = vi.mocked(apiClient.listHostedAgents);
 const mockedListAgents = vi.mocked(apiClient.listAgents);
 const mockedGetInstitution = vi.mocked(apiClient.getInstitution);
 const mockedProvisionAgent = vi.mocked(apiClient.provisionAgent);
 const mockedListNegotiationMandates = vi.mocked(apiClient.listNegotiationMandates);
+const mockedCreateNegotiationMandate = vi.mocked(apiClient.createNegotiationMandate);
 
 const session = {
   token: 'session-token',
@@ -49,6 +63,7 @@ const session = {
 
 describe('AgentDeploymentGuide', () => {
   beforeEach(() => {
+    navigateMock.mockReset();
     mockedListHostedAgents.mockResolvedValue([]);
     mockedListAgents.mockResolvedValue([]);
     mockedGetInstitution.mockResolvedValue({
@@ -60,14 +75,15 @@ describe('AgentDeploymentGuide', () => {
       settlementProfileRef: 'noop',
     });
     mockedListNegotiationMandates.mockResolvedValue([]);
+    mockedCreateNegotiationMandate.mockReset();
   });
 
   it('renders the mandate-bound deploy surface with a readiness checklist', async () => {
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
     expect(screen.getByText('Hosted Negotiator')).toBeInTheDocument();
-    expect(screen.getByText('1. Select Admitted Agent')).toBeInTheDocument();
-    expect(screen.getByText('2. Bound Negotiation Mandate')).toBeInTheDocument();
+    expect(screen.getByText('Admitted Agent')).toBeInTheDocument();
+    expect(screen.getByText('Mandate Bounds')).toBeInTheDocument();
     expect(screen.getAllByText('No active mandate attached').length).toBeGreaterThanOrEqual(1);
 
     await waitFor(() => {
@@ -151,7 +167,7 @@ describe('AgentDeploymentGuide', () => {
 
     await waitFor(() => {
       expect(mockedProvisionAgent).toHaveBeenCalled();
-      expect(screen.getByRole('combobox', { name: '1. Select Admitted Agent' })).toHaveValue('agent-2');
+      expect(screen.getByRole('combobox', { name: 'Select Admitted Agent' })).toHaveValue('agent-2');
     });
   });
 
@@ -204,6 +220,60 @@ describe('AgentDeploymentGuide', () => {
     expect(screen.getByLabelText('Max Ticks')).toBeInTheDocument();
     expect(screen.getByLabelText('Groq Model')).toBeInTheDocument();
     expect(screen.getByText('Dry Run')).toBeInTheDocument();
+  });
+
+  it('disables launch when runtime fields are not valid positive integers', async () => {
+    const user = userEvent.setup();
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockedListNegotiationMandates.mockResolvedValue([
+      {
+        id: 'mandate-1',
+        assetCode: 'WBTC',
+        side: 'buy',
+        targetQuantity: '2',
+        referencePrice: '70000',
+        priceBandBps: 150,
+        maxNotional: '140000',
+        urgency: 'normal',
+        deadline: '2026-07-01T12:00:00.000Z',
+        disclosableClaims: [],
+        requiredCounterpartyClaims: {},
+        counterpartyConstraints: {},
+        operatorPrompt: 'Buy carefully.',
+        policyHash: 'policy-1',
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-02T00:00:00.000Z',
+      },
+    ]);
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: /Show Advanced Runtime/i }));
+    const pollInput = screen.getByLabelText('Poll Interval (ms)');
+    await user.clear(pollInput);
+    await user.type(pollInput, '0');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Launch Hosted Negotiator/i })).toBeDisabled();
+      expect(screen.getAllByText('Poll interval must be a positive integer.').length).toBeGreaterThan(0);
+    });
   });
 
   it('opens the mandate editor when Create Mandate is clicked', async () => {
@@ -296,6 +366,417 @@ describe('AgentDeploymentGuide', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Asset')).toBeInTheDocument();
       expect(screen.getAllByText('No active mandate attached').length).toBeGreaterThan(0);
+    });
+  });
+
+  it('keeps mandate selection scoped when switching between admitted agents', async () => {
+    const user = userEvent.setup();
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: { delegation_credential: { id: 'vc-1' } },
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'agent-2',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-2',
+        status: 'admitted',
+        authorityRef: 'authority-2',
+        label: 'Agent Two',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-2',
+        metadata: {},
+        createdAt: '2026-01-02T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    mockedListNegotiationMandates.mockImplementation(async (agentId: string) => {
+      if (agentId === 'agent-1') {
+        return [
+          {
+            id: 'mandate-1',
+            assetCode: 'WBTC',
+            side: 'buy',
+            targetQuantity: '2',
+            referencePrice: '70000',
+            priceBandBps: 150,
+            maxNotional: '140000',
+            urgency: 'normal',
+            deadline: '2026-07-01T12:00:00.000Z',
+            disclosableClaims: ['accredited_institution'],
+            requiredCounterpartyClaims: { jurisdiction: 'US' },
+            counterpartyConstraints: {},
+            operatorPrompt: 'Buy carefully.',
+            policyHash: 'policy-1',
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-02T00:00:00.000Z',
+          },
+        ];
+      }
+      return [
+        {
+          id: 'mandate-2',
+          assetCode: 'ETH',
+          side: 'sell',
+          targetQuantity: '5',
+          referencePrice: '3500',
+          priceBandBps: 120,
+          maxNotional: '17500',
+          urgency: 'high',
+          deadline: '2026-07-02T12:00:00.000Z',
+          disclosableClaims: ['settlement_capacity'],
+          requiredCounterpartyClaims: { jurisdiction: 'GB' },
+          counterpartyConstraints: { minimumFillPercent: 50 },
+          operatorPrompt: 'Sell into qualified liquidity.',
+          policyHash: 'policy-2',
+          createdAt: '2026-06-03T00:00:00.000Z',
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        },
+      ];
+    });
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    const agentSelect = await screen.findByRole('combobox', { name: 'Select Admitted Agent' });
+    expect(agentSelect).toHaveValue('agent-1');
+    expect(screen.getByRole('combobox', { name: 'Mandate Selection' })).toHaveValue('mandate-1');
+    expect(screen.getByText('BUY WBTC')).toBeInTheDocument();
+
+    await user.selectOptions(agentSelect, 'agent-2');
+
+    await waitFor(() => {
+      expect(agentSelect).toHaveValue('agent-2');
+      expect(screen.getByRole('combobox', { name: 'Mandate Selection' })).toHaveValue('mandate-2');
+      expect(screen.getByText('SELL ETH')).toBeInTheDocument();
+    });
+  });
+
+  it('keeps the selected hosted record aligned when switching agents', async () => {
+    const user = userEvent.setup();
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'agent-2',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-2',
+        status: 'admitted',
+        authorityRef: 'authority-2',
+        label: 'Agent Two',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-2',
+        metadata: {},
+        createdAt: '2026-01-02T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    mockedListHostedAgents.mockResolvedValue([
+      {
+        agent: {
+          id: 'agent-2',
+          institutionId: 'institution-1',
+          agentDid: 'did:t3:agent-2',
+          status: 'admitted',
+          authorityRef: 'authority-2',
+          label: 'Agent Two',
+          instrumentScope: null,
+          directionScope: null,
+          maxNotional: null,
+          limitReference: null,
+          policyHash: 'policy-2',
+          metadata: {},
+          createdAt: '2026-01-02T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+        },
+        config: {
+          mandateId: 'mandate-2',
+          pollIntervalMs: 15000,
+          maxTicks: 40,
+          dryRun: false,
+          groqModel: 'qwen/qwen3-32b',
+        },
+        runtime: {
+          running: true,
+          pid: 123,
+          logTail: 'runtime online',
+          startedAt: '2026-06-12T00:00:00.000Z',
+        },
+        mandate: {
+          id: 'mandate-2',
+          assetCode: 'ETH',
+          side: 'sell',
+          targetQuantity: '5',
+          referencePrice: '3500',
+          priceBandBps: 120,
+          maxNotional: '17500',
+          urgency: 'high',
+          deadline: '2026-07-02T12:00:00.000Z',
+          disclosableClaims: [],
+          requiredCounterpartyClaims: {},
+          counterpartyConstraints: {},
+          operatorPrompt: 'Sell into qualified liquidity.',
+          policyHash: 'policy-2',
+          createdAt: '2026-06-03T00:00:00.000Z',
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        },
+        migrationState: 'ready',
+      },
+    ]);
+    mockedListNegotiationMandates.mockImplementation(async (agentId: string) => {
+      return agentId === 'agent-1'
+        ? []
+        : [
+            {
+              id: 'mandate-2',
+              assetCode: 'ETH',
+              side: 'sell',
+              targetQuantity: '5',
+              referencePrice: '3500',
+              priceBandBps: 120,
+              maxNotional: '17500',
+              urgency: 'high',
+              deadline: '2026-07-02T12:00:00.000Z',
+              disclosableClaims: [],
+              requiredCounterpartyClaims: {},
+              counterpartyConstraints: {},
+              operatorPrompt: 'Sell into qualified liquidity.',
+              policyHash: 'policy-2',
+              createdAt: '2026-06-03T00:00:00.000Z',
+              updatedAt: '2026-06-04T00:00:00.000Z',
+            },
+          ];
+    });
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('runtime online')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Select Admitted Agent' }), 'agent-1');
+
+    await waitFor(() => {
+      expect(screen.getByText(/Selected agent does not have a hosted runtime yet/i)).toBeInTheDocument();
+    });
+  });
+
+  it('reloads mandates for the current non-first agent after saving a replacement', async () => {
+    const user = userEvent.setup();
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'agent-2',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-2',
+        status: 'admitted',
+        authorityRef: 'authority-2',
+        label: 'Agent Two',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-2',
+        metadata: {},
+        createdAt: '2026-01-02T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+    mockedCreateNegotiationMandate.mockResolvedValue({
+      mandate: { id: 'mandate-2b' },
+      authorityRef: 'authority-2',
+      policyHash: 'policy-2b',
+    });
+    let callCount = 0;
+    mockedListNegotiationMandates.mockImplementation(async (agentId: string) => {
+      if (agentId === 'agent-1') {
+        return [];
+      }
+      callCount += 1;
+      if (callCount < 2) {
+        return [
+          {
+            id: 'mandate-2a',
+            assetCode: 'ETH',
+            side: 'sell',
+            targetQuantity: '5',
+            referencePrice: '3500',
+            priceBandBps: 120,
+            maxNotional: '17500',
+            urgency: 'high',
+            deadline: '2026-07-02T12:00:00.000Z',
+            disclosableClaims: [],
+            requiredCounterpartyClaims: {},
+            counterpartyConstraints: {},
+            operatorPrompt: 'Sell into qualified liquidity.',
+            policyHash: 'policy-2a',
+            createdAt: '2026-06-03T00:00:00.000Z',
+            updatedAt: '2026-06-04T00:00:00.000Z',
+          },
+        ];
+      }
+      return [
+        {
+          id: 'mandate-2b',
+          assetCode: 'ETH',
+          side: 'sell',
+          targetQuantity: '6',
+          referencePrice: '3550',
+          priceBandBps: 120,
+          maxNotional: '21300',
+          urgency: 'high',
+          deadline: '2026-07-03T12:00:00.000Z',
+          disclosableClaims: [],
+          requiredCounterpartyClaims: {},
+          counterpartyConstraints: {},
+          operatorPrompt: 'Updated sell mandate.',
+          policyHash: 'policy-2b',
+          createdAt: '2026-06-05T00:00:00.000Z',
+          updatedAt: '2026-06-06T00:00:00.000Z',
+        },
+      ];
+    });
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Select Admitted Agent' }), 'agent-2');
+    await user.click(screen.getByRole('button', { name: /Edit \/ Replace Mandate/i }));
+    const targetQuantity = await screen.findByLabelText('Target Quantity');
+    await user.clear(targetQuantity);
+    await user.type(targetQuantity, '6');
+    await user.click(screen.getByRole('button', { name: /Save Mandate/i }));
+
+    await waitFor(() => {
+      expect(mockedCreateNegotiationMandate).toHaveBeenCalledWith(
+        'agent-2',
+        expect.objectContaining({ targetQuantity: 6 }),
+      );
+      expect(screen.getByRole('combobox', { name: 'Mandate Selection' })).toHaveValue('mandate-2b');
+    });
+  });
+
+  it('requires valid structured mandate values before saving', async () => {
+    const user = userEvent.setup();
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    const targetQuantity = await screen.findByLabelText('Target Quantity');
+    await user.clear(targetQuantity);
+    await user.type(targetQuantity, '0');
+    await user.click(screen.getByRole('button', { name: /Save Mandate/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Target quantity must be greater than zero.').length).toBeGreaterThan(0);
+      expect(mockedCreateNegotiationMandate).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('NegotiationMandateWrapper', () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    mockedListAgents.mockReset();
+  });
+
+  it('requires an explicit agent selection when multiple admitted agents exist', async () => {
+    const user = userEvent.setup();
+    mockedListAgents.mockResolvedValue([
+      { id: 'agent-1', institutionId: 'institution-1', agentDid: 'did:t3:agent-1', status: 'admitted', authorityRef: 'authority-1', label: 'Agent One', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'agent-2', institutionId: 'institution-1', agentDid: 'did:t3:agent-2', status: 'admitted', authorityRef: 'authority-2', label: 'Agent Two', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+    ]);
+
+    render(<NegotiationMandateWrapper />);
+
+    expect(await screen.findByText('MANDATE TARGETING')).toBeInTheDocument();
+    expect(screen.getByText('Select an admitted agent to edit its negotiation mandate.')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Admitted Agent' }), 'agent-2');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mandate-form-agent')).toHaveTextContent('Mandate form for agent-2');
+    });
+  });
+
+  it('refreshes admitted agents when the shared agent update event fires', async () => {
+    mockedListAgents
+      .mockResolvedValueOnce([
+        { id: 'agent-1', institutionId: 'institution-1', agentDid: 'did:t3:agent-1', status: 'admitted', authorityRef: 'authority-1', label: 'Agent One', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'agent-1', institutionId: 'institution-1', agentDid: 'did:t3:agent-1', status: 'admitted', authorityRef: 'authority-1', label: 'Agent One', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+        { id: 'agent-2', institutionId: 'institution-1', agentDid: 'did:t3:agent-2', status: 'admitted', authorityRef: 'authority-2', label: 'Agent Two', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+      ]);
+
+    render(<NegotiationMandateWrapper />);
+
+    expect(await screen.findByRole('combobox', { name: 'Admitted Agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Agent Two' })).not.toBeInTheDocument();
+
+    window.dispatchEvent(new CustomEvent(AGENTS_UPDATED_EVENT));
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'Agent Two' })).toBeInTheDocument();
     });
   });
 });

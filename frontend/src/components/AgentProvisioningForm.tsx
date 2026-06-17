@@ -32,9 +32,9 @@ const categoryOptions: Array<{
 
 const defaultFormState: ProvisioningFormState = {
   label: '',
-  maxSpendUsd: '1',
+  maxSpendUsd: '50000',
   approverEmail: '',
-  purpose: 'Negotiate within active institutional mandates and obey hosted runtime policy.',
+  purpose: 'Provision delegation for hosted negotiation under institution-approved mandates.',
   validityMonths: '12',
   allowedCategories: ['services'],
 };
@@ -161,6 +161,9 @@ export function AgentProvisioningForm({
             onChange={(event) => setForm((current) => ({ ...current, maxSpendUsd: event.target.value }))}
             inputMode="numeric"
           />
+          <span style={{ display: 'block', marginTop: '4px', color: 'var(--color-text-muted)', fontSize: '0.68rem', lineHeight: 1.5 }}>
+            This delegation limit caps the credential itself. Trading-specific notional bounds are defined in the mandate step that follows.
+          </span>
         </div>
         <div className="form-group">
           <label className="form-label" htmlFor="agent-provision-validity">Validity (months)</label>
@@ -184,6 +187,9 @@ export function AgentProvisioningForm({
           rows={3}
           style={{ resize: 'vertical' }}
         />
+        <span style={{ display: 'block', marginTop: '4px', color: 'var(--color-text-muted)', fontSize: '0.68rem', lineHeight: 1.5 }}>
+          Keep this broad and institutional. Asset, side, and max notional policy belong to the agent mandate, not the base delegation.
+        </span>
       </div>
 
       <div className="form-group">

@@ -25,6 +25,7 @@ import {
 } from 'hugeicons-react';
 import { AgentProvisioningForm } from './AgentProvisioningForm';
 import '../styles/deploy.css';
+import { dispatchAgentsUpdated } from '../services/agent-events';
 
 interface AgentDeploymentGuideProps {
   session: AuthSession;
@@ -51,6 +52,15 @@ interface MandateFormState {
   requiredCounterpartyClaims: string;
   counterpartyConstraints: string;
   operatorPrompt: string;
+}
+
+interface GuidedJsonFieldState {
+  jurisdiction: string;
+  settlementRail: string;
+  minimumRating: string;
+  allowAnonymousLiquidity: boolean;
+  minimumFillPercent: string;
+  blockedInstitutions: string;
 }
 
 const defaultRuntimeForm: RuntimeFormState = {
@@ -101,7 +111,99 @@ function parseJsonField(label: string, raw: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function buildMandateRequest(form: MandateFormState): CreateNegotiationMandateRequest {
+function isPositiveNumber(value: string): boolean {
+  return Number.isFinite(Number(value)) && Number(value) > 0;
+}
+
+function isPositiveInteger(value: string): boolean {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0;
+}
+
+function isNonNegativeNumber(value: string): boolean {
+  return Number.isFinite(Number(value)) && Number(value) >= 0;
+}
+
+function toGuidedJsonFieldState(mandate: NegotiationMandateSummary | null): GuidedJsonFieldState {
+  const requiredClaims = mandate?.requiredCounterpartyClaims ?? {};
+  const constraints = mandate?.counterpartyConstraints ?? {};
+  const blockedInstitutions = Array.isArray(constraints.blockedInstitutions)
+    ? constraints.blockedInstitutions.filter((value): value is string => typeof value === 'string').join(', ')
+    : '';
+
+  return {
+    jurisdiction: typeof requiredClaims.jurisdiction === 'string' ? requiredClaims.jurisdiction : '',
+    settlementRail: typeof requiredClaims.settlementRail === 'string' ? requiredClaims.settlementRail : '',
+    minimumRating: typeof requiredClaims.minimumRating === 'string' ? requiredClaims.minimumRating : '',
+    allowAnonymousLiquidity: Boolean(constraints.allowAnonymousLiquidity),
+    minimumFillPercent:
+      typeof constraints.minimumFillPercent === 'number'
+        ? String(constraints.minimumFillPercent)
+        : typeof constraints.minimumFillPercent === 'string'
+          ? constraints.minimumFillPercent
+          : '',
+    blockedInstitutions,
+  };
+}
+
+function buildGuidedJsonFields(state: GuidedJsonFieldState): Pick<CreateNegotiationMandateRequest, 'requiredCounterpartyClaims' | 'counterpartyConstraints'> {
+  const requiredCounterpartyClaims: Record<string, unknown> = {};
+  const counterpartyConstraints: Record<string, unknown> = {};
+
+  if (state.jurisdiction.trim()) {
+    requiredCounterpartyClaims.jurisdiction = state.jurisdiction.trim().toUpperCase();
+  }
+  if (state.settlementRail.trim()) {
+    requiredCounterpartyClaims.settlementRail = state.settlementRail.trim();
+  }
+  if (state.minimumRating.trim()) {
+    requiredCounterpartyClaims.minimumRating = state.minimumRating.trim().toUpperCase();
+  }
+  if (state.allowAnonymousLiquidity) {
+    counterpartyConstraints.allowAnonymousLiquidity = true;
+  }
+  if (state.minimumFillPercent.trim()) {
+    counterpartyConstraints.minimumFillPercent = Number(state.minimumFillPercent);
+  }
+  const blockedInstitutions = state.blockedInstitutions
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (blockedInstitutions.length > 0) {
+    counterpartyConstraints.blockedInstitutions = blockedInstitutions;
+  }
+
+  return { requiredCounterpartyClaims, counterpartyConstraints };
+}
+
+function validateMandateForm(form: MandateFormState, guidedFields: GuidedJsonFieldState): string | null {
+  if (!form.assetCode.trim()) return 'Asset is required.';
+  if (!isPositiveNumber(form.targetQuantity)) return 'Target quantity must be greater than zero.';
+  if (!isPositiveNumber(form.referencePrice)) return 'Reference price must be greater than zero.';
+  if (!isNonNegativeNumber(form.priceBandBps)) return 'Price band must be zero or greater.';
+  if (!isPositiveNumber(form.maxNotional)) return 'Max notional must be greater than zero.';
+  if (!form.deadline.trim() || Number.isNaN(new Date(form.deadline).getTime())) return 'Deadline must be a valid date and time.';
+  if (!form.operatorPrompt.trim()) return 'Operator prompt is required.';
+  if (guidedFields.minimumFillPercent.trim() && !isNonNegativeNumber(guidedFields.minimumFillPercent)) {
+    return 'Minimum fill percent must be zero or greater.';
+  }
+  return null;
+}
+
+function validateRuntimeForm(form: RuntimeFormState): string | null {
+  if (!isPositiveInteger(form.pollIntervalMs)) {
+    return 'Poll interval must be a positive integer.';
+  }
+  if (!isPositiveInteger(form.maxTicks)) {
+    return 'Max ticks must be a positive integer.';
+  }
+  return null;
+}
+
+function buildMandateRequest(
+  form: MandateFormState,
+  overrides?: Partial<Pick<CreateNegotiationMandateRequest, 'requiredCounterpartyClaims' | 'counterpartyConstraints'>>,
+): CreateNegotiationMandateRequest {
   return {
     assetCode: form.assetCode.trim().toUpperCase(),
     side: form.side,
@@ -115,8 +217,8 @@ function buildMandateRequest(form: MandateFormState): CreateNegotiationMandateRe
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean),
-    requiredCounterpartyClaims: parseJsonField('Required counterparty claims', form.requiredCounterpartyClaims),
-    counterpartyConstraints: parseJsonField('Counterparty constraints', form.counterpartyConstraints),
+    requiredCounterpartyClaims: overrides?.requiredCounterpartyClaims ?? parseJsonField('Required counterparty claims', form.requiredCounterpartyClaims),
+    counterpartyConstraints: overrides?.counterpartyConstraints ?? parseJsonField('Counterparty constraints', form.counterpartyConstraints),
     operatorPrompt: form.operatorPrompt.trim(),
   };
 }
@@ -151,6 +253,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const [selectedMandateId, setSelectedMandateId] = useState<string>('');
   const [runtimeForm, setRuntimeForm] = useState<RuntimeFormState>(defaultRuntimeForm);
   const [mandateForm, setMandateForm] = useState<MandateFormState>(defaultMandateForm);
+  const [guidedJsonFields, setGuidedJsonFields] = useState<GuidedJsonFieldState>(() => toGuidedJsonFieldState(null));
   const [showMandateEditor, setShowMandateEditor] = useState(false);
   const [showAdvancedRuntime, setShowAdvancedRuntime] = useState(false);
   const [showProvisioningForm, setShowProvisioningForm] = useState(false);
@@ -160,7 +263,11 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mandateValidationError, setMandateValidationError] = useState<string | null>(null);
+  const [runtimeValidationError, setRuntimeValidationError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showOperationsPanel, setShowOperationsPanel] = useState(false);
+  const [showTelemetryPanel, setShowTelemetryPanel] = useState(false);
 
   const loadState = useCallback(async (preferredAgentId?: string | null) => {
     const [records, agents, inst] = await Promise.all([
@@ -303,6 +410,9 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         counterpartyConstraints: JSON.stringify(selectedMandate.counterpartyConstraints, null, 2),
         operatorPrompt: selectedMandate.operatorPrompt,
       });
+      setGuidedJsonFields(toGuidedJsonFieldState(selectedMandate));
+    } else {
+      setGuidedJsonFields(toGuidedJsonFieldState(null));
     }
     if (selectedHostedRecord?.config) {
       setRuntimeForm({
@@ -317,7 +427,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const runningCount = hostedAgents.filter((record) => record.runtime.running).length;
   const isChainRail = institution?.settlementProfileRef === 'chain:sepolia:erc20';
   const settlementReady = isChainRail ? Boolean(depositStatus?.approved.wbtc && depositStatus?.approved.usdc) : true;
-  const canLaunch = Boolean(selectedAgentId && selectedMandateId) && settlementReady;
+  const runtimeValidationMessage = useMemo(() => validateRuntimeForm(runtimeForm), [runtimeForm]);
+  const canLaunch = Boolean(selectedAgentId && selectedMandateId) && settlementReady && !runtimeValidationMessage;
   const hasAdmittedAgents = admittedAgents.length > 0;
   const hasHostedAgents = hostedAgents.length > 0;
 
@@ -335,8 +446,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       },
       {
         label: 'Hosted Negotiator Runtime',
-        ready: Boolean(runtimeForm.pollIntervalMs && runtimeForm.maxTicks),
-        detail: `${runtimeForm.pollIntervalMs} ms • ${runtimeForm.maxTicks} ticks`,
+        ready: !runtimeValidationMessage,
+        detail: runtimeValidationMessage ?? `${runtimeForm.pollIntervalMs} ms • ${runtimeForm.maxTicks} ticks`,
       },
       {
         label: 'Settlement Rail Approval',
@@ -350,24 +461,53 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
             : 'Not required (noop rail)',
       },
     ],
-    [depositStatus, institution, isChainRail, runtimeForm.maxTicks, runtimeForm.pollIntervalMs, selectedAgent, selectedMandate, selectedMandateId, settlementReady],
+    [depositStatus, institution, isChainRail, runtimeForm.maxTicks, runtimeForm.pollIntervalMs, runtimeValidationMessage, selectedAgent, selectedMandate, selectedMandateId, settlementReady],
   );
+
+  const selectedAgentHasHostedRuntime = useMemo(
+    () => hostedAgents.some((record) => record.agent.id === selectedAgentId),
+    [hostedAgents, selectedAgentId],
+  );
+
+  const launchStage = useMemo(() => {
+    if (!selectedAgentId) return 1;
+    if (!selectedMandateId || showMandateEditor) return 2;
+    return 3;
+  }, [selectedAgentId, selectedMandateId, showMandateEditor]);
 
   const handleProvisioned = useCallback(async (agent: Agent) => {
     setShowProvisioningForm(false);
     setShowMandateEditor(true);
     await loadState(agent.id);
+    dispatchAgentsUpdated();
   }, [loadState]);
 
   const handleCreateOrUpdateMandate = useCallback(async () => {
     if (!selectedAgentId) {
       throw new Error('Select an admitted agent before creating a mandate.');
     }
-    const result = await apiClient.createNegotiationMandate(selectedAgentId, buildMandateRequest(mandateForm));
+    const validationError = validateMandateForm(mandateForm, guidedJsonFields);
+    if (validationError) {
+      throw new Error(validationError);
+    }
+
+    const rawRequiredClaims = parseJsonField('Required counterparty claims', mandateForm.requiredCounterpartyClaims);
+    const rawConstraints = parseJsonField('Counterparty constraints', mandateForm.counterpartyConstraints);
+    const guidedOverrides = buildGuidedJsonFields(guidedJsonFields);
+    const result = await apiClient.createNegotiationMandate(
+      selectedAgentId,
+      buildMandateRequest(mandateForm, {
+        requiredCounterpartyClaims:
+          Object.keys(rawRequiredClaims).length > 0 ? rawRequiredClaims : guidedOverrides.requiredCounterpartyClaims,
+        counterpartyConstraints:
+          Object.keys(rawConstraints).length > 0 ? rawConstraints : guidedOverrides.counterpartyConstraints,
+      }),
+    );
     setSelectedMandateId(result.mandate.id);
     setShowMandateEditor(false);
-    await loadState();
-  }, [loadState, mandateForm, selectedAgentId]);
+    setMandateValidationError(null);
+    await loadState(selectedAgentId);
+  }, [guidedJsonFields, loadState, mandateForm, selectedAgentId]);
 
   const handleLaunch = useCallback(async () => {
     if (!selectedAgentId) {
@@ -378,8 +518,15 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       setError('Attach a negotiation mandate before launching.');
       return;
     }
+    const nextRuntimeValidationError = validateRuntimeForm(runtimeForm);
+    if (nextRuntimeValidationError) {
+      setRuntimeValidationError(nextRuntimeValidationError);
+      setError(nextRuntimeValidationError);
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
+    setRuntimeValidationError(null);
     try {
       const request: CreateHostedAgentRequest = {
         institutionId: session.institution.id,
@@ -402,6 +549,20 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       setIsSubmitting(false);
     }
   }, [loadState, runtimeForm, selectedAgentId, selectedMandateId, session.institution.id]);
+
+  useEffect(() => {
+    setRuntimeValidationError(runtimeValidationMessage);
+  }, [runtimeValidationMessage]);
+
+  useEffect(() => {
+    if (selectedAgentHasHostedRuntime) {
+      setShowOperationsPanel(true);
+      setShowTelemetryPanel(true);
+      return;
+    }
+    setShowOperationsPanel(false);
+    setShowTelemetryPanel(false);
+  }, [selectedAgentHasHostedRuntime]);
 
   const handleStart = useCallback(async (id: string) => {
     setBusyAgentId(id);
@@ -474,15 +635,48 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
           </h2>
 
           <div className="deploy-form-grid deploy-guide-grid">
-            <div className="form-group deploy-form-span-full">
-              <label className="form-label" htmlFor="deploy-agent-select">1. Select Admitted Agent</label>
+            <div className="deploy-wizard-nav deploy-form-span-full" aria-label="Hosted launch steps">
+              {[
+                { step: 1, kicker: 'Access', label: selectedAgentId ? 'Agent selected' : 'Choose or provision an admitted agent' },
+                { step: 2, kicker: 'Mandate', label: selectedMandateId && !showMandateEditor ? 'Mandate bound' : 'Define strategy bounds for the selected agent' },
+                { step: 3, kicker: 'Runtime', label: selectedAgentHasHostedRuntime ? 'Runtime attached' : 'Tune runtime and launch' },
+              ].map((item) => (
+                <div
+                  key={item.step}
+                  className={`deploy-wizard-nav-item ${launchStage === item.step ? 'active' : launchStage > item.step ? 'completed' : ''}`}
+                >
+                  <span className="deploy-wizard-nav-step">0{item.step}</span>
+                  <div className="deploy-wizard-nav-content">
+                    <span className="deploy-wizard-nav-kicker">{item.kicker}</span>
+                    <span className="deploy-wizard-nav-label">{item.label}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <section className="deploy-guide-section deploy-form-span-full">
+              <div className="deploy-guide-section-header deploy-guide-section-header-compact">
+                <span className="deploy-guide-step">01</span>
+                <div>
+                  <h3 className="deploy-guide-heading">Admitted Agent</h3>
+                  <p className="deploy-guide-copy">Pick the exact operator-approved agent you want to manage. Provisioning here creates the durable delegation layer, then returns directly to mandate binding.</p>
+                </div>
+              </div>
+
+              <div className="form-group deploy-form-span-full">
+                <label className="form-label" htmlFor="deploy-agent-select">Select Admitted Agent</label>
               {hasAdmittedAgents ? (
                 <>
                   <select
                     id="deploy-agent-select"
                     className="form-select"
                     value={selectedAgentId ?? ''}
-                    onChange={(event) => setSelectedAgentId(event.target.value || null)}
+                    onChange={(event) => {
+                      setSelectedAgentId(event.target.value || null);
+                      setShowMandateEditor(false);
+                      setMandateValidationError(null);
+                      setError(null);
+                    }}
                   >
                     <option value="">Select agent…</option>
                     {admittedAgents.map((agent) => (
@@ -522,7 +716,17 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                   />
                 </div>
               )}
-            </div>
+              </div>
+            </section>
+
+            <section className="deploy-guide-section deploy-form-span-full">
+              <div className="deploy-guide-section-header deploy-guide-section-header-compact">
+                <span className="deploy-guide-step">02</span>
+                <div>
+                  <h3 className="deploy-guide-heading">Mandate Bounds</h3>
+                  <p className="deploy-guide-copy">Mandates are per-agent trading policy. Selecting another admitted agent swaps the mandate list and summary to that agent only.</p>
+                </div>
+              </div>
 
             <div className="deploy-mandate-summary deploy-form-span-full">
               <span className="deploy-mandate-summary-label">2. Bound Negotiation Mandate</span>
@@ -566,7 +770,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
               <span className="deploy-field-hint">
                 {selectedAgentId
                   ? selectedAgentMandates.length > 0
-                    ? 'Mandates are scoped to the selected agent. Creating a new one replaces the active hosted mandate.'
+                    ? 'Mandates are scoped to the selected agent. Creating or replacing one here only affects that agent, even when other admitted agents exist.'
                     : 'No mandate exists for this agent yet. Create one now to unlock launch.'
                   : 'Select or provision an admitted agent before binding a mandate.'}
               </span>
@@ -574,6 +778,21 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
             {showMandateEditor ? (
               <div className="deploy-form-span-full" style={{ display: 'grid', gap: '12px' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: '6px',
+                    padding: '12px 14px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(94, 210, 156, 0.16)',
+                    background: 'rgba(94, 210, 156, 0.04)',
+                  }}
+                >
+                  <strong style={{ color: 'var(--color-text-primary)', fontSize: '0.78rem' }}>Mandate limits govern live negotiation</strong>
+                  <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.72rem', lineHeight: 1.5, maxWidth: '72ch' }}>
+                    Fill the structured policy fields first. Raw JSON is still available for advanced override cases, but it is optional and validated before submit.
+                  </span>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
                   <div className="form-group">
                     <label className="form-label" htmlFor="mandate-asset">Asset</label>
@@ -619,21 +838,58 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 <div className="form-group">
                   <label className="form-label" htmlFor="mandate-disclosable">Disclosable Claims</label>
                   <input id="mandate-disclosable" className="form-input" value={mandateForm.disclosableClaims} onChange={(event) => setMandateForm((current) => ({ ...current, disclosableClaims: event.target.value }))} placeholder="accredited_institution, settlement_capacity" />
+                  <span className="deploy-field-hint">Comma-separated claims the agent may reveal during negotiation.</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="mandate-guided-jurisdiction">Required Jurisdiction</label>
+                    <input id="mandate-guided-jurisdiction" className="form-input" value={guidedJsonFields.jurisdiction} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, jurisdiction: event.target.value }))} placeholder="US" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="mandate-guided-settlement-rail">Settlement Rail Claim</label>
+                    <input id="mandate-guided-settlement-rail" className="form-input" value={guidedJsonFields.settlementRail} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, settlementRail: event.target.value }))} placeholder="chain:sepolia:erc20" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="mandate-guided-rating">Minimum Rating</label>
+                    <input id="mandate-guided-rating" className="form-input" value={guidedJsonFields.minimumRating} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, minimumRating: event.target.value }))} placeholder="A" />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.9fr) 1fr 1.2fr', gap: '12px', alignItems: 'end' }}>
+                  <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 0 }}>
+                    <input type="checkbox" checked={guidedJsonFields.allowAnonymousLiquidity} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, allowAnonymousLiquidity: event.target.checked }))} />
+                    <span>Allow anonymous liquidity</span>
+                  </label>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="mandate-guided-fill">Minimum Fill Percent</label>
+                    <input id="mandate-guided-fill" className="form-input font-mono" value={guidedJsonFields.minimumFillPercent} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, minimumFillPercent: event.target.value }))} placeholder="25" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="mandate-guided-blocked">Blocked Institutions</label>
+                    <input id="mandate-guided-blocked" className="form-input" value={guidedJsonFields.blockedInstitutions} onChange={(event) => setGuidedJsonFields((current) => ({ ...current, blockedInstitutions: event.target.value }))} placeholder="did:t3:competitor-a, did:t3:competitor-b" />
+                  </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
                   <div className="form-group">
                     <label className="form-label" htmlFor="mandate-required-claims">Required Counterparty Claims (JSON)</label>
                     <textarea id="mandate-required-claims" className="form-input deploy-textarea font-mono" value={mandateForm.requiredCounterpartyClaims} onChange={(event) => setMandateForm((current) => ({ ...current, requiredCounterpartyClaims: event.target.value }))} />
+                    <span className="deploy-field-hint">Advanced override. Leave as <code>{'{}'}</code> to use the structured claim fields above.</span>
                   </div>
                   <div className="form-group">
                     <label className="form-label" htmlFor="mandate-counterparty-constraints">Counterparty Constraints (JSON)</label>
                     <textarea id="mandate-counterparty-constraints" className="form-input deploy-textarea font-mono" value={mandateForm.counterpartyConstraints} onChange={(event) => setMandateForm((current) => ({ ...current, counterpartyConstraints: event.target.value }))} />
+                    <span className="deploy-field-hint">Advanced override. Leave as <code>{'{}'}</code> to use the structured constraint fields above.</span>
                   </div>
                 </div>
                 <div className="form-group">
                   <label className="form-label" htmlFor="mandate-operator-prompt">Operator Prompt</label>
                   <textarea id="mandate-operator-prompt" className="form-input deploy-textarea font-mono" value={mandateForm.operatorPrompt} onChange={(event) => setMandateForm((current) => ({ ...current, operatorPrompt: event.target.value }))} />
+                  <span className="deploy-field-hint">Use this for negotiation behavior and escalation guidance, not for numeric policy that already exists in the mandate fields.</span>
                 </div>
+                {mandateValidationError ? (
+                  <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)' }}>
+                    <AlertCircleIcon size={14} /> {mandateValidationError}
+                  </div>
+                ) : null}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     type="button"
@@ -642,8 +898,12 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     onClick={() => {
                       setIsSubmitting(true);
                       setError(null);
+                      setMandateValidationError(null);
                       handleCreateOrUpdateMandate()
-                        .catch((err) => setError(err instanceof Error ? err.message : 'Failed to save mandate.'))
+                        .catch((err) => {
+                          const message = err instanceof Error ? err.message : 'Failed to save mandate.';
+                          setMandateValidationError(message);
+                        })
                         .finally(() => setIsSubmitting(false));
                     }}
                   >
@@ -652,10 +912,20 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 </div>
               </div>
             ) : null}
+            </section>
+
+            <section className="deploy-guide-section deploy-form-span-full">
+              <div className="deploy-guide-section-header deploy-guide-section-header-compact">
+                <span className="deploy-guide-step">03</span>
+                <div>
+                  <h3 className="deploy-guide-heading">Runtime Controls</h3>
+                  <p className="deploy-guide-copy">Launch with the minimum required runtime settings first. Fleet state and raw telemetry stay tucked below so the control plane stays easier to scan.</p>
+                </div>
+              </div>
 
             <div className="form-group deploy-form-span-full">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <label className="form-label">3. Runtime Settings</label>
+                <label className="form-label">Runtime Settings</label>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowAdvancedRuntime((current) => !current)}>
                   {showAdvancedRuntime ? 'Hide Advanced Runtime' : 'Show Advanced Runtime'}
                 </button>
@@ -684,14 +954,31 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
               </div>
             ) : null}
 
+            {runtimeValidationError ? (
+              <div className="status-badge error deploy-form-span-full" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)' }}>
+                <AlertCircleIcon size={14} /> {runtimeValidationError}
+              </div>
+            ) : null}
+
             <div className="deploy-wizard-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
               <button type="button" className="btn btn-secondary" onClick={() => { setIsLoading(true); loadState().finally(() => setIsLoading(false)); }} disabled={isLoading || isSubmitting}>
                 <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} /> Synchronize
               </button>
-              <button type="button" className="btn btn-primary" onClick={handleLaunch} disabled={!canLaunch || isSubmitting} title={!selectedMandateId ? 'Create or attach a negotiation mandate first.' : undefined}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleLaunch}
+                disabled={!canLaunch || isSubmitting}
+                title={
+                  !selectedMandateId
+                    ? 'Create or attach a negotiation mandate first.'
+                    : runtimeValidationMessage ?? undefined
+                }
+              >
                 {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RocketIcon size={14} />} Launch Hosted Negotiator
               </button>
             </div>
+            </section>
           </div>
         </section>
 
@@ -699,47 +986,74 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
           <h2 className="card-title" style={{ margin: '0 0 var(--spacing-md) 0' }}>
             <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Fleet & Migration State
           </h2>
-          {isLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-secondary)' }}>
-              <Loading03Icon size={16} style={{ animation: 'spin 1s linear infinite' }} /> Loading hosted negotiators…
-            </div>
-          ) : hostedAgents.length === 0 ? (
-            <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
-              {hasAdmittedAgents
-                ? 'Admitted agents are available. Bind a mandate above to attach the first hosted negotiator runtime.'
-                : 'No hosted negotiators configured yet because no agent has been provisioned.'}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: 'var(--spacing-md)' }}>
+            <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.75rem', maxWidth: '60ch' }}>
+              Runtime inventory is secondary during launch. Expand this when you need to inspect legacy migration state or jump between existing hosted negotiators.
             </p>
-          ) : (
-            <div className="deploy-agent-fleet">
-              {hostedAgents.map((record) => (
-                <button key={record.agent.id} type="button" className={`deploy-agent-runtime ${record.agent.id === selectedAgentId ? 'active' : ''}`} onClick={() => setSelectedAgentId(record.agent.id)}>
-                  <div className="deploy-agent-runtime-main">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>
-                        {record.agent.label ?? truncateMiddle(record.agent.agentDid, 10)}
-                      </span>
-                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>
-                        {record.mandate ? `${record.mandate.side.toUpperCase()} • ${record.mandate.assetCode} • ${record.mandate.targetQuantity}` : 'No active mandate'}
-                      </span>
-                    </div>
-                    <span className={`status-badge ${record.migrationState === 'ready' ? 'secure' : 'error'}`} style={{ display: 'inline-flex', fontSize: '0.62rem', padding: '2px 8px', borderRadius: '4px' }}>
-                      {record.migrationState === 'ready' ? 'READY' : 'NEEDS MIGRATION'}
-                    </span>
-                  </div>
-                  <div className="deploy-agent-runtime-meta">
-                    <span title={record.agent.agentDid}>DID: {truncateMiddle(record.agent.agentDid, 9)}</span>
-                    <span>{record.runtime.running ? 'RUNNING' : 'STOPPED'} • {formatTimestamp(record.runtime.startedAt)}</span>
-                  </div>
-                  {record.migrationState === 'needs_migration' ? (
-                    <div className="deploy-runtime-error" style={{ marginTop: '8px' }}>
-                      <AlertCircleIcon size={14} />
-                      <span>Legacy deploy config detected. Attach a negotiation mandate to relaunch.</span>
-                    </div>
-                  ) : null}
-                </button>
-              ))}
+            <button type="button" className="btn btn-secondary" onClick={() => setShowOperationsPanel((current) => !current)}>
+              {showOperationsPanel ? 'Hide Fleet State' : 'Show Fleet State'}
+            </button>
+          </div>
+          {!showOperationsPanel ? (
+            <div className="deploy-context-note" style={{ color: 'var(--color-text-secondary)' }}>
+              {runningCount > 0
+                ? `${runningCount} hosted runtime${runningCount === 1 ? '' : 's'} currently tracked.`
+                : 'No hosted runtimes attached yet.'}
             </div>
-          )}
+          ) : null}
+          {showOperationsPanel ? (
+            isLoading ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-secondary)' }}>
+                <Loading03Icon size={16} style={{ animation: 'spin 1s linear infinite' }} /> Loading hosted negotiators…
+              </div>
+            ) : hostedAgents.length === 0 ? (
+              <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+                {hasAdmittedAgents
+                  ? 'Admitted agents are available. Bind a mandate above to attach the first hosted negotiator runtime.'
+                  : 'No hosted negotiators configured yet because no agent has been provisioned.'}
+              </p>
+            ) : (
+              <div className="deploy-agent-fleet">
+                {hostedAgents.map((record) => (
+                  <button
+                    key={record.agent.id}
+                    type="button"
+                    className={`deploy-agent-runtime ${record.agent.id === selectedAgentId ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedAgentId(record.agent.id);
+                      setShowMandateEditor(false);
+                      setMandateValidationError(null);
+                      setError(null);
+                    }}
+                  >
+                    <div className="deploy-agent-runtime-main">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>
+                          {record.agent.label ?? truncateMiddle(record.agent.agentDid, 10)}
+                        </span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase' }}>
+                          {record.mandate ? `${record.mandate.side.toUpperCase()} • ${record.mandate.assetCode} • ${record.mandate.targetQuantity}` : 'No active mandate'}
+                        </span>
+                      </div>
+                      <span className={`status-badge ${record.migrationState === 'ready' ? 'secure' : 'error'}`} style={{ display: 'inline-flex', fontSize: '0.62rem', padding: '2px 8px', borderRadius: '4px' }}>
+                        {record.migrationState === 'ready' ? 'READY' : 'NEEDS MIGRATION'}
+                      </span>
+                    </div>
+                    <div className="deploy-agent-runtime-meta">
+                      <span title={record.agent.agentDid}>DID: {truncateMiddle(record.agent.agentDid, 9)}</span>
+                      <span>{record.runtime.running ? 'RUNNING' : 'STOPPED'} • {formatTimestamp(record.runtime.startedAt)}</span>
+                    </div>
+                    {record.migrationState === 'needs_migration' ? (
+                      <div className="deploy-runtime-error" style={{ marginTop: '8px' }}>
+                        <AlertCircleIcon size={14} />
+                        <span>Legacy deploy config detected. Attach a negotiation mandate to relaunch.</span>
+                      </div>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            )
+          ) : null}
         </section>
 
         <section className="card">
@@ -765,15 +1079,25 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
           <h2 className="card-title" style={{ margin: 0 }}>
             <Activity01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Runtime Telemetry
           </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+            <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.75rem', maxWidth: '60ch' }}>
+              Expand logs only when you need process detail. The launch controls above stay focused on agent, mandate, and runtime readiness.
+            </p>
+            <button type="button" className="btn btn-secondary" onClick={() => setShowTelemetryPanel((current) => !current)} disabled={!selectedHostedRecord}>
+              {showTelemetryPanel ? 'Hide Telemetry' : 'Show Telemetry'}
+            </button>
+          </div>
           {!selectedHostedRecord ? (
             <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
-              {hasHostedAgents
-                ? 'Select a hosted negotiator to inspect runtime state.'
+              {selectedAgentId && !selectedAgentHasHostedRuntime
+                ? 'Selected agent does not have a hosted runtime yet. Bind a mandate and launch from the control plane above.'
+                : hasHostedAgents
+                  ? 'Select a hosted negotiator to inspect runtime state.'
                 : hasAdmittedAgents
                   ? 'No hosted runtime attached yet. Bind a mandate and launch from the control plane above.'
                   : 'Provision an agent first, then this panel will stream hosted runtime telemetry.'}
             </p>
-          ) : (
+          ) : showTelemetryPanel ? (
             <>
               <div className="process-dashboard">
                 <div className="process-cell">
@@ -836,6 +1160,10 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 </div>
               ) : null}
             </>
+          ) : (
+            <div className="deploy-context-note" style={{ color: 'var(--color-text-secondary)' }}>
+              Hosted runtime selected. Expand telemetry to inspect logs, lifecycle, and process state.
+            </div>
           )}
         </section>
       </div>
