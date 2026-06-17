@@ -281,9 +281,7 @@ export async function runNegotiationLoop(
     }
 
     const listed = await client.listNegotiationSessions();
-    const liveSession = sessionId
-      ? listed.sessions.find((item) => item.id === sessionId)
-      : listed.sessions[0];
+    const liveSession = pickLiveSession(listed.sessions, sessionId);
     if (!liveSession) {
       lastOutcome = "awaiting counterparty pairing";
       await sleep(env.POLL_INTERVAL_MS);
@@ -624,4 +622,53 @@ function formatError(err: unknown): string {
     return err.message;
   }
   return String(err);
+}
+
+/**
+ * True when the session is in a state where the agent can still take
+ * an action: a live negotiation (`active`), a disclosure pause
+ * (`awaiting_approval`), the brief window where the cross has
+ * happened and the orchestrator is running the disclosure gate /
+ * settlement (`converged`), or settlement in flight (`settling`).
+ */
+export function isActionableSessionStatus(
+  status: RedactedNegotiationSessionView["status"],
+): boolean {
+  return (
+    status === "active" ||
+    status === "awaiting_approval" ||
+    status === "converged" ||
+    status === "settling"
+  );
+}
+
+/**
+ * Pick the live session the agent should act on this tick.
+ *
+ *   - When we already have a `sessionId` (e.g. we were paired at
+ *     `submitTicket` time), follow that exact session.
+ *   - When `sessionId` is undefined (our ticket was sealed but the
+ *     orchestrator had no partner yet, so it parked us in
+ *     `pendingTickets`), pick the most recent session we are a
+ *     participant in that is still in an actionable state.
+ *
+ * Critically, we must NOT blindly take `sessions[0]` in the second
+ * case: the listed surface includes stale sessions from earlier
+ * runs (e.g. an `expired` session from a previous negotiation).
+ * Returning one of those would cause the agent to immediately exit
+ * with `expired`/`walked_away`/`settled` and abandon the freshly
+ * submitted ticket before the orchestrator ever pairs it.
+ *
+ * Returns `null` when no actionable session is visible — the caller
+ * should keep polling for the orchestrator to pair the pending
+ * ticket.
+ */
+export function pickLiveSession(
+  sessions: readonly RedactedNegotiationSessionView[],
+  sessionId: string | undefined,
+): RedactedNegotiationSessionView | null {
+  if (sessionId !== undefined) {
+    return sessions.find((item) => item.id === sessionId) ?? null;
+  }
+  return sessions.find((item) => isActionableSessionStatus(item.status)) ?? null;
 }
