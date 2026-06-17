@@ -190,12 +190,19 @@ export interface NegotiationRoundView {
   createdAt: string;
 }
 
+export type NegotiationEscalationStatus =
+  | "none"
+  | "pending"
+  | "approved"
+  | "declined";
+
 export interface RedactedNegotiationSessionView {
   id: string;
   assetCode: string;
   status:
     | "pairing"
     | "active"
+    | "awaiting_approval"
     | "converged"
     | "settling"
     | "settled"
@@ -217,7 +224,9 @@ export interface RedactedNegotiationSessionView {
     receivedVerifiedClaims: string[];
     pendingRequiredClaims: string[];
   };
+  escalationStatus: NegotiationEscalationStatus;
   escalationPending: boolean;
+  escalationReason: string | null;
   latestStrategySignal: string | null;
   disclosedClaims: NegotiationDisclosureView[];
   rounds: NegotiationRoundView[];
@@ -277,6 +286,9 @@ export type TelemetryPhase =
   | "negotiation_disclosure_required"
   | "negotiation_held"
   | "negotiation_escalation_requested"
+  | "negotiation_escalation_approved"
+  | "negotiation_escalation_declined"
+  | "negotiation_escalation_expired"
   | "negotiation_converged"
   | "negotiation_walked_away"
   | "negotiation_expired"

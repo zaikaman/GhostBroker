@@ -13,6 +13,7 @@ export {
   type NegotiationTicketAccepted,
   type SubmitNegotiationMoveRequest,
   type NegotiationMoveAccepted,
+  type NegotiationEscalationDecision,
 } from "./negotiation-client.js";
 export {
   GhostBrokerClient,
@@ -31,6 +32,7 @@ export type {
   RedactedErrorCode,
   Institution,
   NegotiationMove,
+  NegotiationEscalationStatus,
   NegotiationDisclosureView,
   NegotiationRoundView,
   RedactedNegotiationSessionView,

@@ -16,6 +16,10 @@ const agentMandateQuerySchema = z.object({
   mandateId: z.string().uuid().optional(),
 });
 
+const escalationDecisionSchema = z.object({
+  reason: z.string().trim().min(1).max(4000).optional(),
+});
+
 export function createNegotiationsRouter(
   negotiationService: NegotiationManagementService,
 ): Router {
@@ -136,6 +140,60 @@ export function createNegotiationsRouter(
       next(error);
     }
   });
+
+  // Operator approves an escalation that the agent paused for. The
+  // orchestrator re-evaluates the cross against the disclosure gate
+  // and settles if both clear. Approval is participant-scoped.
+  router.post(
+    "/negotiations/:id/escalation/approve",
+    async (request, response, next) => {
+      try {
+        const operatorAuth = requireOperatorAuth(response);
+        const params = negotiationIdParamsSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new PublicError("validation_failed", 400, params.error);
+        }
+        assertInstitutionScope(operatorAuth, operatorAuth.institutionId);
+        const result = await negotiationService.approveEscalation({
+          institutionId: operatorAuth.institutionId,
+          sessionId: params.data.id,
+          correlationRef: `escalation:approve:${params.data.id}:${Date.now()}`,
+        });
+        response.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // Operator declines the escalation. The session expires; no
+  // settlement happens.
+  router.post(
+    "/negotiations/:id/escalation/decline",
+    async (request, response, next) => {
+      try {
+        const operatorAuth = requireOperatorAuth(response);
+        const params = negotiationIdParamsSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new PublicError("validation_failed", 400, params.error);
+        }
+        const body = escalationDecisionSchema.safeParse(request.body ?? {});
+        if (!body.success) {
+          throw new PublicError("validation_failed", 400, body.error);
+        }
+        assertInstitutionScope(operatorAuth, operatorAuth.institutionId);
+        const result = await negotiationService.declineEscalation({
+          institutionId: operatorAuth.institutionId,
+          sessionId: params.data.id,
+          ...(body.data.reason !== undefined ? { reason: body.data.reason } : {}),
+          correlationRef: `escalation:decline:${params.data.id}:${Date.now()}`,
+        });
+        response.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   return router;
 }

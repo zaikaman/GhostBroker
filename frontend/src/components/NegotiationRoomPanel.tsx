@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertCircleIcon,
+  Cancel01Icon,
   CheckmarkCircle01Icon,
   Link01Icon,
   LockIcon,
+  Shield01Icon,
 } from 'hugeicons-react';
 import { apiClient, type NegotiationSession } from '../services/api-client';
 import { DisclosureTimeline } from './DisclosureTimeline';
@@ -11,11 +13,30 @@ import { DisclosureTimeline } from './DisclosureTimeline';
 const STATUS_COLORS: Record<NegotiationSession['status'], string> = {
   pairing: '#d6a94c',
   active: 'var(--color-accent)',
+  awaiting_approval: '#d6a94c',
   converged: '#4ecdc4',
   settling: '#d6a94c',
   settled: 'var(--color-accent)',
   walked_away: '#e05c5c',
   expired: '#888',
+};
+
+const STATUS_LABELS: Record<NegotiationSession['status'], string> = {
+  pairing: 'Pairing',
+  active: 'Active',
+  awaiting_approval: 'Awaiting Approval',
+  converged: 'Converged',
+  settling: 'Settling',
+  settled: 'Settled',
+  walked_away: 'Walked Away',
+  expired: 'Expired',
+};
+
+const ESCALATION_LABELS: Record<NegotiationSession['escalationStatus'], string> = {
+  none: 'No escalation',
+  pending: 'Escalation pending',
+  approved: 'Escalation approved',
+  declined: 'Escalation declined',
 };
 
 const DISTANCE_LABELS: Record<string, string> = {
@@ -48,6 +69,25 @@ function strategyLabel(intent: string | null): string | null {
   return STRATEGY_SIGNAL_LABELS[intent] ?? intent.replace(/_/gu, ' ');
 }
 
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function disclosureRationaleByClaim(
+  session: NegotiationSession,
+): Record<string, string> {
+  const rationale: Record<string, string> = {};
+  for (const round of session.rounds) {
+    if (round.moveType !== 'reveal') continue;
+    if (!round.reasoning) continue;
+    for (const ref of round.disclosedClaimRefs ?? []) {
+      rationale[ref] = round.reasoning;
+    }
+  }
+  return rationale;
+}
+
 function deadlineCountdown(deadline: string): string {
   const diff = Date.parse(deadline) - Date.now();
   if (diff <= 0) return 'Expired';
@@ -63,6 +103,8 @@ export function NegotiationRoomPanel(): React.JSX.Element {
   const [sessions, setSessions] = useState<NegotiationSession[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -84,6 +126,57 @@ export function NegotiationRoomPanel(): React.JSX.Element {
     }, 5000);
     return () => clearInterval(interval);
   }, [fetchSessions]);
+
+  const handleApprove = useCallback(
+    async (sessionId: string) => {
+      setResolvingId(sessionId);
+      setActionMessage(null);
+      try {
+        const result = await apiClient.approveNegotiationEscalation(sessionId);
+        setActionMessage(
+          result.status === 'settled'
+            ? 'Escalation approved. The session settled on the authorized terms.'
+            : result.status === 'active'
+              ? 'Escalation approved. The session returned to active negotiation.'
+              : `Escalation approved (${result.status}).`,
+        );
+        await fetchSessions();
+      } catch (err) {
+        setActionMessage(
+          err instanceof Error
+            ? `Approval failed: ${err.message}`
+            : 'Approval failed.',
+        );
+      } finally {
+        setResolvingId(null);
+      }
+    },
+    [fetchSessions],
+  );
+
+  const handleDecline = useCallback(
+    async (sessionId: string) => {
+      setResolvingId(sessionId);
+      setActionMessage(null);
+      try {
+        await apiClient.declineNegotiationEscalation(
+          sessionId,
+          'Operator declined escalation in the observatory.',
+        );
+        setActionMessage('Escalation declined. The session has expired.');
+        await fetchSessions();
+      } catch (err) {
+        setActionMessage(
+          err instanceof Error
+            ? `Decline failed: ${err.message}`
+            : 'Decline failed.',
+        );
+      } finally {
+        setResolvingId(null);
+      }
+    },
+    [fetchSessions],
+  );
 
   if (loading && sessions.length === 0) {
     return (
@@ -112,11 +205,28 @@ export function NegotiationRoomPanel(): React.JSX.Element {
         NEGOTIATION ROOM
       </h3>
 
+      {actionMessage && (
+        <div
+          role="status"
+          className="status-badge secure"
+          style={{
+            justifyContent: 'center',
+            padding: 'var(--spacing-sm)',
+            gap: '8px',
+          }}
+        >
+          <CheckmarkCircle01Icon size={14} /> {actionMessage}
+        </div>
+      )}
+
       {sessions.map((session) => {
         const isExpanded = expandedId === session.id;
         const trust = TRUST_LABELS[session.trustLevel];
         const strategy = strategyLabel(session.latestStrategySignal);
         const pendingProofs = session.disclosureProgress.pendingRequiredClaims.length;
+        const statusLabel = STATUS_LABELS[session.status];
+        const showEscalationControls =
+          session.status === 'awaiting_approval' && session.escalationPending;
         return (
           <article
             key={session.id}
@@ -150,7 +260,7 @@ export function NegotiationRoomPanel(): React.JSX.Element {
                     letterSpacing: '0.05em',
                   }}
                 >
-                  {session.status.replace('_', ' ')}
+                  {statusLabel}
                 </span>
                 <span style={{ color: 'var(--color-text-primary)', fontSize: '0.85rem', fontWeight: 600 }}>
                   {session.assetCode}
@@ -178,9 +288,23 @@ export function NegotiationRoomPanel(): React.JSX.Element {
                   {strategy}
                 </span>
               )}
-              {session.escalationPending && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '4px', border: '1px solid #d6a94c40', background: '#d6a94c10', color: '#d6a94c', fontSize: '0.66rem', fontFamily: 'var(--font-mono)' }}>
-                  <AlertCircleIcon size={11} /> Escalation requested
+              {(session.escalationStatus !== 'none' || session.escalationPending) && (
+                <span
+                  title={session.escalationReason ?? undefined}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    border: `1px solid ${STATUS_COLORS[session.status]}40`,
+                    background: `${STATUS_COLORS[session.status]}10`,
+                    color: STATUS_COLORS[session.status],
+                    fontSize: '0.66rem',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  <AlertCircleIcon size={11} /> {ESCALATION_LABELS[session.escalationStatus]}
                 </span>
               )}
               {pendingProofs > 0 && (
@@ -189,6 +313,84 @@ export function NegotiationRoomPanel(): React.JSX.Element {
                 </span>
               )}
             </div>
+
+            {showEscalationControls && (
+              <div
+                role="region"
+                aria-label="Operator escalation controls"
+                style={{
+                  marginTop: '14px',
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid rgba(214, 169, 76, 0.35)',
+                  background: 'rgba(214, 169, 76, 0.05)',
+                  display: 'flex',
+                  gap: '12px',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#d6a94c', fontFamily: 'var(--font-mono)', fontSize: '0.74rem' }}>
+                  <Shield01Icon size={14} />
+                  <span>
+                    Awaiting operator approval
+                    {session.escalationReason ? ` — ${truncate(session.escalationReason, 120)}` : ''}
+                  </span>
+                </div>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleApprove(session.id)}
+                    disabled={resolvingId === session.id}
+                    className="btn"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: 'var(--color-accent)',
+                      color: '#070b0a',
+                      border: 'none',
+                      borderRadius: '9999px',
+                      padding: '6px 14px',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.72rem',
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      cursor: resolvingId === session.id ? 'wait' : 'pointer',
+                      opacity: resolvingId === session.id ? 0.6 : 1,
+                    }}
+                  >
+                    <CheckmarkCircle01Icon size={12} /> Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDecline(session.id)}
+                    disabled={resolvingId === session.id}
+                    className="btn"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      color: 'var(--color-text-primary)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '9999px',
+                      padding: '6px 14px',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.72rem',
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      cursor: resolvingId === session.id ? 'wait' : 'pointer',
+                      opacity: resolvingId === session.id ? 0.6 : 1,
+                    }}
+                  >
+                    <Cancel01Icon size={12} /> Decline
+                  </button>
+                </div>
+              </div>
+            )}
 
             {isExpanded && (
               <div
@@ -252,7 +454,10 @@ export function NegotiationRoomPanel(): React.JSX.Element {
                 {session.disclosedClaims.length > 0 && (
                   <div>
                     <h4 style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>DISCLOSURES</h4>
-                    <DisclosureTimeline disclosures={session.disclosedClaims} />
+                    <DisclosureTimeline
+                      disclosures={session.disclosedClaims}
+                      rationaleByClaim={disclosureRationaleByClaim(session)}
+                    />
                   </div>
                 )}
 

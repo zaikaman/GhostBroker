@@ -123,6 +123,12 @@ describe("GET /api/agents/:id/mandate contract", () => {
       submitMove: async () => {
         throw new Error("not used");
       },
+      approveEscalation: async () => {
+        throw new Error("not used");
+      },
+      declineEscalation: async () => {
+        throw new Error("not used");
+      },
       listSessions: async () => {
         throw new Error("not used");
       },

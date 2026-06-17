@@ -358,10 +358,16 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export type NegotiationEscalationStatus =
+  | 'none'
+  | 'pending'
+  | 'approved'
+  | 'declined';
+
 export interface NegotiationSession {
   id: string;
   assetCode: string;
-  status: 'pairing' | 'active' | 'converged' | 'settling' | 'settled' | 'walked_away' | 'expired';
+  status: 'pairing' | 'active' | 'awaiting_approval' | 'converged' | 'settling' | 'settled' | 'walked_away' | 'expired';
   currentTurn: 'buy' | 'sell';
   roundNumber: number;
   maxRounds: number;
@@ -375,7 +381,9 @@ export interface NegotiationSession {
     receivedVerifiedClaims: string[];
     pendingRequiredClaims: string[];
   };
+  escalationStatus: NegotiationEscalationStatus;
   escalationPending: boolean;
+  escalationReason: string | null;
   latestStrategySignal: string | null;
   disclosedClaims: { id: string; fromSide: string; claimType: string; verified: boolean; createdAt: string }[];
   rounds: {
@@ -383,6 +391,7 @@ export interface NegotiationSession {
     roundNumber: number;
     actorSide: string;
     moveType: string;
+    disclosedClaimRefs?: string[];
     opaqueSignal: string | null;
     reasoning: string | null;
     strategicIntent: string | null;
@@ -754,5 +763,30 @@ export const apiClient = {
   async getNegotiationSession(id: string): Promise<NegotiationSession> {
     const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/negotiations/${id}`);
     return handleResponse<NegotiationSession>(res);
+  },
+
+  async approveNegotiationEscalation(
+    sessionId: string,
+  ): Promise<{ status: NegotiationSession['status'] }> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/negotiations/${sessionId}/escalation/approve`,
+      { method: 'POST' },
+    );
+    return handleResponse<{ status: NegotiationSession['status'] }>(res);
+  },
+
+  async declineNegotiationEscalation(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{ status: NegotiationSession['status'] }> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/negotiations/${sessionId}/escalation/decline`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...(reason ? { reason } : {}) }),
+      },
+    );
+    return handleResponse<{ status: NegotiationSession['status'] }>(res);
   },
 };

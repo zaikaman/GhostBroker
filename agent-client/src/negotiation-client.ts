@@ -30,6 +30,19 @@ export interface NegotiationMoveAccepted {
   status:
     | "pairing"
     | "active"
+    | "awaiting_approval"
+    | "converged"
+    | "settling"
+    | "settled"
+    | "walked_away"
+    | "expired";
+}
+
+export interface NegotiationEscalationDecision {
+  status:
+    | "pairing"
+    | "active"
+    | "awaiting_approval"
     | "converged"
     | "settling"
     | "settled"
@@ -149,6 +162,49 @@ export class NegotiationClient {
     }
 
     return response.json() as Promise<NegotiationMoveAccepted>;
+  }
+
+  public async approveEscalation(
+    sessionId: string,
+    token: string,
+  ): Promise<NegotiationEscalationDecision> {
+    const response = await fetch(
+      `${this.baseUrl}/api/negotiations/${sessionId}/escalation/approve`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    if (!response.ok) {
+      throw await this.parseError(response);
+    }
+    return response.json() as Promise<NegotiationEscalationDecision>;
+  }
+
+  public async declineEscalation(
+    sessionId: string,
+    request: { reason?: string },
+    token: string,
+  ): Promise<NegotiationEscalationDecision> {
+    const response = await fetch(
+      `${this.baseUrl}/api/negotiations/${sessionId}/escalation/decline`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(request),
+      },
+    );
+    if (!response.ok) {
+      throw await this.parseError(response);
+    }
+    return response.json() as Promise<NegotiationEscalationDecision>;
   }
 
   private async parseError(response: Response): Promise<GhostBrokerApiError> {

@@ -1,5 +1,10 @@
 import Groq from "groq-sdk";
 import { z } from "zod";
+import {
+  validateAgentDecision,
+  type AgentDecisionMove,
+  type NegotiationTurnContext,
+} from "@ghostbroker/negotiation-core";
 import { extractJsonObject } from "./llm-decision.js";
 
 // ---------------------------------------------------------------------------
@@ -50,59 +55,15 @@ export type NegotiationDecision = z.infer<typeof negotiationDecisionSchema>;
 // Negotiation context — everything the agent is allowed to see
 // ---------------------------------------------------------------------------
 
-export interface NegotiationContext {
-  side: "buy" | "sell";
-  assetCode: string;
+/**
+ * Agent-side context. Extends the shared {@link NegotiationTurnContext}
+ * with the settlement quote asset code (an LLM-only field the backend
+ * never carries). Built via the shared `buildTurnContext` so the
+ * bounds are guaranteed to match the orchestrator's authoritative
+ * validator.
+ */
+export interface NegotiationContext extends NegotiationTurnContext {
   quoteAssetCode: string;
-
-  // --- Authored policy surface ---
-  objective: string;
-  executionStyle:
-    | "patient"
-    | "balanced"
-    | "aggressive"
-    | "relationship_first"
-    | "trust_first";
-  urgency: "low" | "normal" | "high" | "critical";
-
-  // --- Size ---
-  targetQuantity: number;
-  minimumQuantity: number;
-  partialExecutionAllowed: boolean;
-
-  // --- Derived bounds ---
-  referencePrice: number;
-  minPrice: number;
-  maxPrice: number;
-  maxNotional: number;
-
-  // --- Concession ---
-  concessionBudgetRemainingBps: number;
-
-  // --- Session signals ---
-  roundNumber: number;
-  maxRounds: number;
-  roundsRemaining: number;
-  deadline: string;
-  timeToDeadlineMs: number;
-  distanceSignal: "crossed" | "near" | "moderate" | "far" | null;
-  counterpartPattern: "unknown" | "cooperative" | "resistant";
-  counterpartStandingPrice: number | null;
-  counterpartStandingQuantity: number | null;
-
-  // --- Disclosure ---
-  disclosableClaims: string[];
-  receivedClaims: string[];
-  requiredClaims: string[];
-  trustLevel: "none" | "partial" | "established";
-
-  // --- Approval ---
-  approvalMode: "auto_settle" | "escalate_outside_envelope";
-
-  // --- Operator guidance ---
-  operatorInstructions: string;
-  lastOutcome?: string;
-  priorMoveRationale?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,23 +185,8 @@ function negotiationUserPrompt(ctx: NegotiationContext): string {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — the shared validator is the single source of truth.
 // ---------------------------------------------------------------------------
-
-function roundPrice(price: number): number {
-  return Math.round(price * 100) / 100;
-}
-
-function roundQty(quantity: number): number {
-  return Math.round(quantity * 1_000_000) / 1_000_000;
-}
-
-function clampConfidence(confidence: number | undefined): number {
-  if (confidence === undefined || !Number.isFinite(confidence)) {
-    return 0;
-  }
-  return Math.max(0, Math.min(1, Math.round(confidence * 100) / 100));
-}
 
 function defaultIntentFor(
   action: NegotiationDecision["action"],
@@ -266,163 +212,49 @@ function defaultIntentFor(
 }
 
 // ---------------------------------------------------------------------------
-// Clamp decision within mandate bounds
+// Clamp decision through the shared strategy validator.
 // ---------------------------------------------------------------------------
 
 /**
- * Clamp an LLM-proposed move into the agent's mandate bounds and fill
- * in default strategic metadata. The enclave is the authority and will
- * reject anything out of bounds, but clamping here keeps the agent
- * honest and avoids burning a round on a guaranteed-rejected move.
+ * Validate an LLM-proposed move through the shared
+ * {@link validateAgentDecision} validator. The validator is the same
+ * code the backend orchestrator runs as its authoritative bound; the
+ * agent pre-clamps here to keep its outputs honest and avoid burning
+ * a round on a guaranteed-rejected move.
  */
 export function clampNegotiationDecision(
   decision: NegotiationDecision,
   ctx: NegotiationContext,
 ): NegotiationDecision {
-  const { action, reasoning } = decision;
-
-  // Shared metadata: fill defaults for optional strategic fields.
-  const strategicIntent =
-    decision.strategicIntent ?? defaultIntentFor(action);
-  const confidence = clampConfidence(decision.confidence);
-  const escalationRequested = Boolean(decision.escalationRequested);
-  const settlementReadiness =
-    decision.settlementReadiness ?? settlementReadinessFor(ctx);
-
-  if (action === "walkaway") {
-    return {
-      action,
-      price: 0,
-      quantity: 0,
-      strategicIntent,
-      confidence,
-      escalationRequested,
-      settlementReadiness: "not_ready",
-      reasoning,
-    };
-  }
-
-  // Disclosure moves must reference an allowed claim.
-  if (action === "reveal") {
-    const claimType =
-      decision.claimType && ctx.disclosableClaims.includes(decision.claimType)
-        ? decision.claimType
-        : ctx.disclosableClaims[0];
-    if (!claimType) {
-      return {
-        action: "hold",
-        price: roundPrice(clampPrice(decision.price, ctx)),
-        quantity: roundQty(clampQuantity(decision.quantity, ctx)),
-        strategicIntent: "hold_for_better_terms",
-        confidence,
-        escalationRequested,
-        settlementReadiness: "not_ready",
-        reasoning: "No disclosable claim available; holding instead.".slice(
-          0,
-          280,
-        ),
-      };
-    }
-    return {
-      action: "reveal",
-      price: roundPrice(clampPrice(decision.price, ctx)),
-      quantity: roundQty(clampQuantity(decision.quantity, ctx)),
-      claimType,
-      strategicIntent,
-      confidence,
-      escalationRequested,
-      settlementReadiness,
-      reasoning,
-    };
-  }
-
-  if (action === "request_disclosure") {
-    const claimType =
-      decision.claimType && ctx.requiredClaims.includes(decision.claimType)
-        ? decision.claimType
-        : ctx.requiredClaims[0];
-    if (!claimType) {
-      return {
-        action: "hold",
-        price: roundPrice(clampPrice(decision.price, ctx)),
-        quantity: roundQty(clampQuantity(decision.quantity, ctx)),
-        strategicIntent: "hold_for_better_terms",
-        confidence,
-        escalationRequested,
-        settlementReadiness: "not_ready",
-        reasoning:
-          "No outstanding required claim to request; holding instead.".slice(
-            0,
-            280,
-          ),
-      };
-    }
-    return {
-      action: "request_disclosure",
-      price: roundPrice(clampPrice(decision.price, ctx)),
-      quantity: roundQty(clampQuantity(decision.quantity, ctx)),
-      claimType,
-      strategicIntent,
-      confidence,
-      escalationRequested,
-      settlementReadiness,
-      reasoning,
-    };
-  }
-
-  // propose | counter | accept — carry price/quantity bounded by rails.
-  const price = clampPrice(decision.price, ctx);
-  const quantity = clampQuantity(decision.quantity, ctx);
-
-  // Enforce the per-trade notional ceiling.
-  let finalQuantity = quantity;
-  if (price > 0 && price * finalQuantity > ctx.maxNotional) {
-    finalQuantity = ctx.maxNotional / price;
-  }
-
-  // Full-block-only: if partial not allowed, force target quantity.
-  if (!ctx.partialExecutionAllowed && finalQuantity < ctx.targetQuantity) {
-    finalQuantity = ctx.targetQuantity;
-  }
-
-  return {
-    action,
-    price: roundPrice(price),
-    quantity: roundQty(finalQuantity),
-    strategicIntent,
-    confidence,
-    escalationRequested,
-    settlementReadiness,
-    reasoning,
+  const move: AgentDecisionMove = {
+    action: decision.action,
+    ...(decision.price !== undefined ? { price: decision.price } : {}),
+    ...(decision.quantity !== undefined ? { quantity: decision.quantity } : {}),
+    ...(decision.claimType !== undefined ? { claimType: decision.claimType } : {}),
+    ...(decision.strategicIntent !== undefined
+      ? { strategicIntent: decision.strategicIntent }
+      : {}),
+    ...(decision.confidence !== undefined ? { confidence: decision.confidence } : {}),
+    ...(decision.escalationRequested !== undefined
+      ? { escalationRequested: decision.escalationRequested }
+      : {}),
+    ...(decision.settlementReadiness !== undefined
+      ? { settlementReadiness: decision.settlementReadiness }
+      : {}),
+    reasoning: decision.reasoning,
   };
-}
-
-function clampPrice(
-  price: number | undefined,
-  ctx: NegotiationContext,
-): number {
-  if (price === undefined || !Number.isFinite(price) || price <= 0) {
-    return ctx.referencePrice;
-  }
-  return Math.max(ctx.minPrice, Math.min(ctx.maxPrice, price));
-}
-
-function clampQuantity(
-  quantity: number | undefined,
-  ctx: NegotiationContext,
-): number {
-  if (quantity === undefined || !Number.isFinite(quantity) || quantity <= 0) {
-    return ctx.targetQuantity;
-  }
-  return Math.min(quantity, ctx.targetQuantity);
-}
-
-function settlementReadinessFor(
-  ctx: NegotiationContext,
-): "not_ready" | "near" | "ready" {
-  if (ctx.distanceSignal === "crossed") return "ready";
-  if (ctx.distanceSignal === "near") return "near";
-  return "not_ready";
+  const validated = validateAgentDecision(move, ctx).accepted;
+  return {
+    action: validated.action,
+    price: validated.price ?? 0,
+    quantity: validated.quantity ?? 0,
+    ...(validated.claimType !== undefined ? { claimType: validated.claimType } : {}),
+    strategicIntent: validated.strategicIntent ?? defaultIntentFor(validated.action),
+    confidence: validated.confidence ?? 0,
+    escalationRequested: validated.escalationRequested,
+    settlementReadiness: validated.settlementReadiness ?? "not_ready",
+    reasoning: validated.reasoning,
+  };
 }
 
 // ---------------------------------------------------------------------------

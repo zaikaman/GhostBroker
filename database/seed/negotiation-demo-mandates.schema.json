@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GhostBroker Negotiation Demo Mandates",
+  "description": "Seed file describing two contrasting authored negotiation mandates for the live demo. These are loaded at runtime via POST /api/agents/:id/mandate; the seed file is environment-agnostic.",
+  "type": "object",
+  "required": ["buyer", "seller"],
+  "properties": {
+    "buyer": {
+      "type": "object",
+      "required": ["label", "agentDid", "policy"],
+      "properties": {
+        "label": { "type": "string" },
+        "agentDid": { "type": "string" },
+        "policy": { "$ref": "#/$defs/authoredPolicy" }
+      }
+    },
+    "seller": {
+      "type": "object",
+      "required": ["label", "agentDid", "policy"],
+      "properties": {
+        "label": { "type": "string" },
+        "agentDid": { "type": "string" },
+        "policy": { "$ref": "#/$defs/authoredPolicy" }
+      }
+    }
+  },
+  "$defs": {
+    "authoredPolicy": {
+      "type": "object",
+      "required": [
+        "objective",
+        "assetCode",
+        "side",
+        "sizePolicy",
+        "urgency",
+        "executionStyle",
+        "valuationPolicy",
+        "concessionPolicy",
+        "disclosurePolicy",
+        "counterpartyRequirements",
+        "approvalPolicy",
+        "timeWindow",
+        "operatorInstructions"
+      ]
+    }
+  }
+}

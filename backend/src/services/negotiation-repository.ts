@@ -130,8 +130,30 @@ export interface NegotiationRepository {
   }): Promise<NegotiationSessionRecord>;
   updateSession(input: {
     sessionId: string;
-    patch: Partial<Pick<NegotiationSessionRecord, "status" | "current_turn" | "round_number" | "trade_ref" | "deadline">>;
+    patch: Partial<
+      Pick<
+        NegotiationSessionRecord,
+        | "status"
+        | "current_turn"
+        | "round_number"
+        | "trade_ref"
+        | "deadline"
+        | "escalation_status"
+        | "escalation_initiated_round_id"
+        | "escalation_resolved_at"
+      >
+    >;
   }): Promise<NegotiationSessionRecord>;
+  /**
+   * Return the most recent standing proposal (price+quantity) per
+   * side that has not been superseded by a walkaway/expiry. Used by
+   * the orchestrator to re-evaluate a cross after the operator
+   * approves an escalation.
+   */
+  getStandingProposals(sessionId: string): Promise<{
+    buy: { price: number; quantity: number } | null;
+    sell: { price: number; quantity: number } | null;
+  }>;
   appendRound(input: {
     sessionId: string;
     roundNumber: number;
@@ -179,6 +201,29 @@ function parseProposalCiphertext(
   } catch {
     return { price: null, quantity: null };
   }
+}
+
+function pickLatestStandingProposal(
+  rounds: NegotiationRoundRecord[],
+  side: "buy" | "sell",
+): { price: number; quantity: number } | null {
+  for (let i = rounds.length - 1; i >= 0; i -= 1) {
+    const round = rounds[i];
+    if (!round) continue;
+    if (round.actor_side !== side) continue;
+    if (
+      round.move_type !== "propose" &&
+      round.move_type !== "counter" &&
+      round.move_type !== "accept"
+    ) {
+      continue;
+    }
+    const parsed = parseProposalCiphertext(round.proposal_ciphertext);
+    if (parsed.price !== null && parsed.quantity !== null) {
+      return { price: parsed.price, quantity: parsed.quantity };
+    }
+  }
+  return null;
 }
 
 function toRoundView(record: NegotiationRoundRecord): RedactedNegotiationSessionView["rounds"][number] {
@@ -472,6 +517,7 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
         round_number: 0,
         max_rounds: input.maxRounds,
         deadline: input.deadline,
+        escalation_status: "none",
       })
       .select("*")
       .single();
@@ -487,7 +533,14 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     patch: Partial<
       Pick<
         NegotiationSessionRecord,
-        "status" | "current_turn" | "round_number" | "trade_ref" | "deadline"
+        | "status"
+        | "current_turn"
+        | "round_number"
+        | "trade_ref"
+        | "deadline"
+        | "escalation_status"
+        | "escalation_initiated_round_id"
+        | "escalation_resolved_at"
       >
     >;
   }): Promise<NegotiationSessionRecord> {
@@ -502,6 +555,23 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       throw new PublicError("service_unavailable", 503, error);
     }
     return data;
+  }
+
+  public async getStandingProposals(sessionId: string): Promise<{
+    buy: { price: number; quantity: number } | null;
+    sell: { price: number; quantity: number } | null;
+  }> {
+    const { data: rounds, error } = await this.client
+      .from("negotiation_rounds")
+      .select("*")
+      .eq("session_id", sessionId)
+      .order("round_number", { ascending: true });
+    if (error || !rounds) {
+      return { buy: null, sell: null };
+    }
+    const buy = pickLatestStandingProposal(rounds, "buy");
+    const sell = pickLatestStandingProposal(rounds, "sell");
+    return { buy, sell };
   }
 
   public async appendRound(input: {
@@ -643,6 +713,15 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       .eq("session_id", sessionId)
       .order("created_at", { ascending: true });
 
+    // Load both mandates so the trust state is sourced from the
+    // AUTHORED counterparty requirements, not from which claims were
+    // explicitly asked for in a prior round. This is the single
+    // authority for the disclosure gate.
+    const [buyMandate, sellMandate] = await Promise.all([
+      this.getMandateById(session.buy_mandate_id, session.buy_institution_id),
+      this.getMandateById(session.sell_mandate_id, session.sell_institution_id),
+    ]);
+
     const counterpartSide =
       session.buy_institution_id === institutionId ? "sell" : "buy";
     const counterpartProposalRecord = [...(rounds ?? [])]
@@ -666,7 +745,25 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     const receivedVerifiedClaims = verifiedDisclosures.map(
       (disclosure) => disclosure.claim_type,
     );
-    const requiredClaims = Array.from(
+
+    // Mandate-sourced required claims: union of both sides' authored
+    // `counterpartyRequirements.requiredClaims`. The round-derived
+    // `request_disclosure` set is now a secondary, informational-only
+    // signal that the UI can surface if it wants.
+    const authorRequired = new Set<string>();
+    if (buyMandate) {
+      for (const claim of authoredRequiredClaimsFor(buyMandate)) {
+        authorRequired.add(claim);
+      }
+    }
+    if (sellMandate) {
+      for (const claim of authoredRequiredClaimsFor(sellMandate)) {
+        authorRequired.add(claim);
+      }
+    }
+    const requiredClaims = Array.from(authorRequired);
+
+    const askedRequired = Array.from(
       new Set(
         (rounds ?? [])
           .filter((round) => round.move_type === "request_disclosure")
@@ -677,15 +774,17 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       (claim) => !receivedVerifiedClaims.includes(claim),
     );
     const trustLevel: RedactedNegotiationSessionView["trustLevel"] =
-      receivedVerifiedClaims.length === 0
-        ? "none"
-        : pendingRequiredClaims.length === 0 && requiredClaims.length > 0
+      requiredClaims.length === 0
+        ? "established"
+        : pendingRequiredClaims.length === 0
           ? "established"
-          : "partial";
+          : receivedVerifiedClaims.length === 0
+            ? "none"
+            : "partial";
 
-    const escalationPending = (rounds ?? []).some(
-      (round) => round.escalation_requested === true,
-    );
+    const escalationStatus = session.escalation_status;
+    const escalationPending = escalationStatus === "pending";
+    const escalationReason = pendingEscalationReason(rounds ?? []);
 
     const latestStrategyRound = [...(rounds ?? [])]
       .reverse()
@@ -714,12 +813,41 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
         receivedVerifiedClaims,
         pendingRequiredClaims,
       },
+      escalationStatus,
       escalationPending,
+      escalationReason,
       latestStrategySignal: latestStrategyRound?.strategic_intent ?? null,
       disclosedClaims: (disclosures ?? []).map(toDisclosureView),
       rounds: (rounds ?? []).map(toRoundView),
+      // Surface the round-derived required set as a non-breaking
+      // informational field for the UI. The authoritative source is
+      // `requiredClaims` above.
+      ...({ askedRequiredClaims: askedRequired } as Record<string, unknown>),
       createdAt: session.created_at,
       updatedAt: session.updated_at,
-    };
+    } as RedactedNegotiationSessionView;
   }
+}
+
+function authoredRequiredClaimsFor(
+  mandate: NegotiationMandate,
+): string[] {
+  if (
+    mandate.counterpartyRequirements &&
+    Array.isArray((mandate.counterpartyRequirements as Record<string, unknown>).requiredClaims)
+  ) {
+    return (mandate.counterpartyRequirements as { requiredClaims: string[] }).requiredClaims;
+  }
+  return Object.keys(mandate.requiredCounterpartyClaims);
+}
+
+function pendingEscalationReason(rounds: NegotiationRoundRecord[]): string | null {
+  for (let i = rounds.length - 1; i >= 0; i -= 1) {
+    const round = rounds[i];
+    if (!round) continue;
+    if (round.escalation_requested === true) {
+      return round.reasoning ?? round.strategic_intent ?? null;
+    }
+  }
+  return null;
 }

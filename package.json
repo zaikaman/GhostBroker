@@ -10,6 +10,7 @@
   },
   "packageManager": "npm@10.0.0",
   "workspaces": [
+    "negotiation-core",
     "t3-enclave",
     "backend",
     "frontend",
@@ -18,7 +19,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run build --workspace @ghostbroker/t3-enclave && npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build --workspace @ghostbroker/negotiation-core && npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:watch": "npm run test:watch --workspaces --if-present"

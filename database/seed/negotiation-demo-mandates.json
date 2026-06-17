@@ -1,0 +1,86 @@
+{
+  "$schema": "./negotiation-demo-mandates.schema.json",
+  "description": "Two contrasting authored mandates for the live demo: a trust-first buyer and a deadline-driven seller. Same asset (WBTC), same anchor (USD 70,000). Different style, urgency, and disclosure posture produce visibly different round sequences.",
+  "buyer": {
+    "label": "Trust-first buyer (patient)",
+    "agentDid": "did:t3n:agent:us1-buyer-trustfirst",
+    "policy": {
+      "objective": "Acquire strategic BTC exposure quietly; only improve terms once the counterparty proves settlement capacity.",
+      "assetCode": "WBTC",
+      "side": "buy",
+      "sizePolicy": {
+        "targetQuantity": 1,
+        "minimumQuantity": 0.5,
+        "partialExecutionAllowed": true
+      },
+      "urgency": "low",
+      "executionStyle": "trust_first",
+      "valuationPolicy": {
+        "source": "operator_note",
+        "anchorValue": 70000,
+        "note": "Anchor on treasury fair value; hold for better terms until trust is established."
+      },
+      "concessionPolicy": {
+        "pace": "patient",
+        "maxConcessionBps": 120
+      },
+      "disclosurePolicy": {
+        "allowLadder": ["accredited_institution", "settlement_capacity"],
+        "requireReciprocityFor": ["settlement_capacity"]
+      },
+      "counterpartyRequirements": {
+        "requiredClaims": ["accredited_institution", "settlement_capacity"],
+        "disallowedTraits": []
+      },
+      "approvalPolicy": {
+        "mode": "escalate_outside_envelope",
+        "preferredEnvelopeNote": "Settle only at or below the anchor plus the half-band."
+      },
+      "timeWindow": {
+        "deadline": "PT45M"
+      },
+      "operatorInstructions": "Open at the anchor. Reveal accredited_institution first, then ask for settlement_capacity. Only improve price once both verified. Walk away cleanly if disclosure stalls."
+    }
+  },
+  "seller": {
+    "label": "Deadline-driven seller (aggressive)",
+    "agentDid": "did:t3n:agent:us1-seller-deadline",
+    "policy": {
+      "objective": "Reduce WBTC inventory by end of session; willing to disclose inventory sufficiency only after the buyer proves reciprocal seriousness.",
+      "assetCode": "WBTC",
+      "side": "sell",
+      "sizePolicy": {
+        "targetQuantity": 1,
+        "minimumQuantity": 0.75,
+        "partialExecutionAllowed": false
+      },
+      "urgency": "high",
+      "executionStyle": "aggressive",
+      "valuationPolicy": {
+        "source": "operator_note",
+        "anchorValue": 70000,
+        "note": "Anchor on treasury fair value; concede faster to land a deal before the deadline."
+      },
+      "concessionPolicy": {
+        "pace": "aggressive",
+        "maxConcessionBps": 250
+      },
+      "disclosurePolicy": {
+        "allowLadder": ["inventory_sufficiency", "accredited_institution"],
+        "requireReciprocityFor": ["inventory_sufficiency"]
+      },
+      "counterpartyRequirements": {
+        "requiredClaims": ["accredited_institution"],
+        "disallowedTraits": []
+      },
+      "approvalPolicy": {
+        "mode": "auto_settle",
+        "preferredEnvelopeNote": "Auto-settle inside the full walkaway band; the deadline drives concession."
+      },
+      "timeWindow": {
+        "deadline": "PT45M"
+      },
+      "operatorInstructions": "Ask for accredited_institution proof on the first round; reveal inventory_sufficiency only after the buyer reciprocates with a serious move. Concede quickly toward the deadline."
+    }
+  }
+}

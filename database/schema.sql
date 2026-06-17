@@ -184,19 +184,27 @@ CREATE TABLE public.negotiation_sessions (
   sell_agent_did text NOT NULL CHECK (sell_agent_did <> ''::text),
   buy_mandate_id uuid NOT NULL,
   sell_mandate_id uuid NOT NULL,
-  status text NOT NULL DEFAULT 'pairing'::text CHECK (status = ANY (ARRAY['pairing'::text, 'active'::text, 'converged'::text, 'settling'::text, 'settled'::text, 'walked_away'::text, 'expired'::text])),
+  status text NOT NULL DEFAULT 'pairing'::text CHECK (status = ANY (ARRAY['pairing'::text, 'active'::text, 'awaiting_approval'::text, 'converged'::text, 'settling'::text, 'settled'::text, 'walked_away'::text, 'expired'::text])),
   current_turn text NOT NULL DEFAULT 'buy'::text CHECK (current_turn = ANY (ARRAY['buy'::text, 'sell'::text])),
   round_number integer NOT NULL DEFAULT 0 CHECK (round_number >= 0),
   max_rounds integer NOT NULL CHECK (max_rounds > 0),
   deadline timestamp with time zone NOT NULL,
   trade_ref text,
+  -- Authoritative escalation gating (migration 017). When
+  -- `escalation_status` is `pending`, the session status reads
+  -- `awaiting_approval` and the orchestrator will refuse to settle
+  -- priced crosses until an operator approves or declines.
+  escalation_status text NOT NULL DEFAULT 'none'::text CHECK (escalation_status = ANY (ARRAY['none'::text, 'pending'::text, 'approved'::text, 'declined'::text])),
+  escalation_initiated_round_id uuid,
+  escalation_resolved_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT negotiation_sessions_pkey PRIMARY KEY (id),
   CONSTRAINT negotiation_sessions_buy_institution_id_fkey FOREIGN KEY (buy_institution_id) REFERENCES public.institutions(id),
   CONSTRAINT negotiation_sessions_sell_institution_id_fkey FOREIGN KEY (sell_institution_id) REFERENCES public.institutions(id),
   CONSTRAINT negotiation_sessions_buy_mandate_id_fkey FOREIGN KEY (buy_mandate_id) REFERENCES public.negotiation_mandates(id),
-  CONSTRAINT negotiation_sessions_sell_mandate_id_fkey FOREIGN KEY (sell_mandate_id) REFERENCES public.negotiation_mandates(id)
+  CONSTRAINT negotiation_sessions_sell_mandate_id_fkey FOREIGN KEY (sell_mandate_id) REFERENCES public.negotiation_mandates(id),
+  CONSTRAINT negotiation_sessions_escalation_initiated_round_id_fkey FOREIGN KEY (escalation_initiated_round_id) REFERENCES public.negotiation_rounds(id) ON DELETE SET NULL
 );
 CREATE TABLE public.negotiation_rounds (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

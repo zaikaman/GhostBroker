@@ -18,14 +18,19 @@ import type { PortfolioService } from "./portfolio.service.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
 import type { TelemetryPhase } from "../websocket/telemetry-event.js";
 import {
-  disclosureGateSatisfied,
+  buildTurnContext,
   derivedPriceBandFor,
+  disclosureGateSatisfied,
+  normalizeStrategy,
   pairingCompatibility,
+  preferredEnvelopeFor,
+  priceInsidePreferredEnvelope,
+  validateAgentDecision,
   type AgentDecisionMove,
   type AuthoredMandatePolicy,
   type DerivedExecutionRails,
   type NegotiationStrategyProfile,
-} from "./negotiation-strategy.js";
+} from "@ghostbroker/negotiation-core";
 
 /**
  * A negotiation ticket awaiting pairing. Held in memory between
@@ -230,6 +235,13 @@ export class NegotiationOrchestrator {
 
   private pendingTickets: PendingTicket[] = [];
   private readonly standingProposals = new Map<string, StandingProposal>();
+  /**
+   * One-shot timers that auto-expire an awaiting_approval session
+   * at its deadline. The map is keyed by session id and cleared on
+   * approve / decline so the timer never fires after the gate has
+   * been resolved. The orchestrator is the only owner.
+   */
+  private readonly escalationTimers = new Map<string, NodeJS.Timeout>();
 
   public constructor(input: {
     ticketClient: NegotiationTicketClient;
@@ -467,8 +479,42 @@ export class NegotiationOrchestrator {
       throw new PublicError("authorization_failed", 403);
     }
 
-    if (session.status !== "active") {
+    if (session.status !== "active" && session.status !== "awaiting_approval") {
       throw new PublicError("validation_failed", 409);
+    }
+
+    // Session is awaiting operator approval. The agent loop should not
+    // be moving here, but defend the gate regardless: a move that
+    // arrives while the gate is open is a hold that does not advance
+    // the turn. This keeps the API contract honest — escalation is a
+    // hard pause, not a hint.
+    if (session.status === "awaiting_approval") {
+      await this.repository.appendRound({
+        sessionId: session.id,
+        roundNumber: session.round_number + 1,
+        actorDid: input.agentDid,
+        actorSide,
+        moveType: "hold",
+        reasoning: `awaiting operator approval: ${input.move.reasoning}`.slice(
+          0,
+          4000,
+        ),
+        strategicIntent: "hold_for_better_terms",
+        confidence: input.move.confidence ?? null,
+        escalationRequested: true,
+        settlementReadiness: "not_ready",
+      });
+      await this.repository.updateSession({
+        sessionId: session.id,
+        patch: { round_number: session.round_number + 1 },
+      });
+      this.publish(
+        input.institutionId,
+        "negotiation_escalation_requested",
+        input.correlationRef,
+        input.agentDid,
+      );
+      return { status: "awaiting_approval" };
     }
 
     // Deadline / round-cap enforcement. Either terminal condition
@@ -492,7 +538,6 @@ export class NegotiationOrchestrator {
     if (!rails) {
       throw new PublicError("service_unavailable", 503);
     }
-    const { minPrice, maxPrice } = derivedPriceBandFor(rails, actorSide);
 
     if (input.move.action === "walkaway") {
       await this.repository.appendRound({
@@ -562,10 +607,65 @@ export class NegotiationOrchestrator {
     }
 
     // propose | counter | accept — all carry price/quantity that must
-    // be clamped to the derived mandate band, quantity, and notional
-    // ceiling.
-    const price = this.clampPrice(input.move.price, minPrice, maxPrice);
-    const quantity = this.clampQuantity(input.move.quantity, mandate);
+    // be bounded by the shared strategy validator. The backend is the
+    // authoritative source; the agent runtime pre-clamps with the
+    // SAME validator to avoid burning rounds on rejected moves.
+    const profile = normalizeStrategy(authoredFromMandate(mandate)!);
+    const band = derivedPriceBandFor(profile.rails, actorSide);
+    const operatorInstructions =
+      (mandate.operatorInstructions as string | null | undefined) ??
+      (mandate.operatorPrompt as string | null | undefined) ??
+      null;
+    const liveSessionView = await this.repository.getSession(
+      session.id,
+      input.institutionId,
+    );
+    const ctx = buildTurnContext({
+      profile,
+      side: actorSide,
+      roundNumber: session.round_number + 1,
+      maxRounds: session.max_rounds,
+      deadline: session.deadline,
+      distanceSignal: null,
+      counterpartStandingPrice: null,
+      counterpartStandingQuantity: null,
+      receivedClaims:
+        liveSessionView?.disclosureProgress.receivedVerifiedClaims ?? [],
+      concessionConsumedBps: 0,
+      ...(operatorInstructions ? { operatorInstructions } : {}),
+    });
+    const validation = validateAgentDecision(
+      {
+        action: input.move.action,
+        ...(input.move.price !== undefined ? { price: input.move.price } : {}),
+        ...(input.move.quantity !== undefined ? { quantity: input.move.quantity } : {}),
+        ...(input.move.claimType !== undefined ? { claimType: input.move.claimType } : {}),
+        ...(input.move.strategicIntent !== undefined
+          ? { strategicIntent: input.move.strategicIntent }
+          : {}),
+        ...(input.move.confidence !== undefined
+          ? { confidence: input.move.confidence }
+          : {}),
+        ...(input.move.escalationRequested !== undefined
+          ? { escalationRequested: input.move.escalationRequested }
+          : {}),
+        ...(input.move.settlementReadiness !== undefined
+          ? { settlementReadiness: input.move.settlementReadiness }
+          : {}),
+        reasoning: input.move.reasoning,
+      },
+      ctx,
+    );
+    const bounded = validation.accepted;
+    const boundedPrice = bounded.price ?? 0;
+    const boundedQuantity = bounded.quantity ?? 0;
+    const price =
+      boundedPrice > 0 &&
+      boundedPrice >= band.minPrice &&
+      boundedPrice <= band.maxPrice
+        ? boundedPrice
+        : null;
+    const quantity = boundedQuantity > 0 ? boundedQuantity : null;
     if (price === null || quantity === null) {
       // Out-of-band move: treat as a hold (no concession) rather than
       // rejecting the round, mirroring the agent-side clamp discipline.
@@ -595,6 +695,10 @@ export class NegotiationOrchestrator {
     // Evaluate the round confidentially against the counterpart's
     // standing proposal (if any). The enclave decides the cross.
     const counterpartSide = actorSide === "buy" ? "sell" : "buy";
+    const counterpartyMandate = await this.loadMandateForSide(
+      session,
+      counterpartSide,
+    );
     const counterpart = this.standingProposals.get(
       this.standingKey(session.id, counterpartSide),
     );
@@ -626,7 +730,49 @@ export class NegotiationOrchestrator {
       matchedQuantity = evaluation.matchedQuantity;
     }
 
-    await this.repository.appendRound({
+    const counterpartStandingProfile =
+      counterpart && counterpartyMandate
+        ? profileForCounterpart(counterpartyMandate)
+        : null;
+    const counterpartStandingApprovalMode =
+      (counterpartyMandate?.approvalPolicy as { mode?: string } | null)?.mode ??
+      "auto_settle";
+    const counterpartStandingEnvelope = counterpartStandingProfile
+      ? preferredEnvelopeFor(counterpartStandingProfile, counterpartSide)
+      : null;
+    const executionPriceAfterEvaluation =
+      crossed && executionPrice > 0 ? executionPrice : 0;
+
+    // Server-side escalation enforcement: the priced move and the
+    // evaluated cross together form the gate trigger. If the actor's
+    // priced proposal exits their preferred envelope under an
+    // escalate approval mode, OR the evaluated execution price
+    // falls outside the counterpart's preferred envelope under their
+    // escalate approval mode, the gate is opened. This makes
+    // escalation a real policy guarantee on both sides of the deal.
+    const crossesActorEnvelope = !priceInsidePreferredEnvelope(
+      profile,
+      actorSide,
+      price,
+    );
+    const actorApprovalMode =
+      (mandate.approvalPolicy as { mode?: string } | null)?.mode ??
+      "auto_settle";
+    const actorEscalationRequired =
+      actorApprovalMode === "escalate_outside_envelope" &&
+      crossesActorEnvelope;
+    const counterpartEscalationRequired =
+      counterpartStandingApprovalMode === "escalate_outside_envelope" &&
+      !!executionPriceAfterEvaluation &&
+      counterpartStandingEnvelope !== null &&
+      (executionPriceAfterEvaluation < counterpartStandingEnvelope.minPrice ||
+        executionPriceAfterEvaluation > counterpartStandingEnvelope.maxPrice);
+    const serverEscalationRequired =
+      actorEscalationRequired || counterpartEscalationRequired;
+    const escalationRequested =
+      serverEscalationRequired || bounded.escalationRequested === true;
+
+    const appendedRound = await this.repository.appendRound({
       sessionId: session.id,
       roundNumber: session.round_number + 1,
       actorDid: input.agentDid,
@@ -637,11 +783,29 @@ export class NegotiationOrchestrator {
       reasoning: input.move.reasoning,
       strategicIntent: input.move.strategicIntent ?? null,
       confidence: input.move.confidence ?? null,
-      escalationRequested: input.move.escalationRequested ?? null,
+      escalationRequested,
       settlementReadiness: input.move.settlementReadiness ?? null,
     });
 
     this.publish(input.institutionId, "negotiation_move_submitted", input.correlationRef, input.agentDid);
+
+    // If the priced move exits the actor's preferred envelope under
+    // an escalate approval mode, the session pauses for operator
+    // approval BEFORE we even look at the cross. Settlement is the
+    // thing that has to be authorized; the priced move itself is
+    // legitimate and saved on the round row.
+    if (escalationRequested && crossed && executionPrice > 0 && matchedQuantity > 0) {
+      await this.openEscalationGate({
+        session,
+        actorSide,
+        actorInstitutionId: input.institutionId,
+        initiatingRoundId: appendedRound.id,
+        reason:
+          input.move.strategicIntent ?? input.move.reasoning ?? null,
+        correlationRef: input.correlationRef,
+      });
+      return { status: "awaiting_approval" };
+    }
 
     if (crossed && executionPrice > 0 && matchedQuantity > 0) {
       // Disclosure gate: a price cross is not enough if either side
@@ -704,34 +868,6 @@ export class NegotiationOrchestrator {
       throw new PublicError("service_unavailable", 503);
     }
     return mandate;
-  }
-
-  private clampPrice(
-    price: number | undefined,
-    minPrice: number,
-    maxPrice: number,
-  ): number | null {
-    if (price === undefined || !Number.isFinite(price) || price <= 0) {
-      return null;
-    }
-    if (price < minPrice || price > maxPrice) {
-      return null;
-    }
-    return price;
-  }
-
-  private clampQuantity(
-    quantity: number | undefined,
-    mandate: NegotiationMandate,
-  ): number | null {
-    if (quantity === undefined || !Number.isFinite(quantity) || quantity <= 0) {
-      return null;
-    }
-    const target = Number(mandate.targetQuantity);
-    if (quantity > target) {
-      return target;
-    }
-    return quantity;
   }
 
   private async advanceTurn(
@@ -953,9 +1089,10 @@ export class NegotiationOrchestrator {
     session: NegotiationSessionRecord,
     correlationRef: string,
   ): Promise<void> {
+    this.clearEscalationTimer(session.id);
     await this.repository.updateSession({
       sessionId: session.id,
-      patch: { status: "expired" },
+      patch: { status: "expired", escalation_status: "none" },
     });
     this.releaseSessionLocks(session);
     this.publish(session.buy_institution_id, "negotiation_expired", correlationRef);
@@ -974,6 +1111,232 @@ export class NegotiationOrchestrator {
     void this.portfolioService;
     void this.settlementAssetCode;
   }
+
+  // ---------------------------------------------------------------------------
+  // Escalation gate — operator-approves-in-UI + auto-expire-on-timeout
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Open the escalation gate: persist the pending state, surface the
+   * telemetry, and arm a deadline timer that auto-expires the session
+   * if no operator acts.
+   */
+  private async openEscalationGate(input: {
+    session: NegotiationSessionRecord;
+    actorSide: "buy" | "sell";
+    actorInstitutionId: string;
+    initiatingRoundId: string;
+    reason: string | null;
+    correlationRef: string;
+  }): Promise<void> {
+    await this.repository.updateSession({
+      sessionId: input.session.id,
+      patch: {
+        status: "awaiting_approval",
+        escalation_status: "pending",
+        escalation_initiated_round_id: input.initiatingRoundId,
+      },
+    });
+    this.publish(
+      input.session.buy_institution_id,
+      "negotiation_escalation_requested",
+      input.correlationRef,
+    );
+    this.publish(
+      input.session.sell_institution_id,
+      "negotiation_escalation_requested",
+      input.correlationRef,
+    );
+    this.armEscalationTimer(input.session.id, input.session.deadline);
+  }
+
+  /**
+   * Arm (or re-arm) the deadline timer for an awaiting_approval
+   * session. When the deadline passes without an operator decision,
+   * the session transitions to expired — never settling outside the
+   * envelope.
+   */
+  private armEscalationTimer(sessionId: string, deadline: string): void {
+    this.clearEscalationTimer(sessionId);
+    const ms = Math.max(0, Date.parse(deadline) - Date.now());
+    const handle = setTimeout(() => {
+      void this.expireUnapprovedEscalation(sessionId);
+    }, ms);
+    this.escalationTimers.set(sessionId, handle);
+  }
+
+  private clearEscalationTimer(sessionId: string): void {
+    const existing = this.escalationTimers.get(sessionId);
+    if (existing) {
+      clearTimeout(existing);
+      this.escalationTimers.delete(sessionId);
+    }
+  }
+
+  private async expireUnapprovedEscalation(sessionId: string): Promise<void> {
+    this.escalationTimers.delete(sessionId);
+    const session = await this.repository.getSessionRecord(sessionId);
+    if (!session) return;
+    if (
+      session.status !== "awaiting_approval" ||
+      session.escalation_status !== "pending"
+    ) {
+      return;
+    }
+    await this.repository.updateSession({
+      sessionId,
+      patch: {
+        status: "expired",
+        escalation_status: "declined",
+        escalation_resolved_at: new Date().toISOString(),
+      },
+    });
+    this.releaseSessionLocks(session);
+    const correlationRef = `escalation:expire:${sessionId}:${Date.now()}`;
+    this.publish(session.buy_institution_id, "negotiation_escalation_expired", correlationRef);
+    this.publish(session.sell_institution_id, "negotiation_escalation_expired", correlationRef);
+    this.publish(session.buy_institution_id, "negotiation_expired", correlationRef);
+    this.publish(session.sell_institution_id, "negotiation_expired", correlationRef);
+  }
+
+  /**
+   * Operator approves the escalation. The orchestrator re-evaluates
+   * the priced cross against the counterpart's standing proposal,
+   * runs the disclosure gate, and — if both clear — settles.
+   */
+  public async approveEscalation(input: {
+    institutionId: string;
+    sessionId: string;
+    correlationRef: string;
+  }): Promise<{ status: NegotiationSessionRecord["status"] }> {
+    const session = await this.repository.getSessionRecord(input.sessionId);
+    if (!session) throw new PublicError("not_found", 404);
+    if (
+      session.buy_institution_id !== input.institutionId &&
+      session.sell_institution_id !== input.institutionId
+    ) {
+      throw new PublicError("authorization_failed", 403);
+    }
+    if (
+      session.status !== "awaiting_approval" ||
+      session.escalation_status !== "pending"
+    ) {
+      throw new PublicError("validation_failed", 409);
+    }
+    if (Date.parse(session.deadline) <= Date.now()) {
+      await this.expireUnapprovedEscalation(session.id);
+      return { status: "expired" };
+    }
+
+    this.clearEscalationTimer(session.id);
+    await this.repository.updateSession({
+      sessionId: session.id,
+      patch: {
+        escalation_status: "approved",
+        escalation_resolved_at: new Date().toISOString(),
+        status: "active",
+      },
+    });
+    this.publish(session.buy_institution_id, "negotiation_escalation_approved", input.correlationRef);
+    this.publish(session.sell_institution_id, "negotiation_escalation_approved", input.correlationRef);
+
+    // Re-evaluate the priced cross against the counterpart's standing
+    // proposal. The round row holds the actor's priced proposal; the
+    // counterpart's standing proposal is fetched from the round
+    // history so we don't depend on this process's in-memory map
+    // surviving across the approval pause.
+    const standing = await this.repository.getStandingProposals(session.id);
+    if (!standing.buy || !standing.sell) {
+      // No counterpart proposal on record yet — nothing to settle.
+      return { status: "active" };
+    }
+    const evaluation = await this.roundEvaluator.evaluateRound({
+      sessionId: session.id,
+      roundNumber: session.round_number,
+      correlationRef: input.correlationRef,
+      assetCode: session.asset_code,
+      buyPrice: decimalString(standing.buy.price),
+      buyQuantity: decimalString(standing.buy.quantity),
+      sellPrice: decimalString(standing.sell.price),
+      sellQuantity: decimalString(standing.sell.quantity),
+      buyTicketHandle: `session:${session.id}:buy`,
+      sellTicketHandle: `session:${session.id}:sell`,
+    });
+    if (
+      evaluation.status !== "crossed" ||
+      evaluation.executionPrice <= 0 ||
+      evaluation.matchedQuantity <= 0
+    ) {
+      return { status: "active" };
+    }
+    const disclosureOk = await this.disclosureGateSatisfiedFor(session);
+    if (!disclosureOk) {
+      this.publish(session.buy_institution_id, "negotiation_disclosure_required", input.correlationRef);
+      this.publish(session.sell_institution_id, "negotiation_disclosure_required", input.correlationRef);
+      return { status: "active" };
+    }
+    await this.convergeAndSettle({
+      session,
+      executionPrice: evaluation.executionPrice,
+      matchedQuantity: evaluation.matchedQuantity,
+      correlationRef: input.correlationRef,
+    });
+    return { status: "settled" };
+  }
+
+  /**
+   * Operator declines the escalation. The session expires — no
+   * settlement ever happens for the priced move that triggered the
+   * gate.
+   */
+  public async declineEscalation(input: {
+    institutionId: string;
+    sessionId: string;
+    reason?: string;
+    correlationRef: string;
+  }): Promise<{ status: NegotiationSessionRecord["status"] }> {
+    const session = await this.repository.getSessionRecord(input.sessionId);
+    if (!session) throw new PublicError("not_found", 404);
+    if (
+      session.buy_institution_id !== input.institutionId &&
+      session.sell_institution_id !== input.institutionId
+    ) {
+      throw new PublicError("authorization_failed", 403);
+    }
+    if (
+      session.status !== "awaiting_approval" ||
+      session.escalation_status !== "pending"
+    ) {
+      throw new PublicError("validation_failed", 409);
+    }
+    this.clearEscalationTimer(session.id);
+    await this.repository.updateSession({
+      sessionId: session.id,
+      patch: {
+        status: "expired",
+        escalation_status: "declined",
+        escalation_resolved_at: new Date().toISOString(),
+      },
+    });
+    if (input.reason && input.reason.trim().length > 0) {
+      await this.repository.appendRound({
+        sessionId: session.id,
+        roundNumber: session.round_number + 1,
+        actorDid: session.buy_agent_did,
+        actorSide: "buy",
+        moveType: "hold",
+        reasoning: `escalation declined: ${input.reason}`.slice(0, 4000),
+        strategicIntent: "hold_for_better_terms",
+        settlementReadiness: "not_ready",
+      });
+    }
+    this.releaseSessionLocks(session);
+    this.publish(session.buy_institution_id, "negotiation_escalation_declined", input.correlationRef);
+    this.publish(session.sell_institution_id, "negotiation_escalation_declined", input.correlationRef);
+    this.publish(session.buy_institution_id, "negotiation_expired", input.correlationRef);
+    this.publish(session.sell_institution_id, "negotiation_expired", input.correlationRef);
+    return { status: "expired" };
+  }
 }
 
 function requiredClaimsFor(mandate: NegotiationMandate): string[] {
@@ -984,6 +1347,14 @@ function requiredClaimsFor(mandate: NegotiationMandate): string[] {
     return (mandate.counterpartyRequirements as { requiredClaims: string[] }).requiredClaims;
   }
   return Object.keys(mandate.requiredCounterpartyClaims);
+}
+
+function profileForCounterpart(
+  mandate: NegotiationMandate,
+): NegotiationStrategyProfile | null {
+  const authored = authoredFromMandate(mandate);
+  if (!authored) return null;
+  return normalizeStrategy(authored);
 }
 
 /**

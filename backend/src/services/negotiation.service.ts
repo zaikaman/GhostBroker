@@ -65,6 +65,17 @@ export interface NegotiationManagementService {
     claimCredential?: unknown;
     correlationRef: string;
   }): Promise<{ status: NegotiationSessionRecord["status"] }>;
+  approveEscalation(input: {
+    institutionId: string;
+    sessionId: string;
+    correlationRef: string;
+  }): Promise<{ status: NegotiationSessionRecord["status"] }>;
+  declineEscalation(input: {
+    institutionId: string;
+    sessionId: string;
+    reason?: string;
+    correlationRef: string;
+  }): Promise<{ status: NegotiationSessionRecord["status"] }>;
   listSessions(institutionId: string): Promise<RedactedNegotiationSessionView[]>;
   getSession(
     institutionId: string,
@@ -217,6 +228,23 @@ export class NegotiationService implements NegotiationManagementService {
     correlationRef: string;
   }): Promise<{ status: NegotiationSessionRecord["status"] }> {
     return this.orchestrator.submitMove(input);
+  }
+
+  public async approveEscalation(input: {
+    institutionId: string;
+    sessionId: string;
+    correlationRef: string;
+  }): Promise<{ status: NegotiationSessionRecord["status"] }> {
+    return this.orchestrator.approveEscalation(input);
+  }
+
+  public async declineEscalation(input: {
+    institutionId: string;
+    sessionId: string;
+    reason?: string;
+    correlationRef: string;
+  }): Promise<{ status: NegotiationSessionRecord["status"] }> {
+    return this.orchestrator.declineEscalation(input);
   }
 
   public async listSessions(

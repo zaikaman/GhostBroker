@@ -1,43 +1,80 @@
 import { describe, expect, it } from "vitest";
+import { negotiationDecisionSchema } from "./negotiation-decision.js";
 import {
-  clampNegotiationDecision,
-  negotiationDecisionSchema,
-} from "./negotiation-decision.js";
+  buildTurnContext,
+  deriveExecutionRails,
+  normalizeStrategy,
+  type AuthoredMandatePolicy,
+} from "@ghostbroker/negotiation-core";
+import { clampNegotiationDecision } from "./negotiation-decision.js";
 import type { NegotiationContext } from "./negotiation-decision.js";
 
-const baseCtx: NegotiationContext = {
-  side: "buy",
-  assetCode: "WBTC",
-  quoteAssetCode: "USDC",
+const authored: AuthoredMandatePolicy = {
   objective: "Acquire strategic BTC exposure",
-  executionStyle: "balanced",
+  assetCode: "WBTC",
+  side: "buy",
+  sizePolicy: {
+    targetQuantity: 10,
+    minimumQuantity: 1,
+    partialExecutionAllowed: true,
+  },
   urgency: "normal",
-  targetQuantity: 10,
-  minimumQuantity: 1,
-  partialExecutionAllowed: true,
-  referencePrice: 70_000,
-  minPrice: 70_000,
-  maxPrice: 70_000 * 1.02,
-  maxNotional: 1_000_000,
-  concessionBudgetRemainingBps: 200,
-  roundNumber: 1,
-  maxRounds: 12,
-  roundsRemaining: 11,
-  deadline: new Date(Date.now() + 86_400_000).toISOString(),
-  timeToDeadlineMs: 86_400_000,
-  distanceSignal: "moderate",
-  counterpartPattern: "unknown",
-  counterpartStandingPrice: null,
-  counterpartStandingQuantity: null,
-  disclosableClaims: ["accredited_institution", "settlement_capacity"],
-  receivedClaims: [],
-  requiredClaims: ["accredited_institution"],
-  trustLevel: "none",
-  approvalMode: "auto_settle",
+  executionStyle: "balanced",
+  valuationPolicy: { source: "operator_note", anchorValue: 70_000 },
+  concessionPolicy: { pace: "balanced", maxConcessionBps: 200 },
+  disclosurePolicy: {
+    allowLadder: ["accredited_institution", "settlement_capacity"],
+    requireReciprocityFor: [],
+  },
+  counterpartyRequirements: {
+    requiredClaims: ["accredited_institution"],
+    disallowedTraits: [],
+  },
+  approvalPolicy: { mode: "auto_settle" },
+  timeWindow: { deadline: new Date(Date.now() + 86_400_000).toISOString() },
   operatorInstructions: "Be patient but get the deal done.",
-  lastOutcome: undefined,
-  priorMoveRationale: undefined,
 };
+
+function buildContext(overrides: Partial<NegotiationContext> = {}): NegotiationContext {
+  const profile = normalizeStrategy(authored);
+  const rails = deriveExecutionRails(authored);
+  const baseCtx = buildTurnContext({
+    profile,
+    side: "buy",
+    roundNumber: 1,
+    maxRounds: 12,
+    deadline: profile.authored.timeWindow.deadline,
+    distanceSignal: "moderate",
+    counterpartStandingPrice: null,
+    counterpartStandingQuantity: null,
+    receivedClaims: [],
+    concessionConsumedBps: 0,
+    operatorInstructions: "Be patient but get the deal done.",
+  });
+  return {
+    ...baseCtx,
+    quoteAssetCode: "USDC",
+    targetQuantity: rails.targetQuantity,
+    minimumQuantity: rails.minimumQuantity,
+    maxNotional: rails.notionalCeiling,
+    maxPrice: baseCtx.maxPrice,
+    roundNumber: 1,
+    maxRounds: 12,
+    roundsRemaining: 11,
+    timeToDeadlineMs: 86_400_000,
+    counterpartPattern: "unknown",
+    counterpartStandingPrice: null,
+    counterpartStandingQuantity: null,
+    disclosableClaims: ["accredited_institution", "settlement_capacity"],
+    receivedClaims: [],
+    requiredClaims: ["accredited_institution"],
+    trustLevel: "none",
+    operatorInstructions: "Be patient but get the deal done.",
+    ...overrides,
+  };
+}
+
+const baseCtx: NegotiationContext = buildContext();
 
 describe("negotiationDecisionSchema", () => {
   it("accepts every supported action", () => {
@@ -173,13 +210,31 @@ describe("clampNegotiationDecision — price/quantity bounds", () => {
 
   it("fills default strategic fields when not provided", () => {
     const out = clampNegotiationDecision(
-      { action: "propose", price: 70_000, quantity: 1, reasoning: "test" },
+      {
+        action: "propose",
+        price: 70_000,
+        quantity: 10,
+        reasoning: "test",
+      },
       baseCtx,
     );
     expect(out.strategicIntent).toBe("open_patiently");
     expect(out.confidence).toBe(0);
     expect(out.escalationRequested).toBe(false);
     expect(out.settlementReadiness).toBe("not_ready");
+  });
+
+  it("flags a partial-fill as a trust-building strategic intent", () => {
+    const out = clampNegotiationDecision(
+      {
+        action: "propose",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "smaller block to build trust",
+      },
+      baseCtx,
+    );
+    expect(out.strategicIntent).toBe("build_trust");
   });
 });
 

@@ -5,6 +5,12 @@ import {
   type AuthSession,
   type RedactedNegotiationSessionView,
 } from "@ghostbroker/agent-client";
+import {
+  buildTurnContext,
+  normalizeStrategy,
+  type AuthoredMandatePolicy,
+  type NegotiationStrategyProfile,
+} from "@ghostbroker/negotiation-core";
 import type { AgentEnv } from "./env.js";
 import {
   type NegotiationContext,
@@ -321,6 +327,17 @@ export async function runNegotiationLoop(
       };
     }
 
+    // Awaiting operator approval: the orchestrator has paused
+    // settlement pending a human decision. The agent loop must NOT
+    // keep submitting moves; we just back off and poll. Outcome is
+    // resolved by either the approve / decline endpoint or the
+    // deadline expiry, not by us.
+    if (liveSession.status === "awaiting_approval") {
+      lastOutcome = `escalation ${liveSession.escalationStatus ?? "pending"} — awaiting operator`;
+      await sleep(env.POLL_INTERVAL_MS);
+      continue;
+    }
+
     if (liveSession.currentTurn !== side) {
       lastOutcome = `waiting for ${liveSession.currentTurn} turn`;
       await sleep(env.POLL_INTERVAL_MS);
@@ -404,8 +421,11 @@ export async function runNegotiationLoop(
 
 /**
  * Build the full NegotiationContext from the runtime mandate + live
- * session view. Uses authored policy fields when available, falls
- * back to legacy derived fields for compatibility.
+ * session view by routing through the shared `buildTurnContext` so the
+ * agent's bounds are guaranteed to match the orchestrator's
+ * authoritative validator. Legacy mandates (no authored columns)
+ * fall back to a synthetic authored policy built from the legacy
+ * numeric fields.
  */
 function buildNegotiationContext(input: {
   mandate: RuntimeMandate;
@@ -417,124 +437,140 @@ function buildNegotiationContext(input: {
   const { mandate, quoteAssetCode, session, lastOutcome, priorMoveRationale } =
     input;
 
-  // Resolve authored vs legacy fields.
-  const objective = mandate.objective ?? mandate.operatorPrompt;
-  const executionStyle = mandate.executionStyle ?? "balanced";
-  const approvalPolicy = (mandate.approvalPolicy ??
-    {}) as Record<string, unknown>;
-  const approvalMode =
-    (approvalPolicy.mode as "auto_settle" | "escalate_outside_envelope") ??
-    "auto_settle";
-  const concessionPolicy = (mandate.concessionPolicy ??
-    {}) as Record<string, unknown>;
-  const concessionBudgetBps =
-    mandate.derivedConcessionBudgetBps ??
-    (concessionPolicy.maxConcessionBps as number | undefined) ??
-    mandate.priceBandBps;
-
-  const sizePolicy = (mandate.sizePolicy ?? {}) as Record<string, unknown>;
-  const minimumQuantity =
-    mandate.minimumQuantity ??
-    (sizePolicy.minimumQuantity as number | undefined) ??
-    0;
-  const partialExecutionAllowed =
-    mandate.partialExecutionAllowed ??
-    (sizePolicy.partialExecutionAllowed as boolean | undefined) ??
-    true;
-
-  const derivedWalkawayMin =
-    mandate.derivedWalkawayMin ??
-    Number(mandate.referencePrice) *
-      (1 - (mandate.priceBandBps ?? 200) / 10_000);
-  const derivedWalkawayMax =
-    mandate.derivedWalkawayMax ??
-    Number(mandate.referencePrice) *
-      (1 + (mandate.priceBandBps ?? 200) / 10_000);
-
-  // Bounds depend on side.
-  const minPrice =
-    mandate.side === "buy"
-      ? Number(mandate.referencePrice)
-      : derivedWalkawayMin;
-  const maxPrice =
-    mandate.side === "sell"
-      ? Number(mandate.referencePrice)
-      : derivedWalkawayMax;
-
-  // Estimate concession consumed from the session's round count.
-  const roundsUsed = session.roundNumber;
+  const profile = profileFromRuntimeMandate(mandate);
+  const receivedClaims = session.disclosureProgress.receivedVerifiedClaims;
   const concessionConsumedBps = Math.round(
-    Math.min(concessionBudgetBps, roundsUsed * (concessionBudgetBps / Math.max(1, session.maxRounds))),
+    Math.min(
+      profile.rails.concessionBudgetBps,
+      session.roundNumber *
+        (profile.rails.concessionBudgetBps / Math.max(1, session.maxRounds)),
+    ),
+  );
+  const counterpartPattern = deriveCounterpartPattern(
+    session.latestStrategySignal,
   );
 
-  // Resolve counterpart pattern from the session's strategy signals.
-  const latestStrategySignal = session.latestStrategySignal;
-  const counterpartPattern: "unknown" | "cooperative" | "resistant" =
+  const baseCtx = buildTurnContext({
+    profile,
+    side: mandate.side,
+    roundNumber: session.roundNumber,
+    maxRounds: session.maxRounds,
+    deadline: session.deadline,
+    distanceSignal: session.distanceSignal,
+    counterpartStandingPrice: session.counterpartStandingProposal.price,
+    counterpartStandingQuantity: session.counterpartStandingProposal.quantity,
+    receivedClaims,
+    concessionConsumedBps,
+    counterpartPattern,
+    ...(mandate.operatorInstructions ??
+    mandate.operatorPrompt !== undefined
+      ? {
+          operatorInstructions:
+            mandate.operatorInstructions ?? mandate.operatorPrompt,
+        }
+      : {}),
+    lastOutcome,
+    ...(priorMoveRationale !== undefined ? { priorMoveRationale } : {}),
+  });
+
+  return {
+    ...baseCtx,
+    quoteAssetCode,
+  };
+}
+
+function profileFromRuntimeMandate(mandate: RuntimeMandate): NegotiationStrategyProfile {
+  if (
+    mandate.executionStyle &&
+    mandate.objective &&
+    mandate.valuationPolicy &&
+    mandate.concessionPolicy &&
+    mandate.disclosurePolicy &&
+    mandate.counterpartyRequirements &&
+    mandate.approvalPolicy &&
+    mandate.sizePolicy &&
+    mandate.timeWindow &&
+    mandate.operatorInstructions &&
+    mandate.derivedAnchorValue !== null
+  ) {
+    const authored: AuthoredMandatePolicy = {
+      objective: mandate.objective,
+      assetCode: mandate.assetCode,
+      side: mandate.side,
+      sizePolicy: {
+        targetQuantity: Number(mandate.targetQuantity),
+        minimumQuantity: mandate.minimumQuantity ?? 0,
+        partialExecutionAllowed: mandate.partialExecutionAllowed ?? true,
+      },
+      urgency: mandate.urgency,
+      executionStyle: mandate.executionStyle,
+      valuationPolicy: mandate.valuationPolicy as unknown as AuthoredMandatePolicy["valuationPolicy"],
+      concessionPolicy: mandate.concessionPolicy as unknown as AuthoredMandatePolicy["concessionPolicy"],
+      disclosurePolicy: mandate.disclosurePolicy as unknown as AuthoredMandatePolicy["disclosurePolicy"],
+      counterpartyRequirements: mandate.counterpartyRequirements as unknown as AuthoredMandatePolicy["counterpartyRequirements"],
+      approvalPolicy: mandate.approvalPolicy as unknown as AuthoredMandatePolicy["approvalPolicy"],
+      timeWindow: mandate.timeWindow as unknown as AuthoredMandatePolicy["timeWindow"],
+      operatorInstructions: mandate.operatorInstructions,
+    };
+    return normalizeStrategy(authored);
+  }
+  // Legacy mandate: synthesize a minimal authored policy from the
+  // numeric fields so we still share the bounds math.
+  const reference = Number(mandate.referencePrice);
+  const synthesized: AuthoredMandatePolicy = {
+    objective: mandate.objective ?? mandate.operatorPrompt,
+    assetCode: mandate.assetCode,
+    side: mandate.side,
+    sizePolicy: {
+      targetQuantity: Number(mandate.targetQuantity),
+      minimumQuantity: mandate.minimumQuantity ?? 0,
+      partialExecutionAllowed: mandate.partialExecutionAllowed ?? true,
+    },
+    urgency: mandate.urgency,
+    executionStyle: "balanced",
+    valuationPolicy: {
+      source: "operator_note",
+      anchorValue: mandate.derivedAnchorValue ?? reference,
+    },
+    concessionPolicy: {
+      pace: "balanced",
+      maxConcessionBps: mandate.derivedConcessionBudgetBps ?? mandate.priceBandBps ?? 150,
+    },
+    disclosurePolicy: { allowLadder: mandate.disclosableClaims ?? [] },
+    counterpartyRequirements: {
+      requiredClaims: mandate.requiredCounterpartyClaims ?? [],
+      disallowedTraits: [],
+    },
+    approvalPolicy: { mode: "auto_settle" },
+    timeWindow: { deadline: mandate.deadline },
+    operatorInstructions: mandate.operatorPrompt,
+  };
+  return normalizeStrategy(synthesized);
+}
+
+function deriveCounterpartPattern(
+  latestStrategySignal: string | null,
+): "unknown" | "cooperative" | "resistant" {
+  if (
     latestStrategySignal === "accept" ||
     latestStrategySignal === "concede" ||
     latestStrategySignal === "build_trust"
-      ? "cooperative"
-      : latestStrategySignal === "test_patience" ||
-          latestStrategySignal === "hold_for_better_terms"
-        ? "resistant"
-        : "unknown";
-
-  const timeToDeadlineMs = Math.max(
-    0,
-    Date.parse(session.deadline) - Date.now(),
-  );
-  const roundsRemaining = Math.max(
-    0,
-    session.maxRounds - session.roundNumber,
-  );
-
-  return {
-    side: mandate.side,
-    assetCode: mandate.assetCode,
-    quoteAssetCode,
-    objective,
-    executionStyle,
-    urgency: mandate.urgency,
-    targetQuantity: Number(mandate.targetQuantity),
-    minimumQuantity,
-    partialExecutionAllowed,
-    referencePrice: Number(mandate.referencePrice),
-    minPrice: roundPrice(minPrice),
-    maxPrice: roundPrice(maxPrice),
-    maxNotional: Number(mandate.maxNotional ?? mandate.derivedNotionalCeiling ?? 1_000_000),
-    concessionBudgetRemainingBps: Math.max(
-      0,
-      concessionBudgetBps - concessionConsumedBps,
-    ),
-    roundNumber: session.roundNumber,
-    maxRounds: session.maxRounds,
-    roundsRemaining,
-    deadline: session.deadline,
-    timeToDeadlineMs,
-    distanceSignal: session.distanceSignal,
-    counterpartPattern,
-    counterpartStandingPrice: session.counterpartStandingProposal.price,
-    counterpartStandingQuantity: session.counterpartStandingProposal.quantity,
-    disclosableClaims: mandate.disclosableClaims,
-    receivedClaims: session.disclosureProgress.receivedVerifiedClaims,
-    requiredClaims: session.disclosureProgress.requiredClaims,
-    trustLevel: session.trustLevel,
-    approvalMode,
-    operatorInstructions:
-      mandate.operatorInstructions ?? mandate.operatorPrompt,
-    lastOutcome,
-    priorMoveRationale,
-  };
+  ) {
+    return "cooperative";
+  }
+  if (
+    latestStrategySignal === "test_patience" ||
+    latestStrategySignal === "hold_for_better_terms"
+  ) {
+    return "resistant";
+  }
+  return "unknown";
 }
 
 function log(side: "buy" | "sell", message: string): void {
   const ts = new Date().toISOString();
   const tag = side.toUpperCase().padEnd(5, " ");
   console.log(`[${ts}] [${tag}] ${message}`);
-}
-
-function roundPrice(price: number): number {
-  return Math.round(price * 100) / 100;
 }
 
 function sleep(ms: number): Promise<void> {

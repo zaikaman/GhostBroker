@@ -32,12 +32,24 @@ export const negotiationActionSchema = z.enum([
 export const negotiationSessionStatusSchema = z.enum([
   "pairing",
   "active",
+  "awaiting_approval",
   "converged",
   "settling",
   "settled",
   "walked_away",
   "expired",
 ]);
+
+export const negotiationEscalationStatusSchema = z.enum([
+  "none",
+  "pending",
+  "approved",
+  "declined",
+]);
+
+export type NegotiationEscalationStatus = z.infer<
+  typeof negotiationEscalationStatusSchema
+>;
 export const negotiationDistanceSignalSchema = z.enum([
   "crossed",
   "near",
@@ -286,6 +298,9 @@ export interface NegotiationSessionRecord {
   max_rounds: number;
   deadline: string;
   trade_ref: string | null;
+  escalation_status: z.infer<typeof negotiationEscalationStatusSchema>;
+  escalation_initiated_round_id: string | null;
+  escalation_resolved_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -414,8 +429,13 @@ export interface RedactedNegotiationSessionView {
     receivedVerifiedClaims: string[];
     pendingRequiredClaims: string[];
   };
-  /** Whether escalation to operator is pending. */
+  /** Authoritative escalation state. `escalationPending` is the
+   * shorthand for "the gate is closed"; the underlying `escalationStatus`
+   * carries the full lifecycle (none → pending → approved | declined). */
+  escalationStatus: z.infer<typeof negotiationEscalationStatusSchema>;
   escalationPending: boolean;
+  /** Free-text reason the agent attached when it triggered the gate. */
+  escalationReason: string | null;
   /** Latest opaque strategy signal surfaced for "why the AI matters". */
   latestStrategySignal: string | null;
   disclosedClaims: NegotiationDisclosureView[];

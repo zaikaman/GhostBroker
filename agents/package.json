@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@ghostbroker/agent-client": "file:../agent-client",
+    "@ghostbroker/negotiation-core": "file:../negotiation-core",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^1.5.0",
     "@terminal3/t3n-sdk": "^3.5.2",
