@@ -296,6 +296,153 @@ describe("validateAgentDecision", () => {
     expect(result.downgradedFrom).toBe("reveal");
   });
 
+  it("downgrades opening-turn request_disclosure to propose", () => {
+    const profile = buildProfile(buyerAuthored);
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 1,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: null,
+      counterpartStandingPrice: null,
+      counterpartStandingQuantity: null,
+      receivedClaims: [],
+      concessionConsumedBps: 0,
+    });
+    const result = validateAgentDecision(
+      {
+        action: "request_disclosure",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "verify counterpart first",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("propose");
+    expect(result.downgradedFrom).toBe("request_disclosure");
+    expect(result.adjustedReason).toBe("opening_turn_must_propose");
+    expect(result.accepted.price).toBeGreaterThan(0);
+  });
+
+  it("downgrades opening-turn reveal to propose", () => {
+    const profile = buildProfile(buyerAuthored);
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 1,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: null,
+      counterpartStandingPrice: null,
+      counterpartStandingQuantity: null,
+      receivedClaims: [],
+      concessionConsumedBps: 0,
+    });
+    const result = validateAgentDecision(
+      {
+        action: "reveal",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "disclose first",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("propose");
+    expect(result.downgradedFrom).toBe("reveal");
+    expect(result.adjustedReason).toBe("opening_turn_must_propose");
+  });
+
+  it("keeps request_disclosure after the counterpart has already proposed", () => {
+    const profile = buildProfile(buyerAuthored);
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 2,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: "moderate",
+      counterpartStandingPrice: 70_500,
+      counterpartStandingQuantity: 1,
+      receivedClaims: [],
+      concessionConsumedBps: 30,
+    });
+    const result = validateAgentDecision(
+      {
+        action: "request_disclosure",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "verify counterpart",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("request_disclosure");
+    expect(result.downgradedFrom).toBeUndefined();
+  });
+
+  it("downgrades a second request_disclosure of the same claim to propose", () => {
+    const profile = buildProfile(buyerAuthored);
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 3,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: "moderate",
+      counterpartStandingPrice: 70_500,
+      counterpartStandingQuantity: 1,
+      receivedClaims: [],
+      concessionConsumedBps: 30,
+      priorClaimRequests: ["accredited_institution"],
+    });
+    const result = validateAgentDecision(
+      {
+        action: "request_disclosure",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "ask again",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("propose");
+    expect(result.downgradedFrom).toBe("request_disclosure");
+    expect(result.adjustedReason).toBe("repeated_disclosure_request");
+  });
+
+  it("downgrades a third reveal of the same claim to propose", () => {
+    const profile = buildProfile(buyerAuthored);
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 4,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: "moderate",
+      counterpartStandingPrice: 70_500,
+      counterpartStandingQuantity: 1,
+      receivedClaims: [],
+      concessionConsumedBps: 30,
+      priorClaimRequests: ["accredited_institution", "accredited_institution"],
+    });
+    const result = validateAgentDecision(
+      {
+        action: "reveal",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "reveal again",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("propose");
+    expect(result.downgradedFrom).toBe("reveal");
+    expect(result.adjustedReason).toBe("repeated_disclosure_reveal");
+  });
+
   it("zeroes price and quantity on walkaway", () => {
     const profile = buildProfile(buyerAuthored);
     const ctx = buildTurnContext({

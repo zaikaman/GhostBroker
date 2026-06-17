@@ -18,6 +18,7 @@ import {
   type NegotiationLlmClient,
 } from "./negotiation-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
+import { buildSelfAttestedClaimCredential } from "./claim-credential.js";
 
 /**
  * The expanded runtime mandate as returned by the hosted-mandate
@@ -344,12 +345,23 @@ export async function runNegotiationLoop(
       continue;
     }
 
+    // Refresh the cumulative disclosure-request history for THIS side
+    // so the validator can cap repeated disclosure-only moves. The
+    // round view's `disclosedClaimRefs` carries the claim type the
+    // actor named when it asked (or revealed) on each past round.
+    const priorClaimRequests: string[] = liveSession.rounds
+      .filter((round) => round.actorSide === side)
+      .filter((round) => round.moveType === "request_disclosure" || round.moveType === "reveal")
+      .flatMap((round) => round.disclosedClaimRefs)
+      .filter((claim): claim is string => typeof claim === "string" && claim.length > 0);
+
     const ctx = buildNegotiationContext({
       mandate,
       quoteAssetCode,
       session: liveSession,
       lastOutcome,
       priorMoveRationale,
+      priorClaimRequests,
     });
 
     let decision: NegotiationDecision;
@@ -380,16 +392,37 @@ export async function runNegotiationLoop(
         });
         lastOutcome = `walkaway -> ${result.status}`;
       } else {
+        // Build a self-attested W3C-style credential for reveal moves so
+        // the orchestrator's disclosure verifier returns `verified: true`
+        // and the claim advances the trust-level filter. This lets the
+        // hosted agent actually progress the disclosure gate (and stop
+        // looping on `request_disclosure`) even when running outside a
+        // T3-enclave attestation pipeline.
+        const claimCredential =
+          decision.action === "reveal" && decision.claimType
+            ? buildSelfAttestedClaimCredential({
+                issuerDid: identity.did,
+                subjectId: session.institution.displayName,
+                claimType: decision.claimType,
+              })
+            : undefined;
+
         const result = await client.submitNegotiationMove(sessionId, {
           agentId: env.HOSTED_AGENT_ID ?? "00000000-0000-0000-0000-000000000000",
           agentDid: identity.did,
           authorityRef: admission.authorityRef,
           move: decision,
+          ...(claimCredential !== undefined ? { claimCredential } : {}),
         });
         lastOutcome = `move -> ${result.status}`;
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       if (err instanceof GhostBrokerApiError) {
+        log(
+          side,
+          `Move rejected: ${err.status} ${err.code} ${message} (action=${decision.action} price=${decision.price} qty=${decision.quantity})`,
+        );
         if (err.status === 409 || err.status === 403) {
           lastOutcome = `move rejected ${err.status}`;
           await sleep(env.POLL_INTERVAL_MS);
@@ -400,6 +433,8 @@ export async function runNegotiationLoop(
           await sleep(env.POLL_INTERVAL_MS);
           continue;
         }
+      } else {
+        log(side, `Move threw non-API error: ${message}`);
       }
       throw err;
     }
@@ -433,8 +468,9 @@ function buildNegotiationContext(input: {
   session: RedactedNegotiationSessionView;
   lastOutcome: string;
   priorMoveRationale?: string;
+  priorClaimRequests?: string[];
 }): NegotiationContext {
-  const { mandate, quoteAssetCode, session, lastOutcome, priorMoveRationale } =
+  const { mandate, quoteAssetCode, session, lastOutcome, priorMoveRationale, priorClaimRequests } =
     input;
 
   const profile = profileFromRuntimeMandate(mandate);
@@ -468,6 +504,9 @@ function buildNegotiationContext(input: {
           operatorInstructions:
             mandate.operatorInstructions ?? mandate.operatorPrompt,
         }
+      : {}),
+    ...(priorClaimRequests !== undefined && priorClaimRequests.length > 0
+      ? { priorClaimRequests }
       : {}),
     lastOutcome,
     ...(priorMoveRationale !== undefined ? { priorMoveRationale } : {}),

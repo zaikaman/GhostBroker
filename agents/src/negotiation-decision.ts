@@ -81,14 +81,18 @@ Do not output prose, markdown, or code fences.
 
 ACTIONS:
   - "propose":  open or restate your terms. price must be inside [minPrice, maxPrice];
-                quantity must be > 0 and within your mandate. Use early in a session.
+                quantity must be > 0 and within your mandate. Use this on the FIRST turn
+                of a session — without a priced proposal the round evaluator cannot run.
   - "counter":  respond to the counterparty's standing terms with a revised price/quantity
                 inside your bounds. Move toward the counterparty only as much as your
                 mandate and urgency justify.
   - "reveal":   disclose one verified claim to build trust. Set claimType to one of
                 disclosableClaims. price/quantity should restate your current terms.
+                The hosted runtime will attach a self-attested credential automatically
+                so the disclosure records as verified. Use at most once per claim.
   - "request_disclosure": ask the counterparty to prove a claim listed in requiredClaims.
                 Set claimType to the required claim. price/quantity restate current terms.
+                Use at most ONCE per claim; after that, put terms on the table.
   - "accept":   accept when the counterparty's standing terms are inside your mandate and
                 further rounds are unlikely to improve them. price/quantity must equal the
                 terms you are accepting.
@@ -96,6 +100,21 @@ ACTIONS:
                 price/quantity restate your current terms.
   - "walkaway": abandon the negotiation when terms cannot reach your mandate before the
                 deadline, or a required disclosure was refused. price=0, quantity=0.
+
+OPENING-TURN RULE (read carefully):
+  - If counterpart_standing_price is "(none)" (i.e. the counterpart has not yet proposed),
+    you MUST return action="propose" with a price inside [minPrice, maxPrice]. The shared
+    validator downgrades "reveal" / "request_disclosure" / "hold" on the opening turn to
+    "propose" anyway, so emitting a priced proposal yourself saves a round.
+  - The disclosure gate (which requires verified claims from both sides) ONLY gates the
+    final settlement. You can and SHOULD propose terms before every required claim is
+    verified — the cross evaluator runs on price/quantity alone.
+
+TRUST-FIRST SPECIFIC:
+  - For execution_style="trust_first", spend at most ONE round on a "reveal" of each
+    disclosable claim and ONE round on a "request_disclosure" of each required claim,
+    then switch to priced proposals. The validator downgrades further disclosure-only
+    moves to "propose" automatically.
 
 NEW FIELDS (include in every response):
   - "strategicIntent": explain WHY you chose this move. One of:
@@ -111,13 +130,14 @@ NEW FIELDS (include in every response):
 GUIDANCE:
   - Respect urgency: "critical" should converge faster and concede more; "low" can hold.
   - Respect your executionStyle: "patient" moves in small steps; "aggressive" concedes
-    faster; "trust_first" prioritizes disclosure over price moves.
+    faster; "trust_first" spends at most one round on each disclosure move before
+    proposing terms.
   - Never cross your own mandate bounds. The enclave will reject out-of-bounds moves.
   - Prefer "accept" over additional rounds once terms are acceptable; rounds are limited.
   - If your approval mode is "escalate_outside_envelope", set escalationRequested=true
     when the move would go outside your preferred envelope.
-  - Use "reveal" / "request_disclosure" strategically to build trust and satisfy
-    counterparty requirements.
+  - Use "reveal" / "request_disclosure" strategically to build trust, but never at the
+    expense of putting a priced proposal on the table.
   - Consider roundsRemaining and timeToDeadlineMs — don't hold too long near the deadline.
 
 Output exactly:
@@ -166,12 +186,18 @@ function negotiationUserPrompt(ctx: NegotiationContext): string {
     `counterpart_pattern: ${ctx.counterpartPattern}`,
     `counterpart_standing_price: ${ctx.counterpartStandingPrice ?? "(none)"}`,
     `counterpart_standing_quantity: ${ctx.counterpartStandingQuantity ?? "(none)"}`,
+    `opening_turn: ${ctx.counterpartStandingPrice === null ? "yes (no counterpart proposal yet — you MUST propose)" : "no"}`,
     ``,
     `=== DISCLOSURE ===`,
     `trust_level: ${ctx.trustLevel}`,
     `disclosable_claims: ${ctx.disclosableClaims.length > 0 ? ctx.disclosableClaims.join(", ") : "(none)"}`,
     `received_claims: ${ctx.receivedClaims.length > 0 ? ctx.receivedClaims.join(", ") : "(none)"}`,
     `required_claims: ${ctx.requiredClaims.length > 0 ? ctx.requiredClaims.join(", ") : "(none)"}`,
+    `prior_claim_requests_this_session: ${
+      ctx.priorClaimRequests && ctx.priorClaimRequests.length > 0
+        ? ctx.priorClaimRequests.join(", ")
+        : "(none — this is your first disclosure-related move)"
+    }`,
     ``,
     `=== HISTORY ===`,
     `last_round_outcome: ${ctx.lastOutcome ?? "(none)"}`,

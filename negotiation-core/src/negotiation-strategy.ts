@@ -408,6 +408,13 @@ export interface NegotiationTurnContext {
   preferredMinPrice: number;
   preferredMaxPrice: number;
   operatorInstructions: string;
+  /**
+   * Cumulative list of claim types the actor has already asked the
+   * counterpart to verify (or has revealed itself) on prior rounds.
+   * Used by the validator to cap repeated disclosure moves so the
+   * session doesn't loop on trust-building indefinitely.
+   */
+  priorClaimRequests?: string[];
   lastOutcome?: string;
   priorMoveRationale?: string;
 }
@@ -431,6 +438,11 @@ export function buildTurnContext(input: {
   concessionConsumedBps: number;
   counterpartPattern?: NegotiationTurnContext["counterpartPattern"];
   operatorInstructions?: string;
+  /** Cumulative list of claim types the actor has already requested or
+   * revealed on prior rounds. Used by the validator to cap repeated
+   * disclosure moves. If omitted, the validator assumes an empty
+   * history (the agent's very first turn). */
+  priorClaimRequests?: string[];
   lastOutcome?: string;
   priorMoveRationale?: string;
   /** Optional: trust level computed upstream from a mandate-sourced
@@ -491,6 +503,9 @@ export function buildTurnContext(input: {
     preferredMinPrice: preferred.minPrice,
     preferredMaxPrice: preferred.maxPrice,
     operatorInstructions: input.operatorInstructions ?? "",
+    ...(input.priorClaimRequests !== undefined
+      ? { priorClaimRequests: input.priorClaimRequests }
+      : {}),
     ...(input.lastOutcome !== undefined ? { lastOutcome: input.lastOutcome } : {}),
     ...(input.priorMoveRationale !== undefined
       ? { priorMoveRationale: input.priorMoveRationale }
@@ -552,6 +567,16 @@ export interface DecisionValidationResult {
  * system owns bounds. Out-of-band prices/quantities are clamped (never
  * silently accepted beyond rails); invalid disclosures are downgraded
  * to holds; the concession budget is enforced across moves.
+ *
+ * Opening-turn enforcement: on a turn where the counterpart has no
+ * standing proposal yet, disclosure-only moves (`reveal`,
+ * `request_disclosure`) are downgraded to `propose`. The disclosure
+ * gate only gates settlement; the first move of a session must put a
+ * price on the table so the round evaluator can run.
+ *
+ * Repeated-disclosure cap: a claim the actor has already asked about
+ * once is downgraded on the next attempt — the LLM gets one
+ * reciprocity window, after which it must put terms on the table.
  */
 export function validateAgentDecision(
   move: AgentDecisionMove,
@@ -559,6 +584,10 @@ export function validateAgentDecision(
 ): DecisionValidationResult {
   const { action } = move;
 
+  // ---------------------------------------------------------------------
+  // Walkaway is a no-rail terminal action; no opening-turn or repeat-cap
+  // adjustment applies.
+  // ---------------------------------------------------------------------
   if (action === "walkaway") {
     return {
       accepted: {
@@ -574,6 +603,97 @@ export function validateAgentDecision(
     };
   }
 
+  // ---------------------------------------------------------------------
+  // Disclosure moves that have no possible target (no disclosable claim
+  // for `reveal`, no outstanding required claim for `request_disclosure`)
+  // are downgraded to `hold` BEFORE the opening-turn check. Otherwise
+  // the opening-turn rule would convert a "nothing to disclose" reveal
+  // into a priced proposal, which is wrong: the LLM may still need to
+  // wait for the counterpart to propose first.
+  // ---------------------------------------------------------------------
+  if (action === "reveal" && ctx.disclosableClaims.length === 0) {
+    return {
+      accepted: restatedHold(move, ctx, "No disclosable claim available; holding instead."),
+      downgradedFrom: "reveal",
+      adjustedReason: "no_disclosable_claim",
+    };
+  }
+  if (action === "request_disclosure" && ctx.requiredClaims.length === 0) {
+    return {
+      accepted: restatedHold(
+        move,
+        ctx,
+        "No outstanding required claim to request; holding instead.",
+      ),
+      downgradedFrom: "request_disclosure",
+      adjustedReason: "no_outstanding_required_claim",
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // Opening turn: the counterpart has no standing proposal yet. Force
+  // a priced move (propose) so the round evaluator can run.
+  // `request_disclosure` and `reveal` are downgraded to `propose` here.
+  // The LLM still owns price/quantity/strategic intent inside the
+  // accepted move; we only adjust the action.
+  // ---------------------------------------------------------------------
+  const isOpeningTurn = ctx.counterpartStandingPrice === null;
+  if (isOpeningTurn && (action === "request_disclosure" || action === "reveal")) {
+    return {
+      accepted: restatedPropose(
+        move,
+        ctx,
+        "Opening turn requires a priced move; the disclosure gate only gates settlement, not proposal. Putting terms on the table.",
+      ),
+      downgradedFrom: action,
+      adjustedReason: "opening_turn_must_propose",
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // Repeated disclosure cap: track which claims have been requested in
+  // the actor's own history. `priorClaimRequests` is the cumulative set
+  // of claim types the actor has already asked the counterpart to prove
+  // on previous rounds. Asking a second time without putting terms on
+  // the table is downgraded to a `propose`.
+  // ---------------------------------------------------------------------
+  const priorRequested = ctx.priorClaimRequests ?? [];
+  if (action === "request_disclosure" && move.claimType) {
+    const repeatedRequestCount = priorRequested.filter(
+      (claim) => claim === move.claimType,
+    ).length;
+    if (repeatedRequestCount >= 1) {
+      // Already asked once; switch to proposing terms.
+      return {
+        accepted: restatedPropose(
+          move,
+          ctx,
+          `Already requested disclosure of '${move.claimType}'; putting terms on the table instead so the cross can be evaluated.`,
+        ),
+        downgradedFrom: action,
+        adjustedReason: "repeated_disclosure_request",
+      };
+    }
+  }
+  if (action === "reveal" && move.claimType) {
+    const repeatedRevealCount = priorRequested.filter(
+      (claim) => claim === move.claimType,
+    ).length;
+    if (repeatedRevealCount >= 2) {
+      // Revealed twice already; switch to proposing terms to keep the
+      // session moving.
+      return {
+        accepted: restatedPropose(
+          move,
+          ctx,
+          `Already revealed '${move.claimType}' more than once; switching to priced proposal to keep the session moving.`,
+        ),
+        downgradedFrom: action,
+        adjustedReason: "repeated_disclosure_reveal",
+      };
+    }
+  }
+
   // Disclosure moves must reference an allowed claim.
   if (action === "reveal") {
     const allowLadder = ctx.disclosableClaims;
@@ -581,26 +701,20 @@ export function validateAgentDecision(
       move.claimType && allowLadder.includes(move.claimType)
         ? move.claimType
         : allowLadder[0];
-    if (!claimType) {
-      return {
-        accepted: restatedHold(move, ctx, "No disclosable claim available; holding instead."),
-        downgradedFrom: "reveal",
-        adjustedReason: "no_disclosable_claim",
-      };
-    }
-    return {
-      accepted: {
-        action: "reveal",
-        price: roundPrice(clampPrice(move.price, ctx)),
-        quantity: roundQty(clampQuantity(move.quantity, ctx)),
-        claimType,
-        strategicIntent: move.strategicIntent ?? "build_trust",
-        confidence: clampConfidence(move.confidence),
-        escalationRequested: Boolean(move.escalationRequested),
-        settlementReadiness: move.settlementReadiness ?? "not_ready",
-        reasoning: move.reasoning,
-      },
+    const accepted: AgentDecisionMove = {
+      action: "reveal",
+      price: roundPrice(clampPrice(move.price, ctx)),
+      quantity: roundQty(clampQuantity(move.quantity, ctx)),
+      strategicIntent: move.strategicIntent ?? "build_trust",
+      confidence: clampConfidence(move.confidence),
+      escalationRequested: Boolean(move.escalationRequested),
+      settlementReadiness: move.settlementReadiness ?? "not_ready",
+      reasoning: move.reasoning,
     };
+    if (claimType !== undefined) {
+      accepted.claimType = claimType;
+    }
+    return { accepted };
   }
 
   if (action === "request_disclosure") {
@@ -608,30 +722,20 @@ export function validateAgentDecision(
       move.claimType && ctx.requiredClaims.includes(move.claimType)
         ? move.claimType
         : ctx.requiredClaims[0];
-    if (!claimType) {
-      return {
-        accepted: restatedHold(
-          move,
-          ctx,
-          "No outstanding required claim to request; holding instead.",
-        ),
-        downgradedFrom: "request_disclosure",
-        adjustedReason: "no_outstanding_required_claim",
-      };
-    }
-    return {
-      accepted: {
-        action: "request_disclosure",
-        price: roundPrice(clampPrice(move.price, ctx)),
-        quantity: roundQty(clampQuantity(move.quantity, ctx)),
-        claimType,
-        strategicIntent: move.strategicIntent ?? "request_proof",
-        confidence: clampConfidence(move.confidence),
-        escalationRequested: Boolean(move.escalationRequested),
-        settlementReadiness: move.settlementReadiness ?? "not_ready",
-        reasoning: move.reasoning,
-      },
+    const accepted: AgentDecisionMove = {
+      action: "request_disclosure",
+      price: roundPrice(clampPrice(move.price, ctx)),
+      quantity: roundQty(clampQuantity(move.quantity, ctx)),
+      strategicIntent: move.strategicIntent ?? "request_proof",
+      confidence: clampConfidence(move.confidence),
+      escalationRequested: Boolean(move.escalationRequested),
+      settlementReadiness: move.settlementReadiness ?? "not_ready",
+      reasoning: move.reasoning,
     };
+    if (claimType !== undefined) {
+      accepted.claimType = claimType;
+    }
+    return { accepted };
   }
 
   // propose | counter | accept — carry price/quantity bounded by rails.
@@ -772,6 +876,33 @@ function restatedHold(
     confidence: clampConfidence(move.confidence),
     escalationRequested: Boolean(move.escalationRequested),
     settlementReadiness: "not_ready",
+    reasoning: reason.slice(0, 280),
+  };
+}
+
+/**
+ * Restate a move as `propose` so the round evaluator has priced
+ * inputs to compare against the counterpart's standing proposal.
+ * Used to downgrade disclosure-only moves on the opening turn and
+ * after repeated disclosure requests. The LLM's price/quantity are
+ * honored within the derived band; a missing/zero price falls back
+ * to the reference price so the proposed move is in-band.
+ */
+function restatedPropose(
+  move: AgentDecisionMove,
+  ctx: NegotiationTurnContext,
+  reason: string,
+): AgentDecisionMove {
+  const proposedPrice = clampPrice(move.price, ctx);
+  const proposedQuantity = clampQuantity(move.quantity, ctx);
+  return {
+    action: "propose",
+    price: roundPrice(proposedPrice),
+    quantity: roundQty(proposedQuantity),
+    strategicIntent: move.strategicIntent ?? "open_patiently",
+    confidence: clampConfidence(move.confidence),
+    escalationRequested: Boolean(move.escalationRequested),
+    settlementReadiness: move.settlementReadiness ?? "not_ready",
     reasoning: reason.slice(0, 280),
   };
 }

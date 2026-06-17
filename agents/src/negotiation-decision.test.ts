@@ -239,6 +239,17 @@ describe("clampNegotiationDecision — price/quantity bounds", () => {
 });
 
 describe("clampNegotiationDecision — disclosure moves", () => {
+  // Disclosure moves should happen after the counterpart has put a
+  // priced proposal on the table; otherwise the shared validator
+  // downgrades them to `propose` on the opening turn. Mirror that
+  // here so the agent-side clamp matches the orchestrator's bounds.
+  const postOpeningCtx: NegotiationContext = {
+    ...baseCtx,
+    counterpartStandingPrice: 70_300,
+    counterpartStandingQuantity: 1,
+    roundNumber: 2,
+  };
+
   it("keeps a reveal when the claim is disclosable", () => {
     const out = clampNegotiationDecision(
       {
@@ -252,7 +263,7 @@ describe("clampNegotiationDecision — disclosure moves", () => {
         settlementReadiness: "near",
         reasoning: "build trust",
       },
-      baseCtx,
+      postOpeningCtx,
     );
     expect(out.action).toBe("reveal");
     expect(out.claimType).toBe("settlement_capacity");
@@ -270,15 +281,15 @@ describe("clampNegotiationDecision — disclosure moves", () => {
         strategicIntent: "build_trust",
         reasoning: "oops",
       },
-      baseCtx,
+      postOpeningCtx,
     );
     expect(out.action).toBe("reveal");
-    expect(out.claimType).toBe(baseCtx.disclosableClaims[0]);
+    expect(out.claimType).toBe(postOpeningCtx.disclosableClaims[0]);
   });
 
   it("downgrades reveal to hold when nothing is disclosable", () => {
     const noClaims: NegotiationContext = {
-      ...baseCtx,
+      ...postOpeningCtx,
       disclosableClaims: [],
     };
     const out = clampNegotiationDecision(
@@ -306,7 +317,7 @@ describe("clampNegotiationDecision — disclosure moves", () => {
         settlementReadiness: "not_ready",
         reasoning: "prove it",
       },
-      baseCtx,
+      postOpeningCtx,
     );
     expect(out.action).toBe("request_disclosure");
     expect(out.claimType).toBe("accredited_institution");
@@ -314,7 +325,7 @@ describe("clampNegotiationDecision — disclosure moves", () => {
   });
 
   it("downgrades request_disclosure to hold when nothing is required", () => {
-    const noReq: NegotiationContext = { ...baseCtx, requiredClaims: [] };
+    const noReq: NegotiationContext = { ...postOpeningCtx, requiredClaims: [] };
     const out = clampNegotiationDecision(
       {
         action: "request_disclosure",
@@ -325,6 +336,52 @@ describe("clampNegotiationDecision — disclosure moves", () => {
       noReq,
     );
     expect(out.action).toBe("hold");
+  });
+
+  it("downgrades opening-turn reveal to propose", () => {
+    const out = clampNegotiationDecision(
+      {
+        action: "reveal",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "disclose first",
+      },
+      baseCtx,
+    );
+    expect(out.action).toBe("propose");
+  });
+
+  it("downgrades opening-turn request_disclosure to propose", () => {
+    const out = clampNegotiationDecision(
+      {
+        action: "request_disclosure",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "verify first",
+      },
+      baseCtx,
+    );
+    expect(out.action).toBe("propose");
+  });
+
+  it("downgrades a second request_disclosure of the same claim to propose", () => {
+    const repeatedCtx: NegotiationContext = {
+      ...postOpeningCtx,
+      priorClaimRequests: ["accredited_institution"],
+    };
+    const out = clampNegotiationDecision(
+      {
+        action: "request_disclosure",
+        price: 70_000,
+        quantity: 1,
+        claimType: "accredited_institution",
+        reasoning: "ask again",
+      },
+      repeatedCtx,
+    );
+    expect(out.action).toBe("propose");
   });
 });
 

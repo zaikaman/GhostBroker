@@ -921,7 +921,9 @@ export class NegotiationOrchestrator {
       fromDid: input.agentDid,
       fromSide: input.actorSide,
       claimType: verified.claimType,
-      claimAssertionCiphertext: verified.assertionCiphertext,
+      claimAssertionCiphertext: verified.verified
+        ? verified.assertionCiphertext
+        : "",
       verified: verified.verified,
       t3AttestationRef: verified.t3AttestationRef,
     });
