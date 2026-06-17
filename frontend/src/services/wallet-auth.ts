@@ -40,6 +40,7 @@ export async function connectWithWallet(): Promise<WalletAuthResult> {
   const session = await apiClient.verifyAuthChallenge(
     challenge.challengeId,
     signature,
+    did,
   );
 
   return { session, address };

@@ -485,11 +485,11 @@ export const apiClient = {
     return handleResponse<AuthChallenge>(res);
   },
 
-  async verifyAuthChallenge(challengeId: string, signature: string): Promise<AuthSession> {
+  async verifyAuthChallenge(challengeId: string, signature: string, did: string): Promise<AuthSession> {
     const res = await fetch(`${API_BASE_URL}/api/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ challengeId, signature }),
+      body: JSON.stringify({ challengeId, signature, did }),
     });
     const session = await handleResponse<AuthSession>(res);
     apiClient.setAuthSession(session);
