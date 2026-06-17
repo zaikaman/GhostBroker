@@ -6,27 +6,28 @@ import '../styles/landing-v2.css';
 import { RouterProvider, Route } from './routes';
 import { useRouter } from './use-router';
 import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
-import { SecureMetric } from '../components/SecureMetric';
-import { AgentConnectionGrid } from '../components/AgentConnectionGrid';
-import { ProcessingStatusRail } from '../components/ProcessingStatusRail';
-import { LiveAgentActivityStream } from '../components/LiveAgentActivityStream';
-import { CompletedTradesTable } from '../components/CompletedTradesTable';
-import { EncryptedReceiptDrawer } from '../components/EncryptedReceiptDrawer';
-import { AuthGateway } from '../components/AuthGateway';
-import { LandingPage } from '../components/LandingPage';
-import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
-import { DepositWalletOverviewCard } from '../components/DepositWalletOverviewCard';
-import { PortfolioHistory } from '../components/PortfolioHistory';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
-import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
-import { AgentsPanel } from '../components/AgentsPanel';
-const SettingsPanel = React.lazy(async () => ({
-  default: (await import('../components/SettingsPanel')).SettingsPanel,
-}));
-import { MandateConfigForm } from '../components/MandateConfigForm';
-import { NegotiationRoomPanel } from '../components/NegotiationRoomPanel';
 import { apiClient, type AuthSession } from '../services/api-client';
+
+// Lazy-loaded tab-exclusive components — each becomes a separate chunk
+// loaded only on first navigation to the corresponding tab.
+const SecureMetric = React.lazy(async () => ({ default: (await import('../components/SecureMetric')).SecureMetric }));
+const AgentConnectionGrid = React.lazy(async () => ({ default: (await import('../components/AgentConnectionGrid')).AgentConnectionGrid }));
+const ProcessingStatusRail = React.lazy(async () => ({ default: (await import('../components/ProcessingStatusRail')).ProcessingStatusRail }));
+const LiveAgentActivityStream = React.lazy(async () => ({ default: (await import('../components/LiveAgentActivityStream')).LiveAgentActivityStream }));
+const CompletedTradesTable = React.lazy(async () => ({ default: (await import('../components/CompletedTradesTable')).CompletedTradesTable }));
+const EncryptedReceiptDrawer = React.lazy(async () => ({ default: (await import('../components/EncryptedReceiptDrawer')).EncryptedReceiptDrawer }));
+const AuthGateway = React.lazy(async () => ({ default: (await import('../components/AuthGateway')).AuthGateway }));
+const LandingPage = React.lazy(async () => ({ default: (await import('../components/LandingPage')).LandingPage }));
+const AgentDeploymentGuide = React.lazy(async () => ({ default: (await import('../components/AgentDeploymentGuide')).AgentDeploymentGuide }));
+const DepositWalletOverviewCard = React.lazy(async () => ({ default: (await import('../components/DepositWalletOverviewCard')).DepositWalletOverviewCard }));
+const PortfolioHistory = React.lazy(async () => ({ default: (await import('../components/PortfolioHistory')).PortfolioHistory }));
+const EnclaveHealthMonitor = React.lazy(async () => ({ default: (await import('../components/EnclaveHealthMonitor')).EnclaveHealthMonitor }));
+const AgentsPanel = React.lazy(async () => ({ default: (await import('../components/AgentsPanel')).AgentsPanel }));
+const SettingsPanel = React.lazy(async () => ({ default: (await import('../components/SettingsPanel')).SettingsPanel }));
+const MandateConfigForm = React.lazy(async () => ({ default: (await import('../components/MandateConfigForm')).MandateConfigForm }));
+const NegotiationRoomPanel = React.lazy(async () => ({ default: (await import('../components/NegotiationRoomPanel')).NegotiationRoomPanel }));
 
 const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSProperties }) => (
   <svg
@@ -88,7 +89,11 @@ function NegotiationMandateWrapper(): React.JSX.Element {
     );
   }
 
-  return <MandateConfigForm agentId={agentId} />;
+  return (
+    <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading mandate form…</div>}>
+      <MandateConfigForm agentId={agentId} />
+    </React.Suspense>
+  );
 }
 
 import {
@@ -233,20 +238,28 @@ function DashboardView({
         return (
           <div className="dashboard-grid-overview" style={{ animation: 'fadeIn 0.3s ease' }}>
             <div className="layout-col-1" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-              <DepositWalletOverviewCard institutionId={session.institution.id} />
-              <PortfolioHistory institutionId={session.institution.id} />
+              <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading wallet…</div>}>
+                <DepositWalletOverviewCard institutionId={session.institution.id} />
+              </React.Suspense>
+              <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading portfolio…</div>}>
+                <PortfolioHistory institutionId={session.institution.id} />
+              </React.Suspense>
             </div>
             <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               <div className="card">
-                <ProcessingStatusRail intents={intents} />
+                <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading status…</div>}>
+                  <ProcessingStatusRail intents={intents} />
+                </React.Suspense>
               </div>
               <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <LiveAgentActivityStream
-                  agents={agents}
-                  intents={intents}
-                  institutionName={session.institution.displayName}
-                  institutionDid={session.institution.t3TenantDid}
-                />
+                <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading activity stream…</div>}>
+                  <LiveAgentActivityStream
+                    agents={agents}
+                    intents={intents}
+                    institutionName={session.institution.displayName}
+                    institutionDid={session.institution.t3TenantDid}
+                  />
+                </React.Suspense>
               </div>
             </div>
           </div>
@@ -300,14 +313,20 @@ function DashboardView({
                   </button>
                 </div>
               )}
-              <AgentsPanel />
+              <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading agents panel…</div>}>
+                <AgentsPanel />
+              </React.Suspense>
             </div>
             <div className="enclaves-side" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
               <div className="card enclave-health-card" style={{ display: 'flex', flexDirection: 'column' }}>
-                <EnclaveHealthMonitor />
+                <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading health monitor…</div>}>
+                  <EnclaveHealthMonitor />
+                </React.Suspense>
               </div>
               <div className="card">
-                <AgentConnectionGrid agents={agents} onDeploy={() => handleTabChange('deploy')} />
+                <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading connections…</div>}>
+                  <AgentConnectionGrid agents={agents} onDeploy={() => handleTabChange('deploy')} />
+                </React.Suspense>
               </div>
             </div>
           </div>
@@ -320,11 +339,13 @@ function DashboardView({
               <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ScrollIcon size={18} style={{ color: 'var(--color-accent)' }} /> Completed Trades & Audit History
               </h2>
-              <CompletedTradesTable
-                trades={trades}
-                isLoading={isHistoryLoading}
-                onViewReceipt={handleViewReceipt}
-              />
+              <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading trades table…</div>}>
+                <CompletedTradesTable
+                  trades={trades}
+                  isLoading={isHistoryLoading}
+                  onViewReceipt={handleViewReceipt}
+                />
+              </React.Suspense>
             </div>
           </div>
         );
@@ -332,13 +353,17 @@ function DashboardView({
         return (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 420px) 1fr', gap: 'var(--spacing-lg)', animation: 'fadeIn 0.3s ease' }}>
             <NegotiationMandateWrapper />
-            <NegotiationRoomPanel />
+            <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading negotiation room…</div>}>
+              <NegotiationRoomPanel />
+            </React.Suspense>
           </div>
         );
       case 'deploy':
         return (
           <div style={{ animation: 'fadeIn 0.3s ease' }}>
-            <AgentDeploymentGuide session={session} onBack={() => handleTabChange('enclaves')} />
+            <React.Suspense fallback={<div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-secondary)' }}>Loading deployment guide…</div>}>
+              <AgentDeploymentGuide session={session} onBack={() => handleTabChange('enclaves')} />
+            </React.Suspense>
           </div>
         );
 
@@ -489,6 +514,7 @@ function DashboardView({
                     {activeTab === 'overview' && 'SYSTEM OVERVIEW'}
                     {activeTab === 'enclaves' && 'ACCESS CONTROL & INFRASTRUCTURE'}
                     {activeTab === 'ledger' && 'SECURE AUDIT LEDGER'}
+                    {activeTab === 'negotiations' && 'NEGOTIATION ROOM'}
                     {activeTab === 'settings' && 'SYSTEM SETTINGS'}
                   </h2>
                 </div>
@@ -556,6 +582,7 @@ function DashboardView({
           {/* Connection Status Section (Metrics Grid) - Only shown if not in deploy tab */}
           {activeTab !== 'deploy' && (
             <div className="layout-metrics" style={{ marginBottom: 'var(--spacing-lg)' }}>
+            <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading metrics…</div>}>
               <SecureMetric 
                 title="TEE Enclave Status" 
                 value={enclaveStatus === 'secure' ? 'SECURE' : enclaveStatus === 'processing' ? 'PROCESSING' : 'ERROR'} 
@@ -577,7 +604,8 @@ function DashboardView({
                 subtext="Smart Contract Broker Link"
                 icon={sandboxStatus === 'connected' ? <Link01Icon size={16} /> : <AlertCircleIcon size={16} />}
               />
-            </div>
+            </React.Suspense>
+          </div>
           )}
 
           {/* System Error Notification Banner */}
@@ -608,14 +636,16 @@ function DashboardView({
       </div>
 
       {/* Encrypted Audit Receipt Drawer */}
-      <EncryptedReceiptDrawer
-        receiptId={selectedReceiptId}
-        isOpen={isDrawerOpen}
-        onClose={handleCloseDrawer}
-        receipt={receipt}
-        isLoading={isReceiptLoading}
-        error={receiptError}
-      />
+      <React.Suspense fallback={null}>
+        <EncryptedReceiptDrawer
+          receiptId={selectedReceiptId}
+          isOpen={isDrawerOpen}
+          onClose={handleCloseDrawer}
+          receipt={receipt}
+          isLoading={isReceiptLoading}
+          error={receiptError}
+        />
+      </React.Suspense>
     </div>
   );
 }
@@ -641,7 +671,7 @@ function AppContent({
   return (
     <>
       <Route path="/" element={
-        session ? null : <LandingPage onLaunch={() => navigate('/auth')} />
+        session ? null : <React.Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>Loading…</div>}><LandingPage onLaunch={() => navigate('/auth')} /></React.Suspense>
       } />
       
       <Route path="/auth" element={
@@ -662,10 +692,12 @@ function AppContent({
             >
               &larr; Back to Landing
             </button>
-            <AuthGateway onAuthenticated={(newSession) => {
-              setSession(newSession);
-              navigate('/dashboard');
-            }} />
+            <React.Suspense fallback={<div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>Loading authentication…</div>}>
+              <AuthGateway onAuthenticated={(newSession) => {
+                setSession(newSession);
+                navigate('/dashboard');
+              }} />
+            </React.Suspense>
           </div>
         )
       } />
