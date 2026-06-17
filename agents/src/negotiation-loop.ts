@@ -364,10 +364,22 @@ export async function runNegotiationLoop(
 
     let decision: NegotiationDecision;
     try {
-      decision = await llm.decide(ctx);
+      // Retry transient Groq failures (empty completions, malformed
+      // JSON, schema validation noise) a couple of times before
+      // burning the rest of the tick on `POLL_INTERVAL_MS` of sleep.
+      // A single bad response should not cost the agent 15s of
+      // progress against a 10-minute deadline.
+      decision = await withRetries(() => llm.decide(ctx), {
+        maxAttempts: 3,
+        retryDelayMs: 750,
+        onAttempt: (attempt, err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          log(side, `Negotiation LLM attempt ${attempt} failed: ${message}`);
+        },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log(side, `Negotiation LLM call failed: ${message}`);
+      log(side, `Negotiation LLM call failed after retries: ${message}`);
       lastOutcome = `llm failed: ${message.slice(0, 80)}`;
       await sleep(env.POLL_INTERVAL_MS);
       continue;
@@ -614,6 +626,38 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+export interface RetryOptions {
+  maxAttempts: number;
+  retryDelayMs: number;
+  onAttempt?: (attempt: number, err: unknown) => void;
+}
+
+/**
+ * Run an async function with a small retry budget. The Groq API
+ * occasionally returns an empty completion, a non-JSON response, or
+ * a response that trips Zod validation; those are transient from
+ * the agent's point of view, and a single failure should not cost
+ * the agent a full `POLL_INTERVAL_MS` tick.
+ */
+export async function withRetries<T>(
+  fn: () => Promise<T>,
+  options: RetryOptions,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= options.maxAttempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      options.onAttempt?.(attempt, err);
+      if (attempt < options.maxAttempts) {
+        await sleep(options.retryDelayMs);
+      }
+    }
+  }
+  throw lastError;
+}
+
 function formatError(err: unknown): string {
   if (err instanceof GhostBrokerApiError) {
     return `${err.status} ${err.code} ${err.message}`;
@@ -650,14 +694,19 @@ export function isActionableSessionStatus(
  *   - When `sessionId` is undefined (our ticket was sealed but the
  *     orchestrator had no partner yet, so it parked us in
  *     `pendingTickets`), pick the most recent session we are a
- *     participant in that is still in an actionable state.
+ *     participant in that is still in an actionable state AND whose
+ *     deadline has not yet passed.
  *
  * Critically, we must NOT blindly take `sessions[0]` in the second
  * case: the listed surface includes stale sessions from earlier
- * runs (e.g. an `expired` session from a previous negotiation).
- * Returning one of those would cause the agent to immediately exit
- * with `expired`/`walked_away`/`settled` and abandon the freshly
- * submitted ticket before the orchestrator ever pairs it.
+ * runs. Returning one of those would cause the agent to immediately
+ * exit with `expired`/`walked_away`/`settled` and abandon the freshly
+ * submitted ticket before the orchestrator ever pairs it. Worse,
+ * a prior session whose `status` is still `active` in the database
+ * (because the previous run never called `submitMove` after the
+ * deadline, so `expireSession` was never invoked) would slip past a
+ * status-only filter — its `deadline` is the only reliable signal
+ * that it is dead.
  *
  * Returns `null` when no actionable session is visible — the caller
  * should keep polling for the orchestrator to pair the pending
@@ -666,9 +715,16 @@ export function isActionableSessionStatus(
 export function pickLiveSession(
   sessions: readonly RedactedNegotiationSessionView[],
   sessionId: string | undefined,
+  now: number = Date.now(),
 ): RedactedNegotiationSessionView | null {
   if (sessionId !== undefined) {
     return sessions.find((item) => item.id === sessionId) ?? null;
   }
-  return sessions.find((item) => isActionableSessionStatus(item.status)) ?? null;
+  return (
+    sessions.find(
+      (item) =>
+        isActionableSessionStatus(item.status) &&
+        Date.parse(item.deadline) > now,
+    ) ?? null
+  );
 }

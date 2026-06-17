@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { negotiationDecisionSchema } from "./negotiation-decision.js";
+import {
+  negotiationDecisionSchema,
+  SYSTEM_PROMPT,
+} from "./negotiation-decision.js";
 import {
   buildTurnContext,
   deriveExecutionRails,
@@ -137,6 +140,29 @@ describe("negotiationDecisionSchema", () => {
     expect(parsed.action).toBe("hold");
     expect(parsed.strategicIntent).toBeUndefined();
     expect(parsed.confidence).toBeUndefined();
+  });
+
+  it("normalises explicit null on optional fields to undefined", () => {
+    // The LLM sometimes emits `null` for absent optional fields
+    // instead of omitting them. The schema should accept that and
+    // surface undefined so downstream code does not have to special-
+    // case null vs missing.
+    const parsed = negotiationDecisionSchema.parse({
+      action: "propose",
+      price: 70_000,
+      quantity: 1,
+      claimType: null,
+      strategicIntent: null,
+      confidence: null,
+      escalationRequested: null,
+      settlementReadiness: null,
+      reasoning: "no extras",
+    });
+    expect(parsed.claimType).toBeUndefined();
+    expect(parsed.strategicIntent).toBeUndefined();
+    expect(parsed.confidence).toBeUndefined();
+    expect(parsed.escalationRequested).toBeUndefined();
+    expect(parsed.settlementReadiness).toBeUndefined();
   });
 });
 
@@ -405,5 +431,104 @@ describe("clampNegotiationDecision — walkaway", () => {
     expect(out.quantity).toBe(0);
     expect(out.strategicIntent).toBe("walkaway");
     expect(out.confidence).toBe(0);
+  });
+});
+
+describe("SYSTEM_PROMPT — response schema and examples", () => {
+  // These tests pin the structural promises the prompt makes to the
+  // LLM. A future edit that drops the JSON Schema, removes the worked
+  // examples, or accidentally reintroduces placeholder syntax should
+  // fail loudly here, not at 3am via a malformed LLM response in prod.
+  it("publishes a real JSON Schema for the response shape", () => {
+    expect(SYSTEM_PROMPT).toMatch(/"type":\s*"object"/u);
+    expect(SYSTEM_PROMPT).toMatch(/"required":\s*\[[^\]]*"action"[^\]]*"price"[^\]]*"quantity"[^\]]*"reasoning"[^\]]*\]/u);
+    expect(SYSTEM_PROMPT).toMatch(/"additionalProperties":\s*false/u);
+    // enum values must be present (the prompt has them as an inline
+    // JSON array). Match leniently on whitespace.
+    expect(SYSTEM_PROMPT).toMatch(/"enum":\s*\[\s*"propose"/u);
+  });
+
+  it("lists every action enum value that the parser accepts", () => {
+    for (const action of [
+      "propose",
+      "counter",
+      "reveal",
+      "request_disclosure",
+      "accept",
+      "hold",
+      "walkaway",
+    ]) {
+      expect(SYSTEM_PROMPT, `missing action in prompt: ${action}`).toContain(`"${action}"`);
+    }
+  });
+
+  it("includes at least one fully-populated worked example", () => {
+    // The LLM is much more reliable when the few-shot example shows
+    // every field filled in. Make sure the prompt still has one.
+    //
+    // The example block runs from the "═══\nWORKED EXAMPLE" header
+    // down to the next "═══" banner that introduces a new top-level
+    // section (ACTIONS / RULES / FORMATTING / the trailing backticks).
+    const examplePattern =
+      /WORKED EXAMPLE[\s\S]*?(?=\n═{10,}\n(?:ACTIONS|RULES|FORMATTING|RESPONSE SCHEMA|═{10,}$))/gu;
+    const exampleBlocks = SYSTEM_PROMPT.match(examplePattern);
+    expect(exampleBlocks).not.toBeNull();
+    expect(exampleBlocks?.length ?? 0).toBeGreaterThanOrEqual(1);
+    const firstExample = exampleBlocks?.[0] ?? "";
+    // The example must demonstrate the optional fields populated
+    // (strategicIntent, confidence, escalationRequested,
+    // settlementReadiness) so the LLM does not infer they should
+    // be emitted as null.
+    for (const field of [
+      '"action"',
+      '"price"',
+      '"quantity"',
+      '"strategicIntent"',
+      '"confidence"',
+      '"escalationRequested"',
+      '"settlementReadiness"',
+      '"reasoning"',
+    ]) {
+      expect(firstExample, `example missing field ${field}`).toContain(field);
+    }
+    // The first example should be the opening-turn "propose" so the
+    // model sees the most common case first.
+    expect(firstExample).toContain("WORKED EXAMPLE 1");
+    expect(firstExample).toContain('"action": "propose"');
+  });
+
+  it("forbids the LLM from emitting null for absent optional fields", () => {
+    // The original placeholder "Output exactly:" block showed
+    // "<optional claim type>" which qwen3-32b was misreading as
+    // "emit null when absent". The replacement prompt must be
+    // explicit that absent means omitted, not null.
+    expect(SYSTEM_PROMPT.toLowerCase()).toContain("omit the key");
+    expect(SYSTEM_PROMPT.toLowerCase()).toMatch(/do not emit null/u);
+    // And it must not still contain the misleading placeholder
+    // syntax that was the original bug.
+    expect(SYSTEM_PROMPT).not.toMatch(/<optional claim type>/u);
+    expect(SYSTEM_PROMPT).not.toMatch(/<0\.0 to 1\.0>/u);
+    expect(SYSTEM_PROMPT).not.toMatch(/<=/u);
+  });
+
+  it("forbids markdown code fences around the JSON", () => {
+    // extractJsonObject strips fences, but explicitly telling the
+    // LLM not to use them reduces the chance of exotic
+    // pre/post-text slipping through.
+    expect(SYSTEM_PROMPT.toLowerCase()).toContain("no code fences");
+    expect(SYSTEM_PROMPT.toLowerCase()).toContain("not wrap the json");
+  });
+
+  it("keeps the three rules that have caused the most agent misbehaviour", () => {
+    // The opening-turn rule is what stops the LLM from emitting
+    // a disclosure on round 1 (which the validator then has to
+    // downgrade).
+    expect(SYSTEM_PROMPT).toContain("OPENING-TURN RULE");
+    // The disclosure-gate rule is what stops the LLM from holding
+    // indefinitely waiting for a claim that is not required.
+    expect(SYSTEM_PROMPT).toContain("DISCLOSURE-GATE RULE");
+    // The trust-first budget rule is what stops the LLM from
+    // spending 12 rounds on disclosures.
+    expect(SYSTEM_PROMPT).toContain("TRUST-FIRST BUDGET");
   });
 });
