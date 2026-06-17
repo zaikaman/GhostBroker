@@ -946,7 +946,13 @@ export class NegotiationOrchestrator {
       claimCredential: input.claimCredential,
     });
 
-    const disclosure = await this.repository.appendDisclosure({
+    // Persist the disclosure row (assertion ciphertext + attestation
+    // ref live there) and then append the round that references it.
+    // The round's `disclosedClaimRefs` stores the claim type so the
+    // shared validator's "no repeated reveal of the same claim" cap
+    // and the agent-side `priorClaimRequests` history can match
+    // reveals across rounds.
+    await this.repository.appendDisclosure({
       sessionId: input.session.id,
       fromDid: input.agentDid,
       fromSide: input.actorSide,
@@ -964,7 +970,7 @@ export class NegotiationOrchestrator {
       actorDid: input.agentDid,
       actorSide: input.actorSide,
       moveType: "reveal",
-      disclosedClaimRefs: [disclosure.id],
+      disclosedClaimRefs: [verified.claimType],
       reasoning: input.move.reasoning,
       strategicIntent: input.move.strategicIntent ?? "build_trust",
       confidence: input.move.confidence ?? null,

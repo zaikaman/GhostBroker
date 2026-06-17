@@ -497,6 +497,84 @@ describe("SYSTEM_PROMPT — response schema and examples", () => {
     expect(firstExample).toContain('"action": "propose"');
   });
 
+  it("regression: worked example 1 anchors its price at min_price, not above", () => {
+    // qwen3-32b over-fits to the example price and was treating the
+    // example's 10002 as its own min, which prevented crossing when
+    // the counterpart was sitting exactly at the real min (10000).
+    // The example must demonstrate bidding AT min_price.
+    // Match from the example header through the closing brace of the
+    // JSON object so the assertion can see the price line.
+    const example1Block =
+      SYSTEM_PROMPT.match(/WORKED EXAMPLE 1[\s\S]*?\n\}/u)?.[0] ?? "";
+    expect(example1Block).toContain("WORKED EXAMPLE 1");
+    // The opening example must show price equal to the stated
+    // min_price in the example's hypothetical header.
+    expect(example1Block).toMatch(/min_price=10000/u);
+    expect(example1Block).toContain('"price": 10000');
+    // And the reasoning must explicitly call out bidding AT min_price
+    // (not "inside the band" or "at 10002") so the LLM cannot
+    // re-anchor to a premium.
+    expect(example1Block.toLowerCase()).toContain("at min_price");
+    // Guard against regression to the old anchor price.
+    expect(example1Block).not.toContain('"price": 10002');
+  });
+
+  it("publishes a CRITICAL REMINDER that example prices are illustrative", () => {
+    // Without this block, qwen3-32b copies the example's price
+    // verbatim regardless of its actual context values.
+    expect(SYSTEM_PROMPT).toContain("CRITICAL REMINDER");
+    expect(SYSTEM_PROMPT.toLowerCase()).toContain("illustrative");
+    expect(SYSTEM_PROMPT).toContain("Do NOT copy");
+  });
+
+  it("publishes the price-anchoring strategy rules", () => {
+    // These three rules are what stops the LLM from over-bidding and
+    // walking away from feasible crosses.
+    expect(SYSTEM_PROMPT).toContain("OPENING-BID RULE");
+    expect(SYSTEM_PROMPT).toContain("WALK-AWAY VERIFICATION");
+    expect(SYSTEM_PROMPT).toContain("PATIENCE RULE");
+    expect(SYSTEM_PROMPT).toContain("CROSS-FEASIBILITY CHECK");
+    // And the rules must say what they actually require.
+    const openingBidBlock = SYSTEM_PROMPT.match(
+      /OPENING-BID RULE\.[\s\S]*?(?=\n\d+\. [A-Z]|$)/u,
+    )?.[0] ?? "";
+    expect(openingBidBlock.toLowerCase()).toContain("min_price");
+    const walkAwayBlock = SYSTEM_PROMPT.match(
+      /WALK-AWAY VERIFICATION\.[\s\S]*?(?=\n\d+\. [A-Z]|$)/u,
+    )?.[0] ?? "";
+    expect(walkAwayBlock).toContain("priced move");
+    expect(walkAwayBlock).toContain("min_price");
+  });
+
+  it("regression: cross-feasibility rule does NOT use the inverted min_price check", () => {
+    // The earlier version of this rule said:
+    //   "If counterpart_standing_price >= min_price, the cross is feasible."
+    // That is the wrong axis for buy-side agents. A buy-side mandate's
+    // min_price == referencePrice, and the sell-side counterpart's ask
+    // is always in [walkawayMin, referencePrice] — so counterpart_standing_price
+    // is always <= the buyer's min_price. The old rule therefore told
+    // the buyer that no sell-side offer was ever feasible, which caused
+    // the agent to walk away from perfectly good crosses.
+    //
+    // The correct rule: a cross is feasible whenever the counterpart
+    // has priced, because the derived bands are constructed so the
+    // counterpart's price is always inside the agent's own band.
+    const crossBlock = SYSTEM_PROMPT.match(
+      /CROSS-FEASIBILITY CHECK[\s\S]*?(?=\n\d+\. [A-Z]|$)/u,
+    )?.[0] ?? "";
+    expect(crossBlock).toContain("CROSS-FEASIBILITY CHECK");
+    // The new rule must say the cross is feasible when the counterpart
+    // has priced, and must tell the agent to accept.
+    expect(crossBlock).toMatch(
+      /when counterpart_standing_price is set[\s\S]*cross IS feasible/u,
+    );
+    expect(crossBlock).toContain('action="accept"');
+    // And it must not regress to the old "counterpart >= min_price" check.
+    expect(crossBlock).not.toMatch(
+      /counterpart_standing_price\s*>=\s*min_price/u,
+    );
+  });
+
   it("forbids the LLM from emitting null for absent optional fields", () => {
     // The original placeholder "Output exactly:" block showed
     // "<optional claim type>" which qwen3-32b was misreading as
@@ -505,10 +583,14 @@ describe("SYSTEM_PROMPT — response schema and examples", () => {
     expect(SYSTEM_PROMPT.toLowerCase()).toContain("omit the key");
     expect(SYSTEM_PROMPT.toLowerCase()).toMatch(/do not emit null/u);
     // And it must not still contain the misleading placeholder
-    // syntax that was the original bug.
+    // syntax that was the original bug. Note: the prompt may use
+    // `<=` as a legitimate comparison operator in the rules
+    // (e.g. "SELL ask <= referencePrice"), so we only forbid the
+    // specific placeholder forms, not the operator itself.
     expect(SYSTEM_PROMPT).not.toMatch(/<optional claim type>/u);
     expect(SYSTEM_PROMPT).not.toMatch(/<0\.0 to 1\.0>/u);
-    expect(SYSTEM_PROMPT).not.toMatch(/<=/u);
+    expect(SYSTEM_PROMPT).not.toMatch(/<=\s*4000\s*chars/u);
+    expect(SYSTEM_PROMPT).not.toMatch(/<=\s*280\s*chars/u);
   });
 
   it("forbids markdown code fences around the JSON", () => {
