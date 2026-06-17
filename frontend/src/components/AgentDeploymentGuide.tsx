@@ -208,42 +208,34 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     [selectedAgentMandates, selectedHostedRecord, selectedMandateId],
   );
 
+  // Unified mandate selection: prefer hosted record's configured mandate, fall back to first
+  // available mandate for the selected agent, and re-validate when agent/mandates change.
+  // Combines two previous effects that had a circular dependency via selectedMandate → selectedMandateId.
   useEffect(() => {
     if (selectedHostedRecord?.config?.mandateId) {
       setSelectedMandateId(selectedHostedRecord.config.mandateId);
       return;
     }
-    if (selectedAgentMandates[0]?.id) {
-      const firstMandate = selectedAgentMandates[0];
-      if (firstMandate) {
-        setSelectedMandateId((current) => current || firstMandate.id);
-      }
-      return;
-    }
-    if (selectedMandate?.id) {
-      setSelectedMandateId(selectedMandate.id);
-      return;
-    }
-    setSelectedMandateId('');
-  }, [selectedAgentMandates, selectedHostedRecord, selectedMandate]);
 
-  useEffect(() => {
     if (!selectedAgentId) {
       setSelectedMandateId('');
       return;
     }
-    const mandates = mandatesByAgentId[selectedAgentId] ?? [];
-    if (mandates.length === 0) {
+
+    if (selectedAgentMandates.length === 0) {
       setSelectedMandateId('');
       return;
     }
-    if (!mandates.some((mandate) => mandate.id === selectedMandateId)) {
-      const firstMandate = mandates[0];
-      if (firstMandate) {
-        setSelectedMandateId(firstMandate.id);
+
+    // Extract before the closure so TypeScript can narrow the type
+    const firstMandate = selectedAgentMandates[0]!;
+    setSelectedMandateId((current) => {
+      if (selectedAgentMandates.some((m) => m.id === current)) {
+        return current;
       }
-    }
-  }, [mandatesByAgentId, selectedAgentId, selectedMandateId]);
+      return firstMandate.id;
+    });
+  }, [selectedAgentId, selectedAgentMandates, selectedHostedRecord?.config?.mandateId]);
 
   useEffect(() => {
     if (selectedHostedRecord?.config) {
