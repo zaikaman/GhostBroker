@@ -156,17 +156,19 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     setIsSavingPolicy(true);
     setPolicyError(null);
     try {
-      const policy: Record<string, unknown> = {
+      const policy: {
+        maxSpendUsd: number;
+        allowedCategories: string[];
+        approverEmail?: string;
+        purpose?: string;
+        validityMonths?: number;
+      } = {
         maxSpendUsd,
         allowedCategories,
         validityMonths,
+        ...(approverEmail.trim() ? { approverEmail: approverEmail.trim() } : {}),
+        ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
       };
-      if (approverEmail.trim()) {
-        policy.approverEmail = approverEmail.trim();
-      }
-      if (purpose.trim()) {
-        policy.purpose = purpose.trim();
-      }
       await apiClient.mintDelegation(editingAgent.id, policy);
       setEditingAgent(null);
       await loadAgents();
@@ -205,6 +207,12 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   const totalPages = Math.ceil(agents.length / itemsPerPage);
   const activePage = Math.min(currentPage, Math.max(1, totalPages));
   const paginatedAgents = agents.slice((activePage - 1) * itemsPerPage, activePage * itemsPerPage);
+
+  // Extract envelope keys from institution metadata with proper typing.
+  const meta = institution?.metadata as Record<string, unknown> | undefined;
+  const envelopeKeys = meta?.envelopeKeys as Record<string, unknown> | undefined;
+  const hiddenIntentKey = envelopeKeys?.hidden_intent as Record<string, unknown> | undefined;
+  const receiptKey = envelopeKeys?.receipt as Record<string, unknown> | undefined;
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 'var(--spacing-lg)', minHeight: '600px' }}>
@@ -438,20 +446,20 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                         <div>
                           <span style={{ color: 'var(--color-text-muted)' }}>Version:</span>{' '}
                           <code style={{ color: 'var(--color-accent)' }}>
-                            {institution.metadata?.envelopeKeys?.hidden_intent?.keyVersion?.slice(0, 32) || 'hidden_intent:static-genesis-v1'}...
+                            {(hiddenIntentKey?.keyVersion as string | undefined)?.slice(0, 32) || 'hidden_intent:static-genesis-v1'}...
                           </code>
                         </div>
                         <div>
                           <span style={{ color: 'var(--color-text-muted)' }}>Key Reference:</span>{' '}
                           <code style={{ color: 'var(--color-text-primary)' }}>
-                            {institution.metadata?.envelopeKeys?.hidden_intent?.publicKeyRef?.slice(0, 24) || 't3-key:genesis-ref'}...
+                            {(hiddenIntentKey?.publicKeyRef as string | undefined)?.slice(0, 24) || 't3-key:genesis-ref'}...
                           </code>
                         </div>
                         <div>
                           <span style={{ color: 'var(--color-text-muted)' }}>Last Rotated:</span>{' '}
                           <span style={{ color: 'var(--color-text-secondary)' }}>
-                            {institution.metadata?.envelopeKeys?.hidden_intent?.createdAt 
-                              ? new Date(institution.metadata.envelopeKeys.hidden_intent.createdAt).toLocaleString() 
+                            {hiddenIntentKey?.createdAt 
+                              ? new Date(hiddenIntentKey.createdAt as string).toLocaleString() 
                               : 'System Initialization'}
                           </span>
                         </div>
@@ -471,20 +479,20 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                         <div>
                           <span style={{ color: 'var(--color-text-muted)' }}>Version:</span>{' '}
                           <code style={{ color: 'var(--color-accent)' }}>
-                            {institution.metadata?.envelopeKeys?.receipt?.keyVersion?.slice(0, 32) || 'receipt:static-genesis-v1'}...
+                            {(receiptKey?.keyVersion as string | undefined)?.slice(0, 32) || 'receipt:static-genesis-v1'}...
                           </code>
                         </div>
                         <div>
                           <span style={{ color: 'var(--color-text-muted)' }}>Key Reference:</span>{' '}
                           <code style={{ color: 'var(--color-text-primary)' }}>
-                            {institution.metadata?.envelopeKeys?.receipt?.publicKeyRef?.slice(0, 24) || 't3-key:genesis-ref'}...
+                            {(receiptKey?.publicKeyRef as string | undefined)?.slice(0, 24) || 't3-key:genesis-ref'}...
                           </code>
                         </div>
                         <div>
                           <span style={{ color: 'var(--color-text-muted)' }}>Last Rotated:</span>{' '}
                           <span style={{ color: 'var(--color-text-secondary)' }}>
-                            {institution.metadata?.envelopeKeys?.receipt?.createdAt 
-                              ? new Date(institution.metadata.envelopeKeys.receipt.createdAt).toLocaleString() 
+                            {receiptKey?.createdAt 
+                              ? new Date(receiptKey.createdAt as string).toLocaleString() 
                               : 'System Initialization'}
                           </span>
                         </div>

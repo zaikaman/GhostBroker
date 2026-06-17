@@ -21,7 +21,9 @@ import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
 import { AgentsPanel } from '../components/AgentsPanel';
-import { SettingsPanel } from '../components/SettingsPanel';
+const SettingsPanel = React.lazy(async () => ({
+  default: (await import('../components/SettingsPanel')).SettingsPanel,
+}));
 import { MandateConfigForm } from '../components/MandateConfigForm';
 import { NegotiationRoomPanel } from '../components/NegotiationRoomPanel';
 import { apiClient, type AuthSession } from '../services/api-client';
@@ -343,7 +345,9 @@ function DashboardView({
       case 'settings':
         return (
           <div style={{ animation: 'fadeIn 0.3s ease' }}>
-            <SettingsPanel session={session} />
+            <React.Suspense fallback={<div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-secondary)' }}>Loading settings…</div>}>
+              <SettingsPanel session={session} />
+            </React.Suspense>
           </div>
         );
 
