@@ -37,6 +37,18 @@ interface InsertQuery<TResult> {
   };
 }
 
+interface DeleteResult {
+  error: Error | null;
+}
+
+interface DeleteQuery {
+  delete(): {
+    eq(column: string, value: string): {
+      eq(column: string, value: string): Promise<DeleteResult>;
+    };
+  };
+}
+
 interface UpdateQuery<TResult> {
   update(value: Record<string, unknown>): {
     eq(column: string, value: string): {
@@ -50,7 +62,8 @@ interface UpdateQuery<TResult> {
 interface SupabaseNegotiationClient {
   from(table: "negotiation_mandates"): InsertQuery<NegotiationMandateRecord> &
     SelectQuery<NegotiationMandateRecord> &
-    UpdateQuery<NegotiationMandateRecord>;
+    UpdateQuery<NegotiationMandateRecord> &
+    DeleteQuery;
   from(table: "negotiation_sessions"): InsertQuery<NegotiationSessionRecord> &
     SelectQuery<NegotiationSessionRecord> &
     UpdateQuery<NegotiationSessionRecord>;
@@ -217,6 +230,25 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     input: CreateMandateRepositoryInput,
   ): Promise<NegotiationMandate> {
     const { authored, rails, legacy } = input;
+
+    // Replace semantics: delete any existing mandates for this agent
+    // so the insert below does not collide with the
+    // `uniq_negotiation_mandates_agent_active` unique constraint.
+    // The UI presents this as "Author / Replace Mandate".
+    const existing = await this.listMandatesByAgent(
+      input.institutionId,
+      input.agentId,
+    );
+    if (existing.length > 0) {
+      const { error: deleteError } = await this.client
+        .from("negotiation_mandates")
+        .delete()
+        .eq("agent_id", input.agentId)
+        .eq("institution_id", input.institutionId);
+      if (deleteError) {
+        throw new PublicError("service_unavailable", 503, deleteError);
+      }
+    }
 
     // Resolve the persisted row. The authored policy is primary; the
     // derived rails feed the legacy numeric columns so the enclave/
