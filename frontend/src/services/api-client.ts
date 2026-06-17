@@ -6,23 +6,7 @@ export interface HealthResponse {
 export interface CreateInstitutionRequest {
   legalName: string;
   displayName: string;
-  /**
-   * WS3: settlement profile ref. One of:
-   *   - `wallet:default`            — noop rail (system default)
-   *   - `chain:sepolia:erc20`       — Sepolia ERC-20 chain rail
-   *   - `custody:<partner>`         — future custody rail
-   *   - `settlement-profile:<name>`  — legacy free-form (back-compat)
-   *
-   * The chain rail requires `metadata.depositAddress` and
-   * `metadata.tokenAddresses` (a `Record<assetCode, address>`
-   * map). The backend's Zod schema validates this.
-   */
   settlementProfileRef: string;
-  /**
-   * WS3: per-rail config. For the chain rail, the
-   * `depositAddress` and `tokenAddresses` fields are
-   * required. For other rails, the field is free-form.
-   */
   metadata?: Record<string, unknown>;
 }
 
@@ -79,14 +63,6 @@ export interface Institution {
 export interface AdmitAgentRequest {
   institutionId: string;
   agentDid: string;
-  /**
-   * Post-Phase 1: the delegation VC is owned by the
-   * backend. The dashboard mints + persists the VC on
-   * the agent record at "Configure Agent" time; the
-   * agent process never holds or sends the VC. The
-   * optional field is kept for forward-compat
-   * (custom integrations, E2E tests).
-   */
   delegationCredential?: unknown;
 }
 
@@ -107,11 +83,37 @@ export interface Agent {
   updatedAt: string;
 }
 
+export interface ProvisionAgentPolicy {
+  maxSpendUsd: number;
+  allowedCategories: Array<'office-supplies' | 'software' | 'hardware' | 'services' | 'travel'>;
+  approverEmail?: string;
+  purpose?: string;
+  validityMonths?: number;
+}
+
+export interface ProvisionAgentRequest {
+  institutionId: string;
+  label?: string;
+  agentDid?: string;
+  policy: ProvisionAgentPolicy;
+}
+
 export interface AgentAdmission {
   id?: string;
   agentDid: string;
   status: 'admitted' | 'rejected';
   authorityRef: string;
+}
+
+export interface ProvisionAgentResponse {
+  agent: Agent;
+  admission: {
+    id?: string;
+    agentDid: string;
+    status: 'admitted';
+    authorityRef: string;
+  };
+  policyHash: string;
 }
 
 export interface AuthChallenge {
@@ -151,18 +153,8 @@ export interface CompletedTrade {
   settledAt: string;
   settlementStatus: 'settled' | 'failed' | 'reversed';
   receiptIds: string[];
-  /**
-   * WS1: rail transport proof fields. For the noop rail
-   * the values are `null` (no external transport). For
-   * the chain rail the values are the contract id and
-   * the on-chain tx hash.
-   */
   railId: string | null;
   railTradeRef: string | null;
-  /**
-   * WS1: mirrors `settlementStatus` for symmetry. `null`
-   * for pre-WS1 rows.
-   */
   railState: 'settled' | 'failed' | 'reversed' | null;
 }
 
@@ -198,20 +190,9 @@ export interface AuditReceipt {
   t3AttestationRef: string;
 }
 
-export type HostedAgentPreset = 'buyer' | 'seller' | 'custom';
-
 export interface HostedAgentConfig {
-  mode: HostedAgentPreset;
-  label: string;
-  side: 'buy' | 'sell';
-  assetCode: string;
-  quoteAssetCode: string;
-  operatorPrompt: string;
-  referencePrice: number;
-  priceBandBps: number;
-  quantityMin: number;
-  quantityMax: number;
-  tickIntervalMs: number;
+  mandateId: string;
+  pollIntervalMs: number;
   maxTicks: number;
   dryRun: boolean;
   groqModel?: string;
@@ -229,14 +210,36 @@ export interface HostedAgentRuntimeStatus {
   logTail: string;
 }
 
+export interface NegotiationMandateSummary {
+  id: string;
+  assetCode: string;
+  side: 'buy' | 'sell';
+  targetQuantity: string;
+  referencePrice: string;
+  priceBandBps: number;
+  maxNotional: string;
+  urgency: 'low' | 'normal' | 'high' | 'critical';
+  deadline: string;
+  disclosableClaims: string[];
+  requiredCounterpartyClaims: Record<string, unknown>;
+  counterpartyConstraints: Record<string, unknown>;
+  operatorPrompt: string;
+  policyHash: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface HostedAgentRecord {
   agent: Agent;
-  config: HostedAgentConfig;
+  config: HostedAgentConfig | null;
   runtime: HostedAgentRuntimeStatus;
+  mandate: NegotiationMandateSummary | null;
+  migrationState: 'ready' | 'needs_migration';
 }
 
 export interface CreateHostedAgentRequest {
   institutionId: string;
+  agentId: string;
   config: HostedAgentConfig;
   startOnCreate?: boolean;
 }
@@ -261,36 +264,23 @@ export class ApiClientError extends Error {
     this.name = 'ApiClientError';
     this.status = status;
     this.code = code;
-    // Maintains proper stack trace for where our error was thrown (only available on V8)
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, ApiClientError);
-    }
   }
 }
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
-
 const AUTH_TOKEN_KEY = 'ghostbroker-auth-token';
 const AUTH_SESSION_KEY = 'ghostbroker-auth-session';
 
 const getOperatorHeaders = (): Record<string, string> => {
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
   if (token) {
-    return {
-      Authorization: `Bearer ${token}`,
-    };
+    return { Authorization: `Bearer ${token}` };
   }
-
-  // No valid bearer token available. Sending the operator identity headers
-  // without a real signed JWT would always result in a 401 from the backend.
-  // Return an empty header map so the request fails fast with a clear,
-  // unauthenticated error instead of looping on a stale token.
   return {};
 };
 
 function buildOperatorRequestInit(init: RequestInit = {}): RequestInit {
   const headers: Record<string, string> = {};
-
   if (init.headers) {
     if (init.headers instanceof Headers) {
       init.headers.forEach((value, key) => {
@@ -304,31 +294,20 @@ function buildOperatorRequestInit(init: RequestInit = {}): RequestInit {
       Object.assign(headers, init.headers);
     }
   }
-
-  headers['Accept'] = headers['Accept'] ?? 'application/json';
-
+  headers.Accept = headers.Accept ?? 'application/json';
   for (const [key, value] of Object.entries(getOperatorHeaders())) {
     headers[key] = value;
   }
-
-  return {
-    ...init,
-    headers,
-  };
+  return { ...init, headers };
 }
 
-async function requestWithOperatorFallback(
-  input: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function requestWithOperatorFallback(input: string, init: RequestInit = {}): Promise<Response> {
   const performFetch = () => fetch(input, buildOperatorRequestInit(init));
   let response = await performFetch();
-
   if (response.status === 401 && localStorage.getItem(AUTH_TOKEN_KEY)) {
     apiClient.clearAuthSession();
     response = await performFetch();
   }
-
   return response;
 }
 
@@ -336,7 +315,6 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let errorCode: RedactedErrorCode | 'request_failed' = 'request_failed';
     let errorMessage = `HTTP error! Status: ${response.status}`;
-    
     try {
       const errorData = await response.json() as Partial<RedactedError>;
       if (errorData && typeof errorData.code === 'string') {
@@ -346,7 +324,6 @@ async function handleResponse<T>(response: Response): Promise<T> {
         errorMessage = errorData.message;
       }
     } catch {
-      // Body is not JSON, fallback to generic messages based on status
       if (response.status === 403) {
         errorCode = 'authorization_failed';
         errorMessage = 'Authorization failed. Request rejected by the security enclave.';
@@ -358,10 +335,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
         errorMessage = 'The secure enclave services are temporarily unavailable.';
       }
     }
-
     throw new ApiClientError(response.status, errorCode, errorMessage);
   }
-
   return response.json() as Promise<T>;
 }
 
@@ -424,11 +399,6 @@ export const apiClient = {
         this.clearAuthSession();
       }
     }
-
-    // No valid session. Never fabricate a synthetic session with a fake
-    // `e2e-bypass-token` — the backend has no way to validate it and every
-    // authenticated request would fail with 401. Callers must use the real
-    // DID challenge/verify flow (wallet auth) to obtain a signed JWT.
     return null;
   },
 
@@ -450,9 +420,7 @@ export const apiClient = {
 
   async getHealth(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE_URL}/api/health`, {
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers: { Accept: 'application/json' },
     });
     return handleResponse<HealthResponse>(res);
   },
@@ -460,10 +428,7 @@ export const apiClient = {
   async createInstitution(req: CreateInstitutionRequest): Promise<Institution> {
     const res = await fetch(`${API_BASE_URL}/api/institutions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(req),
     });
     return handleResponse<Institution>(res);
@@ -474,113 +439,60 @@ export const apiClient = {
     return handleResponse<Institution>(res);
   },
 
-  async rotateKeys(id: string): Promise<Institution> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/institutions/${id}/rotate-key`,
-      { method: 'POST' },
-    );
+  async rotateKeys(id: string): Promise<{ keyVersion: string; rotatedAt: string }> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/institutions/${id}/rotate-key`, { method: 'POST' });
+    return handleResponse<{ keyVersion: string; rotatedAt: string }>(res);
+  },
+
+  async patchInstitution(id: string, req: UpdateInstitutionRequest): Promise<Institution> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/institutions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
     return handleResponse<Institution>(res);
   },
 
-  /**
-   * WS3: PATCH an institution's settlement profile and/or
-   * chain-rail metadata. The route is operator-scoped; the
-   * backend validates that profile + metadata satisfy the
-   * chain-rail superRefine when applicable.
-   */
-  async patchInstitution(
-    id: string,
-    req: UpdateInstitutionRequest,
-  ): Promise<Institution> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/institutions/${id}`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
-      },
-    );
-    return handleResponse<Institution>(res);
-  },
-
-  /**
-   * Read the institution's deposit wallet status: on-chain
-   * balances and whether the relayer is approved per token.
-   * Chain-rail institutions only; operator-scoped.
-   */
   async getDepositStatus(id: string): Promise<RelayerApprovalResponse> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/institutions/${id}/deposit-status`,
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/institutions/${id}/deposit-status`);
     return handleResponse<RelayerApprovalResponse>(res);
   },
 
-  /**
-   * Approve the settlement relayer to move ERC-20 tokens out of
-   * the institution's server-owned deposit wallet. The backend
-   * holds the deposit wallet key and signs the approval.
-   * Chain-rail institutions only; operator-scoped.
-   */
   async approveRelayer(id: string): Promise<RelayerApprovalResponse> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/institutions/${id}/approve-relayer`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      },
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/institutions/${id}/approve-relayer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
     return handleResponse<RelayerApprovalResponse>(res);
   },
 
-  /**
-   * Withdraw assets from the institution's deposit wallet to an
-   * external destination. The backend signs and broadcasts the
-   * transfer. Chain-rail institutions only; operator-scoped.
-   */
-  async withdrawFromDeposit(
-    id: string,
-    req: WithdrawRequest,
-  ): Promise<WithdrawResponse> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/institutions/${id}/withdrawals`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
-      },
-    );
+  async withdrawFromDeposit(id: string, req: WithdrawRequest): Promise<WithdrawResponse> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/institutions/${id}/withdrawals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
     return handleResponse<WithdrawResponse>(res);
   },
 
   async requestAuthChallenge(did: string): Promise<AuthChallenge> {
     const res = await fetch(`${API_BASE_URL}/api/auth/challenge`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ did }),
     });
     return handleResponse<AuthChallenge>(res);
   },
 
-  async verifyAuthChallenge(req: {
-    challengeId: string;
-    did: string;
-    signature: string;
-    walletAddress?: string;
-  }): Promise<AuthSession> {
+  async verifyAuthChallenge(challengeId: string, signature: string): Promise<AuthSession> {
     const res = await fetch(`${API_BASE_URL}/api/auth/verify`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify(req),
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ challengeId, signature }),
     });
     const session = await handleResponse<AuthSession>(res);
-    this.setAuthSession(session);
+    apiClient.setAuthSession(session);
     return session;
   },
 
@@ -591,6 +503,15 @@ export const apiClient = {
       body: JSON.stringify(req),
     });
     return handleResponse<AgentAdmission>(res);
+  },
+
+  async provisionAgent(req: ProvisionAgentRequest): Promise<ProvisionAgentResponse> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/configure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    return handleResponse<ProvisionAgentResponse>(res);
   },
 
   async submitIntent(req: EncryptedIntentRequest): Promise<IntentAccepted> {
@@ -606,29 +527,20 @@ export const apiClient = {
     const url = new URL(`${API_BASE_URL}/api/trades/completed`);
     if (from) url.searchParams.append('from', from);
     if (to) url.searchParams.append('to', to);
-
-    const res = await requestWithOperatorFallback(url.toString(), {
-      headers: {},
-    });
+    const res = await requestWithOperatorFallback(url.toString(), { headers: {} });
     return handleResponse<{ items: CompletedTrade[] }>(res);
   },
 
   async getPortfolio(institutionId: string): Promise<Portfolio> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/portfolios/${institutionId}`,
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/portfolios/${institutionId}`);
     return handleResponse<Portfolio>(res);
   },
 
-  async getPortfolioHistory(
-    institutionId: string,
-    limit = 50,
-  ): Promise<PortfolioHistoryEntry[]> {
+  async getPortfolioHistory(institutionId: string, limit = 50): Promise<PortfolioHistoryEntry[]> {
     const url = new URL(`${API_BASE_URL}/api/portfolios/${institutionId}/history`);
     if (limit !== undefined) {
       url.searchParams.set('limit', String(limit));
     }
-
     const res = await requestWithOperatorFallback(url.toString());
     return handleResponse<PortfolioHistoryEntry[]>(res);
   },
@@ -638,45 +550,35 @@ export const apiClient = {
     return handleResponse<AuditReceipt>(res);
   },
 
-  // ── Agent Management ──────────────────────────────────────────────────────
-
-  async listAgents(status?: "admitted" | "revoked"): Promise<Agent[]> {
+  async listAgents(status?: 'admitted' | 'revoked'): Promise<Agent[]> {
     const url = new URL(`${API_BASE_URL}/api/agents`);
-    if (status) url.searchParams.append("status", status);
-
+    if (status) url.searchParams.append('status', status);
     const res = await requestWithOperatorFallback(url.toString());
     return handleResponse<Agent[]>(res);
   },
 
   async getAgent(id: string): Promise<Agent> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/agents/${id}`,
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${id}`);
     return handleResponse<Agent>(res);
   },
 
   async updateAgentLabel(id: string, label: string): Promise<Agent> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/agents/${id}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label }),
-      },
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    });
     return handleResponse<Agent>(res);
   },
 
-  async revokeAgent(id: string): Promise<void> {
-    await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/agents/${id}/revoke`,
-      { method: "POST" },
-    );
+  async revokeAgent(id: string): Promise<Agent> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${id}/revoke`, { method: 'POST' });
+    return handleResponse<Agent>(res);
   },
 
   async mintDelegation(
     id: string,
-    policy: {
+    policy?: {
       maxSpendUsd: number;
       allowedCategories: string[];
       approverEmail?: string;
@@ -684,14 +586,11 @@ export const apiClient = {
       validityMonths?: number;
     },
   ): Promise<{ authorityRef: string; policyHash: string }> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/agents/${id}/delegation`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(policy),
-      },
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${id}/delegation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(policy ?? {}),
+    });
     return handleResponse<{ authorityRef: string; policyHash: string }>(res);
   },
 
@@ -705,37 +604,26 @@ export const apiClient = {
   },
 
   async getHostedAgent(id: string): Promise<HostedAgentRecord> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/hosted-agents/${id}`,
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/hosted-agents/${id}`);
     return handleResponse<HostedAgentRecord>(res);
   },
 
   async createHostedAgent(req: CreateHostedAgentRequest): Promise<HostedAgentRecord> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/hosted-agents`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
-      },
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/hosted-agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
     return handleResponse<HostedAgentRecord>(res);
   },
 
   async startHostedAgent(id: string): Promise<HostedAgentRecord> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/hosted-agents/${id}/start`,
-      { method: 'POST' },
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/hosted-agents/${id}/start`, { method: 'POST' });
     return handleResponse<HostedAgentRecord>(res);
   },
 
   async stopHostedAgent(id: string): Promise<HostedAgentRecord> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/hosted-agents/${id}/stop`,
-      { method: 'POST' },
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/hosted-agents/${id}/stop`, { method: 'POST' });
     return handleResponse<HostedAgentRecord>(res);
   },
 
@@ -743,30 +631,33 @@ export const apiClient = {
     agentId: string,
     mandate: CreateNegotiationMandateRequest,
   ): Promise<{ mandate: { id: string }; authorityRef: string; policyHash: string }> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/agents/${agentId}/mandate`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mandate),
-      },
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${agentId}/mandate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mandate }),
+    });
     return handleResponse<{ mandate: { id: string }; authorityRef: string; policyHash: string }>(res);
   },
 
+  async getNegotiationMandate(agentId: string): Promise<NegotiationMandateSummary> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${agentId}/mandate`);
+    return handleResponse<NegotiationMandateSummary>(res);
+  },
+
+  async listNegotiationMandates(agentId: string): Promise<NegotiationMandateSummary[]> {
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${agentId}/mandates`);
+    const payload = await handleResponse<{ mandates: NegotiationMandateSummary[] }>(res);
+    return payload.mandates;
+  },
+
   async listNegotiationSessions(): Promise<NegotiationSession[]> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/negotiations`,
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/negotiations`);
     const payload = await handleResponse<{ sessions: NegotiationSession[] }>(res);
     return payload.sessions;
   },
 
   async getNegotiationSession(id: string): Promise<NegotiationSession> {
-    const res = await requestWithOperatorFallback(
-      `${API_BASE_URL}/api/negotiations/${id}`,
-    );
+    const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/negotiations/${id}`);
     return handleResponse<NegotiationSession>(res);
   },
 };
-

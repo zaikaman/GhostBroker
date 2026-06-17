@@ -8,10 +8,21 @@ import {
   Edit02Icon,
   Delete02Icon,
   Refresh01Icon,
+  RocketIcon,
 } from 'hugeicons-react';
 import { Pagination } from './Pagination';
+import { useRouter } from '../app/use-router';
+
+function agentLifecycleStatus(agent: Agent): 'configured' | 'admitted' | 'revoked' {
+  if (agent.status === 'revoked') {
+    return 'revoked';
+  }
+  const metadata = agent.metadata as Record<string, unknown> | undefined;
+  return metadata?.delegation_credential ? 'admitted' : 'configured';
+}
 
 export function AgentsPanel(): React.JSX.Element {
+  const { navigate } = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +155,8 @@ export function AgentsPanel(): React.JSX.Element {
       ) : agents.length === 0 ? (
         <div
           style={{
+            display: 'grid',
+            gap: '14px',
             textAlign: 'center',
             padding: 'var(--spacing-xl)',
             color: 'var(--color-text-muted)',
@@ -153,7 +166,15 @@ export function AgentsPanel(): React.JSX.Element {
             borderRadius: 'var(--radius-md)',
           }}
         >
-          No agents registered yet. Launch a hosted agent from the Hosted Agents tab to get started.
+          <div style={{ display: 'grid', gap: '6px' }}>
+            <strong style={{ color: 'var(--color-text-primary)', fontSize: '0.8rem', letterSpacing: '0.04em' }}>No agents provisioned yet</strong>
+            <span>Create an admitted agent first, then bind a mandate and launch a hosted negotiator.</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-primary" onClick={() => navigate('/deploy')}>
+              <RocketIcon size={14} /> Provision Agent
+            </button>
+          </div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
@@ -270,10 +291,10 @@ export function AgentsPanel(): React.JSX.Element {
                 </code>
 
                 <div>
-                  <span className={`status-badge ${agent.status === 'admitted' ? 'secure' : 'error'}`} style={{ fontSize: '0.6rem', padding: '2px 8px' }}>
-                    {agent.status === 'admitted' ? 'ADMITTED' : 'REVOKED'}
-                  </span>
-                </div>
+                    <span className={`status-badge ${agentLifecycleStatus(agent) === 'revoked' ? 'error' : 'secure'}`} style={{ fontSize: '0.6rem', padding: '2px 8px' }}>
+                      {agentLifecycleStatus(agent).toUpperCase()}
+                    </span>
+                  </div>
 
                 <span style={{ color: 'var(--color-text-muted)', fontSize: '0.65rem' }}>
                   {formatDate(agent.createdAt)}

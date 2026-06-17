@@ -229,3 +229,31 @@ export interface ConfigureAgentResponse {
   authorityRef: string;
   policyHash: string;
 }
+
+export const provisionAgentResponseSchema = z.object({
+  agent: z.object({
+    id: z.string().uuid(),
+    institutionId: z.string().uuid(),
+    agentDid: z.string().min(1),
+    status: z.enum(["admitted", "revoked"]),
+    authorityRef: z.string().min(1),
+    label: z.string().nullable(),
+    instrumentScope: z.array(z.string()).nullable(),
+    directionScope: z.array(z.string()).nullable(),
+    maxNotional: z.string().nullable(),
+    limitReference: z.string().nullable(),
+    policyHash: z.string().nullable(),
+    metadata: z.record(z.string(), z.unknown()).default({}),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  }),
+  admission: z.object({
+    id: z.string().uuid().optional(),
+    agentDid: z.string().min(1),
+    status: z.literal("admitted"),
+    authorityRef: z.string().min(1),
+  }),
+  policyHash: z.string().min(1),
+});
+
+export type ProvisionAgentResponse = z.infer<typeof provisionAgentResponseSchema>;

@@ -30,6 +30,14 @@ async function main(): Promise<void> {
     console.error("Missing GROQ_API_KEY");
     process.exit(2);
   }
+  if (!env.HOSTED_AGENT_ID) {
+    console.error("Missing HOSTED_AGENT_ID");
+    process.exit(2);
+  }
+  if (!env.HOSTED_MANDATE_ID) {
+    console.error("Missing HOSTED_MANDATE_ID");
+    process.exit(2);
+  }
 
   const llm = new GroqNegotiationClient({
     apiKey: env.GROQ_API_KEY,
@@ -37,11 +45,8 @@ async function main(): Promise<void> {
   });
 
   const result = await runNegotiationLoop({
-    side: env.AGENT_SIDE,
     env,
     llm,
-    assetCode: env.AGENT_ASSET_CODE,
-    quoteAssetCode: env.AGENT_QUOTE_ASSET_CODE,
   });
 
   console.log(JSON.stringify(result, null, 2));

@@ -4,6 +4,7 @@ import { assertInstitutionScope, requireOperatorAuth } from "../auth/operator-au
 import { PublicError } from "../errors/public-error.js";
 import {
   admitAgentRequestSchema,
+  configureAgentRequestSchema,
   listAgentsQuerySchema,
   mintDelegationParamsSchema,
   mintDelegationPolicySchema,
@@ -83,6 +84,68 @@ export function createAgentsRouter(
       } else if (error instanceof Error && error.stack) {
         console.error("[ADMIT DEBUG] stack:", error.stack);
       }
+      next(error);
+    }
+  });
+
+  router.post("/agents/configure", async (request, response, next) => {
+    try {
+      if (!tenantSigner) {
+        throw new PublicError("service_unavailable", 503);
+      }
+
+      const parsed = configureAgentRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new PublicError("validation_failed", 400, parsed.error);
+      }
+
+      const operatorAuth = requireOperatorAuth(response);
+      assertInstitutionScope(operatorAuth, parsed.data.institutionId);
+
+      const provisionPolicy = {
+        maxSpendUsd: parsed.data.policy.maxSpendUsd,
+        allowedCategories: [...parsed.data.policy.allowedCategories],
+        ...(parsed.data.policy.approverEmail
+          ? { approverEmail: parsed.data.policy.approverEmail }
+          : {}),
+        ...(parsed.data.policy.purpose
+          ? { purpose: parsed.data.policy.purpose }
+          : {}),
+        ...(parsed.data.policy.mandate
+          ? { mandate: parsed.data.policy.mandate }
+          : {}),
+        ...(parsed.data.policy.validityMonths
+          ? { validityMonths: parsed.data.policy.validityMonths }
+          : {}),
+      };
+
+      const { agent, policyHash } = await agentService.configureAgent({
+        institutionId: parsed.data.institutionId,
+        ...(parsed.data.agentDid ? { agentDid: parsed.data.agentDid } : {}),
+        ...(parsed.data.label ? { label: parsed.data.label } : {}),
+        policy: provisionPolicy,
+        signCredential: (input) => tenantSigner.mint({
+          ...input,
+          allowedCategories: [...input.allowedCategories],
+        }),
+      });
+
+      const admission = await agentService.admitAgent({
+        institutionId: parsed.data.institutionId,
+        agentDid: agent.agentDid,
+      });
+
+      const admittedAgent = await agentService.getAgent(
+        agent.id,
+        parsed.data.institutionId,
+      );
+
+      response.status(201).json({
+        agent: admittedAgent,
+        admission,
+        policyHash,
+      });
+    } catch (error) {
       next(error);
     }
   });

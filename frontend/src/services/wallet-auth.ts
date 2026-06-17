@@ -37,12 +37,10 @@ export async function connectWithWallet(): Promise<WalletAuthResult> {
     method: 'personal_sign',
     params: [challenge.challenge, address],
   });
-  const session = await apiClient.verifyAuthChallenge({
-    challengeId: challenge.challengeId,
-    did,
+  const session = await apiClient.verifyAuthChallenge(
+    challenge.challengeId,
     signature,
-    walletAddress: address,
-  });
+  );
 
   return { session, address };
 }

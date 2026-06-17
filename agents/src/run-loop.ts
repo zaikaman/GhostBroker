@@ -12,6 +12,26 @@ import type { Decision, DecisionContext, LlmClient } from "./llm-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
 import { buildSealedEnvelope } from "./sealed-envelope.js";
 
+/*
+ * Legacy strategy fallbacks — used only by the legacy buyer/seller loop.
+ * The hosted negotiator (negotiation-loop.ts) reads strategy from the
+ * mandate fetched at startup. These process.env reads keep the legacy
+ * scripts compiling after the env schema was stripped of strategy fields.
+ */
+function legacyNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim().length === 0) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const LEGACY_REFERENCE_PRICE = legacyNumber("AGENT_REFERENCE_PRICE", legacyNumber("REFERENCE_PRICE", 70_000));
+const LEGACY_PRICE_BAND_BPS = legacyNumber("PRICE_BAND_BPS", 200);
+const LEGACY_QUANTITY_MIN = legacyNumber("AGENT_QUANTITY_MIN", legacyNumber("QUANTITY_MIN", 0.05));
+const LEGACY_QUANTITY_MAX = legacyNumber("AGENT_QUANTITY_MAX", legacyNumber("QUANTITY_MAX", 1.0));
+const LEGACY_TICK_INTERVAL_MS = legacyNumber("TICK_INTERVAL_MS", 15_000);
+const LEGACY_OPERATOR_PROMPT = process.env.AGENT_OPERATOR_PROMPT ?? undefined;
+
 export interface AgentRunOptions {
   side: "buy" | "sell";
   env: AgentEnv;
@@ -190,7 +210,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       const message = err instanceof Error ? err.message : String(err);
       log(side, `LLM call failed: ${message}`);
       lastOutcome = `LLM call failed: ${message.slice(0, 80)}`;
-      await sleep(env.TICK_INTERVAL_MS);
+      await sleep(LEGACY_TICK_INTERVAL_MS);
       continue;
     }
 
@@ -216,7 +236,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       lastOutcome = dryRun
         ? `DRY_RUN: would submit ${decision.quantity} ${assetCode} @ ${decision.price}`
         : "wait chosen by LLM";
-      await sleep(env.TICK_INTERVAL_MS);
+      await sleep(LEGACY_TICK_INTERVAL_MS);
       continue;
     }
 
@@ -261,36 +281,36 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
             log(side, `Submit auth error ${err.status}; hosted session cannot be refreshed in-process.`);
             lastOutcome = `auth failed ${err.status}`;
           }
-          await sleep(env.TICK_INTERVAL_MS);
+          await sleep(LEGACY_TICK_INTERVAL_MS);
           continue;
         }
         if (err.status === 403) {
           log(side, `Submit rejected with 403; waiting for next tick.`);
           lastOutcome = `403 on submit (${err.message.slice(0, 60)})`;
-          await sleep(env.TICK_INTERVAL_MS);
+          await sleep(LEGACY_TICK_INTERVAL_MS);
           continue;
         }
         if (err.isRetryable) {
           log(side, `Retryable submit failure ${err.status}; retrying next tick.`);
           lastOutcome = `${err.status} on submit (retryable)`;
-          await sleep(env.TICK_INTERVAL_MS);
+          await sleep(LEGACY_TICK_INTERVAL_MS);
           continue;
         }
         log(side, `Submit failed: ${err.status} ${err.code} ${err.message}`);
         lastOutcome = `submit failed ${err.status}`;
-        await sleep(env.TICK_INTERVAL_MS);
+        await sleep(LEGACY_TICK_INTERVAL_MS);
         continue;
       }
       log(side, `Submit threw: ${friendly}`);
       lastOutcome = `submit threw: ${friendly.slice(0, 60)}`;
-      await sleep(env.TICK_INTERVAL_MS);
+      await sleep(LEGACY_TICK_INTERVAL_MS);
       continue;
     }
 
     const settledRef = await waitForSettlement({
       client,
       side,
-      timeoutMs: env.TICK_INTERVAL_MS,
+      timeoutMs: LEGACY_TICK_INTERVAL_MS,
     });
     if (settledRef) {
       stopOnSettle();
@@ -360,26 +380,26 @@ function availableBalances(
 function buildDecisionContext(input: BuildContextInput): DecisionContext {
   const { side, env, assetCode, quoteAssetCode, completedTradeCount, tickNumber, lastOutcome, livePortfolio } = input;
   const { base, quote } = availableBalances(livePortfolio, env, assetCode, quoteAssetCode);
-  const minPrice = roundPrice(env.REFERENCE_PRICE * (1 - env.PRICE_BAND_BPS / 10_000));
-  const maxPrice = roundPrice(env.REFERENCE_PRICE * (1 + env.PRICE_BAND_BPS / 10_000));
+  const minPrice = roundPrice(LEGACY_REFERENCE_PRICE * (1 - LEGACY_PRICE_BAND_BPS / 10_000));
+  const maxPrice = roundPrice(LEGACY_REFERENCE_PRICE * (1 + LEGACY_PRICE_BAND_BPS / 10_000));
 
   return {
     side,
     assetCode,
     quoteAssetCode,
-    referencePrice: env.REFERENCE_PRICE,
-    priceBandBps: env.PRICE_BAND_BPS,
+    referencePrice: LEGACY_REFERENCE_PRICE,
+    priceBandBps: LEGACY_PRICE_BAND_BPS,
     minPrice,
     maxPrice,
-    quantityMin: env.QUANTITY_MIN,
-    quantityMax: env.QUANTITY_MAX,
+    quantityMin: LEGACY_QUANTITY_MIN,
+    quantityMax: LEGACY_QUANTITY_MAX,
     availableQuoteBalance: quote,
     availableBaseBalance: base,
     completedTradeCount,
     tickNumber,
     maxTicks: env.MAX_TICKS,
     lastOutcome,
-    operatorPrompt: env.AGENT_OPERATOR_PROMPT,
+    operatorPrompt: LEGACY_OPERATOR_PROMPT,
   };
 }
 

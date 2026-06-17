@@ -186,7 +186,8 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     setRotatingKeys(true);
     setRotateSuccess(null);
     try {
-      const updatedInst = await apiClient.rotateKeys(session.institution.id);
+      await apiClient.rotateKeys(session.institution.id);
+      const updatedInst = await apiClient.getInstitution(session.institution.id);
       setInstitution(updatedInst);
       setRotateSuccess('Enclave envelope keys rotated successfully. New key versions published.');
       setTimeout(() => setRotateSuccess(null), 5000);
@@ -290,11 +291,11 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
               <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-md)' }}>
                 <AlertCircleIcon size={14} /> {agentsError}
               </div>
-            ) : agents.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-                No active or historical agents found for this institution. Launch a hosted agent to configure mandates.
-              </div>
-            ) : (
+             ) : agents.length === 0 ? (
+               <div style={{ textAlign: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+                 No active or historical agents found for this institution. Provision an agent first, then bind its mandate here or from Hosted Negotiator.
+               </div>
+             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
                 <div style={{ overflowX: 'auto' }}>
                   <table className="trades-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>

@@ -2,13 +2,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { SettlementProfileCard } from "../components/SettlementProfileCard";
 
-/**
- * WS3: SettlementProfileCard tests. The card reads
- * the institution + completed trades from the API
- * client and renders a per-rail summary with
- * Etherscan links for chain rail trade refs.
- */
-
 vi.mock("../services/api-client", () => ({
   apiClient: {
     getInstitution: vi.fn(),
@@ -36,6 +29,7 @@ describe("SettlementProfileCard (WS3)", () => {
   beforeEach(() => {
     mockedGetDepositStatus.mockResolvedValue(STATUS_FIXTURE);
   });
+
   it("renders the institution's settlement profile ref", async () => {
     mockedGetInstitution.mockResolvedValue({
       id: INSTITUTION_ID,
@@ -118,9 +112,6 @@ describe("SettlementProfileCard (WS3)", () => {
 
     render(<SettlementProfileCard institutionId={INSTITUTION_ID} />);
 
-    // The card renders an <a> tag with the Etherscan URL.
-    // We assert the href rather than the displayed text
-    // (the displayed text is the shortened form).
     await waitFor(() => {
       const link = screen.getByRole("link", { name: /0x5eaaed/i });
       expect(link).toBeInTheDocument();
@@ -161,18 +152,11 @@ describe("SettlementProfileCard (WS3)", () => {
 
     render(<SettlementProfileCard institutionId={INSTITUTION_ID} />);
 
-    // The noop rail's railTradeRef is rendered as a
-    // shortened <code> (not as an Etherscan link).
     await waitFor(() => {
       expect(screen.getByText(/noop:0000/)).toBeInTheDocument();
     });
-    // No Etherscan link for the noop rail.
     expect(
       screen.queryByText(/sepolia\.etherscan\.io/),
     ).not.toBeInTheDocument();
   });
 });
-
-
-
-

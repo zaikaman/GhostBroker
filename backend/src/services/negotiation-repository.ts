@@ -72,6 +72,10 @@ export interface NegotiationRepository {
     institutionId: string,
     agentId: string,
   ): Promise<NegotiationMandate | null>;
+  listMandatesByAgent(
+    institutionId: string,
+    agentId: string,
+  ): Promise<NegotiationMandate[]>;
   getMandateById(
     mandateId: string,
     institutionId: string,
@@ -225,18 +229,26 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     institutionId: string,
     agentId: string,
   ): Promise<NegotiationMandate | null> {
+    const mandates = await this.listMandatesByAgent(institutionId, agentId);
+    return mandates[0] ?? null;
+  }
+
+  public async listMandatesByAgent(
+    institutionId: string,
+    agentId: string,
+  ): Promise<NegotiationMandate[]> {
     const { data, error } = await this.client
       .from("negotiation_mandates")
       .select("*")
       .eq("institution_id", institutionId)
       .eq("agent_id", agentId)
-      .single();
+      .order("created_at", { ascending: false });
 
     if (error || !data) {
-      return null;
+      return [];
     }
 
-    return negotiationMandateFromRecord(data);
+    return data.map(negotiationMandateFromRecord);
   }
 
   public async getMandateById(
@@ -316,9 +328,6 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       .single();
 
     if (error) {
-      // The trade row may not yet expose the rail ref under this
-      // column in every settlement profile; linking is best-effort
-      // and must not fail an otherwise-settled negotiation.
       return;
     }
   }

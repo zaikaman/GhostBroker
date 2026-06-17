@@ -4,15 +4,18 @@ import { issueOperatorSessionToken } from "../auth/session-token.js";
 import { PublicError } from "../errors/public-error.js";
 import {
   type CreateHostedAgentRequest,
-  type HostedAgentConfig,
   type HostedAgentRecord,
   type HostedAgentRuntimeStatus,
-  readHostedAgentConfig,
+  type HostedNegotiatorRuntimeConfig,
+  hasLegacyHostedAgentConfig,
+  readHostedNegotiatorRuntimeConfig,
+  toNegotiationMandateSummary,
 } from "../models/hosted-agent.js";
 import type { AgentManagementService } from "./agent.service.js";
 import type { InstitutionManagementService } from "./institution.service.js";
-import type { TenantDelegationSigner } from "./tenant-delegation-signer.js";
 import type { InstitutionApprovalService } from "./institution-approval.service.js";
+import type { NegotiationManagementService } from "./negotiation.service.js";
+import type { NegotiationMandate } from "../models/negotiation.js";
 
 const LOG_TAIL_BYTES = 8192;
 const HOSTED_SESSION_BUFFER_SECONDS = 15 * 60;
@@ -46,7 +49,10 @@ export interface ChildProcessHostedAgentServiceOptions {
   authSessionSecret: string;
   agentService: AgentManagementService;
   institutionService: Required<Pick<InstitutionManagementService, "getInstitution">>;
-  tenantSigner: TenantDelegationSigner;
+  negotiationService: Pick<
+    NegotiationManagementService,
+    "getMandateByAgent" | "listMandatesByAgent"
+  >;
   institutionApprovalService?: InstitutionApprovalService;
   runner?: readonly string[];
   hostedScript?: string;
@@ -59,7 +65,10 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
   private readonly authSessionSecret: string;
   private readonly agentService: AgentManagementService;
   private readonly institutionService: Required<Pick<InstitutionManagementService, "getInstitution">>;
-  private readonly tenantSigner: TenantDelegationSigner;
+  private readonly negotiationService: Pick<
+    NegotiationManagementService,
+    "getMandateByAgent" | "listMandatesByAgent"
+  >;
   private readonly institutionApprovalService: InstitutionApprovalService | undefined;
   private readonly runner: readonly string[];
   private readonly hostedScript: string | undefined;
@@ -70,7 +79,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     this.authSessionSecret = options.authSessionSecret;
     this.agentService = options.agentService;
     this.institutionService = options.institutionService;
-    this.tenantSigner = options.tenantSigner;
+    this.negotiationService = options.negotiationService;
     this.institutionApprovalService = options.institutionApprovalService;
     this.runner = options.runner ?? ["npm", "run"];
     this.hostedScript = options.hostedScript;
@@ -78,27 +87,17 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
 
   public async createHostedAgent(input: CreateHostedAgentRequest): Promise<HostedAgentRecord> {
     await this.assertSettlementReady(input.institutionId);
-    const maxSpendUsd = Math.ceil(
-      input.config.referencePrice *
-        input.config.quantityMax *
-        (1 + input.config.priceBandBps / 10_000),
-    );
+    const admittedAgent = await this.agentService.getAgent(input.agentId, input.institutionId);
+    if (admittedAgent.status !== "admitted") {
+      throw new PublicError(
+        "validation_failed",
+        422,
+        undefined,
+        "Hosted negotiators can only be attached to admitted agents.",
+      );
+    }
 
-    const configured = await this.agentService.configureAgent({
-      institutionId: input.institutionId,
-      label: input.config.label,
-      policy: {
-        maxSpendUsd,
-        allowedCategories: ["services"],
-        purpose: `hosted ${input.config.side} ${input.config.assetCode}`,
-        validityMonths: 12,
-      },
-      signCredential: async (policyInput) =>
-        this.tenantSigner.mint({
-          ...policyInput,
-          allowedCategories: [...policyInput.allowedCategories],
-        }),
-    });
+    const mandate = await this.requireMandate(input.institutionId, admittedAgent.id, input.config.mandateId);
 
     if (!this.agentService.updateAgentMetadata) {
       throw new PublicError(
@@ -107,23 +106,24 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
         "updateAgentMetadata is not supported by this agent service implementation.",
       );
     }
-    const updated = await this.agentService.updateAgentMetadata({
-      id: configured.agent.id,
+
+    await this.agentService.updateAgentMetadata({
+      id: admittedAgent.id,
       institutionId: input.institutionId,
       patch: {
         hostedAgent: input.config,
+        hostedNegotiator: {
+          mandateSnapshot: toNegotiationMandateSummary(mandate),
+          migrationState: "ready",
+        },
       },
     });
 
     if (input.startOnCreate) {
-      return this.startHostedAgent(updated.id, input.institutionId);
+      return this.startHostedAgent(admittedAgent.id, input.institutionId);
     }
 
-    const record = this.toHostedRecord(updated);
-    if (!record) {
-      throw new PublicError("service_unavailable", 503);
-    }
-    return record;
+    return this.getHostedAgent(admittedAgent.id, input.institutionId);
   }
 
   public async listHostedAgents(
@@ -131,19 +131,18 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     running?: boolean,
   ): Promise<HostedAgentRecord[]> {
     const agents = await this.agentService.listAgents(institutionId, "admitted");
-    const hosted = agents
-      .map((agent) => this.toHostedRecord(agent))
-      .filter((record): record is HostedAgentRecord => record !== null);
+    const hosted = await Promise.all(agents.map(async (agent) => this.toHostedRecord(agent)));
+    const filtered = hosted.filter((record): record is HostedAgentRecord => record !== null);
 
     if (running === undefined) {
-      return hosted;
+      return filtered;
     }
-    return hosted.filter((record) => record.runtime.running === running);
+    return filtered.filter((record) => record.runtime.running === running);
   }
 
   public async getHostedAgent(id: string, institutionId: string): Promise<HostedAgentRecord> {
     const agent = await this.agentService.getAgent(id, institutionId);
-    const record = this.toHostedRecord(agent);
+    const record = await this.toHostedRecord(agent);
     if (!record) {
       throw new PublicError("not_found", 404);
     }
@@ -153,6 +152,23 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
   public async startHostedAgent(id: string, institutionId: string): Promise<HostedAgentRecord> {
     await this.assertSettlementReady(institutionId);
     const record = await this.getHostedAgent(id, institutionId);
+    if (record.migrationState === "needs_migration") {
+      throw new PublicError(
+        "validation_failed",
+        422,
+        undefined,
+        "Legacy deploy config detected. Attach a negotiation mandate to relaunch.",
+      );
+    }
+    if (!record.config || !record.mandate) {
+      throw new PublicError(
+        "validation_failed",
+        422,
+        undefined,
+        "Hosted negotiator requires an active mandate before launch.",
+      );
+    }
+
     const existingState = this.runtimeStates.get(id);
     if (existingState?.child && existingState.child.exitCode === null) {
       throw new PublicError("service_unavailable", 409);
@@ -253,16 +269,57 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     }
   }
 
-  private toHostedRecord(agent: Awaited<ReturnType<AgentManagementService["getAgent"]>>): HostedAgentRecord | null {
-    const config = readHostedAgentConfig(agent);
-    if (!config) {
+  private async toHostedRecord(
+    agent: Awaited<ReturnType<AgentManagementService["getAgent"]>>,
+  ): Promise<HostedAgentRecord | null> {
+    const runtimeConfig = readHostedNegotiatorRuntimeConfig(agent);
+    const legacy = hasLegacyHostedAgentConfig(agent);
+    const hasHostedMetadata = runtimeConfig !== null || legacy;
+    if (!hasHostedMetadata) {
       return null;
     }
+
+    const mandate = await this.loadMandateForRecord(agent.institutionId, agent.id, runtimeConfig?.mandateId);
     return {
       agent,
-      config,
+      config: runtimeConfig,
       runtime: this.readRuntimeState(agent.id),
+      mandate: mandate ? toNegotiationMandateSummary(mandate) : null,
+      migrationState: legacy || !runtimeConfig || !mandate ? "needs_migration" : "ready",
     };
+  }
+
+  private async loadMandateForRecord(
+    institutionId: string,
+    agentId: string,
+    mandateId?: string,
+  ): Promise<NegotiationMandate | null> {
+    const active = await this.negotiationService.getMandateByAgent(institutionId, agentId);
+    if (!active) {
+      return null;
+    }
+    if (!mandateId || active.id === mandateId) {
+      return active;
+    }
+    const mandates = await this.negotiationService.listMandatesByAgent(institutionId, agentId);
+    return mandates.find((item) => item.id === mandateId) ?? active;
+  }
+
+  private async requireMandate(
+    institutionId: string,
+    agentId: string,
+    mandateId: string,
+  ): Promise<NegotiationMandate> {
+    const mandate = await this.loadMandateForRecord(institutionId, agentId, mandateId);
+    if (!mandate || mandate.id !== mandateId) {
+      throw new PublicError(
+        "validation_failed",
+        422,
+        undefined,
+        "Hosted negotiator requires an active mandate before launch.",
+      );
+    }
+    return mandate;
   }
 
   private readRuntimeState(agentId: string): HostedAgentRuntimeStatus {
@@ -323,9 +380,9 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     );
   }
 
-  private computeHostedSessionTtlMs(config: HostedAgentConfig): number {
+  private computeHostedSessionTtlMs(config: HostedNegotiatorRuntimeConfig): number {
     const sessionWindowMs =
-      config.tickIntervalMs * config.maxTicks +
+      config.pollIntervalMs * config.maxTicks +
       HOSTED_SESSION_BUFFER_SECONDS * 1000;
     return Math.max(sessionWindowMs, HOSTED_SESSION_MINIMUM_SECONDS * 1000);
   }
@@ -334,7 +391,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     runtime: {
       agentDid: string;
       agentId: string;
-      config: HostedAgentConfig;
+      config: HostedNegotiatorRuntimeConfig;
     },
     session: {
       token: string;
@@ -355,16 +412,8 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       GHOSTBROKER_INSTITUTION_TENANT_DID: session.tenantDid,
       AGENT_IDENTITY_DID: runtime.agentDid,
       HOSTED_AGENT_ID: runtime.agentId,
-      HOSTED_AGENT_LABEL: runtime.config.label,
-      AGENT_SIDE: runtime.config.side,
-      AGENT_ASSET_CODE: runtime.config.assetCode,
-      AGENT_QUOTE_ASSET_CODE: runtime.config.quoteAssetCode,
-      AGENT_OPERATOR_PROMPT: runtime.config.operatorPrompt,
-      AGENT_REFERENCE_PRICE: String(runtime.config.referencePrice),
-      PRICE_BAND_BPS: String(runtime.config.priceBandBps),
-      AGENT_QUANTITY_MIN: String(runtime.config.quantityMin),
-      AGENT_QUANTITY_MAX: String(runtime.config.quantityMax),
-      TICK_INTERVAL_MS: String(runtime.config.tickIntervalMs),
+      HOSTED_MANDATE_ID: runtime.config.mandateId,
+      POLL_INTERVAL_MS: String(runtime.config.pollIntervalMs),
       MAX_TICKS: String(runtime.config.maxTicks),
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
       ...(runtime.config.groqModel ? { GROQ_MODEL: runtime.config.groqModel } : {}),

@@ -7,26 +7,17 @@ import {
 } from "../../services/hosted-agent.service.js";
 import type { AgentManagementService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
-import type { TenantDelegationSigner } from "../../services/tenant-delegation-signer.js";
 import type { Agent } from "../../models/agent.js";
-import type { HostedAgentConfig } from "../../models/hosted-agent.js";
+import type { HostedNegotiatorRuntimeConfig } from "../../models/hosted-agent.js";
+import type { NegotiationManagementService } from "../../services/negotiation.service.js";
 
 const institutionId = "00000000-0000-4000-8000-000000000101";
 const agentId = "00000000-0000-4000-8000-0000000002a1";
 const agentDid = "did:t3n:agent:hosted-stop-test";
 
-const hostedConfig: HostedAgentConfig = {
-  mode: "custom",
-  label: "Stop Race Agent",
-  side: "buy",
-  assetCode: "WBTC",
-  quoteAssetCode: "USDC",
-  operatorPrompt: "accumulate quietly",
-  referencePrice: 100,
-  priceBandBps: 50,
-  quantityMin: 1,
-  quantityMax: 2,
-  tickIntervalMs: 1000,
+const hostedConfig: HostedNegotiatorRuntimeConfig = {
+  mandateId: "00000000-0000-4000-8000-0000000003a1",
+  pollIntervalMs: 1000,
   maxTicks: 5,
   dryRun: true,
 };
@@ -76,9 +67,30 @@ const institutionService: Required<Pick<InstitutionManagementService, "getInstit
   }),
 };
 
-const tenantSigner: TenantDelegationSigner = {
-  mint: async () => { throw new Error("not used"); },
-} as unknown as TenantDelegationSigner;
+const negotiationService: Pick<NegotiationManagementService, "getMandateByAgent" | "listMandatesByAgent"> = {
+  getMandateByAgent: async () => ({
+    id: hostedConfig.mandateId,
+    institutionId,
+    agentId,
+    agentDid,
+    assetCode: "WBTC",
+    side: "buy",
+    targetQuantity: "2",
+    referencePrice: "100",
+    priceBandBps: 50,
+    deadline: "2026-01-02T00:00:00.000Z",
+    urgency: "normal",
+    maxNotional: "200",
+    disclosableClaims: [],
+    requiredCounterpartyClaims: {},
+    counterpartyConstraints: {},
+    operatorPrompt: "accumulate quietly",
+    policyHash: "policy:hosted-stop",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }),
+  listMandatesByAgent: async () => [],
+};
 
 describe("ChildProcessHostedAgentService.stopHostedAgent", () => {
   let workspace: string;
@@ -106,7 +118,7 @@ describe("ChildProcessHostedAgentService.stopHostedAgent", () => {
       authSessionSecret: "test-auth-session-secret-with-more-than-32-characters",
       agentService: buildAgentService(),
       institutionService,
-      tenantSigner,
+      negotiationService,
       runner: ["node"],
       hostedScript: "keepalive.mjs",
     });

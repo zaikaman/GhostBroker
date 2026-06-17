@@ -49,6 +49,7 @@ const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSP
 function NegotiationMandateWrapper(): React.JSX.Element {
   const [agentId, setAgentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const { navigate } = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -82,9 +83,14 @@ function NegotiationMandateWrapper(): React.JSX.Element {
         <h3 style={{ margin: '0 0 8px', fontSize: '0.85rem', fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
           NO ADMITTED AGENT
         </h3>
-        <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-          Admit or deploy an agent before configuring a negotiation mandate.
+        <p style={{ margin: '0 0 12px', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
+          Provision an agent first, then bind a mandate and launch the hosted negotiator.
         </p>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/deploy')}>
+            Provision Agent
+          </button>
+        </div>
       </div>
     );
   }

@@ -616,7 +616,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
           "development-only-auth-session-secret-change-before-production",
         agentService,
         institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
-        tenantSigner: tenantDelegationSigner,
+        negotiationService,
         ...(institutionApprovalService ? { institutionApprovalService } : {}),
       }),
     authService: new DidAuthService({

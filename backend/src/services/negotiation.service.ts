@@ -29,6 +29,18 @@ export interface NegotiationManagementService {
     authorityRef: string;
     policyHash: string;
   }>;
+  getMandateByAgent(
+    institutionId: string,
+    agentId: string,
+  ): Promise<NegotiationMandate | null>;
+  listMandatesByAgent(
+    institutionId: string,
+    agentId: string,
+  ): Promise<NegotiationMandate[]>;
+  getMandate(
+    institutionId: string,
+    mandateId: string,
+  ): Promise<NegotiationMandate>;
   submitTicket(input: {
     institutionId: string;
     agentId: string;
@@ -128,6 +140,31 @@ export class NegotiationService implements NegotiationManagementService {
       authorityRef: authorityRefFor(credential),
       policyHash,
     };
+  }
+
+  public async getMandateByAgent(
+    institutionId: string,
+    agentId: string,
+  ): Promise<NegotiationMandate | null> {
+    return this.repository.getMandateByAgent(institutionId, agentId);
+  }
+
+  public async listMandatesByAgent(
+    institutionId: string,
+    agentId: string,
+  ): Promise<NegotiationMandate[]> {
+    return this.repository.listMandatesByAgent(institutionId, agentId);
+  }
+
+  public async getMandate(
+    institutionId: string,
+    mandateId: string,
+  ): Promise<NegotiationMandate> {
+    const mandate = await this.repository.getMandateById(mandateId, institutionId);
+    if (!mandate) {
+      throw new PublicError("not_found", 404);
+    }
+    return mandate;
   }
 
   public async submitTicket(input: {

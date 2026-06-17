@@ -101,21 +101,14 @@ export const agentEnvSchema = z.object({
   VC_VERIFY_MODE: z.enum(["sandbox", "live", "structural"]).default("sandbox").optional(),
   GROQ_API_KEY: z.string().min(1),
   GROQ_MODEL: z.string().min(1).default("qwen/qwen3-32b"),
-  AGENT_SIDE: z.enum(["buy", "sell"]).default("buy"),
-  AGENT_ASSET_CODE: z.string().trim().min(1).max(32).default("WBTC"),
+  POLL_INTERVAL_MS: z.number().positive().default(15_000),
   AGENT_QUOTE_ASSET_CODE: z.string().trim().min(1).max(32).default("USDC"),
-  AGENT_OPERATOR_PROMPT: z.string().trim().min(1).max(4_000).optional(),
-  REFERENCE_PRICE: z.number().positive(),
-  PRICE_BAND_BPS: z.number().positive().default(200),
-  QUANTITY_MIN: z.number().positive().default(0.05),
-  QUANTITY_MAX: z.number().positive().default(1.0),
-  TICK_INTERVAL_MS: z.number().positive().default(15_000),
   MAX_TICKS: z.number().positive().default(40),
   DRY_RUN: z.boolean().default(false),
   AGENT_AVAILABLE_QUOTE_BALANCE: z.coerce.number().nonnegative().optional(),
   AGENT_AVAILABLE_BASE_BALANCE: z.coerce.number().nonnegative().optional(),
   HOSTED_AGENT_ID: z.string().uuid().optional(),
-  HOSTED_AGENT_LABEL: z.string().trim().min(1).max(100).optional(),
+  HOSTED_MANDATE_ID: z.string().uuid().optional(),
 });
 
 export type AgentEnv = z.infer<typeof agentEnvSchema>;
@@ -138,24 +131,8 @@ export function loadAgentEnv(): AgentEnv {
     VC_VERIFY_MODE: optionalEnv("VC_VERIFY_MODE", "sandbox"),
     GROQ_API_KEY: process.env.GROQ_API_KEY,
     GROQ_MODEL: optionalEnv("GROQ_MODEL", "qwen/qwen3-32b"),
-    AGENT_SIDE: optionalEnv("AGENT_SIDE", "buy"),
-    AGENT_ASSET_CODE: optionalEnv("AGENT_ASSET_CODE", "WBTC"),
+    POLL_INTERVAL_MS: numberEnv("POLL_INTERVAL_MS", 15_000),
     AGENT_QUOTE_ASSET_CODE: optionalEnv("AGENT_QUOTE_ASSET_CODE", "USDC"),
-    AGENT_OPERATOR_PROMPT: optionalEnvMany(["AGENT_OPERATOR_PROMPT"]),
-    REFERENCE_PRICE: numberEnvMany(
-      ["AGENT_REFERENCE_PRICE", "REFERENCE_PRICE", "REFERENCE_PRICE_USDC_PER_WBTC"],
-      70_000,
-    ),
-    PRICE_BAND_BPS: numberEnv("PRICE_BAND_BPS", 200),
-    QUANTITY_MIN: numberEnvMany(
-      ["AGENT_QUANTITY_MIN", "QUANTITY_MIN", "QUANTITY_MIN_WBTC"],
-      0.05,
-    ),
-    QUANTITY_MAX: numberEnvMany(
-      ["AGENT_QUANTITY_MAX", "QUANTITY_MAX", "QUANTITY_MAX_WBTC"],
-      1.0,
-    ),
-    TICK_INTERVAL_MS: numberEnv("TICK_INTERVAL_MS", 15_000),
     MAX_TICKS: numberEnv("MAX_TICKS", 40),
     DRY_RUN: booleanEnv("DRY_RUN", false),
     AGENT_AVAILABLE_QUOTE_BALANCE: numberEnvMany(
@@ -167,7 +144,7 @@ export function loadAgentEnv(): AgentEnv {
       undefined,
     ),
     HOSTED_AGENT_ID: process.env.HOSTED_AGENT_ID,
-    HOSTED_AGENT_LABEL: process.env.HOSTED_AGENT_LABEL,
+    HOSTED_MANDATE_ID: process.env.HOSTED_MANDATE_ID,
   });
   if (!parsed.success) {
     console.error("Invalid environment:");

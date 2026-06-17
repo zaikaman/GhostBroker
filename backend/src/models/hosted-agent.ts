@@ -1,39 +1,23 @@
 import { z } from "zod";
 import type { Agent } from "./agent.js";
+import type { NegotiationMandate } from "./negotiation.js";
 
-export const hostedAgentPresetSchema = z.enum(["buyer", "seller", "custom"]);
-export type HostedAgentPreset = z.infer<typeof hostedAgentPresetSchema>;
-
-export const hostedAgentConfigSchema = z.object({
-  mode: hostedAgentPresetSchema.default("custom"),
-  label: z.string().trim().min(1).max(100),
-  side: z.enum(["buy", "sell"]),
-  assetCode: z.string().trim().min(1).max(32),
-  quoteAssetCode: z.string().trim().min(1).max(32).default("USDC"),
-  operatorPrompt: z.string().trim().min(1).max(4_000),
-  referencePrice: z.number().positive(),
-  priceBandBps: z.number().int().positive().max(10_000),
-  quantityMin: z.number().positive(),
-  quantityMax: z.number().positive(),
-  tickIntervalMs: z.number().int().positive().max(300_000),
+export const hostedNegotiatorRuntimeConfigSchema = z.object({
+  mandateId: z.string().uuid(),
+  pollIntervalMs: z.number().int().positive().max(300_000),
   maxTicks: z.number().int().positive().max(10_000),
   dryRun: z.boolean().default(false),
   groqModel: z.string().trim().min(1).max(200).optional(),
 });
 
-export type HostedAgentConfig = z.infer<typeof hostedAgentConfigSchema>;
+export type HostedNegotiatorRuntimeConfig = z.infer<
+  typeof hostedNegotiatorRuntimeConfigSchema
+>;
 
 export const createHostedAgentRequestSchema = z.object({
   institutionId: z.string().uuid(),
-  config: hostedAgentConfigSchema.superRefine((value, ctx) => {
-    if (value.quantityMax < value.quantityMin) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["quantityMax"],
-        message: "quantityMax must be greater than or equal to quantityMin",
-      });
-    }
-  }),
+  agentId: z.string().uuid(),
+  config: hostedNegotiatorRuntimeConfigSchema,
   startOnCreate: z.boolean().default(true),
 });
 
@@ -64,14 +48,91 @@ export interface HostedAgentRuntimeStatus {
   logTail: string;
 }
 
-export interface HostedAgentRecord {
-  agent: Agent;
-  config: HostedAgentConfig;
-  runtime: HostedAgentRuntimeStatus;
+export interface NegotiationMandateSummary {
+  id: string;
+  assetCode: string;
+  side: NegotiationMandate["side"];
+  targetQuantity: string;
+  referencePrice: string;
+  priceBandBps: number;
+  maxNotional: string;
+  urgency: NegotiationMandate["urgency"];
+  deadline: string;
+  disclosableClaims: string[];
+  requiredCounterpartyClaims: Record<string, unknown>;
+  counterpartyConstraints: Record<string, unknown>;
+  operatorPrompt: string;
+  policyHash: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export function readHostedAgentConfig(agent: Agent): HostedAgentConfig | null {
-  const candidate = (agent.metadata as Record<string, unknown> | undefined)?.hostedAgent;
-  const parsed = hostedAgentConfigSchema.safeParse(candidate);
+export type HostedAgentMigrationState = "ready" | "needs_migration";
+
+export interface HostedAgentRecord {
+  agent: Agent;
+  config: HostedNegotiatorRuntimeConfig | null;
+  runtime: HostedAgentRuntimeStatus;
+  mandate: NegotiationMandateSummary | null;
+  migrationState: HostedAgentMigrationState;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function readHostedNegotiatorRuntimeConfig(
+  agent: Agent,
+): HostedNegotiatorRuntimeConfig | null {
+  const metadata = isRecord(agent.metadata) ? agent.metadata : null;
+  const candidate = metadata?.hostedAgent;
+  const parsed = hostedNegotiatorRuntimeConfigSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
+}
+
+export function hasLegacyHostedAgentConfig(agent: Agent): boolean {
+  const metadata = isRecord(agent.metadata) ? agent.metadata : null;
+  const candidate = metadata?.hostedAgent;
+  if (!isRecord(candidate)) {
+    return false;
+  }
+
+  const legacyKeys = [
+    "mode",
+    "side",
+    "assetCode",
+    "quoteAssetCode",
+    "operatorPrompt",
+    "referencePrice",
+    "priceBandBps",
+    "quantityMin",
+    "quantityMax",
+    "tickIntervalMs",
+    "label",
+  ];
+
+  return legacyKeys.some((key) => key in candidate);
+}
+
+export function toNegotiationMandateSummary(
+  mandate: NegotiationMandate,
+): NegotiationMandateSummary {
+  return {
+    id: mandate.id,
+    assetCode: mandate.assetCode,
+    side: mandate.side,
+    targetQuantity: mandate.targetQuantity,
+    referencePrice: mandate.referencePrice,
+    priceBandBps: mandate.priceBandBps,
+    maxNotional: mandate.maxNotional,
+    urgency: mandate.urgency,
+    deadline: mandate.deadline,
+    disclosableClaims: mandate.disclosableClaims,
+    requiredCounterpartyClaims: mandate.requiredCounterpartyClaims,
+    counterpartyConstraints: mandate.counterpartyConstraints,
+    operatorPrompt: mandate.operatorPrompt,
+    policyHash: mandate.policyHash,
+    createdAt: mandate.createdAt,
+    updatedAt: mandate.updatedAt,
+  };
 }

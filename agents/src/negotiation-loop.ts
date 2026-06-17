@@ -13,12 +13,26 @@ import {
 } from "./negotiation-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
 
-export interface NegotiationLoopOptions {
+interface RuntimeMandate {
+  id: string;
+  assetCode: string;
   side: "buy" | "sell";
+  targetQuantity: string;
+  referencePrice: string;
+  priceBandBps: number;
+  maxNotional: string;
+  urgency: "low" | "normal" | "high" | "critical";
+  deadline: string;
+  disclosableClaims: string[];
+  requiredCounterpartyClaims: Record<string, unknown>;
+  counterpartyConstraints: Record<string, unknown>;
+  operatorPrompt: string;
+  policyHash: string;
+}
+
+export interface NegotiationLoopOptions {
   env: AgentEnv;
   llm: NegotiationLlmClient;
-  assetCode: string;
-  quoteAssetCode?: string;
 }
 
 export interface NegotiationLoopResult {
@@ -53,18 +67,35 @@ function buildSessionFromEnv(env: AgentEnv): AuthSession | undefined {
   };
 }
 
+async function fetchHostedMandate(
+  env: AgentEnv,
+  mandateId: string,
+): Promise<RuntimeMandate> {
+  const response = await fetch(`${env.GHOSTBROKER_URL}/api/agents/${env.HOSTED_AGENT_ID}/mandate`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${env.GHOSTBROKER_SESSION_TOKEN}`,
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Hosted mandate lookup failed (${response.status}): ${body || response.statusText}`);
+  }
+
+  const mandate = (await response.json()) as RuntimeMandate;
+  if (mandate.id !== mandateId) {
+    throw new Error(`Hosted mandate mismatch: expected ${mandateId}, got ${mandate.id}`);
+  }
+  return mandate;
+}
+
 export async function runNegotiationLoop(
   options: NegotiationLoopOptions,
 ): Promise<NegotiationLoopResult> {
-  const {
-    side,
-    env,
-    llm,
-    assetCode,
-    quoteAssetCode = env.AGENT_QUOTE_ASSET_CODE,
-  } = options;
+  const { env, llm } = options;
   const identity = loadOrGenerateIdentity(env.AGENT_IDENTITY_CONFIG_PATH);
-  log(side, `Hosted negotiator booting with DID ${identity.did}`);
 
   const seededSession = buildSessionFromEnv(env);
   const client = new GhostBrokerClient({
@@ -87,7 +118,7 @@ export async function runNegotiationLoop(
       throw new Error("Missing GhostBroker session token and API key.");
     }
   } catch (err) {
-    log(side, `Authentication failed: ${formatError(err)}`);
+    console.error(`Authentication failed: ${formatError(err)}`);
     return {
       outcome: "admit_failed",
       ticksRun: 0,
@@ -97,6 +128,38 @@ export async function runNegotiationLoop(
       admissionAuthorityRef: undefined,
     };
   }
+
+  if (!env.HOSTED_MANDATE_ID) {
+    console.error("Missing hosted mandate id.");
+    return {
+      outcome: "admit_failed",
+      ticksRun: 0,
+      sessionId: undefined,
+      lastDecision: undefined,
+      settlementCorrelationRef: undefined,
+      admissionAuthorityRef: undefined,
+    };
+  }
+
+  let mandate: RuntimeMandate;
+  try {
+    mandate = await fetchHostedMandate(env, env.HOSTED_MANDATE_ID);
+  } catch (err) {
+    console.error(`Mandate fetch failed: ${formatError(err)}`);
+    return {
+      outcome: "admit_failed",
+      ticksRun: 0,
+      sessionId: undefined,
+      lastDecision: undefined,
+      settlementCorrelationRef: undefined,
+      admissionAuthorityRef: undefined,
+    };
+  }
+
+  const side = mandate.side;
+  const assetCode = mandate.assetCode;
+  const quoteAssetCode = env.AGENT_QUOTE_ASSET_CODE;
+  log(side, `Hosted negotiator booting with DID ${identity.did}`);
 
   let admission: AgentAdmission;
   try {
@@ -166,7 +229,7 @@ export async function runNegotiationLoop(
       : listed.sessions[0];
     if (!liveSession) {
       lastOutcome = "awaiting counterparty pairing";
-      await sleep(env.TICK_INTERVAL_MS);
+      await sleep(env.POLL_INTERVAL_MS);
       continue;
     }
     sessionId = liveSession.id;
@@ -208,17 +271,14 @@ export async function runNegotiationLoop(
       };
     }
 
-    // Not our turn yet — just wait for the next redacted state refresh.
     if (liveSession.currentTurn !== side) {
       lastOutcome = `waiting for ${liveSession.currentTurn} turn`;
-      await sleep(env.TICK_INTERVAL_MS);
+      await sleep(env.POLL_INTERVAL_MS);
       continue;
     }
 
     const ctx = buildNegotiationContext({
-      side,
-      env,
-      assetCode,
+      mandate,
       quoteAssetCode,
       session: liveSession,
       lastOutcome,
@@ -231,7 +291,7 @@ export async function runNegotiationLoop(
       const message = err instanceof Error ? err.message : String(err);
       log(side, `Negotiation LLM call failed: ${message}`);
       lastOutcome = `llm failed: ${message.slice(0, 80)}`;
-      await sleep(env.TICK_INTERVAL_MS);
+      await sleep(env.POLL_INTERVAL_MS);
       continue;
     }
 
@@ -263,19 +323,19 @@ export async function runNegotiationLoop(
       if (err instanceof GhostBrokerApiError) {
         if (err.status === 409 || err.status === 403) {
           lastOutcome = `move rejected ${err.status}`;
-          await sleep(env.TICK_INTERVAL_MS);
+          await sleep(env.POLL_INTERVAL_MS);
           continue;
         }
         if (err.isRetryable || err.status === 429) {
           lastOutcome = `retryable move error ${err.status}`;
-          await sleep(env.TICK_INTERVAL_MS);
+          await sleep(env.POLL_INTERVAL_MS);
           continue;
         }
       }
       throw err;
     }
 
-    await sleep(env.TICK_INTERVAL_MS);
+    await sleep(env.POLL_INTERVAL_MS);
   }
 
   stopOnSettle();
@@ -291,37 +351,38 @@ export async function runNegotiationLoop(
 }
 
 function buildNegotiationContext(input: {
-  side: "buy" | "sell";
-  env: AgentEnv;
-  assetCode: string;
+  mandate: RuntimeMandate;
   quoteAssetCode: string;
   session: RedactedNegotiationSessionView;
   lastOutcome: string;
 }): NegotiationContext {
-  const { side, env, assetCode, quoteAssetCode, session, lastOutcome } = input;
-  const minPrice = roundPrice(env.REFERENCE_PRICE * (1 - env.PRICE_BAND_BPS / 10_000));
-  const maxPrice = roundPrice(env.REFERENCE_PRICE * (1 + env.PRICE_BAND_BPS / 10_000));
+  const { mandate, quoteAssetCode, session, lastOutcome } = input;
+  const referencePrice = Number(mandate.referencePrice);
+  const targetQuantity = Number(mandate.targetQuantity);
+  const maxNotional = Number(mandate.maxNotional);
+  const minPrice = roundPrice(referencePrice * (1 - mandate.priceBandBps / 10_000));
+  const maxPrice = roundPrice(referencePrice * (1 + mandate.priceBandBps / 10_000));
 
   return {
-    side,
-    assetCode,
+    side: mandate.side,
+    assetCode: mandate.assetCode,
     quoteAssetCode,
-    targetQuantity: env.QUANTITY_MAX,
-    referencePrice: env.REFERENCE_PRICE,
-    priceBandBps: env.PRICE_BAND_BPS,
+    targetQuantity,
+    referencePrice,
+    priceBandBps: mandate.priceBandBps,
     minPrice,
     maxPrice,
-    maxNotional: maxPrice * env.QUANTITY_MAX,
-    urgency: "normal",
+    maxNotional,
+    urgency: mandate.urgency,
     roundNumber: session.roundNumber,
     maxRounds: session.maxRounds,
     distanceSignal: session.distanceSignal,
     counterpartStandingPrice: session.counterpartStandingProposal.price,
     counterpartStandingQuantity: session.counterpartStandingProposal.quantity,
-    disclosableClaims: [],
+    disclosableClaims: mandate.disclosableClaims,
     receivedClaims: session.disclosedClaims.map((claim) => claim.claimType),
-    requiredClaims: [],
-    operatorPrompt: env.AGENT_OPERATOR_PROMPT,
+    requiredClaims: Object.keys(mandate.requiredCounterpartyClaims),
+    operatorPrompt: mandate.operatorPrompt,
     lastOutcome,
   };
 }

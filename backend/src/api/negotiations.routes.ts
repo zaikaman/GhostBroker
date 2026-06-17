@@ -140,6 +140,47 @@ export function mountAgentMandateRoute(input: {
   router: Router;
   negotiationService: NegotiationManagementService;
 }): void {
+  input.router.get("/agents/:id/mandate", async (request, response, next) => {
+    try {
+      const operatorAuth = requireOperatorAuth(response);
+      const params = revokeAgentParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        throw new PublicError("validation_failed", 400, params.error);
+      }
+
+      assertInstitutionScope(operatorAuth, operatorAuth.institutionId);
+      const mandate = await input.negotiationService.getMandateByAgent(
+        operatorAuth.institutionId,
+        params.data.id,
+      );
+      if (!mandate) {
+        throw new PublicError("not_found", 404);
+      }
+      response.status(200).json(mandate);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  input.router.get("/agents/:id/mandates", async (request, response, next) => {
+    try {
+      const operatorAuth = requireOperatorAuth(response);
+      const params = revokeAgentParamsSchema.safeParse(request.params);
+      if (!params.success) {
+        throw new PublicError("validation_failed", 400, params.error);
+      }
+
+      assertInstitutionScope(operatorAuth, operatorAuth.institutionId);
+      const mandates = await input.negotiationService.listMandatesByAgent(
+        operatorAuth.institutionId,
+        params.data.id,
+      );
+      response.status(200).json({ mandates });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   input.router.post("/agents/:id/mandate", async (request, response, next) => {
     try {
       const operatorAuth = requireOperatorAuth(response);
