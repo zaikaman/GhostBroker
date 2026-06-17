@@ -4,7 +4,6 @@ import {
   type Agent,
   type AuthSession,
   type CreateHostedAgentRequest,
-  type CreateNegotiationMandateRequest,
   type HostedAgentRecord,
   type Institution,
   type NegotiationMandateSummary,
@@ -23,6 +22,7 @@ import {
   StopIcon,
 } from 'hugeicons-react';
 import { AgentProvisioningForm } from './AgentProvisioningForm';
+import { MandateConfigForm } from './MandateConfigForm';
 import '../styles/deploy.css';
 import { dispatchAgentsUpdated } from '../services/agent-events';
 
@@ -38,35 +38,11 @@ interface RuntimeFormState {
   groqModel: string;
 }
 
-interface MandateFormState {
-  assetCode: string;
-  side: 'buy' | 'sell';
-  targetQuantity: string;
-  referencePrice: string;
-  priceBandBps: string;
-  deadline: string;
-  urgency: CreateNegotiationMandateRequest['urgency'];
-  maxNotional: string;
-  operatorPrompt: string;
-}
-
 const defaultRuntimeForm: RuntimeFormState = {
   pollIntervalMs: '15000',
   maxTicks: '40',
   dryRun: false,
   groqModel: 'qwen/qwen3-32b',
-};
-
-const defaultMandateForm: MandateFormState = {
-  assetCode: 'WBTC',
-  side: 'buy',
-  targetQuantity: '1',
-  referencePrice: '70000',
-  priceBandBps: '150',
-  deadline: new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
-  urgency: 'normal',
-  maxNotional: '70000',
-  operatorPrompt: 'Trade within mandate bounds. Prefer credible counterparties, preserve policy discipline, and stop only for genuine structural faults.',
 };
 
 function formatTimestamp(value?: string): string {
@@ -84,54 +60,45 @@ function truncateMiddle(value: string, keep = 12): string {
   return `${value.slice(0, keep)}...${value.slice(-keep)}`;
 }
 
-function isPositiveNumber(value: string): boolean {
-  return Number.isFinite(Number(value)) && Number(value) > 0;
-}
-
 function isPositiveInteger(value: string): boolean {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0;
 }
 
-function isNonNegativeNumber(value: string): boolean {
-  return Number.isFinite(Number(value)) && Number(value) >= 0;
+function humanizeExecutionStyle(style: NegotiationMandateSummary['executionStyle']): string {
+  if (!style) return '—';
+  return style.replace(/_/gu, ' ').replace(/\b\w/gu, (c) => c.toUpperCase());
 }
 
-function buildMandateRequest(
-  form: MandateFormState,
-): CreateNegotiationMandateRequest {
-  return {
-    assetCode: form.assetCode.trim().toUpperCase(),
-    side: form.side,
-    targetQuantity: Number(form.targetQuantity),
-    referencePrice: Number(form.referencePrice),
-    priceBandBps: Number(form.priceBandBps),
-    deadline: new Date(form.deadline).toISOString(),
-    urgency: form.urgency,
-    maxNotional: form.maxNotional,
-    disclosableClaims: [],
-    requiredCounterpartyClaims: {},
-    counterpartyConstraints: {},
-    operatorPrompt: form.operatorPrompt.trim(),
-  };
-}
-
+/**
+ * Summarize the bound mandate from the authored AI-first fields when
+ * present, falling back to the legacy derived columns for older
+ * mandates. Surfaces policy intent, not trader-style numbers.
+ */
 function summarizeMandate(mandate: NegotiationMandateSummary | null): Array<{ label: string; value: string }> {
   if (!mandate) {
     return [
       { label: 'State', value: 'No active mandate attached' },
-      { label: 'Action', value: 'Create or attach a negotiation mandate before launch' },
+      { label: 'Action', value: 'Author a negotiation policy before launch' },
     ];
   }
 
+  const objective = mandate.objective
+    ? mandate.objective.length > 60
+      ? `${mandate.objective.slice(0, 60)}…`
+      : mandate.objective
+    : mandate.operatorPrompt
+      ? (mandate.operatorPrompt.length > 60 ? `${mandate.operatorPrompt.slice(0, 60)}…` : mandate.operatorPrompt)
+      : '—';
+
   return [
+    { label: 'Objective', value: objective },
     { label: 'Side', value: mandate.side.toUpperCase() },
     { label: 'Asset', value: mandate.assetCode },
-    { label: 'Target Quantity', value: mandate.targetQuantity },
+    { label: 'Target Size', value: mandate.targetQuantity },
+    { label: 'Execution Posture', value: mandate.executionStyle ? humanizeExecutionStyle(mandate.executionStyle) : '—' },
     { label: 'Urgency', value: mandate.urgency.toUpperCase() },
     { label: 'Deadline', value: new Date(mandate.deadline).toLocaleString() },
-    { label: 'Max Notional', value: mandate.maxNotional },
-
   ];
 }
 
@@ -142,7 +109,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedMandateId, setSelectedMandateId] = useState<string>('');
   const [runtimeForm, setRuntimeForm] = useState<RuntimeFormState>(defaultRuntimeForm);
-  const [mandateForm, setMandateForm] = useState<MandateFormState>(defaultMandateForm);
   const [showMandateEditor, setShowMandateEditor] = useState(false);
   const [showProvisioningForm, setShowProvisioningForm] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -280,19 +246,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   }, [mandatesByAgentId, selectedAgentId, selectedMandateId]);
 
   useEffect(() => {
-    if (selectedMandate) {
-      setMandateForm({
-        assetCode: selectedMandate.assetCode,
-        side: selectedMandate.side,
-        targetQuantity: selectedMandate.targetQuantity,
-        referencePrice: selectedMandate.referencePrice,
-        priceBandBps: String(selectedMandate.priceBandBps),
-        deadline: selectedMandate.deadline.slice(0, 16),
-        urgency: selectedMandate.urgency,
-        maxNotional: selectedMandate.maxNotional,
-        operatorPrompt: selectedMandate.operatorPrompt,
-      });
-    }
     if (selectedHostedRecord?.config) {
       setRuntimeForm({
         pollIntervalMs: String(selectedHostedRecord.config.pollIntervalMs),
@@ -301,7 +254,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         groqModel: selectedHostedRecord.config.groqModel ?? defaultRuntimeForm.groqModel,
       });
     }
-  }, [selectedHostedRecord, selectedMandate]);
+  }, [selectedHostedRecord]);
 
   const runningCount = hostedAgents.filter((record) => record.runtime.running).length;
   const isChainRail = institution?.settlementProfileRef === 'chain:sepolia:erc20';
@@ -327,37 +280,18 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     setActiveStep(2);
   }, [loadState]);
 
-  const validateMandateForm = useCallback((): string | null => {
-    const form = mandateForm;
-    if (!form.assetCode.trim()) return 'Asset is required.';
-    if (!isPositiveNumber(form.targetQuantity)) return 'Target quantity must be greater than zero.';
-    if (!isPositiveNumber(form.referencePrice)) return 'Reference price must be greater than zero.';
-    if (!isNonNegativeNumber(form.priceBandBps)) return 'Price band must be zero or greater.';
-    if (!isPositiveNumber(form.maxNotional)) return 'Max notional must be greater than zero.';
-    if (!form.deadline.trim() || Number.isNaN(new Date(form.deadline).getTime())) return 'Deadline must be a valid date and time.';
-    if (!form.operatorPrompt.trim()) return 'Operator prompt is required.';
-    return null;
-  }, [mandateForm]);
-
-  const handleCreateOrUpdateMandate = useCallback(async () => {
-    if (!selectedAgentId) {
-      throw new Error('Select an admitted agent before creating a mandate.');
-    }
-    const validationError = validateMandateForm();
-    if (validationError) {
-      throw new Error(validationError);
-    }
-
-    const result = await apiClient.createNegotiationMandate(
-      selectedAgentId,
-      buildMandateRequest(mandateForm),
-    );
-    setSelectedMandateId(result.mandate.id);
+  /**
+   * After the MandateConfigForm (an authored policy form) commits a
+   * mandate successfully, reload state, bind the new mandate, and
+   * advance to runtime controls. Validation lives in the form itself.
+   */
+  const handleMandateCommitted = useCallback(async () => {
+    if (!selectedAgentId) return;
     setShowMandateEditor(false);
     setMandateValidationError(null);
     await loadState(selectedAgentId);
     setActiveStep(3);
-  }, [loadState, mandateForm, selectedAgentId, validateMandateForm]);
+  }, [loadState, selectedAgentId]);
 
   const handleLaunch = useCallback(async () => {
     if (!selectedAgentId) {
@@ -497,7 +431,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
             <div className="deploy-wizard-nav deploy-form-span-full" aria-label="Hosted launch steps">
               {[
                 { step: 1, kicker: 'Access', label: selectedAgentId ? 'Agent selected' : 'Choose or provision an admitted agent' },
-                { step: 2, kicker: 'Mandate', label: selectedMandateId && !showMandateEditor ? 'Mandate bound' : 'Define strategy bounds' },
+                { step: 2, kicker: 'Mandate', label: selectedMandateId && !showMandateEditor ? 'Mandate bound' : 'Author negotiation policy' },
                 { step: 3, kicker: 'Runtime', label: selectedAgentHasHostedRuntime ? 'Runtime attached' : 'Tune runtime and launch' },
               ].map((item) => {
                 const unlocked = isStepUnlocked(item.step);
@@ -615,7 +549,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     }}
                     style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
-                    Continue to Mandate Bounds &rarr;
+                    Continue to Negotiation Mandate &rarr;
                   </button>
                 </div>
               </section>
@@ -627,8 +561,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 <div className="deploy-guide-section-header">
                   <span className="deploy-guide-step">02</span>
                   <div>
-                    <h3 className="deploy-guide-heading">Mandate Bounds</h3>
-                    <p className="deploy-guide-copy">Define the trading strategy the agent will follow.</p>
+                    <h3 className="deploy-guide-heading">Negotiation Mandate</h3>
+                    <p className="deploy-guide-copy">Author the policy the AI agent negotiates within — objective, size, tempo, trust, and disclosure rules. Numeric rails are derived automatically.</p>
                   </div>
                 </div>
 
@@ -648,7 +582,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     {selectedMandate ? `${selectedMandate.side.toUpperCase()} ${selectedMandate.assetCode}` : 'No active mandate attached'}
                   </strong>
                   <p className="deploy-mandate-summary-copy">
-                    Strategy limits live exclusively in the negotiation mandate. Hosted runtime settings cannot override these bounds.
+                    The authored policy — not trader-tuned numbers — governs the agent. Derived execution rails are sealed inside the enclave and cannot be overridden by the hosted runtime.
                   </p>
                   <div className="deploy-mandate-summary-grid">
                     {mandateSummary.map((item) => (
@@ -664,7 +598,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                     <label className="form-label" htmlFor="mandate-id">Mandate Selection</label>
                     <button type="button" className="btn btn-secondary" onClick={() => setShowMandateEditor((current) => !current)}>
-                      {showMandateEditor ? 'Hide Mandate Editor' : selectedMandate ? 'Edit / Replace Mandate' : 'Create Mandate'}
+                      {showMandateEditor ? 'Hide Mandate Editor' : selectedMandate ? 'Author / Replace Mandate' : 'Author Mandate'}
                     </button>
                   </div>
                   <select
@@ -691,115 +625,28 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 </div>
 
                 {showMandateEditor ? (
-                  <div className="deploy-form-span-full" style={{ display: 'grid', gap: '12px', marginTop: 'var(--spacing-md)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-asset">Asset</label>
-                        <input
-                          id="mandate-asset"
-                          className="form-input"
-                          value={mandateForm.assetCode}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, assetCode: event.target.value.toUpperCase() }))}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-side">Side</label>
-                        <select id="mandate-side" className="form-select" value={mandateForm.side} onChange={(event) => setMandateForm((current) => ({ ...current, side: event.target.value as 'buy' | 'sell' }))}>
-                          <option value="buy">Buy</option>
-                          <option value="sell">Sell</option>
-                        </select>
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-target-quantity">Target Quantity</label>
-                        <input
-                          id="mandate-target-quantity"
-                          className="form-input font-mono"
-                          value={mandateForm.targetQuantity}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, targetQuantity: event.target.value }))}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-reference-price">Reference Price (USD)</label>
-                        <input
-                          id="mandate-reference-price"
-                          className="form-input font-mono"
-                          value={mandateForm.referencePrice}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, referencePrice: event.target.value }))}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-band">Price Tolerance (bps)</label>
-                        <input
-                          id="mandate-band"
-                          className="form-input font-mono"
-                          value={mandateForm.priceBandBps}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, priceBandBps: event.target.value }))}
-                        />
-                        <span className="deploy-field-hint">e.g. 150 = 1.5% deviation allowed from reference price.</span>
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-max-notional">Max Total (USD)</label>
-                        <input
-                          id="mandate-max-notional"
-                          className="form-input font-mono"
-                          value={mandateForm.maxNotional}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, maxNotional: event.target.value }))}
-                        />
-                        <span className="deploy-field-hint">Maximum dollar value of the trade.</span>
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-urgency">Urgency</label>
-                        <select id="mandate-urgency" className="form-select" value={mandateForm.urgency} onChange={(event) => setMandateForm((current) => ({ ...current, urgency: event.target.value as CreateNegotiationMandateRequest['urgency'] }))}>
-                          <option value="low">Low</option>
-                          <option value="normal">Normal</option>
-                          <option value="high">High</option>
-                          <option value="critical">Critical</option>
-                        </select>
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="mandate-deadline">Deadline</label>
-                        <input
-                          id="mandate-deadline"
-                          type="datetime-local"
-                          className="form-input"
-                          value={mandateForm.deadline}
-                          onChange={(event) => setMandateForm((current) => ({ ...current, deadline: event.target.value }))}
-                        />
-                      </div>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label" htmlFor="mandate-operator-prompt">Operator Prompt</label>
-                      <textarea
-                        id="mandate-operator-prompt"
-                        className="form-input deploy-textarea font-mono"
-                        value={mandateForm.operatorPrompt}
-                        onChange={(event) => setMandateForm((current) => ({ ...current, operatorPrompt: event.target.value }))}
-                      />
-                      <span className="deploy-field-hint">Brief trading instructions for the agent.</span>
-                    </div>
+                  <div className="deploy-form-span-full" style={{ marginTop: 'var(--spacing-md)' }}>
                     {mandateValidationError ? (
-                      <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)' }}>
+                      <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)', marginBottom: 'var(--spacing-md)' }}>
                         <AlertCircleIcon size={14} /> {mandateValidationError}
                       </div>
                     ) : null}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <MandateConfigForm
+                      agentId={selectedAgentId ?? ''}
+                      onSuccess={() => {
+                        void handleMandateCommitted();
+                      }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--spacing-md)' }}>
                       <button
                         type="button"
-                        className="btn btn-primary"
-                        disabled={!selectedAgentId || isSubmitting}
+                        className="btn btn-secondary"
                         onClick={() => {
-                          setIsSubmitting(true);
-                          setError(null);
+                          setShowMandateEditor(false);
                           setMandateValidationError(null);
-                          handleCreateOrUpdateMandate()
-                            .catch((err) => {
-                              const message = err instanceof Error ? err.message : 'Failed to save mandate.';
-                              setMandateValidationError(message);
-                            })
-                            .finally(() => setIsSubmitting(false));
                         }}
                       >
-                        {isSubmitting ? 'Saving…' : 'Save Mandate'}
+                        Cancel
                       </button>
                     </div>
                   </div>

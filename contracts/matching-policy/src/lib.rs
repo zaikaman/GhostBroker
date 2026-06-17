@@ -39,12 +39,21 @@ wit_bindgen::generate!({
 
 mod matching;
 
-pub const CONTRACT_VERSION: &str = "0.2.0";
+pub const CONTRACT_VERSION: &str = "0.3.0";
 
 struct Component;
 
 #[cfg(target_arch = "wasm32")]
 impl exports::ghostbroker::matching_policy::contracts::Guest for Component {
+    fn seal_ticket(
+        req: exports::ghostbroker::matching_policy::contracts::GenericInput,
+    ) -> Result<Vec<u8>, String> {
+        let input = req
+            .input
+            .ok_or_else(|| "seal-ticket: missing input bytes".to_string())?;
+        matching::seal_ticket(&input)
+    }
+
     fn seal_intent(
         req: exports::ghostbroker::matching_policy::contracts::GenericInput,
     ) -> Result<Vec<u8>, String> {
@@ -89,6 +98,24 @@ pub struct OuterEnvelope {
     pub user_profile: Option<String>,
     #[serde(default)]
     pub context: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SealTicketInput {
+    pub institution_id: String,
+    pub agent_did: String,
+    pub authority_ref: String,
+    pub asset_code: String,
+    pub side: String,
+    pub policy_hash: String,
+    pub compatibility_token: String,
+    pub correlation_ref: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SealTicketOutput {
+    pub ticket_handle: String,
+    pub execution_ref: String,
 }
 
 #[derive(Debug, Deserialize)]

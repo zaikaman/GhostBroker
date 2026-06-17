@@ -28,6 +28,34 @@ interface contracts {
     context: option<list<u8>>,
   }
 
+  // ─── seal-ticket ───
+  //
+  // Seal a negotiation ticket. The orchestrator dispatches here
+  // from `/contracts/negotiation/tickets`. Creates an opaque handle
+  // from the negotiation ticket fields so the orchestrator can pair
+  // opposite-side tickets in memory. The contract is intentionally
+  // non-validating: the orchestrator already verified the
+  // GhostBroker delegation VC before calling; the TEE's job is to
+  // mint a tamper-evident handle, not re-check policy.
+  //
+  // Input  (JSON): SealTicketInput
+  //   {
+  //     "institution_id":      "<uuid>",
+  //     "agent_did":           "did:t3n:...",
+  //     "authority_ref":       "ghostbroker-delegation:...",
+  //     "asset_code":          "WBTC",
+  //     "side":                "buy" | "sell",
+  //     "policy_hash":         "<hex>",
+  //     "compatibility_token": "WBTC:buy:<institution-id>",
+  //     "correlation_ref":     "ticket:...",
+  //   }
+  // Output (JSON): SealTicketOutput
+  //   {
+  //     "ticket_handle":  "ticket_<32-hex>",
+  //     "execution_ref":  "t3exec_<uuid>",
+  //   }
+  seal-ticket: func(req: generic-input) -> result<list<u8>, string>;
+
   // Seal an encrypted blind intent. The host returns a fresh
   // opaque handle the orchestrator uses as the in-memory queue
   // key. The contract is intentionally non-validating: the

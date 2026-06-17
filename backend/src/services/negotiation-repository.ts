@@ -9,6 +9,10 @@ import {
   type NegotiationSessionRecord,
   type RedactedNegotiationSessionView,
 } from "../models/negotiation.js";
+import type {
+  AuthoredMandatePolicy,
+  DerivedExecutionRails,
+} from "./negotiation-strategy.js";
 
 interface QueryChain<TResult> {
   eq(column: string, value: string): QueryChain<TResult>;
@@ -60,14 +64,27 @@ interface SupabaseNegotiationClient {
   from(table: "completed_trades"): UpdateQuery<{ id: string }>;
 }
 
+export interface CreateMandateRepositoryInput {
+  institutionId: string;
+  agentId: string;
+  agentDid: string;
+  policyHash: string;
+  /**
+   * The authored AI-first policy (primary). When present, the derived
+   * rails are also persisted alongside it.
+   */
+  authored?: AuthoredMandatePolicy;
+  rails?: DerivedExecutionRails;
+  /**
+   * Legacy / compatibility derived-flavored mandate. Used when an old
+   * client posts the thin derived shape directly. The authored surface
+   * wins when both are present.
+   */
+  legacy?: NegotiationMandateInput;
+}
+
 export interface NegotiationRepository {
-  createMandate(input: {
-    institutionId: string;
-    agentId: string;
-    agentDid: string;
-    mandate: NegotiationMandateInput;
-    policyHash: string;
-  }): Promise<NegotiationMandate>;
+  createMandate(input: CreateMandateRepositoryInput): Promise<NegotiationMandate>;
   getMandateByAgent(
     institutionId: string,
     agentId: string,
@@ -112,6 +129,10 @@ export interface NegotiationRepository {
     disclosedClaimRefs?: string[];
     opaqueSignal?: string | null;
     reasoning?: string | null;
+    strategicIntent?: string | null;
+    confidence?: number | null;
+    escalationRequested?: boolean | null;
+    settlementReadiness?: string | null;
   }): Promise<NegotiationRoundRecord>;
   appendDisclosure(input: {
     sessionId: string;
@@ -165,6 +186,10 @@ function toRoundView(record: NegotiationRoundRecord): RedactedNegotiationSession
     disclosedClaimRefs: record.disclosed_claim_refs,
     opaqueSignal,
     reasoning: record.reasoning,
+    strategicIntent: record.strategic_intent ?? null,
+    confidence: record.confidence ?? null,
+    escalationRequested: record.escalation_requested ?? null,
+    settlementReadiness: record.settlement_readiness ?? null,
     createdAt: record.created_at,
   };
 }
@@ -188,33 +213,89 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     this.client = client;
   }
 
-  public async createMandate(input: {
-    institutionId: string;
-    agentId: string;
-    agentDid: string;
-    mandate: NegotiationMandateInput;
-    policyHash: string;
-  }): Promise<NegotiationMandate> {
+  public async createMandate(
+    input: CreateMandateRepositoryInput,
+  ): Promise<NegotiationMandate> {
+    const { authored, rails, legacy } = input;
+
+    // Resolve the persisted row. The authored policy is primary; the
+    // derived rails feed the legacy numeric columns so the enclave/
+    // contract authority path keeps working unchanged.
+    const insertRow: Record<string, unknown> = {
+      institution_id: input.institutionId,
+      agent_id: input.agentId,
+      agent_did: input.agentDid,
+      policy_hash: input.policyHash,
+    };
+
+    if (authored && rails) {
+      insertRow.asset_code = authored.assetCode;
+      insertRow.side = authored.side;
+      insertRow.target_quantity = rails.targetQuantity;
+      insertRow.reference_price = rails.referencePrice;
+      insertRow.price_band_bps = rails.priceBandBps;
+      insertRow.deadline = authored.timeWindow.deadline;
+      insertRow.urgency = authored.urgency;
+      insertRow.max_notional = rails.notionalCeiling.toString();
+      insertRow.disclosable_claims = authored.disclosurePolicy.allowLadder;
+      insertRow.required_counterparty_claims =
+        authored.counterpartyRequirements.requiredClaims.length > 0
+          ? Object.fromEntries(
+              authored.counterpartyRequirements.requiredClaims.map((claim) => [
+                claim,
+                true,
+              ]),
+            )
+          : {};
+      insertRow.counterparty_constraints = {
+        disallowedTraits: authored.counterpartyRequirements.disallowedTraits,
+        reputationTier: authored.counterpartyRequirements.reputationTier ?? null,
+      };
+      insertRow.operator_prompt = authored.operatorInstructions;
+      // Authored columns.
+      insertRow.objective = authored.objective;
+      insertRow.execution_style = authored.executionStyle;
+      insertRow.valuation_policy = authored.valuationPolicy;
+      insertRow.concession_policy = authored.concessionPolicy;
+      insertRow.disclosure_policy = authored.disclosurePolicy;
+      insertRow.approval_policy = authored.approvalPolicy;
+      insertRow.counterparty_requirements = authored.counterpartyRequirements;
+      insertRow.size_policy = authored.sizePolicy;
+      insertRow.time_window = authored.timeWindow;
+      insertRow.operator_instructions = authored.operatorInstructions;
+      insertRow.minimum_quantity = rails.minimumQuantity;
+      insertRow.partial_execution_allowed = rails.partialExecutionAllowed;
+      // Derived rails.
+      insertRow.derived_anchor_value = rails.anchorValue;
+      insertRow.derived_walkaway_min = rails.walkawayMin;
+      insertRow.derived_walkaway_max = rails.walkawayMax;
+      insertRow.derived_concession_budget_bps = rails.concessionBudgetBps;
+      insertRow.derived_notional_ceiling = rails.notionalCeiling;
+    } else if (legacy) {
+      insertRow.asset_code = legacy.assetCode;
+      insertRow.side = legacy.side;
+      insertRow.target_quantity = legacy.targetQuantity;
+      insertRow.reference_price = legacy.referencePrice;
+      insertRow.price_band_bps = legacy.priceBandBps;
+      insertRow.deadline = legacy.deadline;
+      insertRow.urgency = legacy.urgency;
+      insertRow.max_notional = legacy.maxNotional;
+      insertRow.disclosable_claims = legacy.disclosableClaims;
+      insertRow.required_counterparty_claims = legacy.requiredCounterpartyClaims;
+      insertRow.counterparty_constraints = legacy.counterpartyConstraints;
+      insertRow.operator_prompt = legacy.operatorPrompt;
+    } else {
+      throw new PublicError(
+        "validation_failed",
+        400,
+        undefined,
+        "Mandate create requires either an authored policy or legacy mandate fields.",
+      );
+    }
+
     const { data, error } = await this.client
       .from("negotiation_mandates")
-      .insert({
-        institution_id: input.institutionId,
-        agent_id: input.agentId,
-        agent_did: input.agentDid,
-        asset_code: input.mandate.assetCode,
-        side: input.mandate.side,
-        target_quantity: input.mandate.targetQuantity,
-        reference_price: input.mandate.referencePrice,
-        price_band_bps: input.mandate.priceBandBps,
-        deadline: input.mandate.deadline,
-        urgency: input.mandate.urgency,
-        max_notional: input.mandate.maxNotional,
-        disclosable_claims: input.mandate.disclosableClaims,
-        required_counterparty_claims: input.mandate.requiredCounterpartyClaims,
-        counterparty_constraints: input.mandate.counterpartyConstraints,
-        operator_prompt: input.mandate.operatorPrompt,
-        policy_hash: input.policyHash,
-      })
+      .insert(insertRow)
       .select("*")
       .single();
 
@@ -401,6 +482,10 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     disclosedClaimRefs?: string[];
     opaqueSignal?: string | null;
     reasoning?: string | null;
+    strategicIntent?: string | null;
+    confidence?: number | null;
+    escalationRequested?: boolean | null;
+    settlementReadiness?: string | null;
   }): Promise<NegotiationRoundRecord> {
     const { data, error } = await this.client
       .from("negotiation_rounds")
@@ -414,6 +499,10 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
         disclosed_claim_refs: input.disclosedClaimRefs ?? [],
         opaque_signal: input.opaqueSignal ?? null,
         reasoning: input.reasoning ?? null,
+        strategic_intent: input.strategicIntent ?? null,
+        confidence: input.confidence ?? null,
+        escalation_requested: input.escalationRequested ?? null,
+        settlement_readiness: input.settlementReadiness ?? null,
       })
       .select("*")
       .single();
@@ -539,6 +628,37 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       .reverse()
       .find((round) => round.opaque_signal !== null) ?? null;
 
+    const verifiedDisclosures = (disclosures ?? []).filter(
+      (disclosure) => disclosure.verified,
+    );
+    const receivedVerifiedClaims = verifiedDisclosures.map(
+      (disclosure) => disclosure.claim_type,
+    );
+    const requiredClaims = Array.from(
+      new Set(
+        (rounds ?? [])
+          .filter((round) => round.move_type === "request_disclosure")
+          .flatMap((round) => round.disclosed_claim_refs ?? []),
+      ),
+    );
+    const pendingRequiredClaims = requiredClaims.filter(
+      (claim) => !receivedVerifiedClaims.includes(claim),
+    );
+    const trustLevel: RedactedNegotiationSessionView["trustLevel"] =
+      receivedVerifiedClaims.length === 0
+        ? "none"
+        : pendingRequiredClaims.length === 0 && requiredClaims.length > 0
+          ? "established"
+          : "partial";
+
+    const escalationPending = (rounds ?? []).some(
+      (round) => round.escalation_requested === true,
+    );
+
+    const latestStrategyRound = [...(rounds ?? [])]
+      .reverse()
+      .find((round) => round.strategic_intent !== null) ?? null;
+
     return {
       id: session.id,
       assetCode: session.asset_code,
@@ -556,6 +676,14 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
         distanceSignalRecord?.opaque_signal === "far"
           ? distanceSignalRecord.opaque_signal
           : null,
+      trustLevel,
+      disclosureProgress: {
+        requiredClaims,
+        receivedVerifiedClaims,
+        pendingRequiredClaims,
+      },
+      escalationPending,
+      latestStrategySignal: latestStrategyRound?.strategic_intent ?? null,
       disclosedClaims: (disclosures ?? []).map(toDisclosureView),
       rounds: (rounds ?? []).map(toRoundView),
       createdAt: session.created_at,

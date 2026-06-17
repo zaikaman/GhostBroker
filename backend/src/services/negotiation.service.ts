@@ -5,6 +5,8 @@ import type {
   RedactedNegotiationSessionView,
   NegotiationMandate,
   NegotiationMandateInput,
+  AuthoredMandatePolicyInput,
+  CreateNegotiationMandateRequest,
 } from "../models/negotiation.js";
 import type { AgentManagementService } from "./agent.service.js";
 import type {
@@ -15,12 +17,17 @@ import type {
   NegotiationRepository,
 } from "./negotiation-repository.js";
 import type { DelegationCredential } from "@ghostbroker/agent-client";
+import {
+  normalizeStrategy,
+  type AuthoredMandatePolicy,
+  type DerivedExecutionRails,
+} from "./negotiation-strategy.js";
 
 export interface NegotiationManagementService {
   createMandate(input: {
     institutionId: string;
     agentId: string;
-    mandate: NegotiationMandateInput;
+    request: CreateNegotiationMandateRequest;
   }): Promise<{
     mandate: NegotiationMandate;
     authorityRef: string;
@@ -90,7 +97,7 @@ export class NegotiationService implements NegotiationManagementService {
   public async createMandate(input: {
     institutionId: string;
     agentId: string;
-    mandate: NegotiationMandateInput;
+    request: CreateNegotiationMandateRequest;
   }): Promise<{
     mandate: NegotiationMandate;
     authorityRef: string;
@@ -101,12 +108,14 @@ export class NegotiationService implements NegotiationManagementService {
       input.institutionId,
     );
 
+    const { authored, rails, legacy } = this.resolveMandatePayload(input.request);
+
     const policy = {
       agentDid: agent.agentDid,
       institutionId: agent.institutionId,
       maxSpendUsd: 1,
       allowedCategories: ["services"] as ("office-supplies" | "software" | "hardware" | "services" | "travel")[],
-      mandate: input.mandate,
+      mandate: (authored ?? legacy) as NegotiationMandateInput,
     };
 
     const { credential, policyHash } = await this.tenantSigner.mint(policy);
@@ -122,8 +131,9 @@ export class NegotiationService implements NegotiationManagementService {
       institutionId: input.institutionId,
       agentId: agent.id,
       agentDid: agent.agentDid,
-      mandate: input.mandate,
       policyHash,
+      ...(authored ? { authored, rails } : {}),
+      ...(legacy ? { legacy } : {}),
     });
 
     return {
@@ -131,6 +141,31 @@ export class NegotiationService implements NegotiationManagementService {
       authorityRef: authorityRefFor(credential),
       policyHash,
     };
+  }
+
+  /**
+   * Resolve the persisted mandate payload from the create request.
+   * Authored policy is primary; the derived rails are computed from
+   * it. Legacy derived-flavored input is passed through unchanged.
+   */
+  private resolveMandatePayload(request: CreateNegotiationMandateRequest): {
+    authored?: AuthoredMandatePolicy;
+    rails?: DerivedExecutionRails;
+    legacy?: NegotiationMandateInput;
+  } {
+    if (request.authored) {
+      const profile = normalizeStrategy(request.authored satisfies AuthoredMandatePolicyInput as AuthoredMandatePolicy);
+      return { authored: profile.authored, rails: profile.rails };
+    }
+    if (request.mandate) {
+      return { legacy: request.mandate };
+    }
+    throw new PublicError(
+      "validation_failed",
+      400,
+      undefined,
+      "Either an authored policy or a legacy mandate is required.",
+    );
   }
 
   public async getMandateByAgent(

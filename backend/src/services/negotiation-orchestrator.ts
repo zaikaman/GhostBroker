@@ -11,16 +11,26 @@ import type {
   NegotiationMandate,
   NegotiationMove,
   NegotiationSessionRecord,
+  RedactedNegotiationSessionView,
 } from "../models/negotiation.js";
 import type { SettlementService, SettlementExecutionRequest } from "./settlement.service.js";
 import type { PortfolioService } from "./portfolio.service.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
 import type { TelemetryPhase } from "../websocket/telemetry-event.js";
+import {
+  disclosureGateSatisfied,
+  derivedPriceBandFor,
+  pairingCompatibility,
+  type AgentDecisionMove,
+  type AuthoredMandatePolicy,
+  type DerivedExecutionRails,
+  type NegotiationStrategyProfile,
+} from "./negotiation-strategy.js";
 
 /**
  * A negotiation ticket awaiting pairing. Held in memory between
- * `submitTicket` and the matchmaker pairing it with an opposite-side,
- * same-asset ticket from a different institution.
+ * `submitTicket` and the matchmaker pairing it with a compatible
+ * opposite-side ticket from a different institution.
  */
 interface PendingTicket {
   ticketHandle: string;
@@ -31,6 +41,7 @@ interface PendingTicket {
   assetCode: string;
   side: "buy" | "sell";
   mandate: NegotiationMandate;
+  profile: NegotiationStrategyProfile | null;
   sealedAt: string;
 }
 
@@ -58,42 +69,151 @@ function decimalString(value: number): string {
 }
 
 /**
- * Compute the [min, max] price band a mandate authorises. Buyers may
- * bid up to reference*(1+bps); sellers may ask down to
- * reference*(1-bps). Both bound the opposite edge at the reference.
+ * Reconstruct a strategy profile from a persisted mandate. If the
+ * mandate has no authored columns (legacy), returns null and the
+ * orchestrator falls back to the derived numeric rails already stored
+ * on the mandate row.
  */
-function mandatePriceBand(mandate: NegotiationMandate): {
-  minPrice: number;
-  maxPrice: number;
-} {
+function profileFromMandate(
+  mandate: NegotiationMandate,
+): NegotiationStrategyProfile | null {
+  if (!mandate.objective || !mandate.executionStyle) {
+    return null;
+  }
+  const authored = authoredFromMandate(mandate);
+  if (!authored) return null;
+  const rails = railsFromMandate(mandate);
+  if (!rails) return null;
+  return { authored, rails };
+}
+
+function authoredFromMandate(
+  mandate: NegotiationMandate,
+): AuthoredMandatePolicy | null {
+  if (!mandate.objective || !mandate.executionStyle || !mandate.valuationPolicy) {
+    return null;
+  }
+  const sizePolicy = (mandate.sizePolicy ?? {}) as Record<string, unknown>;
+  const timeWindow = (mandate.timeWindow ?? {}) as Record<string, unknown>;
+  const valuationPolicy = mandate.valuationPolicy as Record<string, unknown>;
+  const concessionPolicy = (mandate.concessionPolicy ?? {}) as Record<string, unknown>;
+  const disclosurePolicy = (mandate.disclosurePolicy ?? {}) as Record<string, unknown>;
+  const approvalPolicy = (mandate.approvalPolicy ?? {}) as Record<string, unknown>;
+  const counterpartyRequirements = (mandate.counterpartyRequirements ?? {}) as Record<string, unknown>;
+
+  const result: AuthoredMandatePolicy = {
+    objective: mandate.objective,
+    assetCode: mandate.assetCode,
+    side: mandate.side,
+    sizePolicy: {
+      targetQuantity: Number(sizePolicy.targetQuantity ?? mandate.targetQuantity),
+      minimumQuantity: Number(sizePolicy.minimumQuantity ?? mandate.minimumQuantity ?? 0),
+      partialExecutionAllowed: Boolean(sizePolicy.partialExecutionAllowed ?? mandate.partialExecutionAllowed ?? true),
+    },
+    urgency: mandate.urgency,
+    executionStyle: mandate.executionStyle,
+    valuationPolicy: {
+      source: (valuationPolicy.source ?? "operator_note") as AuthoredMandatePolicy["valuationPolicy"]["source"],
+      anchorValue: valuationPolicy.anchorValue !== undefined && valuationPolicy.anchorValue !== null
+        ? Number(valuationPolicy.anchorValue)
+        : Number(mandate.derivedAnchorValue ?? mandate.referencePrice),
+    },
+    concessionPolicy: {
+      pace: (concessionPolicy.pace ?? "balanced") as AuthoredMandatePolicy["concessionPolicy"]["pace"],
+      maxConcessionBps: Number(concessionPolicy.maxConcessionBps ?? mandate.derivedConcessionBudgetBps ?? mandate.priceBandBps),
+    },
+    disclosurePolicy: {
+      allowLadder: Array.isArray(disclosurePolicy.allowLadder)
+        ? (disclosurePolicy.allowLadder as string[])
+        : mandate.disclosableClaims,
+    },
+    counterpartyRequirements: {
+      requiredClaims: Array.isArray(counterpartyRequirements.requiredClaims)
+        ? (counterpartyRequirements.requiredClaims as string[])
+        : Object.keys(mandate.requiredCounterpartyClaims),
+      disallowedTraits: Array.isArray(counterpartyRequirements.disallowedTraits)
+        ? (counterpartyRequirements.disallowedTraits as string[])
+        : [],
+    },
+    approvalPolicy: {
+      mode: (approvalPolicy.mode ?? "auto_settle") as AuthoredMandatePolicy["approvalPolicy"]["mode"],
+    },
+    timeWindow: {
+      deadline: typeof timeWindow.deadline === "string" ? timeWindow.deadline : mandate.deadline,
+    },
+    operatorInstructions: mandate.operatorInstructions ?? mandate.operatorPrompt,
+  };
+  // Conditionally add optional properties to satisfy exactOptionalPropertyTypes.
+  if (typeof valuationPolicy.note === "string") {
+    result.valuationPolicy.note = valuationPolicy.note;
+  }
+  if (Array.isArray(disclosurePolicy.requireReciprocityFor)) {
+    result.disclosurePolicy.requireReciprocityFor = disclosurePolicy.requireReciprocityFor as string[];
+  }
+  if (typeof counterpartyRequirements.reputationTier === "string") {
+    result.counterpartyRequirements.reputationTier = counterpartyRequirements.reputationTier;
+  }
+  if (typeof approvalPolicy.preferredEnvelopeNote === "string") {
+    result.approvalPolicy.preferredEnvelopeNote = approvalPolicy.preferredEnvelopeNote;
+  }
+  if (typeof timeWindow.preferredWindowStart === "string") {
+    result.timeWindow.preferredWindowStart = timeWindow.preferredWindowStart;
+  }
+  if (typeof timeWindow.preferredWindowEnd === "string") {
+    result.timeWindow.preferredWindowEnd = timeWindow.preferredWindowEnd;
+  }
+  return result;
+}
+
+function railsFromMandate(mandate: NegotiationMandate): DerivedExecutionRails | null {
+  if (mandate.derivedAnchorValue !== null && mandate.derivedWalkawayMin !== null) {
+    return {
+      anchorValue: Number(mandate.derivedAnchorValue),
+      priceBandBps: mandate.derivedConcessionBudgetBps ?? mandate.priceBandBps,
+      referencePrice: Number(mandate.derivedAnchorValue),
+      walkawayMin: Number(mandate.derivedWalkawayMin),
+      walkawayMax: Number(mandate.derivedWalkawayMax ?? mandate.derivedAnchorValue),
+      concessionBudgetBps: mandate.derivedConcessionBudgetBps ?? mandate.priceBandBps,
+      targetQuantity: Number(mandate.targetQuantity),
+      minimumQuantity: Number(mandate.minimumQuantity ?? 0),
+      partialExecutionAllowed: mandate.partialExecutionAllowed ?? true,
+      notionalCeiling: Number(mandate.derivedNotionalCeiling ?? mandate.maxNotional),
+    };
+  }
+  // Legacy mandate: synthesize a best-effort rail set from the stored
+  // derived numeric columns so the existing contract path still works.
   const reference = Number(mandate.referencePrice);
   const band = reference * (mandate.priceBandBps / 10_000);
-  return { minPrice: reference - band, maxPrice: reference + band };
+  return {
+    anchorValue: reference,
+    priceBandBps: mandate.priceBandBps,
+    referencePrice: reference,
+    walkawayMin: reference - band,
+    walkawayMax: reference + band,
+    concessionBudgetBps: mandate.priceBandBps,
+    targetQuantity: Number(mandate.targetQuantity),
+    minimumQuantity: 0,
+    partialExecutionAllowed: true,
+    notionalCeiling: Number(mandate.maxNotional),
+  };
 }
 
 /**
- * Negotiation orchestrator + matchmaker.
+ * Negotiation orchestrator + compatibility-aware matchmaker.
  *
- * Sits beside `MatchingOrchestrator`. Where the matching orchestrator
- * crosses two instant intents, this one owns a turn-based bilateral
- * negotiation session and its state machine:
+ * Owns a turn-based bilateral negotiation session and its state machine:
  *
  *   pairing -> active -> converged -> settling -> settled
  *                     \-> walked_away
  *                     \-> expired
  *
- * Every privileged transition (`submitTicket` => `negotiation.open`,
- * `submitMove` => `negotiation.move`, a `reveal` => `negotiation.disclose`,
- * convergence => `negotiation.settle`) re-verifies the agent's
- * delegation VC through the same facade the instant path uses. Hard
- * limits (price band, quantity, notional, disclosure allowlist, turn
- * order, deadline, round cap) are enforced here deterministically;
- * the LLM only proposes a bounded move.
- *
- * The crossing decision and the authoritative execution terms come
- * from the enclave round evaluator (which wraps the same match
- * contract the instant path uses) — the backend never recomputes a
- * midpoint or a fill.
+ * Pairing is now compatibility-class based (asset, opposite side,
+ * size regime, disclosure/claim compatibility), not just asset/side.
+ * Disclosure is a first-class state transition tracked for trust
+ * milestones, and convergence requires the disclosure gate to be
+ * satisfied in addition to a price cross. The LLM proposes a bounded
+ * move including strategic intent/confidence/escalation; the enclave
+ * remains the authority for the cross and execution terms.
  */
 export class NegotiationOrchestrator {
   private readonly ticketClient: NegotiationTicketClient;
@@ -159,7 +279,7 @@ export class NegotiationOrchestrator {
 
   /**
    * Seal a negotiation ticket through the enclave and attempt to pair
-   * it with a waiting opposite-side ticket. Re-verifies the agent's
+   * it with a compatible waiting ticket. Re-verifies the agent's
    * delegation VC for `negotiation.open` before sealing. Returns the
    * sealed ticket handle plus the session id if a pairing was made.
    */
@@ -214,6 +334,7 @@ export class NegotiationOrchestrator {
       assetCode: input.assetCode,
       side: input.side,
       mandate,
+      profile: profileFromMandate(mandate),
       sealedAt: sealed.sealedAt,
     };
 
@@ -232,27 +353,47 @@ export class NegotiationOrchestrator {
   }
 
   /**
-   * Find a waiting opposite-side, same-asset ticket from a different
-   * institution and open a session. Buyer takes the first turn.
+   * Find a waiting compatible ticket and open a session. Compatibility
+   * is now policy-aware: asset + opposite side + different institution
+   * + overlapping size regime + claim compatibility. Falls back to the
+   * legacy asset/side/institution check when one side has no authored
+   * profile (compatibility codepath). Buyer takes the first turn.
    */
   private async tryPair(
     ticket: PendingTicket,
     correlationRef: string,
   ): Promise<string | null> {
-    const matchIndex = this.pendingTickets.findIndex(
-      (other) =>
-        other.assetCode === ticket.assetCode &&
-        other.side !== ticket.side &&
-        other.institutionId !== ticket.institutionId,
-    );
-    if (matchIndex < 0) {
+    let bestIndex = -1;
+    for (let index = 0; index < this.pendingTickets.length; index += 1) {
+      const other = this.pendingTickets[index];
+      if (!other) continue;
+      if (
+        other.assetCode !== ticket.assetCode ||
+        other.side === ticket.side ||
+        other.institutionId === ticket.institutionId
+      ) {
+        continue;
+      }
+      // Policy-aware compatibility check when both sides have a profile.
+      if (ticket.profile && other.profile) {
+        const buyerProfile = ticket.side === "buy" ? ticket.profile : other.profile;
+        const sellerProfile = ticket.side === "sell" ? ticket.profile : other.profile;
+        const compat = pairingCompatibility(buyerProfile, sellerProfile);
+        if (!compat.compatible) {
+          continue;
+        }
+      }
+      bestIndex = index;
+      break;
+    }
+    if (bestIndex < 0) {
       return null;
     }
-    const other = this.pendingTickets[matchIndex];
+    const other = this.pendingTickets[bestIndex];
     if (!other) {
       return null;
     }
-    this.pendingTickets.splice(matchIndex, 1);
+    this.pendingTickets.splice(bestIndex, 1);
 
     const buyTicket = ticket.side === "buy" ? ticket : other;
     const sellTicket = ticket.side === "sell" ? ticket : other;
@@ -284,10 +425,11 @@ export class NegotiationOrchestrator {
    * Enforces, in order: VC re-verification (`negotiation.move`), the
    * session is active, it is the actor's turn, the deadline has not
    * passed, the round cap is not exceeded, and the move is within the
-   * mandate's price/quantity/notional bounds. A `reveal` additionally
-   * re-verifies `negotiation.disclose` and runs the enclave disclosure
-   * verifier (allowlist enforced). On a price/quantity move the enclave
-   * round evaluator decides the cross; on a cross the session settles.
+   * mandate's derived price/quantity/notional bounds. A `reveal`
+   * additionally re-verifies `negotiation.disclose` and runs the
+   * enclave disclosure verifier. On a price/quantity move the enclave
+   * round evaluator decides the cross; on a cross that ALSO satisfies
+   * the disclosure gate the session settles.
    */
   public async submitMove(input: {
     institutionId: string;
@@ -346,7 +488,11 @@ export class NegotiationOrchestrator {
     }
 
     const mandate = await this.loadMandateForSide(session, actorSide);
-    const { minPrice, maxPrice } = mandatePriceBand(mandate);
+    const rails = railsFromMandate(mandate);
+    if (!rails) {
+      throw new PublicError("service_unavailable", 503);
+    }
+    const { minPrice, maxPrice } = derivedPriceBandFor(rails, actorSide);
 
     if (input.move.action === "walkaway") {
       await this.repository.appendRound({
@@ -356,6 +502,10 @@ export class NegotiationOrchestrator {
         actorSide,
         moveType: "walkaway",
         reasoning: input.move.reasoning,
+        strategicIntent: input.move.strategicIntent ?? "walkaway",
+        confidence: input.move.confidence ?? null,
+        escalationRequested: input.move.escalationRequested ?? null,
+        settlementReadiness: "not_ready",
       });
       await this.repository.updateSession({
         sessionId: session.id,
@@ -385,6 +535,12 @@ export class NegotiationOrchestrator {
     }
 
     if (input.move.action === "request_disclosure" || input.move.action === "hold") {
+      const escalationPhase: TelemetryPhase =
+        input.move.escalationRequested === true
+          ? "negotiation_escalation_requested"
+          : input.move.action === "hold"
+            ? "negotiation_held"
+            : "negotiation_move_submitted";
       await this.repository.appendRound({
         sessionId: session.id,
         roundNumber: session.round_number + 1,
@@ -395,14 +551,19 @@ export class NegotiationOrchestrator {
           ? { disclosedClaimRefs: [input.move.claimType] }
           : {}),
         reasoning: input.move.reasoning,
+        strategicIntent: input.move.strategicIntent ?? null,
+        confidence: input.move.confidence ?? null,
+        escalationRequested: input.move.escalationRequested ?? null,
+        settlementReadiness: input.move.settlementReadiness ?? null,
       });
       await this.advanceTurn(session, actorSide);
-      this.publish(input.institutionId, "negotiation_move_submitted", input.correlationRef, input.agentDid);
+      this.publish(input.institutionId, escalationPhase, input.correlationRef, input.agentDid);
       return { status: "active" };
     }
 
     // propose | counter | accept — all carry price/quantity that must
-    // be clamped to the mandate band, quantity, and notional ceiling.
+    // be clamped to the derived mandate band, quantity, and notional
+    // ceiling.
     const price = this.clampPrice(input.move.price, minPrice, maxPrice);
     const quantity = this.clampQuantity(input.move.quantity, mandate);
     if (price === null || quantity === null) {
@@ -415,6 +576,7 @@ export class NegotiationOrchestrator {
         actorSide,
         moveType: "hold",
         reasoning: `out-of-band move clamped to hold: ${input.move.reasoning}`.slice(0, 4000),
+        strategicIntent: "hold_for_better_terms",
       });
       await this.advanceTurn(session, actorSide);
       return { status: "active" };
@@ -473,11 +635,34 @@ export class NegotiationOrchestrator {
       proposalCiphertext,
       opaqueSignal,
       reasoning: input.move.reasoning,
+      strategicIntent: input.move.strategicIntent ?? null,
+      confidence: input.move.confidence ?? null,
+      escalationRequested: input.move.escalationRequested ?? null,
+      settlementReadiness: input.move.settlementReadiness ?? null,
     });
 
     this.publish(input.institutionId, "negotiation_move_submitted", input.correlationRef, input.agentDid);
 
     if (crossed && executionPrice > 0 && matchedQuantity > 0) {
+      // Disclosure gate: a price cross is not enough if either side
+      // still requires a verified claim it has not received.
+      const gateOk = await this.disclosureGateSatisfiedFor(session);
+      if (!gateOk) {
+        // Hold the cross pending disclosure; surface a trust-building
+        // signal rather than settling.
+        this.publish(
+          session.buy_institution_id,
+          "negotiation_disclosure_required",
+          input.correlationRef,
+        );
+        this.publish(
+          session.sell_institution_id,
+          "negotiation_disclosure_required",
+          input.correlationRef,
+        );
+        await this.advanceTurn(session, actorSide);
+        return { status: "active" };
+      }
       await this.convergeAndSettle({
         session,
         executionPrice,
@@ -613,6 +798,10 @@ export class NegotiationOrchestrator {
       moveType: "reveal",
       disclosedClaimRefs: [disclosure.id],
       reasoning: input.move.reasoning,
+      strategicIntent: input.move.strategicIntent ?? "build_trust",
+      confidence: input.move.confidence ?? null,
+      escalationRequested: input.move.escalationRequested ?? null,
+      settlementReadiness: input.move.settlementReadiness ?? null,
     });
 
     this.publish(
@@ -625,6 +814,41 @@ export class NegotiationOrchestrator {
       "negotiation_disclosure_verified",
       input.correlationRef,
     );
+  }
+
+  /**
+   * Disclosure gate: a session may only settle once every required
+   * counterparty claim on BOTH mandates has been verified. Reads the
+   * authored counterparty requirements when present; otherwise treats
+   * the gate as satisfied (legacy compatibility).
+   */
+  private async disclosureGateSatisfiedFor(
+    session: NegotiationSessionRecord,
+  ): Promise<boolean> {
+    const buyMandate = await this.loadMandateForSide(session, "buy");
+    const sellMandate = await this.loadMandateForSide(session, "sell");
+
+    const view = await this.repository.getSession(session.id, session.buy_institution_id);
+    if (!view) {
+      return true;
+    }
+    const receivedVerifiedClaims = view.disclosureProgress.receivedVerifiedClaims;
+
+    const buyerRequired = requiredClaimsFor(buyMandate);
+    const sellerRequired = requiredClaimsFor(sellMandate);
+
+    // Each side's required claims must have been disclosed AND verified
+    // by the counterparty. A claim verified in the session counts for
+    // whichever side required it.
+    const buyerOk = disclosureGateSatisfied({
+      requiredClaims: buyerRequired,
+      receivedVerifiedClaims,
+    });
+    const sellerOk = disclosureGateSatisfied({
+      requiredClaims: sellerRequired,
+      receivedVerifiedClaims,
+    });
+    return buyerOk && sellerOk;
   }
 
   private async convergeAndSettle(input: {
@@ -751,3 +975,21 @@ export class NegotiationOrchestrator {
     void this.settlementAssetCode;
   }
 }
+
+function requiredClaimsFor(mandate: NegotiationMandate): string[] {
+  if (
+    mandate.counterpartyRequirements &&
+    Array.isArray((mandate.counterpartyRequirements as Record<string, unknown>).requiredClaims)
+  ) {
+    return (mandate.counterpartyRequirements as { requiredClaims: string[] }).requiredClaims;
+  }
+  return Object.keys(mandate.requiredCounterpartyClaims);
+}
+
+/**
+ * Convenience export for callers that want the strategy helpers but
+ * only import the orchestrator. Keeps the agent decision type aligned
+ * with the validator in `negotiation-strategy.ts`.
+ */
+export type { AgentDecisionMove };
+export type { RedactedNegotiationSessionView };

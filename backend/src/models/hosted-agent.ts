@@ -65,6 +65,25 @@ export interface NegotiationMandateSummary {
   policyHash: string;
   createdAt: string;
   updatedAt: string;
+  // Authored AI-first policy summary (nullable for legacy mandates).
+  objective: string | null;
+  executionStyle: NegotiationMandate["executionStyle"];
+  valuationPolicy: Record<string, unknown> | null;
+  concessionPolicy: Record<string, unknown> | null;
+  disclosurePolicy: Record<string, unknown> | null;
+  approvalPolicy: Record<string, unknown> | null;
+  counterpartyRequirements: Record<string, unknown> | null;
+  sizePolicy: Record<string, unknown> | null;
+  timeWindow: Record<string, unknown> | null;
+  operatorInstructions: string | null;
+  minimumQuantity: string | null;
+  partialExecutionAllowed: boolean | null;
+  // Derived rails summary.
+  derivedAnchorValue: string | null;
+  derivedWalkawayMin: string | null;
+  derivedWalkawayMax: string | null;
+  derivedConcessionBudgetBps: number | null;
+  derivedNotionalCeiling: string | null;
 }
 
 export type HostedAgentMigrationState = "ready" | "needs_migration";
@@ -134,5 +153,22 @@ export function toNegotiationMandateSummary(
     policyHash: mandate.policyHash,
     createdAt: mandate.createdAt,
     updatedAt: mandate.updatedAt,
+    objective: mandate.objective,
+    executionStyle: mandate.executionStyle,
+    valuationPolicy: mandate.valuationPolicy,
+    concessionPolicy: mandate.concessionPolicy,
+    disclosurePolicy: mandate.disclosurePolicy,
+    approvalPolicy: mandate.approvalPolicy,
+    counterpartyRequirements: mandate.counterpartyRequirements,
+    sizePolicy: mandate.sizePolicy,
+    timeWindow: mandate.timeWindow,
+    operatorInstructions: mandate.operatorInstructions,
+    minimumQuantity: mandate.minimumQuantity,
+    partialExecutionAllowed: mandate.partialExecutionAllowed,
+    derivedAnchorValue: mandate.derivedAnchorValue,
+    derivedWalkawayMin: mandate.derivedWalkawayMin,
+    derivedWalkawayMax: mandate.derivedWalkawayMax,
+    derivedConcessionBudgetBps: mandate.derivedConcessionBudgetBps,
+    derivedNotionalCeiling: mandate.derivedNotionalCeiling,
   };
 }

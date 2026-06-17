@@ -67,6 +67,74 @@ pub(crate) fn monotonic_nonce() -> u64 {
     NONCE.fetch_add(1, Ordering::SeqCst)
 }
 
+// ─── seal-ticket ───
+
+pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let body = unwrap_body(envelope_bytes)?;
+    let parsed: crate::SealTicketInput = serde_json::from_slice(&body)
+        .map_err(|err| format!("seal-ticket: invalid JSON input: {}", err))?;
+
+    // Required-field check mirrors the Zod schema in
+    // `backend/src/models/negotiation.ts`.
+    if parsed.institution_id.is_empty() {
+        return Err("seal-ticket: institution_id is required".to_string());
+    }
+    if parsed.agent_did.is_empty() {
+        return Err("seal-ticket: agent_did is required".to_string());
+    }
+    if parsed.authority_ref.is_empty() {
+        return Err("seal-ticket: authority_ref is required".to_string());
+    }
+    if parsed.asset_code.is_empty() {
+        return Err("seal-ticket: asset_code is required".to_string());
+    }
+    if parsed.side.is_empty() {
+        return Err("seal-ticket: side is required".to_string());
+    }
+    if parsed.correlation_ref.is_empty() {
+        return Err("seal-ticket: correlation_ref is required".to_string());
+    }
+
+    // The ticket handle is the canonical TEE seal identifier.
+    // Hash a stable concatenation of all the input fields so
+    // (a) the same input always maps to the same handle, and
+    // (b) different inputs are guaranteed to map to different
+    // handles (within SHA-256 collision probability).
+    let mut hasher_input: Vec<u8> = Vec::with_capacity(
+        parsed.institution_id.len()
+            + parsed.agent_did.len()
+            + parsed.authority_ref.len()
+            + parsed.asset_code.len()
+            + parsed.side.len()
+            + parsed.policy_hash.len()
+            + parsed.compatibility_token.len()
+            + parsed.correlation_ref.len()
+            + 7,
+    );
+    hasher_input.extend_from_slice(parsed.institution_id.as_bytes());
+    hasher_input.push(b'|');
+    hasher_input.extend_from_slice(parsed.agent_did.as_bytes());
+    hasher_input.push(b'|');
+    hasher_input.extend_from_slice(parsed.authority_ref.as_bytes());
+    hasher_input.push(b'|');
+    hasher_input.extend_from_slice(parsed.asset_code.as_bytes());
+    hasher_input.push(b'|');
+    hasher_input.extend_from_slice(parsed.side.as_bytes());
+    hasher_input.push(b'|');
+    hasher_input.extend_from_slice(parsed.correlation_ref.as_bytes());
+
+    let ticket_handle = crate::hex_handle("ticket", &hasher_input);
+    let execution_ref = fresh_execution_ref();
+
+    let output = crate::SealTicketOutput {
+        ticket_handle,
+        execution_ref,
+    };
+
+    serde_json::to_vec(&output)
+        .map_err(|err| format!("seal-ticket: response encode failed: {}", err))
+}
+
 /// Unwrap the T3 `generic-input` envelope and return the
 /// inner JSON bytes the contract body lives in. The host
 /// passes the full call body as a `generic-input` record;

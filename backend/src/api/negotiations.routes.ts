@@ -211,7 +211,7 @@ export function mountAgentMandateRoute(input: {
       const result = await input.negotiationService.createMandate({
         institutionId: operatorAuth.institutionId,
         agentId: params.data.id,
-        mandate: body.data.mandate,
+        request: body.data,
       });
 
       response.status(200).json(result);

@@ -148,6 +148,19 @@ export interface NegotiationMove {
   price?: number;
   quantity?: number;
   claimType?: string;
+  strategicIntent?:
+    | "open_patiently"
+    | "test_patience"
+    | "concede"
+    | "hold_for_better_terms"
+    | "build_trust"
+    | "request_proof"
+    | "accelerate_for_deadline"
+    | "accept"
+    | "walkaway";
+  confidence?: number;
+  escalationRequested?: boolean;
+  settlementReadiness?: "not_ready" | "near" | "ready";
   reasoning: string;
 }
 
@@ -170,6 +183,10 @@ export interface NegotiationRoundView {
   disclosedClaimRefs: string[];
   opaqueSignal: "crossed" | "near" | "moderate" | "far" | null;
   reasoning: string | null;
+  strategicIntent: string | null;
+  confidence: number | null;
+  escalationRequested: boolean | null;
+  settlementReadiness: string | null;
   createdAt: string;
 }
 
@@ -194,6 +211,14 @@ export interface RedactedNegotiationSessionView {
     quantity: number | null;
   };
   distanceSignal: "crossed" | "near" | "moderate" | "far" | null;
+  trustLevel: "none" | "partial" | "established";
+  disclosureProgress: {
+    requiredClaims: string[];
+    receivedVerifiedClaims: string[];
+    pendingRequiredClaims: string[];
+  };
+  escalationPending: boolean;
+  latestStrategySignal: string | null;
   disclosedClaims: NegotiationDisclosureView[];
   rounds: NegotiationRoundView[];
   createdAt: string;
@@ -230,6 +255,12 @@ export type TelemetryPhase =
   | "encrypted_evaluation"
   | "settlement_pending"
   | "settlement_finalized"
+  | "rail_settled"
+  | "rail_reconciled"
+  | "rail_drift_detected"
+  | "rail_reconcile_error"
+  | "rail_reversed"
+  | "portfolio_updated"
   | "receipt_available"
   | "authorization_failed"
   | "token_metering_failed"
@@ -237,7 +268,20 @@ export type TelemetryPhase =
   | "service_unavailable"
   | "intent_expired"
   | "intent_cancelled"
-  | "intent_lock_released";
+  | "intent_lock_released"
+  | "negotiation_ticket_sealed"
+  | "negotiation_paired"
+  | "negotiation_round_open"
+  | "negotiation_move_submitted"
+  | "negotiation_disclosure_verified"
+  | "negotiation_disclosure_required"
+  | "negotiation_held"
+  | "negotiation_escalation_requested"
+  | "negotiation_converged"
+  | "negotiation_walked_away"
+  | "negotiation_expired"
+  | "negotiation_settling"
+  | "negotiation_settled";
 
 export interface TelemetryEvent {
   eventId: string;

@@ -13,21 +13,51 @@ import {
 } from "./negotiation-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
 
+/**
+ * The expanded runtime mandate as returned by the hosted-mandate
+ * endpoint. Mirrors the backend's authored + derived rails so the
+ * agent loop has everything it needs to build a rich context.
+ */
 interface RuntimeMandate {
   id: string;
   assetCode: string;
   side: "buy" | "sell";
-  targetQuantity: string;
-  referencePrice: string;
+  targetQuantity: number;
+  minimumQuantity: number;
+  partialExecutionAllowed: boolean;
+  referencePrice: number;
   priceBandBps: number;
-  maxNotional: string;
+  maxNotional: number;
   urgency: "low" | "normal" | "high" | "critical";
   deadline: string;
   disclosableClaims: string[];
-  requiredCounterpartyClaims: Record<string, unknown>;
+  requiredCounterpartyClaims: string[];
   counterpartyConstraints: Record<string, unknown>;
   operatorPrompt: string;
   policyHash: string;
+
+  // --- Authored policy fields ---
+  objective: string | null;
+  executionStyle:
+    | "patient"
+    | "balanced"
+    | "aggressive"
+    | "relationship_first"
+    | "trust_first"
+    | null;
+  valuationPolicy: Record<string, unknown> | null;
+  concessionPolicy: Record<string, unknown> | null;
+  disclosurePolicy: Record<string, unknown> | null;
+  approvalPolicy: Record<string, unknown> | null;
+  counterpartyRequirements: Record<string, unknown> | null;
+  sizePolicy: Record<string, unknown> | null;
+  timeWindow: Record<string, unknown> | null;
+  operatorInstructions: string | null;
+  derivedAnchorValue: number | null;
+  derivedWalkawayMin: number | null;
+  derivedWalkawayMax: number | null;
+  derivedConcessionBudgetBps: number | null;
+  derivedNotionalCeiling: number | null;
 }
 
 export interface NegotiationLoopOptions {
@@ -36,7 +66,12 @@ export interface NegotiationLoopOptions {
 }
 
 export interface NegotiationLoopResult {
-  outcome: "settled" | "walked_away" | "expired" | "max_ticks_reached" | "admit_failed";
+  outcome:
+    | "settled"
+    | "walked_away"
+    | "expired"
+    | "max_ticks_reached"
+    | "admit_failed";
   ticksRun: number;
   sessionId: string | undefined;
   lastDecision: NegotiationDecision | undefined;
@@ -87,12 +122,16 @@ async function fetchHostedMandate(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`Hosted mandate lookup failed (${response.status}): ${body || response.statusText}`);
+    throw new Error(
+      `Hosted mandate lookup failed (${response.status}): ${body || response.statusText}`,
+    );
   }
 
   const mandate = (await response.json()) as RuntimeMandate;
   if (mandate.id !== mandateId) {
-    throw new Error(`Hosted mandate mismatch: expected ${mandateId}, got ${mandate.id}`);
+    throw new Error(
+      `Hosted mandate mismatch: expected ${mandateId}, got ${mandate.id}`,
+    );
   }
   return mandate;
 }
@@ -166,6 +205,10 @@ export async function runNegotiationLoop(
   const assetCode = mandate.assetCode;
   const quoteAssetCode = env.AGENT_QUOTE_ASSET_CODE;
   log(side, `Hosted negotiator booting with DID ${identity.did}`);
+  log(
+    side,
+    `Mandate: ${mandate.objective ?? "(legacy)"} style=${mandate.executionStyle ?? "(legacy)"} urgency=${mandate.urgency}`,
+  );
 
   let admission: AgentAdmission;
   try {
@@ -212,6 +255,7 @@ export async function runNegotiationLoop(
 
   let lastDecision: NegotiationDecision | undefined;
   let lastOutcome = "(start of negotiation)";
+  let priorMoveRationale: string | undefined;
 
   for (let tick = 1; tick <= env.MAX_TICKS; tick += 1) {
     log(side, `Negotiation tick ${tick}/${env.MAX_TICKS}`);
@@ -288,6 +332,7 @@ export async function runNegotiationLoop(
       quoteAssetCode,
       session: liveSession,
       lastOutcome,
+      priorMoveRationale,
     });
 
     let decision: NegotiationDecision;
@@ -302,9 +347,10 @@ export async function runNegotiationLoop(
     }
 
     lastDecision = decision;
+    priorMoveRationale = decision.reasoning;
     log(
       side,
-      `Decision ${decision.action} qty=${decision.quantity ?? 0} price=${decision.price ?? 0} (${decision.reasoning})`,
+      `[${decision.strategicIntent ?? "?"}] ${decision.action} qty=${decision.quantity ?? 0} price=${decision.price ?? 0} conf=${decision.confidence?.toFixed(2) ?? "?"} escalate=${decision.escalationRequested} ready=${decision.settlementReadiness ?? "?"} (${decision.reasoning.slice(0, 120)})`,
     );
 
     try {
@@ -356,40 +402,128 @@ export async function runNegotiationLoop(
   };
 }
 
+/**
+ * Build the full NegotiationContext from the runtime mandate + live
+ * session view. Uses authored policy fields when available, falls
+ * back to legacy derived fields for compatibility.
+ */
 function buildNegotiationContext(input: {
   mandate: RuntimeMandate;
   quoteAssetCode: string;
   session: RedactedNegotiationSessionView;
   lastOutcome: string;
+  priorMoveRationale?: string;
 }): NegotiationContext {
-  const { mandate, quoteAssetCode, session, lastOutcome } = input;
-  const referencePrice = Number(mandate.referencePrice);
-  const targetQuantity = Number(mandate.targetQuantity);
-  const maxNotional = Number(mandate.maxNotional);
-  const minPrice = roundPrice(referencePrice * (1 - mandate.priceBandBps / 10_000));
-  const maxPrice = roundPrice(referencePrice * (1 + mandate.priceBandBps / 10_000));
+  const { mandate, quoteAssetCode, session, lastOutcome, priorMoveRationale } =
+    input;
+
+  // Resolve authored vs legacy fields.
+  const objective = mandate.objective ?? mandate.operatorPrompt;
+  const executionStyle = mandate.executionStyle ?? "balanced";
+  const approvalPolicy = (mandate.approvalPolicy ??
+    {}) as Record<string, unknown>;
+  const approvalMode =
+    (approvalPolicy.mode as "auto_settle" | "escalate_outside_envelope") ??
+    "auto_settle";
+  const concessionPolicy = (mandate.concessionPolicy ??
+    {}) as Record<string, unknown>;
+  const concessionBudgetBps =
+    mandate.derivedConcessionBudgetBps ??
+    (concessionPolicy.maxConcessionBps as number | undefined) ??
+    mandate.priceBandBps;
+
+  const sizePolicy = (mandate.sizePolicy ?? {}) as Record<string, unknown>;
+  const minimumQuantity =
+    mandate.minimumQuantity ??
+    (sizePolicy.minimumQuantity as number | undefined) ??
+    0;
+  const partialExecutionAllowed =
+    mandate.partialExecutionAllowed ??
+    (sizePolicy.partialExecutionAllowed as boolean | undefined) ??
+    true;
+
+  const derivedWalkawayMin =
+    mandate.derivedWalkawayMin ??
+    Number(mandate.referencePrice) *
+      (1 - (mandate.priceBandBps ?? 200) / 10_000);
+  const derivedWalkawayMax =
+    mandate.derivedWalkawayMax ??
+    Number(mandate.referencePrice) *
+      (1 + (mandate.priceBandBps ?? 200) / 10_000);
+
+  // Bounds depend on side.
+  const minPrice =
+    mandate.side === "buy"
+      ? Number(mandate.referencePrice)
+      : derivedWalkawayMin;
+  const maxPrice =
+    mandate.side === "sell"
+      ? Number(mandate.referencePrice)
+      : derivedWalkawayMax;
+
+  // Estimate concession consumed from the session's round count.
+  const roundsUsed = session.roundNumber;
+  const concessionConsumedBps = Math.round(
+    Math.min(concessionBudgetBps, roundsUsed * (concessionBudgetBps / Math.max(1, session.maxRounds))),
+  );
+
+  // Resolve counterpart pattern from the session's strategy signals.
+  const latestStrategySignal = session.latestStrategySignal;
+  const counterpartPattern: "unknown" | "cooperative" | "resistant" =
+    latestStrategySignal === "accept" ||
+    latestStrategySignal === "concede" ||
+    latestStrategySignal === "build_trust"
+      ? "cooperative"
+      : latestStrategySignal === "test_patience" ||
+          latestStrategySignal === "hold_for_better_terms"
+        ? "resistant"
+        : "unknown";
+
+  const timeToDeadlineMs = Math.max(
+    0,
+    Date.parse(session.deadline) - Date.now(),
+  );
+  const roundsRemaining = Math.max(
+    0,
+    session.maxRounds - session.roundNumber,
+  );
 
   return {
     side: mandate.side,
     assetCode: mandate.assetCode,
     quoteAssetCode,
-    targetQuantity,
-    referencePrice,
-    priceBandBps: mandate.priceBandBps,
-    minPrice,
-    maxPrice,
-    maxNotional,
+    objective,
+    executionStyle,
     urgency: mandate.urgency,
+    targetQuantity: Number(mandate.targetQuantity),
+    minimumQuantity,
+    partialExecutionAllowed,
+    referencePrice: Number(mandate.referencePrice),
+    minPrice: roundPrice(minPrice),
+    maxPrice: roundPrice(maxPrice),
+    maxNotional: Number(mandate.maxNotional ?? mandate.derivedNotionalCeiling ?? 1_000_000),
+    concessionBudgetRemainingBps: Math.max(
+      0,
+      concessionBudgetBps - concessionConsumedBps,
+    ),
     roundNumber: session.roundNumber,
     maxRounds: session.maxRounds,
+    roundsRemaining,
+    deadline: session.deadline,
+    timeToDeadlineMs,
     distanceSignal: session.distanceSignal,
+    counterpartPattern,
     counterpartStandingPrice: session.counterpartStandingProposal.price,
     counterpartStandingQuantity: session.counterpartStandingProposal.quantity,
     disclosableClaims: mandate.disclosableClaims,
-    receivedClaims: session.disclosedClaims.map((claim) => claim.claimType),
-    requiredClaims: Object.keys(mandate.requiredCounterpartyClaims),
-    operatorPrompt: mandate.operatorPrompt,
+    receivedClaims: session.disclosureProgress.receivedVerifiedClaims,
+    requiredClaims: session.disclosureProgress.requiredClaims,
+    trustLevel: session.trustLevel,
+    approvalMode,
+    operatorInstructions:
+      mandate.operatorInstructions ?? mandate.operatorPrompt,
     lastOutcome,
+    priorMoveRationale,
   };
 }
 

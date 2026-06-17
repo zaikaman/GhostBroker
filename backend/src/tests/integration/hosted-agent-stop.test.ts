@@ -67,8 +67,7 @@ const institutionService: Required<Pick<InstitutionManagementService, "getInstit
   }),
 };
 
-const negotiationService: Pick<NegotiationManagementService, "getMandateByAgent" | "listMandatesByAgent"> = {
-  getMandateByAgent: async () => ({
+const negotiationService: Pick<NegotiationManagementService, "getMandateByAgent" | "listMandatesByAgent"> = {    getMandateByAgent: async () => ({
     id: hostedConfig.mandateId,
     institutionId,
     agentId,
@@ -86,6 +85,24 @@ const negotiationService: Pick<NegotiationManagementService, "getMandateByAgent"
     counterpartyConstraints: {},
     operatorPrompt: "accumulate quietly",
     policyHash: "policy:hosted-stop",
+    objective: null,
+    executionStyle: null,
+    valuationPolicy: null,
+    concessionPolicy: null,
+    disclosurePolicy: null,
+    approvalPolicy: null,
+    counterpartyRequirements: null,
+    sizePolicy: null,
+    timeWindow: null,
+    operatorInstructions: null,
+    minimumQuantity: null,
+    partialExecutionAllowed: null,
+    derivedAnchorValue: null,
+    derivedWalkawayMin: null,
+    derivedWalkawayMax: null,
+    derivedConcessionBudgetBps: null,
+    derivedNotionalCeiling: null,
+    decisionMeta: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   }),

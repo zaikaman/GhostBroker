@@ -227,6 +227,24 @@ export interface NegotiationMandateSummary {
   policyHash: string;
   createdAt: string;
   updatedAt: string;
+  // Authored AI-first policy summary (nullable for legacy mandates).
+  objective: string | null;
+  executionStyle: NegotiationExecutionStyle | null;
+  valuationPolicy: Record<string, unknown> | null;
+  concessionPolicy: Record<string, unknown> | null;
+  disclosurePolicy: Record<string, unknown> | null;
+  approvalPolicy: Record<string, unknown> | null;
+  counterpartyRequirements: Record<string, unknown> | null;
+  sizePolicy: Record<string, unknown> | null;
+  timeWindow: Record<string, unknown> | null;
+  operatorInstructions: string | null;
+  minimumQuantity: string | null;
+  partialExecutionAllowed: boolean | null;
+  derivedAnchorValue: string | null;
+  derivedWalkawayMin: string | null;
+  derivedWalkawayMax: string | null;
+  derivedConcessionBudgetBps: number | null;
+  derivedNotionalCeiling: string | null;
 }
 
 export interface HostedAgentRecord {
@@ -351,25 +369,102 @@ export interface NegotiationSession {
   tradeRef: string | null;
   distanceSignal: 'crossed' | 'near' | 'moderate' | 'far' | null;
   counterpartStandingProposal: { price: number | null; quantity: number | null };
+  trustLevel: 'none' | 'partial' | 'established';
+  disclosureProgress: {
+    requiredClaims: string[];
+    receivedVerifiedClaims: string[];
+    pendingRequiredClaims: string[];
+  };
+  escalationPending: boolean;
+  latestStrategySignal: string | null;
   disclosedClaims: { id: string; fromSide: string; claimType: string; verified: boolean; createdAt: string }[];
-  rounds: { id: string; roundNumber: number; actorSide: string; moveType: string; opaqueSignal: string | null; reasoning: string | null; createdAt: string }[];
+  rounds: {
+    id: string;
+    roundNumber: number;
+    actorSide: string;
+    moveType: string;
+    opaqueSignal: string | null;
+    reasoning: string | null;
+    strategicIntent: string | null;
+    confidence: number | null;
+    escalationRequested: boolean | null;
+    settlementReadiness: string | null;
+    createdAt: string;
+  }[];
   createdAt: string;
   updatedAt: string;
 }
 
-export interface CreateNegotiationMandateRequest {
+// ---------------------------------------------------------------------------
+// Authored AI-first policy mandate (the operator-facing surface)
+// ---------------------------------------------------------------------------
+
+export type NegotiationExecutionStyle =
+  | 'patient'
+  | 'balanced'
+  | 'aggressive'
+  | 'relationship_first'
+  | 'trust_first';
+
+export type NegotiationValuationSource = 'auto_anchor' | 'internal_fair_value' | 'operator_note';
+
+export interface AuthoredValuationPolicy {
+  source: NegotiationValuationSource;
+  anchorValue?: number;
+  note?: string;
+}
+
+export interface AuthoredConcessionPolicy {
+  pace: 'patient' | 'balanced' | 'aggressive';
+  maxConcessionBps: number;
+}
+
+export interface AuthoredDisclosurePolicy {
+  allowLadder: string[];
+  requireReciprocityFor?: string[];
+}
+
+export interface AuthoredApprovalPolicy {
+  mode: 'auto_settle' | 'escalate_outside_envelope';
+  preferredEnvelopeNote?: string;
+}
+
+export interface AuthoredSizePolicy {
+  targetQuantity: number;
+  minimumQuantity: number;
+  partialExecutionAllowed: boolean;
+}
+
+export interface AuthoredTimeWindow {
+  deadline: string;
+  preferredWindowStart?: string;
+  preferredWindowEnd?: string;
+}
+
+export interface AuthoredCounterpartyRequirements {
+  requiredClaims: string[];
+  disallowedTraits: string[];
+  reputationTier?: string;
+}
+
+export interface AuthoredMandatePolicy {
+  objective: string;
   assetCode: string;
   side: 'buy' | 'sell';
-  targetQuantity: number;
-  referencePrice: number;
-  priceBandBps: number;
-  deadline: string;
+  sizePolicy: AuthoredSizePolicy;
   urgency: 'low' | 'normal' | 'high' | 'critical';
-  maxNotional: string;
-  disclosableClaims: string[];
-  requiredCounterpartyClaims: Record<string, unknown>;
-  counterpartyConstraints: Record<string, unknown>;
-  operatorPrompt: string;
+  executionStyle: NegotiationExecutionStyle;
+  valuationPolicy: AuthoredValuationPolicy;
+  concessionPolicy: AuthoredConcessionPolicy;
+  disclosurePolicy: AuthoredDisclosurePolicy;
+  counterpartyRequirements: AuthoredCounterpartyRequirements;
+  approvalPolicy: AuthoredApprovalPolicy;
+  timeWindow: AuthoredTimeWindow;
+  operatorInstructions: string;
+}
+
+export interface CreateNegotiationMandateRequest {
+  authored: AuthoredMandatePolicy;
 }
 
 export const apiClient = {
@@ -634,7 +729,7 @@ export const apiClient = {
     const res = await requestWithOperatorFallback(`${API_BASE_URL}/api/agents/${agentId}/mandate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mandate }),
+      body: JSON.stringify(mandate),
     });
     return handleResponse<{ mandate: { id: string }; authorityRef: string; policyHash: string }>(res);
   },
