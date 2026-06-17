@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import type { DelegationCredential } from "@ghostbroker/agent-client";
+import type { _DelegationCredential } from "@ghostbroker/agent-client";
 
 /**
  * Tests for the agents workspace delegation helpers.

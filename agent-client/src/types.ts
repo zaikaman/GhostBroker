@@ -136,6 +136,70 @@ export interface AgentPortfolio {
   pendingReservations: PendingReservation[];
 }
 
+export interface NegotiationMove {
+  action:
+    | "propose"
+    | "counter"
+    | "reveal"
+    | "request_disclosure"
+    | "accept"
+    | "hold"
+    | "walkaway";
+  price?: number;
+  quantity?: number;
+  claimType?: string;
+  reasoning: string;
+}
+
+export interface NegotiationDisclosureView {
+  id: string;
+  fromDid: string;
+  fromSide: "buy" | "sell";
+  claimType: string;
+  verified: boolean;
+  t3AttestationRef: string;
+  createdAt: string;
+}
+
+export interface NegotiationRoundView {
+  id: string;
+  roundNumber: number;
+  actorDid: string;
+  actorSide: "buy" | "sell";
+  moveType: NegotiationMove["action"];
+  disclosedClaimRefs: string[];
+  opaqueSignal: "crossed" | "near" | "moderate" | "far" | null;
+  reasoning: string | null;
+  createdAt: string;
+}
+
+export interface RedactedNegotiationSessionView {
+  id: string;
+  assetCode: string;
+  status:
+    | "pairing"
+    | "active"
+    | "converged"
+    | "settling"
+    | "settled"
+    | "walked_away"
+    | "expired";
+  currentTurn: "buy" | "sell";
+  roundNumber: number;
+  maxRounds: number;
+  deadline: string;
+  tradeRef: string | null;
+  counterpartStandingProposal: {
+    price: number | null;
+    quantity: number | null;
+  };
+  distanceSignal: "crossed" | "near" | "moderate" | "far" | null;
+  disclosedClaims: NegotiationDisclosureView[];
+  rounds: NegotiationRoundView[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Institution {
   id: string;
   legalName: string;
@@ -193,4 +257,11 @@ export type RedactedErrorCode =
   | "service_unavailable"
   | "not_found";
 
-export type RequestedAction = "agent.admit" | "intent.submit" | "settlement.execute";
+export type RequestedAction =
+  | "agent.admit"
+  | "intent.submit"
+  | "settlement.execute"
+  | "negotiation.open"
+  | "negotiation.move"
+  | "negotiation.disclose"
+  | "negotiation.settle";

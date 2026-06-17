@@ -22,6 +22,8 @@ import { useReceipt } from '../hooks/useReceipt';
 import { EnclaveHealthMonitor } from '../components/EnclaveHealthMonitor';
 import { AgentsPanel } from '../components/AgentsPanel';
 import { SettingsPanel } from '../components/SettingsPanel';
+import { MandateConfigForm } from '../components/MandateConfigForm';
+import { NegotiationRoomPanel } from '../components/NegotiationRoomPanel';
 import { apiClient, type AuthSession } from '../services/api-client';
 
 const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSProperties }) => (
@@ -40,6 +42,53 @@ const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSP
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
   </svg>
 );
+
+function NegotiationMandateWrapper(): React.JSX.Element {
+  const [agentId, setAgentId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const listed = await apiClient.listAgents('admitted');
+        if (!cancelled) {
+          setAgentId(listed[0]?.id ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setAgentId(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return <div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading agents…</div>;
+  }
+  if (!agentId) {
+    return (
+      <div className="card" style={{ padding: '24px' }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: '0.85rem', fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
+          NO ADMITTED AGENT
+        </h3>
+        <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
+          Admit or deploy an agent before configuring a negotiation mandate.
+        </p>
+      </div>
+    );
+  }
+
+  return <MandateConfigForm agentId={agentId} />;
+}
+
 import {
   Robot01Icon,
   Shield01Icon,
@@ -277,6 +326,13 @@ function DashboardView({
             </div>
           </div>
         );
+      case 'negotiations':
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 420px) 1fr', gap: 'var(--spacing-lg)', animation: 'fadeIn 0.3s ease' }}>
+            <NegotiationMandateWrapper />
+            <NegotiationRoomPanel />
+          </div>
+        );
       case 'deploy':
         return (
           <div style={{ animation: 'fadeIn 0.3s ease' }}>
@@ -375,6 +431,13 @@ function DashboardView({
               onClick={() => handleTabChange('ledger')}
             >
               <ScrollIcon size={16} /> Audit Ledger
+            </button>
+            <button
+              type="button"
+              className={`sidebar-link ${activeTab === 'negotiations' ? 'active' : ''}`}
+              onClick={() => handleTabChange('negotiations')}
+            >
+              <Link01Icon size={16} /> Negotiations
             </button>
             <button
               type="button"

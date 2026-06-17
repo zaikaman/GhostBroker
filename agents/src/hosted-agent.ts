@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadAgentEnv } from "./env.js";
-import { GroqLlmClient } from "./llm-decision.js";
-import { runAgentLoop } from "./run-loop.js";
+import { GroqNegotiationClient } from "./negotiation-decision.js";
+import { runNegotiationLoop } from "./negotiation-loop.js";
 
 async function main(): Promise<void> {
   const env = loadAgentEnv();
@@ -31,22 +31,21 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const llm = new GroqLlmClient({
+  const llm = new GroqNegotiationClient({
     apiKey: env.GROQ_API_KEY,
     model: env.GROQ_MODEL,
   });
 
-  const result = await runAgentLoop({
+  const result = await runNegotiationLoop({
     side: env.AGENT_SIDE,
     env,
     llm,
-    dryRun: env.DRY_RUN,
     assetCode: env.AGENT_ASSET_CODE,
     quoteAssetCode: env.AGENT_QUOTE_ASSET_CODE,
   });
 
   console.log(JSON.stringify(result, null, 2));
-  process.exit(result.outcome === "aborted" || result.outcome === "admit_failed" ? 2 : 0);
+  process.exit(result.outcome === "admit_failed" ? 2 : 0);
 }
 
 main().catch((error: unknown) => {

@@ -36,7 +36,17 @@ export type TelemetryPhase =
   | "service_unavailable"
   | "intent_expired"
   | "intent_cancelled"
-  | "intent_lock_released";
+  | "intent_lock_released"
+  | "negotiation_ticket_sealed"
+  | "negotiation_paired"
+  | "negotiation_round_open"
+  | "negotiation_move_submitted"
+  | "negotiation_disclosure_verified"
+  | "negotiation_converged"
+  | "negotiation_walked_away"
+  | "negotiation_expired"
+  | "negotiation_settling"
+  | "negotiation_settled";
 
 export interface TelemetryEvent {
   eventId: string;

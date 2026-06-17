@@ -108,3 +108,4 @@ export function mintTenantDelegation(
     body: buildDelegationSigningBody(body),
   };
 }
+

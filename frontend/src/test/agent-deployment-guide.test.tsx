@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
 import { apiClient } from '../services/api-client';
+import type * as ApiClientModule from '../services/api-client';
 
 vi.mock('../services/api-client', async () => {
-  const actual = await vi.importActual<typeof import('../services/api-client')>('../services/api-client');
+  const actual = await vi.importActual<typeof ApiClientModule>('../services/api-client');
   return {
     ...actual,
     apiClient: {
@@ -38,8 +39,8 @@ describe('AgentDeploymentGuide', () => {
   it('summarizes the active mandate in plain language', async () => {
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
-    expect(screen.getByText('Choose the trading goal')).toBeInTheDocument();
-    expect(screen.getByText('Mandate Summary')).toBeInTheDocument();
+    expect(screen.getByText('Configure Trading Mandate')).toBeInTheDocument();
+    expect(screen.getByText('Mandate Live Summary')).toBeInTheDocument();
     expect(screen.getByText('Buy WBTC with USDC')).toBeInTheDocument();
     expect(screen.getByText('The agent will spend USDC to accumulate WBTC.')).toBeInTheDocument();
     expect(screen.getByText('70000 USDC per WBTC')).toBeInTheDocument();
@@ -55,23 +56,24 @@ describe('AgentDeploymentGuide', () => {
     await user.click(screen.getByRole('button', { name: /Distribute/i }));
 
     expect(screen.getByText('Sell WBTC for USDC')).toBeInTheDocument();
-    expect(screen.getByText('Template loaded. Editing any field turns this into a custom mandate.')).toBeInTheDocument();
+    expect(screen.getByText('Template loaded. Customizing any parameter below changes the mode to Custom.')).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Agent Label'), ' Desk');
 
-    expect(screen.getByText('Custom mandate. Review the summary below before deploying the agent.')).toBeInTheDocument();
+    expect(screen.getByText('Custom configuration mode. Specify all rules manually.')).toBeInTheDocument();
   });
 
-  it('keeps advanced settings collapsed until requested', async () => {
+  it('reveals engine settings on the final wizard step', async () => {
     const user = userEvent.setup();
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
     expect(screen.queryByLabelText('LLM Engine')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Trading Instructions')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Trading Instructions Prompt')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Show Advanced Settings' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByLabelText('LLM Engine')).toBeInTheDocument();
-    expect(screen.getByLabelText('Trading Instructions')).toBeInTheDocument();
+    expect(screen.getByLabelText('Trading Instructions Prompt')).toBeInTheDocument();
   });
 });

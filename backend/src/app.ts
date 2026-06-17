@@ -16,6 +16,10 @@ import { createHealthRouter } from "./api/health.routes.js";
 import { createInstitutionsRouter } from "./api/institutions.routes.js";
 import { createPortfoliosRouter } from "./api/portfolios.routes.js";
 import { createAgentsRouter } from "./api/agents.routes.js";
+import {
+  createNegotiationsRouter,
+  mountAgentMandateRoute,
+} from "./api/negotiations.routes.js";
 import { createTradesRouter } from "./api/trades.routes.js";
 import { createAdminRouter, type AdminRouterDeps } from "./api/admin.routes.js";
 import { createReceiptsRouter } from "./api/receipts.routes.js";
@@ -88,6 +92,12 @@ import {
   ChildProcessHostedAgentService,
   type HostedAgentManagementService,
 } from "./services/hosted-agent.service.js";
+import { SupabaseNegotiationRepository } from "./services/negotiation-repository.js";
+import {
+  NegotiationService,
+  type NegotiationManagementService,
+} from "./services/negotiation.service.js";
+import { NegotiationOrchestrator } from "./services/negotiation-orchestrator.js";
 import {
   AdkTenantDidRegistry,
   SandboxTokenBalanceClient,
@@ -95,6 +105,9 @@ import {
   T3BlindIntentClient,
   T3MatchContractClient,
   T3AgentIdentityVerifier,
+  T3NegotiationDisclosureVerifier,
+  T3NegotiationRoundEvaluator,
+  T3NegotiationTicketClient,
   createAuthenticatedT3NetworkClient,
   loadOrCreateTenantIdentity,
   readT3EnclaveConfig,
@@ -168,6 +181,7 @@ export interface BackendServices {
    * t3-enclave) can omit it.
    */
   tenantDelegationSigner?: TenantDelegationSigner;
+  negotiationService?: NegotiationManagementService;
   hostedAgentService?: HostedAgentManagementService;
   institutionApprovalService?: InstitutionApprovalService;
   institutionWithdrawalService?: InstitutionWithdrawalService;
@@ -538,6 +552,32 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     supabase: supabase as never,
     authorityRevocationRepository,
   });
+  const negotiationRepository = new SupabaseNegotiationRepository(supabase as never);
+  const negotiationTicketClient = new T3NegotiationTicketClient({
+    networkClient: t3NetworkClient,
+    tokenBalanceClient,
+    tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
+    minimumTokenBalance: 1n,
+  });
+  const negotiationRoundEvaluator = new T3NegotiationRoundEvaluator(matchContractClient);
+  const negotiationDisclosureVerifier = new T3NegotiationDisclosureVerifier();
+  const negotiationOrchestrator = new NegotiationOrchestrator({
+    ticketClient: negotiationTicketClient,
+    roundEvaluator: negotiationRoundEvaluator,
+    disclosureVerifier: negotiationDisclosureVerifier,
+    authorization: authorizationFacade,
+    repository: negotiationRepository,
+    settlementService,
+    telemetryBus,
+    portfolioService,
+    settlementAssetCode: env.SETTLEMENT_ASSET_CODE,
+  });
+  const negotiationService = new NegotiationService({
+    repository: negotiationRepository,
+    agentService,
+    tenantSigner: tenantDelegationSigner,
+    orchestrator: negotiationOrchestrator,
+  });
 
   return {
     institutionService,
@@ -566,6 +606,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     intentLockRepository,
     intentLockJanitor,
     tenantDelegationSigner,
+    negotiationService,
     ...(institutionApprovalService ? { institutionApprovalService } : {}),
     ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),      hostedAgentService: new ChildProcessHostedAgentService({
         agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
@@ -663,15 +704,29 @@ export function createApp(
       services.matchingOrchestrator,
     ),
   );
+  const agentsRouter = createAgentsRouter(
+    services.agentService,
+    services.hiddenIntentService,
+    services.tenantDelegationSigner,
+  );
+  if (services.negotiationService) {
+    mountAgentMandateRoute({
+      router: agentsRouter,
+      negotiationService: services.negotiationService,
+    });
+  }
   app.use(
     "/api",
     operatorAuthMiddleware(env, services.apiKeyService),
-    createAgentsRouter(
-      services.agentService,
-      services.hiddenIntentService,
-      services.tenantDelegationSigner,
-    ),
+    agentsRouter,
   );
+  if (services.negotiationService) {
+    app.use(
+      "/api",
+      operatorAuthMiddleware(env, services.apiKeyService),
+      createNegotiationsRouter(services.negotiationService),
+    );
+  }
   if (services.tradeHistoryService) {
     app.use(
       "/api",

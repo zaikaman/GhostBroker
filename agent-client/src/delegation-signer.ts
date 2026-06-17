@@ -45,6 +45,38 @@ const purchaseCategorySchema = z.enum([
   "travel",
 ]);
 
+const negotiationUrgencySchema = z.enum(["low", "normal", "high", "critical"]);
+const negotiationSideSchema = z.enum(["buy", "sell"]);
+const jsonValueSchema: z.ZodType<
+  string | number | boolean | null | Record<string, unknown> | unknown[]
+> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ]),
+);
+
+export const negotiationMandateSchema = z.object({
+  assetCode: z.string().trim().min(1).max(32),
+  side: negotiationSideSchema,
+  targetQuantity: z.number().positive(),
+  referencePrice: z.number().positive(),
+  priceBandBps: z.number().int().nonnegative().max(100000),
+  deadline: z.string().datetime(),
+  urgency: negotiationUrgencySchema,
+  maxNotional: z.string().regex(/^\d+(?:\.\d+)?$/u),
+  disclosableClaims: z.array(z.string().trim().min(1).max(64)).max(32).default([]),
+  requiredCounterpartyClaims: z.record(z.string(), jsonValueSchema).default({}),
+  counterpartyConstraints: z.record(z.string(), jsonValueSchema).default({}),
+  operatorPrompt: z.string().trim().min(1).max(4000),
+});
+
+export type NegotiationMandate = z.infer<typeof negotiationMandateSchema>;
+
 /**
  * Pure-JS hex helpers so this module compiles in both Node
  * and the browser (the published `agent-client` SDK is loaded
@@ -97,6 +129,7 @@ export const delegationCredentialSchema = z.object({
     allowedCategories: z.array(purchaseCategorySchema).min(1),
     approverEmail: z.string().email().optional(),
     purpose: z.string().min(1),
+    mandate: negotiationMandateSchema.optional(),
   }),
   proof: z
     .object({
@@ -336,6 +369,8 @@ export interface MintDelegationCredentialBody {
   approverEmail?: string;
   /** Purpose string (human-readable audit trail). */
   purpose?: string;
+  /** Optional negotiation mandate bound into the VC policy hash. */
+  mandate?: NegotiationMandate;
   /** Validity period in months. Defaults to 6. */
   validityMonths?: number;
   /** Optional explicit credential ID. Defaults to `urn:uuid:ghostbroker-delegation-<ms>`. */
@@ -387,6 +422,7 @@ export function mintDelegationCredentialBody(
       purpose:
         options.purpose ??
         "Q2 office refresh and team tooling within delegated limits",
+      ...(options.mandate ? { mandate: options.mandate } : {}),
     },
   };
 }
@@ -408,3 +444,4 @@ export function mintAndSignDelegationCredential(
     issuerDid: options.issuerDid ?? options.agentDid,
   });
 }
+

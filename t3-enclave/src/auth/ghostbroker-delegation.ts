@@ -11,7 +11,11 @@ import { verifyVc } from "@terminal3/verify_vc";
 export type RequestedAgentAction =
   | "agent.admit"
   | "intent.submit"
-  | "settlement.execute";
+  | "settlement.execute"
+  | "negotiation.open"
+  | "negotiation.move"
+  | "negotiation.disclose"
+  | "negotiation.settle";
 
 /**
  * Ghostbroker-style W3C Verifiable Credential verifier for an
@@ -57,6 +61,22 @@ const purchaseCategorySchema = z.enum([
   "travel",
 ]);
 
+const negotiationUrgencySchema = z.enum(["low", "normal", "high", "critical"]);
+const negotiationMandateSchema = z.object({
+  assetCode: z.string().trim().min(1).max(32),
+  side: z.enum(["buy", "sell"]),
+  targetQuantity: z.number().positive(),
+  referencePrice: z.number().positive(),
+  priceBandBps: z.number().int().nonnegative().max(100000),
+  deadline: z.string().datetime(),
+  urgency: negotiationUrgencySchema,
+  maxNotional: z.string().regex(/^\d+(?:\.\d+)?$/u),
+  disclosableClaims: z.array(z.string().trim().min(1).max(64)).max(32).default([]),
+  requiredCounterpartyClaims: z.record(z.string(), z.unknown()).default({}),
+  counterpartyConstraints: z.record(z.string(), z.unknown()).default({}),
+  operatorPrompt: z.string().trim().min(1).max(4000),
+});
+
 export const ghostbrokerDelegationSchema = z.object({
   id: z.string().min(1),
   type: z.array(z.string()).min(1),
@@ -70,6 +90,7 @@ export const ghostbrokerDelegationSchema = z.object({
     allowedCategories: z.array(purchaseCategorySchema).min(1),
     approverEmail: z.string().email().optional(),
     purpose: z.string().min(1),
+    mandate: negotiationMandateSchema.optional(),
   }),
   proof: z
     .object({
@@ -335,3 +356,4 @@ async function tryLiveVerify(
     };
   }
 }
+

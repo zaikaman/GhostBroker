@@ -6,6 +6,7 @@ import {
 import type { DelegationCredential } from "@ghostbroker/agent-client";
 import { PublicError } from "../errors/public-error.js";
 import type { TenantIdentity } from "@ghostbroker/t3-enclave";
+import type { NegotiationMandateInput } from "../models/negotiation.js";
 
 /**
  * Backend-side wrapper around the t3-enclave tenant
@@ -29,7 +30,9 @@ export interface TenantDelegationSigner {
    * backend's verifier produces on the same VC, so the
    * orchestrator can assert the two agree).
    */
-  mint(policy: TenantDelegationPolicy): Promise<{
+  mint(policy: TenantDelegationPolicy & {
+    mandate?: NegotiationMandateInput;
+  }): Promise<{
     credential: DelegationCredential;
     policyHash: string;
   }>;

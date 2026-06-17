@@ -117,6 +117,56 @@ const PHASE_LABELS: Record<TelemetryPhase, TelemetryLabelInfo> = {
     description: 'Unmatched intent TTL exceeded. Removed from pending queue without execution.',
     statusType: 'warning',
   },
+  negotiation_ticket_sealed: {
+    label: 'Negotiation Ticket Sealed',
+    description: 'Confidential negotiation ticket sealed inside the enclave. Awaiting a counterparty pairing.',
+    statusType: 'warning',
+  },
+  negotiation_paired: {
+    label: 'Negotiation Paired',
+    description: 'A compatible opposite-side counterparty was paired into a private negotiation session.',
+    statusType: 'info',
+  },
+  negotiation_round_open: {
+    label: 'Negotiation Round Open',
+    description: 'A new negotiation round is open. The agent on turn may submit one bounded move.',
+    statusType: 'info',
+  },
+  negotiation_move_submitted: {
+    label: 'Move Submitted',
+    description: 'A bounded negotiation move was submitted, policy-verified, and evaluated confidentially.',
+    statusType: 'warning',
+  },
+  negotiation_disclosure_verified: {
+    label: 'Disclosure Verified',
+    description: 'A verified claim was disclosed to the counterparty within the mandate allowlist.',
+    statusType: 'success',
+  },
+  negotiation_converged: {
+    label: 'Negotiation Converged',
+    description: 'The two sides crossed. Authoritative execution terms decided inside the enclave.',
+    statusType: 'success',
+  },
+  negotiation_walked_away: {
+    label: 'Negotiation Ended',
+    description: 'A party walked away from the negotiation. Reservations released.',
+    statusType: 'info',
+  },
+  negotiation_expired: {
+    label: 'Negotiation Expired',
+    description: 'The negotiation reached its deadline or round cap without converging. Locks released.',
+    statusType: 'warning',
+  },
+  negotiation_settling: {
+    label: 'Negotiation Settling',
+    description: 'Converged negotiation is settling via the existing settlement rail.',
+    statusType: 'warning',
+  },
+  negotiation_settled: {
+    label: 'Negotiation Settled',
+    description: 'Negotiated block trade settled. Encrypted transcript receipt issued.',
+    statusType: 'success',
+  },
 };
 
 /**

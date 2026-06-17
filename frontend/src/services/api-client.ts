@@ -365,6 +365,38 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface NegotiationSession {
+  id: string;
+  assetCode: string;
+  status: 'pairing' | 'active' | 'converged' | 'settling' | 'settled' | 'walked_away' | 'expired';
+  currentTurn: 'buy' | 'sell';
+  roundNumber: number;
+  maxRounds: number;
+  deadline: string;
+  tradeRef: string | null;
+  distanceSignal: 'crossed' | 'near' | 'moderate' | 'far' | null;
+  counterpartStandingProposal: { price: number | null; quantity: number | null };
+  disclosedClaims: { id: string; fromSide: string; claimType: string; verified: boolean; createdAt: string }[];
+  rounds: { id: string; roundNumber: number; actorSide: string; moveType: string; opaqueSignal: string | null; reasoning: string | null; createdAt: string }[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateNegotiationMandateRequest {
+  assetCode: string;
+  side: 'buy' | 'sell';
+  targetQuantity: number;
+  referencePrice: number;
+  priceBandBps: number;
+  deadline: string;
+  urgency: 'low' | 'normal' | 'high' | 'critical';
+  maxNotional: number;
+  disclosableClaims: string[];
+  requiredCounterpartyClaims: Record<string, unknown>;
+  counterpartyConstraints: Record<string, unknown>;
+  operatorPrompt: string;
+}
+
 export const apiClient = {
   setAuthSession(session: AuthSession): void {
     localStorage.setItem(AUTH_TOKEN_KEY, session.token);
@@ -705,6 +737,36 @@ export const apiClient = {
       { method: 'POST' },
     );
     return handleResponse<HostedAgentRecord>(res);
+  },
+
+  async createNegotiationMandate(
+    agentId: string,
+    mandate: CreateNegotiationMandateRequest,
+  ): Promise<{ mandate: { id: string }; authorityRef: string; policyHash: string }> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/agents/${agentId}/mandate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mandate),
+      },
+    );
+    return handleResponse<{ mandate: { id: string }; authorityRef: string; policyHash: string }>(res);
+  },
+
+  async listNegotiationSessions(): Promise<NegotiationSession[]> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/negotiations`,
+    );
+    const payload = await handleResponse<{ sessions: NegotiationSession[] }>(res);
+    return payload.sessions;
+  },
+
+  async getNegotiationSession(id: string): Promise<NegotiationSession> {
+    const res = await requestWithOperatorFallback(
+      `${API_BASE_URL}/api/negotiations/${id}`,
+    );
+    return handleResponse<NegotiationSession>(res);
   },
 };
 

@@ -4,6 +4,13 @@ import { TradesClient } from "./trades-client.js";
 import { ReceiptClient } from "./receipt-client.js";
 import { TelemetryClient } from "./websocket-client.js";
 import { PortfolioClient } from "./portfolio-client.js";
+import {
+  NegotiationClient,
+  type NegotiationTicketRequest,
+  type NegotiationTicketAccepted,
+  type SubmitNegotiationMoveRequest,
+  type NegotiationMoveAccepted,
+} from "./negotiation-client.js";
 import type {
   AuthSession,
   AdmitAgentRequest,
@@ -13,6 +20,7 @@ import type {
   CompletedTrade,
   AuditReceipt,
   AgentPortfolio,
+  RedactedNegotiationSessionView,
 } from "./types.js";
 import { GhostBrokerApiError } from "./errors.js";
 
@@ -57,6 +65,7 @@ export class GhostBrokerClient {
   public readonly trades: TradesClient;
   public readonly receipts: ReceiptClient;
   public readonly portfolio: PortfolioClient;
+  public readonly negotiations: NegotiationClient;
   public readonly telemetry: TelemetryClient;
   public token: string | undefined;
   private institutionId: string | undefined;
@@ -69,6 +78,7 @@ export class GhostBrokerClient {
     this.trades = new TradesClient(this.baseUrl);
     this.receipts = new ReceiptClient(this.baseUrl);
     this.portfolio = new PortfolioClient(this.baseUrl);
+    this.negotiations = new NegotiationClient(this.baseUrl);
     this.telemetry = new TelemetryClient(this.baseUrl, config.institutionId ?? "");
     this.token = config.token;
     this.institutionId = config.institutionId;
@@ -153,6 +163,41 @@ export class GhostBrokerClient {
     request: EncryptedIntentRequest,
   ): Promise<IntentAccepted> {
     return this.intents.submitEncryptedIntent(request, this.token ?? "");
+  }
+
+  public async submitNegotiationTicket(
+    request: NegotiationTicketRequest,
+  ): Promise<NegotiationTicketAccepted> {
+    return this.negotiations.submitTicket(request, this.token ?? "");
+  }
+
+  public async listNegotiationSessions(): Promise<{ sessions: RedactedNegotiationSessionView[] }> {
+    return this.negotiations.listSessions(this.token ?? "");
+  }
+
+  public async getNegotiationSession(
+    sessionId: string,
+  ): Promise<RedactedNegotiationSessionView> {
+    return this.negotiations.getSession(sessionId, this.token ?? "");
+  }
+
+  public async submitNegotiationMove(
+    sessionId: string,
+    request: SubmitNegotiationMoveRequest,
+  ): Promise<NegotiationMoveAccepted> {
+    return this.negotiations.submitMove(sessionId, request, this.token ?? "");
+  }
+
+  public async walkAwayNegotiation(
+    sessionId: string,
+    request: {
+      agentId: string;
+      agentDid: string;
+      authorityRef: string;
+      reasoning?: string;
+    },
+  ): Promise<NegotiationMoveAccepted> {
+    return this.negotiations.walkAway(sessionId, request, this.token ?? "");
   }
 
   /**

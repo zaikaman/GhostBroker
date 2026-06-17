@@ -43,9 +43,11 @@ CREATE TABLE public.completed_trades (
   rail_trade_ref text,
   rail_state text CHECK (rail_state IS NULL OR (rail_state = ANY (ARRAY['settled'::text, 'failed'::text, 'reversed'::text]))),
   reconciled_at timestamp with time zone,
+  negotiation_session_id uuid,
   CONSTRAINT completed_trades_pkey PRIMARY KEY (id),
   CONSTRAINT completed_trades_buy_institution_id_fkey FOREIGN KEY (buy_institution_id) REFERENCES public.institutions(id),
-  CONSTRAINT completed_trades_sell_institution_id_fkey FOREIGN KEY (sell_institution_id) REFERENCES public.institutions(id)
+  CONSTRAINT completed_trades_sell_institution_id_fkey FOREIGN KEY (sell_institution_id) REFERENCES public.institutions(id),
+  CONSTRAINT completed_trades_negotiation_session_id_fkey FOREIGN KEY (negotiation_session_id) REFERENCES public.negotiation_sessions(id)
 );
 CREATE TABLE public.audit_receipts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -126,4 +128,79 @@ CREATE TABLE public.intent_locks (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT intent_locks_pkey PRIMARY KEY (intent_handle),
   CONSTRAINT intent_locks_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id)
+);
+CREATE TABLE public.negotiation_mandates (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  institution_id uuid NOT NULL,
+  agent_id uuid NOT NULL,
+  agent_did text NOT NULL CHECK (agent_did <> ''::text),
+  asset_code text NOT NULL CHECK (asset_code <> ''::text),
+  side text NOT NULL CHECK (side = ANY (ARRAY['buy'::text, 'sell'::text])),
+  target_quantity numeric NOT NULL CHECK (target_quantity > 0::numeric),
+  reference_price numeric NOT NULL CHECK (reference_price > 0::numeric),
+  price_band_bps integer NOT NULL CHECK (price_band_bps >= 0 AND price_band_bps <= 100000),
+  deadline timestamp with time zone NOT NULL,
+  urgency text NOT NULL CHECK (urgency = ANY (ARRAY['low'::text, 'normal'::text, 'high'::text, 'critical'::text])),
+  max_notional numeric NOT NULL CHECK (max_notional > 0::numeric),
+  disclosable_claims ARRAY NOT NULL DEFAULT ARRAY[]::text[],
+  required_counterparty_claims jsonb NOT NULL DEFAULT '{}'::jsonb,
+  counterparty_constraints jsonb NOT NULL DEFAULT '{}'::jsonb,
+  operator_prompt text NOT NULL CHECK (operator_prompt <> ''::text),
+  policy_hash text NOT NULL CHECK (policy_hash <> ''::text),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT negotiation_mandates_pkey PRIMARY KEY (id),
+  CONSTRAINT negotiation_mandates_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id),
+  CONSTRAINT negotiation_mandates_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id)
+);
+CREATE TABLE public.negotiation_sessions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  asset_code text NOT NULL CHECK (asset_code <> ''::text),
+  buy_institution_id uuid NOT NULL,
+  sell_institution_id uuid NOT NULL,
+  buy_agent_did text NOT NULL CHECK (buy_agent_did <> ''::text),
+  sell_agent_did text NOT NULL CHECK (sell_agent_did <> ''::text),
+  buy_mandate_id uuid NOT NULL,
+  sell_mandate_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'pairing'::text CHECK (status = ANY (ARRAY['pairing'::text, 'active'::text, 'converged'::text, 'settling'::text, 'settled'::text, 'walked_away'::text, 'expired'::text])),
+  current_turn text NOT NULL DEFAULT 'buy'::text CHECK (current_turn = ANY (ARRAY['buy'::text, 'sell'::text])),
+  round_number integer NOT NULL DEFAULT 0 CHECK (round_number >= 0),
+  max_rounds integer NOT NULL CHECK (max_rounds > 0),
+  deadline timestamp with time zone NOT NULL,
+  trade_ref text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT negotiation_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT negotiation_sessions_buy_institution_id_fkey FOREIGN KEY (buy_institution_id) REFERENCES public.institutions(id),
+  CONSTRAINT negotiation_sessions_sell_institution_id_fkey FOREIGN KEY (sell_institution_id) REFERENCES public.institutions(id),
+  CONSTRAINT negotiation_sessions_buy_mandate_id_fkey FOREIGN KEY (buy_mandate_id) REFERENCES public.negotiation_mandates(id),
+  CONSTRAINT negotiation_sessions_sell_mandate_id_fkey FOREIGN KEY (sell_mandate_id) REFERENCES public.negotiation_mandates(id)
+);
+CREATE TABLE public.negotiation_rounds (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL,
+  round_number integer NOT NULL CHECK (round_number >= 0),
+  actor_did text NOT NULL CHECK (actor_did <> ''::text),
+  actor_side text NOT NULL CHECK (actor_side = ANY (ARRAY['buy'::text, 'sell'::text])),
+  move_type text NOT NULL CHECK (move_type = ANY (ARRAY['propose'::text, 'counter'::text, 'reveal'::text, 'request_disclosure'::text, 'accept'::text, 'hold'::text, 'walkaway'::text])),
+  proposal_ciphertext text,
+  disclosed_claim_refs ARRAY NOT NULL DEFAULT ARRAY[]::text[],
+  opaque_signal text,
+  reasoning text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT negotiation_rounds_pkey PRIMARY KEY (id),
+  CONSTRAINT negotiation_rounds_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.negotiation_sessions(id)
+);
+CREATE TABLE public.negotiation_disclosures (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL,
+  from_did text NOT NULL CHECK (from_did <> ''::text),
+  from_side text NOT NULL CHECK (from_side = ANY (ARRAY['buy'::text, 'sell'::text])),
+  claim_type text NOT NULL CHECK (claim_type <> ''::text),
+  claim_assertion_ciphertext text NOT NULL CHECK (claim_assertion_ciphertext <> ''::text),
+  verified boolean NOT NULL DEFAULT false,
+  t3_attestation_ref text NOT NULL CHECK (t3_attestation_ref <> ''::text),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT negotiation_disclosures_pkey PRIMARY KEY (id),
+  CONSTRAINT negotiation_disclosures_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.negotiation_sessions(id)
 );

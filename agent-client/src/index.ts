@@ -8,6 +8,13 @@ export {
 } from "./portfolio-client.js";
 export { TelemetryClient } from "./websocket-client.js";
 export {
+  NegotiationClient,
+  type NegotiationTicketRequest,
+  type NegotiationTicketAccepted,
+  type SubmitNegotiationMoveRequest,
+  type NegotiationMoveAccepted,
+} from "./negotiation-client.js";
+export {
   GhostBrokerClient,
   type GhostBrokerClientConfig,
 } from "./ghostbroker-client.js";
@@ -23,6 +30,10 @@ export type {
   TelemetryEvent,
   RedactedErrorCode,
   Institution,
+  NegotiationMove,
+  NegotiationDisclosureView,
+  NegotiationRoundView,
+  RedactedNegotiationSessionView,
 } from "./types.js";
 export { GhostBrokerApiError } from "./errors.js";
 
@@ -40,10 +51,12 @@ export {
   delegationCredentialSchema,
   mintAndSignDelegationCredential,
   mintDelegationCredentialBody,
+  negotiationMandateSchema,
   signDelegationCredential,
   type DelegationCredential,
   type DelegationSigningBody,
   type MintAndSignDelegationOptions,
   type MintDelegationCredentialBody,
+  type NegotiationMandate,
   type SignDelegationCredentialOptions,
 } from "./delegation-signer.js";

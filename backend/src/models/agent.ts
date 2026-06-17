@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { negotiationMandateSchema } from "./negotiation.js";
 
 export const agentDidSchema = z
   .string()
@@ -167,6 +168,7 @@ export const mintDelegationPolicySchema = z.object({
     .max(20),
   approverEmail: z.string().email().optional(),
   purpose: z.string().trim().min(1).max(500).optional(),
+  mandate: negotiationMandateSchema.optional(),
   validityMonths: z.number().int().positive().max(120).optional(),
 });
 

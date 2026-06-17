@@ -8,6 +8,7 @@ import type {
   AgentStatus,
   DirectionScope,
 } from "../models/agent.js";
+import type { NegotiationMandateInput } from "../models/negotiation.js";
 import type { AgentRepository } from "./agent-repository.js";
 import {
   EmptyAuthorityRevocationRepository,
@@ -81,6 +82,7 @@ export interface AgentManagementService extends AgentAdmissionService {
       >;
       approverEmail?: string;
       purpose?: string;
+      mandate?: NegotiationMandateInput;
       validityMonths?: number;
     };
     /**
@@ -98,6 +100,7 @@ export interface AgentManagementService extends AgentAdmissionService {
       >;
       approverEmail?: string;
       purpose?: string;
+      mandate?: NegotiationMandateInput;
       validityMonths?: number;
     }) => Promise<{ credential: DelegationCredential; policyHash: string }>;
   }): Promise<{ agent: Agent; policyHash: string }>;
@@ -439,6 +442,7 @@ export class AgentService implements AgentManagementService {
       >;
       approverEmail?: string;
       purpose?: string;
+      mandate?: NegotiationMandateInput;
       validityMonths?: number;
     };
     signCredential: (input: {
@@ -450,6 +454,7 @@ export class AgentService implements AgentManagementService {
       >;
       approverEmail?: string;
       purpose?: string;
+      mandate?: NegotiationMandateInput;
       validityMonths?: number;
     }) => Promise<{ credential: DelegationCredential; policyHash: string }>;
   }): Promise<{ agent: Agent; policyHash: string }> {
@@ -470,6 +475,7 @@ export class AgentService implements AgentManagementService {
         ? { approverEmail: input.policy.approverEmail }
         : {}),
       ...(input.policy.purpose ? { purpose: input.policy.purpose } : {}),
+      ...(input.policy.mandate ? { mandate: input.policy.mandate } : {}),
       ...(input.policy.validityMonths
         ? { validityMonths: input.policy.validityMonths }
         : {}),

@@ -27,7 +27,17 @@ export type TelemetryPhase =
   | 'token_metering_failed'
   | 'settlement_failed'
   | 'service_unavailable'
-  | 'intent_expired';
+  | 'intent_expired'
+  | 'negotiation_ticket_sealed'
+  | 'negotiation_paired'
+  | 'negotiation_round_open'
+  | 'negotiation_move_submitted'
+  | 'negotiation_disclosure_verified'
+  | 'negotiation_converged'
+  | 'negotiation_walked_away'
+  | 'negotiation_expired'
+  | 'negotiation_settling'
+  | 'negotiation_settled';
 
 export interface TelemetryEvent {
   eventId: string;
