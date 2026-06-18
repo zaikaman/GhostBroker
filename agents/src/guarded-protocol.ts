@@ -50,7 +50,7 @@ export interface GuardedSelectorInput {
 export type GuardedOverrideReason =
   | "never_emit_settlement_capacity"
   | "replaced_with_reveal_accredited_institution"
-  | "replaced_with_request_accredited_institution"
+  | "replaced_with_reveal_settlement_capacity"
   | "replaced_with_propose"
   | "replaced_with_accept"
   | "preserved_llm_decision";
@@ -61,57 +61,82 @@ export interface GuardedSelectorResult {
 }
 
 /**
- * The single claim the guarded protocol ever asks for or reveals.
- * `settlement_capacity` is intentionally excluded — that fact is
- * pre-cleared by the backend's `assertSettlementReady()` check
- * before the hosted agent ever starts, not negotiated per round.
+ * The first claim the guarded protocol reveals.
  */
 export const GUARDED_DEMO_CLAIM = "accredited_institution";
 
 /**
+ * The second claim the guarded protocol reveals — after
+ * `accredited_institution` has been exchanged, the guard reveals
+ * `settlement_capacity` so the disclosure gate on the orchestrator
+ * can clear. The mandate requires both claims, and without this
+ * step the guard would block `settlement_capacity` forever, making
+ * settlement impossible.
+ */
+export const GUARDED_SECONDARY_CLAIM = "settlement_capacity";
+
+/**
  * Return true when the LLM's `claimType` would have asked for (or
- * revealed) a non-demo claim the guarded protocol forbids on the
- * hackathon path. Used to drive the
- * `never_emit_settlement_capacity` override branch.
+ * revealed) a claim the guarded protocol forbids. The guard allows:
+ *   - `accredited_institution` (revealed first)
+ *   - `settlement_capacity` (revealed second, after the first clears)
+ *   - `undefined` (no claim — priced move like propose/accept)
+ * Everything else is blocked.
  */
 function claimTypeForbiddenInGuarded(claimType: string | undefined): boolean {
   if (claimType === undefined) return false;
-  // The only claim the guarded hackathon path may exchange is
-  // `accredited_institution`. Everything else — including
-  // `settlement_capacity` — is either pre-cleared or out of scope
-  // for the demo.
-  return claimType !== GUARDED_DEMO_CLAIM;
+  if (claimType === GUARDED_DEMO_CLAIM) return false;
+  if (claimType === GUARDED_SECONDARY_CLAIM) return false;
+  return true;
 }
 
 /**
- * True when THIS side has already revealed `accredited_institution`
- * on a prior round. The selector uses this to decide whether the
- * next move should be a `reveal` or skip ahead to `propose` /
- * `accept`.
+ * True when THIS side has already revealed a given claim type
+ * on a prior round.
+ */
+function hasRevealedClaim(
+  priorReveals: readonly string[],
+  claimType: string,
+): boolean {
+  return priorReveals.includes(claimType);
+}
+
+/**
+ * True when THIS side has already revealed `accredited_institution`.
  */
 function hasRevealedDemoClaim(priorReveals: readonly string[]): boolean {
-  return priorReveals.includes(GUARDED_DEMO_CLAIM);
+  return hasRevealedClaim(priorReveals, GUARDED_DEMO_CLAIM);
 }
 
 /**
- * True when THIS side has already asked the counterpart to prove
- * `accredited_institution` on a prior round. The selector uses this
- * to avoid repeated disclosure loops: after one request, the next
- * move restates priced terms instead of asking again.
+ * True when the counterpart has already verified a given claim type
+ * for THIS side.
  */
-function hasRequestedDemoClaim(priorRequests: readonly string[]): boolean {
-  return priorRequests.includes(GUARDED_DEMO_CLAIM);
+function counterpartClaimVerifiedFor(
+  receivedClaims: readonly string[],
+  claimType: string,
+): boolean {
+  return receivedClaims.includes(claimType);
 }
 
 /**
  * True when the counterpart has already verified
- * `accredited_institution` for THIS side — i.e. the disclosure gate
- * has cleared for that claim.
+ * `accredited_institution` for THIS side.
  */
 function counterpartClaimVerified(
   receivedClaims: readonly string[],
 ): boolean {
-  return receivedClaims.includes(GUARDED_DEMO_CLAIM);
+  return counterpartClaimVerifiedFor(receivedClaims, GUARDED_DEMO_CLAIM);
+}
+
+/**
+ * True when the counterpart has already verified
+ * `settlement_capacity` for THIS side.
+ */
+function counterpartSecondaryClaimVerified(
+  receivedClaims: readonly string[],
+): boolean {
+  return counterpartClaimVerifiedFor(receivedClaims, GUARDED_SECONDARY_CLAIM);
 }
 
 /**
@@ -180,53 +205,40 @@ function pickGuardedQuantity(
  *
  * Precedence:
  *
- *   1. If the LLM picked a forbidden claimType (anything other than
- *      `accredited_institution`), the move is replaced with a priced
- *      `propose` and the reason is `never_emit_settlement_capacity`.
- *
- *   2. Opening turn (counterpart has no standing terms):
+ *   1. Opening turn (counterpart has no standing terms):
  *      always `propose`, even when the LLM tried to disclose.
  *
- *   3. Counterpart has standing terms but the counterpart's
- *      `accredited_institution` is not yet verified:
- *      a. If THIS side has not yet requested the claim → `request_disclosure`.
- *      b. If THIS side already asked once → priced `propose`
- *         (never loop on disclosure).
+ *   2. THIS side has not yet revealed `accredited_institution`:
+ *      `reveal` with the first demo claim. Comes before the
+ *      counterpart claim check so at least one side makes the
+ *      first reveal (breaking the request-then-loop-deadlock).
  *
- *   4. THIS side has not yet revealed its own
- *      `accredited_institution`: `reveal` with the demo claim.
+ *   3. THIS side HAS revealed `accredited_institution` but has NOT
+ *      yet revealed `settlement_capacity`: `reveal` with the
+ *      secondary claim. The mandate requires both claims for the
+ *      disclosure gate to clear; without this step the guard would
+ *      block `settlement_capacity` and settlement would be
+ *      permanently stuck.
  *
- *   5. Counterpart terms are visible, the demo claim is verified
- *      both ways: `accept` at counterpart standing price /
- *      quantity.
+ *   4. Both required claims are verified by the counterpart AND
+ *      counterpart has standing terms: `accept` at counterpart
+ *      standing price/quantity. This check comes BEFORE the
+ *      forbidden-claim guard so that even when the LLM keeps
+ *      asking for unrelated claims, once the gate clears we accept.
  *
- *   6. Otherwise: priced `propose` (the LLM's price honoured inside
+ *   5. Forbidden claimType: replace with a priced `propose`.
+ *      Only reached when step 4 didn't fire.
+ *
+ *   6. Counterpart has terms but a required claim is not yet
+ *      verified: restate priced terms with `propose`.
+ *
+ *   7. Otherwise: priced `propose` (the LLM's price honoured inside
  *      the band) so the cross stays visible.
  */
 export function selectGuardedNegotiationMove(
   input: GuardedSelectorInput,
 ): GuardedSelectorResult {
   const { bounds, ctx, llmDecision } = input;
-
-  // (1) Hard guard: never emit `settlement_capacity` (or any other
-  // non-demo claim) at runtime. Replace with a priced `propose` so
-  // the cross stays visible.
-  if (claimTypeForbiddenInGuarded(llmDecision.claimType)) {
-    return {
-      decision: {
-        action: "propose",
-        price: pickGuardedPrice(llmDecision, bounds, bounds.minPrice),
-        quantity: pickGuardedQuantity(llmDecision, bounds, bounds.targetQuantity),
-        strategicIntent: llmDecision.strategicIntent ?? "open_patiently",
-        confidence: llmDecision.confidence ?? 0,
-        escalationRequested: false,
-        settlementReadiness: "not_ready",
-        reasoning:
-          "Guarded fast-path: settlement_capacity is pre-cleared before launch; restating priced terms instead.",
-      },
-      overrideReason: "never_emit_settlement_capacity",
-    };
-  }
 
   // Walkaway is a no-rail terminal action: it is preserved
   // verbatim regardless of where we are in the choreography.
@@ -249,7 +261,7 @@ export function selectGuardedNegotiationMove(
     };
   }
 
-  // (2) Opening turn: always `propose`. The LLM still picks the
+  // (1) Opening turn: always `propose`. The LLM still picks the
   // price / strategic intent inside the band.
   if (!ctx.counterpartHasStandingTerms) {
     const price = pickGuardedPrice(llmDecision, bounds, bounds.minPrice);
@@ -282,61 +294,11 @@ export function selectGuardedNegotiationMove(
   const counterpartPrice = ctx.counterpartStandingPrice;
   const counterpartQuantity = ctx.counterpartStandingQuantity;
 
-  // (3) Disclosure gate (counterpart side): if the counterpart has
-  // priced but has NOT yet verified the demo claim, ask once. Never
-  // ask twice — that is what was causing the 10-40 tick loops.
-  if (!counterpartClaimVerified(ctx.receivedClaims)) {
-    if (!hasRequestedDemoClaim(ctx.priorRequests)) {
-      return {
-        decision: {
-          action: "request_disclosure",
-          claimType: GUARDED_DEMO_CLAIM,
-          price: pickGuardedPrice(
-            llmDecision,
-            bounds,
-            counterpartPrice ?? bounds.minPrice,
-          ),
-          quantity: pickGuardedQuantity(
-            llmDecision,
-            bounds,
-            counterpartQuantity ?? bounds.targetQuantity,
-          ),
-          strategicIntent: llmDecision.strategicIntent ?? "request_proof",
-          confidence: llmDecision.confidence ?? 0,
-          escalationRequested: false,
-          settlementReadiness: "not_ready",
-          reasoning: `Guarded fast-path: requesting ${GUARDED_DEMO_CLAIM} verification before accepting terms.`,
-        },
-        overrideReason: "replaced_with_request_accredited_institution",
-      };
-    }
-    // Already asked once — restate priced terms to keep the cross
-    // visible instead of looping on disclosure.
-    return {
-      decision: {
-        action: "propose",
-        price: pickGuardedPrice(
-          llmDecision,
-          bounds,
-          counterpartPrice ?? bounds.minPrice,
-        ),
-        quantity: pickGuardedQuantity(
-          llmDecision,
-          bounds,
-          counterpartQuantity ?? bounds.targetQuantity,
-        ),
-        strategicIntent: llmDecision.strategicIntent ?? "open_patiently",
-        confidence: llmDecision.confidence ?? 0,
-        escalationRequested: false,
-        settlementReadiness: "not_ready",
-        reasoning: `Already requested ${GUARDED_DEMO_CLAIM} once; restating priced terms so the cross stays visible.`,
-      },
-      overrideReason: "replaced_with_propose",
-    };
-  }
-
-  // (4) Reciprocal gate (our side): if WE have not yet revealed
+  // (2) Reciprocal gate (our side): if WE have not yet revealed
   // `accredited_institution`, do so now while restating terms.
+  // This check comes BEFORE the counterpart claim check so that at
+  // least one side makes the first reveal instead of both sides
+  // waiting for the other to verify.
   if (!hasRevealedDemoClaim(ctx.priorReveals)) {
     return {
       decision: {
@@ -362,10 +324,46 @@ export function selectGuardedNegotiationMove(
     };
   }
 
-  // (5) Both sides have verified and disclosed. Accept the cross at
-  // the counterpart's standing terms — the LLM's price is honoured
-  // only if it happens to match.
+  // (3) Secondary disclosure step: we've revealed
+  // `accredited_institution` but have NOT yet revealed
+  // `settlement_capacity`. Reveal it now so the orchestrator's
+  // disclosure gate clears. Without this step the gate stays
+  // blocked (mandate requires both claims) and settlement never
+  // happens.
+  if (!hasRevealedClaim(ctx.priorReveals, GUARDED_SECONDARY_CLAIM)) {
+    return {
+      decision: {
+        action: "reveal",
+        claimType: GUARDED_SECONDARY_CLAIM,
+        price: pickGuardedPrice(
+          llmDecision,
+          bounds,
+          counterpartPrice ?? bounds.minPrice,
+        ),
+        quantity: pickGuardedQuantity(
+          llmDecision,
+          bounds,
+          counterpartQuantity ?? bounds.targetQuantity,
+        ),
+        strategicIntent: llmDecision.strategicIntent ?? "build_trust",
+        confidence: llmDecision.confidence ?? 0,
+        escalationRequested: false,
+        settlementReadiness: "near",
+        reasoning:
+          "Guarded fast-path: revealing settlement_capacity after accredited_institution cleared.",
+      },
+      overrideReason: "replaced_with_reveal_settlement_capacity",
+    };
+  }
+
+  // (4) Both required claims have been verified by the counterpart
+  // AND the counterpart has standing terms. Accept at the
+  // counterpart's price/quantity. This check comes BEFORE the
+  // forbidden-claim guard so that even when the LLM hallucinates,
+  // once the gate clears we accept.
   if (
+    counterpartClaimVerified(ctx.receivedClaims) &&
+    counterpartSecondaryClaimVerified(ctx.receivedClaims) &&
     counterpartPrice !== null &&
     counterpartQuantity !== null &&
     Number.isFinite(counterpartPrice) &&
@@ -381,16 +379,66 @@ export function selectGuardedNegotiationMove(
         escalationRequested: false,
         settlementReadiness: "ready",
         reasoning:
-          "Guarded fast-path: both sides verified; accepting counterpart standing terms.",
+          "Guarded fast-path: both claims verified; accepting counterpart standing terms.",
       },
       overrideReason: "replaced_with_accept",
     };
   }
 
-  // (6) Fallback (shouldn't normally hit — the orchestrator only
-  // sets counterpartStandingPrice once it's a real number, and
-  // walkaway is handled above). Keep the LLM's priced proposal
-  // so the loop can keep trying.
+  // (5) Hard guard: block any claimType that is neither
+  // `accredited_institution` nor `settlement_capacity`. Replace
+  // with a priced `propose` so the cross stays visible. Only
+  // reached when step 4 didn't fire (gate still blocked).
+  if (claimTypeForbiddenInGuarded(llmDecision.claimType)) {
+    return {
+      decision: {
+        action: "propose",
+        price: pickGuardedPrice(llmDecision, bounds, bounds.minPrice),
+        quantity: pickGuardedQuantity(llmDecision, bounds, bounds.targetQuantity),
+        strategicIntent: llmDecision.strategicIntent ?? "open_patiently",
+        confidence: llmDecision.confidence ?? 0,
+        escalationRequested: false,
+        settlementReadiness: "not_ready",
+        reasoning:
+          "Guarded fast-path: unrecognised claim type; restating priced terms instead.",
+      },
+      overrideReason: "never_emit_settlement_capacity",
+    };
+  }
+
+  // (6) Counterpart claim gate: the counterpart has priced but at
+  // least one required claim is not yet verified. Restate priced
+  // terms so the cross stays visible. The counterpart will see our
+  // reveals on their turn and reciprocate.
+  if (
+    !counterpartClaimVerified(ctx.receivedClaims) ||
+    !counterpartSecondaryClaimVerified(ctx.receivedClaims)
+  ) {
+    return {
+      decision: {
+        action: "propose",
+        price: pickGuardedPrice(
+          llmDecision,
+          bounds,
+          counterpartPrice ?? bounds.minPrice,
+        ),
+        quantity: pickGuardedQuantity(
+          llmDecision,
+          bounds,
+          counterpartQuantity ?? bounds.targetQuantity,
+        ),
+        strategicIntent: llmDecision.strategicIntent ?? "open_patiently",
+        confidence: llmDecision.confidence ?? 0,
+        escalationRequested: false,
+        settlementReadiness: "not_ready",
+        reasoning: `Required claims not yet fully verified; restating priced terms so cross stays visible.`,
+      },
+      overrideReason: "replaced_with_propose",
+    };
+  }
+
+  // (7) Fallback (shouldn't normally hit). Keep the LLM's priced
+  // proposal so the loop can keep trying.
   return {
     decision: {
       action: "propose",

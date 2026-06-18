@@ -56,6 +56,22 @@ describe("isActionableSessionStatus", () => {
   });
 });
 
+function pls(input: {
+  sessions: readonly RedactedNegotiationSessionView[];
+  sessionId: string | undefined;
+  now?: number;
+  side?: "buy" | "sell";
+  sessionCreatedAfter?: number;
+}): RedactedNegotiationSessionView | null {
+  return pickLiveSession({
+    sessions: input.sessions,
+    sessionId: input.sessionId,
+    now: input.now ?? Date.now(),
+    side: input.side,
+    sessionCreatedAfter: input.sessionCreatedAfter,
+  });
+}
+
 describe("pickLiveSession", () => {
   const futureDeadline = new Date(Date.now() + 600_000).toISOString();
   const pastDeadline = new Date(Date.now() - 60_000).toISOString();
@@ -74,96 +90,81 @@ describe("pickLiveSession", () => {
   }
 
   it("returns null when the session list is empty", () => {
-    expect(pickLiveSession([], undefined)).toBeNull();
-    expect(pickLiveSession([], "session-1")).toBeNull();
+    expect(pls({ sessions: [], sessionId: undefined })).toBeNull();
+    expect(pls({ sessions: [], sessionId: "session-1" })).toBeNull();
   });
 
   it("follows the sessionId when one is already known", () => {
     const active = build({ id: "session-1", status: "active" });
     const expired = build({ id: "session-2", status: "expired" });
-    expect(pickLiveSession([active, expired], "session-1")).toBe(active);
+    expect(pls({ sessions: [active, expired], sessionId: "session-1" })).toBe(active);
     // Even if the tracked session is now terminal we still return it
     // so the caller can surface the terminal outcome instead of
     // accidentally picking up a stale actionable session.
-    expect(pickLiveSession([active, expired], "session-2")).toBe(expired);
+    expect(pls({ sessions: [active, expired], sessionId: "session-2" })).toBe(expired);
   });
 
-  it("returns null when no sessionId is known and no actionable session matches our side", () => {
+  it("returns null when no sessionId is known and only terminal sessions are visible (pairing wait)", () => {
     const expired = build({ id: "old-expired", status: "expired" });
     const walkedAway = build({ id: "old-walked", status: "walked_away" });
     const settled = build({ id: "old-settled", status: "settled" });
-    const futureDeadline = new Date(Date.now() + 600_000).toISOString();
-    // Active session at the OTHER side's turn — we cannot act on it
-    // yet. The agent must keep polling for the orchestrator to
-    // pair us into a session that is at our turn.
+    expect(
+      pls({
+        sessions: [expired, walkedAway, settled],
+        sessionId: undefined,
+        now: Date.now(),
+      }),
+    ).toBeNull();
+  });
+
+  it("returns the first actionable session regardless of whose turn it is (turn check handled by loop body)", () => {
     const otherTurn = build({
       id: "other-turn",
       status: "active",
       currentTurn: "sell",
-      deadline: futureDeadline,
     });
     expect(
-      pickLiveSession([otherTurn, expired, walkedAway, settled], undefined, Date.now(), "buy"),
-    ).toBeNull();
+      pls({
+        sessions: [otherTurn],
+        sessionId: undefined,
+        now: Date.now(),
+        side: "buy",
+      }),
+    ).toBe(otherTurn);
   });
 
   it("returns null when only terminal sessions are visible (pairing wait)", () => {
     const expired = build({ id: "old-expired", status: "expired" });
     const walkedAway = build({ id: "old-walked", status: "walked_away" });
-    expect(pickLiveSession([expired, walkedAway], undefined, Date.now(), "buy")).toBeNull();
+    expect(
+      pls({
+        sessions: [expired, walkedAway],
+        sessionId: undefined,
+        now: Date.now(),
+      }),
+    ).toBeNull();
   });
 
-  it("with side filter: returns the freshest active session where it is our turn", () => {
-    const otherTurn = build({ id: "not-our-turn", status: "active", currentTurn: "sell" });
-    const ourTurn = build({ id: "our-turn", status: "active", currentTurn: "buy" });
-    const futureDeadline = new Date(Date.now() + 600_000).toISOString();
-    const freshOurTurn = build({
-      id: "fresh-our-turn",
-      status: "active",
-      currentTurn: "buy",
-      deadline: futureDeadline,
-    });
-    // The session list is ordered created_at desc; the freshest
-    // session whose currentTurn matches our side is the one we
-    // were just paired into.
+  it("returns the first actionable session (discovery picks the most recent)", () => {
+    const activeA = build({ id: "a", status: "active" });
+    const activeB = build({ id: "b", status: "active" });
     expect(
-      pickLiveSession([freshOurTurn, ourTurn, otherTurn], undefined, Date.now(), "buy"),
-    ).toBe(freshOurTurn);
-  });
-
-  it("with side filter: skips sessions whose currentTurn is the other side", () => {
-    // Regression: the legacy pickLiveSession would adopt the
-    // freshest actionable session regardless of whose turn it is.
-    // The seller in a fresh pairing was adopting the buyer's
-    // session and submitting moves on the buyer's turn, which
-    // the orchestrator accepted (because the move itself was
-    // structurally valid) but advanced the wrong turn — silently
-    // corrupting session state. The `currentTurn === side` filter
-    // fixes that.
-    const ourTurn = build({ id: "our-turn", status: "active", currentTurn: "buy" });
-    const otherTurn = build({ id: "other-turn", status: "active", currentTurn: "sell" });
-    expect(
-      pickLiveSession([otherTurn, ourTurn], undefined, Date.now(), "buy"),
-    ).toBe(ourTurn);
+      pls({
+        sessions: [activeA, activeB],
+        sessionId: undefined,
+      }),
+    ).toBe(activeA);
   });
 
   it("regression: still ignores a zombie 'active' session whose deadline has already passed once we have a sessionId", () => {
-    // A previous run may have left a session in `status = "active"`
-    // in the database if the agent exhausted MAX_TICKS without ever
-    // calling `submitMove` after the deadline (so the orchestrator
-    // never explicitly flipped it to "expired"). When the agent
-    // DOES have a sessionId, the existing session-lookup path
-    // returns the requested session regardless of its deadline;
-    // the orchestrator's own deadline check is what terminates it
-    // on submit.
     const zombie = build({
       id: "zombie",
       status: "active",
       deadline: pastDeadline,
     });
     const fresh = build({ id: "fresh", status: "active" });
-    expect(pickLiveSession([zombie, fresh], "zombie")).toBe(zombie);
-    expect(pickLiveSession([zombie, fresh], "fresh")).toBe(fresh);
+    expect(pls({ sessions: [zombie, fresh], sessionId: "zombie" })).toBe(zombie);
+    expect(pls({ sessions: [zombie, fresh], sessionId: "fresh" })).toBe(fresh);
   });
 
   it("regression: returns null when only zombie 'active' sessions are visible and we have no sessionId", () => {
@@ -172,20 +173,75 @@ describe("pickLiveSession", () => {
       status: "active",
       deadline: pastDeadline,
     });
-    expect(pickLiveSession([zombie], undefined, Date.now(), "buy")).toBeNull();
+    expect(pls({ sessions: [zombie], sessionId: undefined, now: Date.now() })).toBeNull();
   });
 
   it("accepts an injected 'now' for deterministic tests", () => {
     const now = Date.parse("2026-06-18T00:00:00.000Z");
     const before = new Date(now - 1).toISOString();
     const after = new Date(now + 1).toISOString();
-    const pastSession = build({ id: "past", status: "active", currentTurn: "buy", deadline: before });
-    const futureSession = build({ id: "future", status: "active", currentTurn: "buy", deadline: after });
+    const pastSession = build({ id: "past", status: "active", deadline: before });
+    const futureSession = build({ id: "future", status: "active", deadline: after });
     // sessionId-bound: returns the requested session regardless of deadline.
-    expect(pickLiveSession([pastSession, futureSession], "past", now)).toBe(pastSession);
-    expect(pickLiveSession([pastSession, futureSession], "future", now)).toBe(futureSession);
-    // No sessionId + side filter: respects deadline.
-    expect(pickLiveSession([pastSession, futureSession], undefined, now, "buy")).toBe(futureSession);
+    expect(pls({ sessions: [pastSession, futureSession], sessionId: "past", now })).toBe(pastSession);
+    expect(pls({ sessions: [pastSession, futureSession], sessionId: "future", now })).toBe(futureSession);
+    // No sessionId: respects deadline.
+    expect(pls({ sessions: [pastSession, futureSession], sessionId: undefined, now, side: "buy" })).toBe(
+      futureSession,
+    );
+  });
+
+  it("regression: filters out stale sessions from prior runs via sessionCreatedAfter", () => {
+    const now = Date.now();
+    const stale = build({
+      id: "stale",
+      status: "active",
+      createdAt: new Date(now - 120_000).toISOString(),
+    });
+    const fresh = build({
+      id: "fresh",
+      status: "active",
+      createdAt: new Date(now - 5_000).toISOString(),
+    });
+    // sessionCreatedAfter after stale was created → stale filtered out
+    expect(
+      pls({
+        sessions: [stale, fresh],
+        sessionId: undefined,
+        now,
+        sessionCreatedAfter: now - 60_000,
+      }),
+    ).toBe(fresh);
+    // sessionCreatedAfter before both → first session returned
+    expect(
+      pls({
+        sessions: [stale, fresh],
+        sessionId: undefined,
+        now,
+        sessionCreatedAfter: now - 300_000,
+      }),
+    ).toBe(stale);
+    // No sessionCreatedAfter (legacy compat) → first session returned
+    expect(pls({ sessions: [stale, fresh], sessionId: undefined, now })).toBe(stale);
+  });
+
+  it("regression: sessionId-bound lookup ignores sessionCreatedAfter", () => {
+    const now = Date.now();
+    const stale = build({
+      id: "stale",
+      status: "active",
+      createdAt: new Date(now - 120_000).toISOString(),
+    });
+    // Even with a strict sessionCreatedAfter, a sessionId-bound
+    // lookup returns the session because the agent already owns it.
+    expect(
+      pls({
+        sessions: [stale],
+        sessionId: "stale",
+        now,
+        sessionCreatedAfter: now - 60_000,
+      }),
+    ).toBe(stale);
   });
 });
 

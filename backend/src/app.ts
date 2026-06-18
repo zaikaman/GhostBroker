@@ -559,7 +559,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
     minimumTokenBalance: 1n,
   });
-  const negotiationRoundEvaluator = new T3NegotiationRoundEvaluator(matchContractClient);
+  const negotiationRoundEvaluator = new T3NegotiationRoundEvaluator();
   const negotiationDisclosureVerifier = new T3NegotiationDisclosureVerifier();
   const negotiationOrchestrator = new NegotiationOrchestrator({
     ticketClient: negotiationTicketClient,

@@ -293,6 +293,7 @@ let admission: AgentAdmission;
   }
 
   client.telemetry.connect();
+  const negotiationStartTime = Date.now();
   let settlementCorrelationRef: string | undefined;
   const stopOnSettle = client.telemetry.onSettled((ref) => {
     settlementCorrelationRef = ref;
@@ -341,7 +342,13 @@ let admission: AgentAdmission;
     }
 
     const listed = await client.listNegotiationSessions(identity.did);
-    const liveSession = pickLiveSession(listed.sessions, sessionId, Date.now(), side);
+    const liveSession = pickLiveSession({
+      sessions: listed.sessions,
+      sessionId,
+      now: Date.now(),
+      side,
+      sessionCreatedAfter: negotiationStartTime,
+    });
     if (!liveSession) {
       lastOutcome = "awaiting counterparty pairing";
       await sleep(env.POLL_INTERVAL_MS);
@@ -867,68 +874,75 @@ export function isActionableSessionStatus(
  *   - When `sessionId` is undefined, our ticket was sealed but the
  *     orchestrator had no partner yet, so it parked us in
  *     `pendingTickets`. We need to discover the session that the
- *     orchestrator has now paired us into. The listed surface
- *     contains every session our institution is a party to,
- *     including stale sessions from prior runs that the agent is
- *     not actually in. We filter to sessions that:
+ *     orchestrator has now paired us into.
  *
- *       1. Are still actionable (`active` / `awaiting_approval` /
- *          `converged` / `settling`),
- *       2. Have not yet hit their deadline,
- *       3. Whose `currentTurn` matches our `side` (otherwise the
- *          agent would adopt a session it cannot act on).
+ *     Previously this function also filtered by `currentTurn === side`
+ *     in discovery mode. That caused two bugs that prevented agents
+ *     from ever being paired:
  *
- *     The most recent such session is the one we just got paired
- *     into. This is what was happening before, but the legacy
- *     version skipped the `currentTurn` check and would happily
- *     adopt a stale `active` session from a previous run where the
- *     agent's DID is not in the session's `buy_agent_did` /
- *     `sell_agent_did` — the orchestrator would then bounce every
- *     move with 403 on `resolveActorSide`. The `currentTurn` filter
- *     alone is enough to rule those out: a prior session in
- *     `active` state from the same side is virtually always at a
- *     later round and may have the agent's turn pending, but if
- *     the previous run left a session in `active` with a deadline
- *     still in the future, the dead-or-zombie filter in
- *     `isActionableSessionStatus` is the safety net. (We still
- *     honour an explicit `sessionId` even when its deadline has
- *     passed — the orchestrator's own deadline check is what
- *     terminates it on submit.)
+ *       1. Stale-session poisoning: a prior run that left a session
+ *          in `active` status with `currentTurn` matching the agent's
+ *          side would be picked up first. The agent would then act
+ *          on a stale session whose counterparty was a different
+ *          agent from the current run, while the fresh session sat
+ *          unclaimed. The two agents would converge on different
+ *          sessions and spin forever.
+ *
+ *       2. Fresh-session invisibility: a freshly paired session is
+ *          created with `currentTurn: "buy"`. A sell-side agent in
+ *          discovery mode could never discover it because
+ *          `"sell" !== "buy"` filtered it out. The agent would loop
+ *          endlessly waiting for a session it could never see.
+ *
+ *     The fix: remove `currentTurn === side` from discovery and
+ *     instead filter by `sessionCreatedAfter`. Stale sessions from
+ *     prior runs have an earlier `createdAt` and are excluded. The
+ *     turn check is handled by the loop body's explicit
+ *     `liveSession.currentTurn !== side` guard, which also ticks
+ *     correctly when the agent already has a `sessionId`.
  *
  * Returns `null` when no actionable session is visible — the caller
  * should keep polling for the orchestrator to pair the pending
  * ticket.
  */
-export function pickLiveSession(
-  sessions: readonly RedactedNegotiationSessionView[],
-  sessionId: string | undefined,
-  now: number = Date.now(),
-  side?: "buy" | "sell",
-): RedactedNegotiationSessionView | null {
+export function pickLiveSession(input: {
+  sessions: readonly RedactedNegotiationSessionView[];
+  sessionId: string | undefined;
+  now: number;
+  side?: "buy" | "sell";
+  /**
+   * When provided, only sessions created after this timestamp are
+   * eligible for discovery. This prevents the agent from picking up
+   * stale sessions left from a prior run. Ignored when `sessionId`
+   * is set (the agent already owns a session and follows it by ID).
+   */
+  sessionCreatedAfter?: number;
+}): RedactedNegotiationSessionView | null {
+  const { sessions, sessionId, now, side, sessionCreatedAfter } = input;
+
   if (sessionId !== undefined) {
     return sessions.find((item) => item.id === sessionId) ?? null;
   }
+
   // No sessionId yet — discover the session the orchestrator paired
-  // us into. The listed surface is institution-scoped (we only see
-  // sessions our institution is a party to), but it also contains
-  // stale `active` sessions from prior runs that we are NOT in.
-  // Filtering by `currentTurn === side` (when we know our side)
-  // rules out most of those: a stale session from a previous
-  // buyer run is either at the buyer's turn (in which case it
-  // would be picked up — see below for the deadline check) or
-  // already advanced past us. The deadline check is the hard
-  // safety net.
-  const candidateSessions = side !== undefined
-    ? sessions.filter(
-        (item) =>
-          isActionableSessionStatus(item.status) &&
-          Date.parse(item.deadline) > now &&
-          item.currentTurn === side,
-      )
-    : sessions.filter(
-        (item) =>
-          isActionableSessionStatus(item.status) &&
-          Date.parse(item.deadline) > now,
-      );
+  // us into. Filter out stale sessions from prior runs by requiring
+  // the session was created during THIS run (timestamp check).
+  // The `currentTurn` check is intentionally OMITTED here: a freshly
+  // paired session starts with `currentTurn: "buy"`, and a sell-side
+  // agent would never discover it. The turn check happens in the
+  // loop body (`if (liveSession.currentTurn !== side) ...`) which
+  // works correctly once the agent has adopted the sessionId.
+  const candidateSessions = sessions.filter((item) => {
+    if (!isActionableSessionStatus(item.status)) return false;
+    if (Date.parse(item.deadline) <= now) return false;
+    if (sessionCreatedAfter !== undefined) {
+      const createdAt = Date.parse(item.createdAt);
+      if (Number.isNaN(createdAt) || createdAt < sessionCreatedAfter) {
+        return false;
+      }
+    }
+    return true;
+  });
+
   return candidateSessions[0] ?? null;
 }

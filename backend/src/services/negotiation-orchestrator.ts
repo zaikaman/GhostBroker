@@ -465,6 +465,12 @@ export class NegotiationOrchestrator {
     claimCredential?: unknown;
     correlationRef: string;
   }): Promise<{ status: NegotiationSessionRecord["status"] }> {
+    console.log(
+      `[ORCHESTRATOR] submitMove ENTER: session=${input.sessionId} ` +
+      `agentId=${input.agentId} agentDid=${input.agentDid.slice(0, 30)} ` +
+      `action=${input.move.action} price=${input.move.price} qty=${input.move.quantity} ` +
+      `inst=${input.institutionId}`
+    );
     const verification = await this.authorization.loadAndVerify?.({
       institutionId: input.institutionId,
       agentId: input.agentId,
@@ -890,13 +896,21 @@ export class NegotiationOrchestrator {
         buyQuantity: decimalString(buySide.quantity),
         sellPrice: decimalString(sellSide.price),
         sellQuantity: decimalString(sellSide.quantity),
-        buyTicketHandle: `session:${session.id}:buy`,
-        sellTicketHandle: `session:${session.id}:sell`,
       });
+      console.log(
+        `[ORCHESTRATOR] ${session.id} eval: status=${evaluation.status} ` +
+        `crossed=${evaluation.status === "crossed"} ` +
+        `execPrice=${evaluation.executionPrice} matchedQty=${evaluation.matchedQuantity} ` +
+        `buy=${buySide.price}@${buySide.quantity} sell=${sellSide.price}@${sellSide.quantity}`
+      );
       opaqueSignal = actorSide === "buy" ? evaluation.buyerSignal : evaluation.sellerSignal;
       crossed = evaluation.status === "crossed";
       executionPrice = evaluation.executionPrice;
       matchedQuantity = evaluation.matchedQuantity;
+    } else {
+      console.log(
+        `[ORCHESTRATOR] ${session.id} cannot evaluate: buySide=${!!buySide} sellSide=${!!sellSide}`
+      );
     }
 
     const counterpartStandingProfile =
@@ -977,9 +991,15 @@ export class NegotiationOrchestrator {
     }
 
     if (crossed && executionPrice > 0 && matchedQuantity > 0) {
+      console.log(
+        `[ORCHESTRATOR] ${session.id} CROSSED! Checking disclosure gate...`
+      );
       // Disclosure gate: a price cross is not enough if either side
       // still requires a verified claim it has not received.
       const gateOk = await this.disclosureGateSatisfiedFor(session);
+      console.log(
+        `[ORCHESTRATOR] ${session.id} disclosureGateSatisfiedFor=${gateOk}`
+      );
       if (!gateOk) {
         // Hold the cross pending disclosure; surface a trust-building
         // signal rather than settling.
@@ -1160,6 +1180,9 @@ export class NegotiationOrchestrator {
 
     const view = await this.repository.getSession(session.id, session.buy_institution_id);
     if (!view) {
+      console.log(
+        `[ORCHESTRATOR] ${session.id} disclosureGate: no view, gate=true`
+      );
       return true;
     }
     const buyerReceivedVerifiedClaims = view.disclosedClaims
@@ -1171,6 +1194,14 @@ export class NegotiationOrchestrator {
 
     const buyerRequired = requiredClaimsFor(buyMandate);
     const sellerRequired = requiredClaimsFor(sellMandate);
+
+    console.log(
+      `[ORCHESTRATOR] ${session.id} disclosure gate: ` +
+      `buyerRequired=[${buyerRequired.join(",")}] ` +
+      `buyerReceived=[${buyerReceivedVerifiedClaims.join(",")}] ` +
+      `sellerRequired=[${sellerRequired.join(",")}] ` +
+      `sellerReceived=[${sellerReceivedVerifiedClaims.join(",")}]`
+    );
 
     // Each side's required claims must have been disclosed AND verified
     // by the counterparty. A side's own disclosures never satisfy its
@@ -1207,6 +1238,11 @@ export class NegotiationOrchestrator {
     const sellerCredential = await this.repository.getSessionDelegation(
       session.id,
       "sell",
+    );
+    console.log(
+      `[CONVERGE] ${session.id} getSessionDelegation: ` +
+      `buy=${"id" in (buyerCredential ?? {}) ? buyerCredential!.id.slice(0, 30) : "null"} ` +
+      `sell=${"id" in (sellerCredential ?? {}) ? sellerCredential!.id.slice(0, 30) : "null"}`
     );
 
     await this.repository.updateSession({
@@ -1269,10 +1305,22 @@ export class NegotiationOrchestrator {
       ],
     };
 
-    const completed = await this.settlementService.executeSettlement(
-      request,
-      `${outcomeRef}:${randomUUID()}`,
-    );
+    let completed;
+    try {
+      completed = await this.settlementService.executeSettlement(
+        request,
+        `${outcomeRef}:${randomUUID()}`,
+      );
+    } catch (settleError) {
+      console.error(
+        `[CONVERGE] ${session.id} executeSettlement failed: ` +
+        `${settleError instanceof Error ? settleError.message : String(settleError)} ` +
+        `${settleError instanceof Error && settleError.stack ? settleError.stack.split("\n").slice(0, 2).join(" | ") : ""}`
+      );
+      throw settleError;
+    }
+
+    console.log(`[CONVERGE] ${session.id} executeSettlement succeeded, tradeRef=${completed.tradeRef}`);
 
     await this.repository.updateSession({
       sessionId: session.id,
@@ -1458,8 +1506,6 @@ export class NegotiationOrchestrator {
       buyQuantity: decimalString(standing.buy.quantity),
       sellPrice: decimalString(standing.sell.price),
       sellQuantity: decimalString(standing.sell.quantity),
-      buyTicketHandle: `session:${session.id}:buy`,
-      sellTicketHandle: `session:${session.id}:sell`,
     });
     if (
       evaluation.status !== "crossed" ||

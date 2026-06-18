@@ -204,8 +204,8 @@ async function createHostedConfig(
         startOnCreate: false,
         config: {
           mandateId,
-          pollIntervalMs: 5000,
-          maxTicks: 30,
+          pollIntervalMs: 1000,
+          maxTicks: 60,
           dryRun: false,
         },
       }),

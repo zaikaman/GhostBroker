@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GUARDED_DEMO_CLAIM,
+  GUARDED_SECONDARY_CLAIM,
   selectGuardedNegotiationMove,
   type GuardedNegotiationContext,
 } from "./guarded-protocol.js";
@@ -83,8 +84,31 @@ describe("selectGuardedNegotiationMove — opening turn", () => {
   });
 });
 
-describe("selectGuardedNegotiationMove — settlement_capacity guard", () => {
-  it("never emits settlement_capacity at runtime", () => {
+describe("selectGuardedNegotiationMove — disclosure choreography", () => {
+  it("reveals accredited_institution on the first turn after opening", () => {
+    const result = selectGuardedNegotiationMove({
+      bounds,
+      ctx: freshCtx({
+        counterpartHasStandingTerms: true,
+        counterpartStandingPrice: 70_100,
+        counterpartStandingQuantity: 1,
+      }),
+      llmDecision: llmPropose({
+        action: "request_disclosure",
+        claimType: GUARDED_DEMO_CLAIM,
+        reasoning: "Ask once",
+      }),
+    });
+    expect(result.decision.action).toBe("reveal");
+    expect(result.decision.claimType).toBe(GUARDED_DEMO_CLAIM);
+    expect(result.overrideReason).toBe(
+      "replaced_with_reveal_accredited_institution",
+    );
+  });
+
+  it("reveals settlement_capacity after accredited_institution has been revealed", () => {
+    // We've revealed accredited_institution but NOT settlement_capacity
+    // Step 3 should fire: reveal settlement_capacity
     const result = selectGuardedNegotiationMove({
       bounds,
       ctx: freshCtx({
@@ -100,103 +124,23 @@ describe("selectGuardedNegotiationMove — settlement_capacity guard", () => {
         reasoning: "Check their settlement capacity",
       }),
     });
-    expect(result.decision.action).toBe("propose");
-    expect(result.decision.claimType).toBeUndefined();
-    expect(result.overrideReason).toBe("never_emit_settlement_capacity");
+    expect(result.decision.action).toBe("reveal");
+    expect(result.decision.claimType).toBe(GUARDED_SECONDARY_CLAIM);
+    expect(result.overrideReason).toBe(
+      "replaced_with_reveal_settlement_capacity",
+    );
   });
 
-  it("never reveals settlement_capacity at runtime", () => {
+  it("accepts when both sides have exchanged both claims", () => {
+    // Both claims revealed by us AND verified by counterpart
     const result = selectGuardedNegotiationMove({
       bounds,
       ctx: freshCtx({
         counterpartHasStandingTerms: true,
         counterpartStandingPrice: 70_100,
         counterpartStandingQuantity: 1,
-        receivedClaims: [GUARDED_DEMO_CLAIM],
-      }),
-      llmDecision: llmPropose({
-        action: "reveal",
-        claimType: "settlement_capacity",
-        reasoning: "Show our settlement capacity",
-      }),
-    });
-    expect(result.decision.action).toBe("propose");
-    expect(result.decision.claimType).toBeUndefined();
-    expect(result.overrideReason).toBe("never_emit_settlement_capacity");
-  });
-});
-
-describe("selectGuardedNegotiationMove — disclosure cap", () => {
-  it("requests accredited_institution at most once", () => {
-    const firstRequest = selectGuardedNegotiationMove({
-      bounds,
-      ctx: freshCtx({
-        counterpartHasStandingTerms: true,
-        counterpartStandingPrice: 70_100,
-        counterpartStandingQuantity: 1,
-      }),
-      llmDecision: llmPropose({
-        action: "request_disclosure",
-        claimType: GUARDED_DEMO_CLAIM,
-        reasoning: "Ask once",
-      }),
-    });
-    expect(firstRequest.decision.action).toBe("request_disclosure");
-    expect(firstRequest.decision.claimType).toBe(GUARDED_DEMO_CLAIM);
-    expect(firstRequest.overrideReason).toBe(
-      "replaced_with_request_accredited_institution",
-    );
-
-    const secondRequest = selectGuardedNegotiationMove({
-      bounds,
-      ctx: freshCtx({
-        counterpartHasStandingTerms: true,
-        counterpartStandingPrice: 70_100,
-        counterpartStandingQuantity: 1,
-        priorRequests: [GUARDED_DEMO_CLAIM],
-      }),
-      llmDecision: llmPropose({
-        action: "request_disclosure",
-        claimType: GUARDED_DEMO_CLAIM,
-        reasoning: "Ask again",
-      }),
-    });
-    expect(secondRequest.decision.action).toBe("propose");
-    expect(secondRequest.decision.claimType).toBeUndefined();
-    expect(secondRequest.overrideReason).toBe("replaced_with_propose");
-  });
-
-  it("reveals accredited_institution at most once before proposing", () => {
-    const reveal = selectGuardedNegotiationMove({
-      bounds,
-      ctx: freshCtx({
-        counterpartHasStandingTerms: true,
-        counterpartStandingPrice: 70_100,
-        counterpartStandingQuantity: 1,
-        receivedClaims: [GUARDED_DEMO_CLAIM],
-      }),
-      llmDecision: llmPropose({
-        action: "reveal",
-        claimType: GUARDED_DEMO_CLAIM,
-        reasoning: "Reciprocal reveal",
-      }),
-    });
-    expect(reveal.decision.action).toBe("reveal");
-    expect(reveal.decision.claimType).toBe(GUARDED_DEMO_CLAIM);
-    expect(reveal.overrideReason).toBe(
-      "replaced_with_reveal_accredited_institution",
-    );
-  });
-
-  it("does not reveal accredited_institution a second time once priorReveals is set", () => {
-    const result = selectGuardedNegotiationMove({
-      bounds,
-      ctx: freshCtx({
-        counterpartHasStandingTerms: true,
-        counterpartStandingPrice: 70_100,
-        counterpartStandingQuantity: 1,
-        receivedClaims: [GUARDED_DEMO_CLAIM],
-        priorReveals: [GUARDED_DEMO_CLAIM],
+        priorReveals: [GUARDED_DEMO_CLAIM, GUARDED_SECONDARY_CLAIM],
+        receivedClaims: [GUARDED_DEMO_CLAIM, GUARDED_SECONDARY_CLAIM],
       }),
       llmDecision: llmPropose({
         action: "reveal",
@@ -204,28 +148,66 @@ describe("selectGuardedNegotiationMove — disclosure cap", () => {
         reasoning: "Re-reveal",
       }),
     });
-    // After both sides have already exchanged the claim, the move
-    // must be an accept (not another reveal). The guard's purpose
-    // is to make sure we don't loop on disclosure — and the test
-    // verifies the LLM's redundant reveal gets converted into the
-    // right terminal action.
     expect(result.decision.action).toBe("accept");
     expect(result.decision.price).toBe(70_100);
     expect(result.decision.quantity).toBe(1);
     expect(result.overrideReason).toBe("replaced_with_accept");
   });
+
+  it("restates terms after both claims revealed but counterpart hasn't verified secondary yet", () => {
+    const result = selectGuardedNegotiationMove({
+      bounds,
+      ctx: freshCtx({
+        counterpartHasStandingTerms: true,
+        counterpartStandingPrice: 70_100,
+        counterpartStandingQuantity: 1,
+        priorReveals: [GUARDED_DEMO_CLAIM, GUARDED_SECONDARY_CLAIM],
+        receivedClaims: [GUARDED_DEMO_CLAIM], // secondary NOT yet verified
+      }),
+      llmDecision: llmPropose({
+        action: "reveal",
+        claimType: GUARDED_DEMO_CLAIM,
+        reasoning: "Re-reveal",
+      }),
+    });
+    expect(result.decision.action).toBe("propose");
+    expect(result.decision.claimType).toBeUndefined();
+    expect(result.overrideReason).toBe("replaced_with_propose");
+  });
+
+  it("reveals when counterpart has already verified us but we haven't revealed yet", () => {
+    const result = selectGuardedNegotiationMove({
+      bounds,
+      ctx: freshCtx({
+        counterpartHasStandingTerms: true,
+        counterpartStandingPrice: 70_100,
+        counterpartStandingQuantity: 1,
+        receivedClaims: [GUARDED_DEMO_CLAIM, GUARDED_SECONDARY_CLAIM],
+      }),
+      llmDecision: llmPropose({
+        action: "reveal",
+        claimType: GUARDED_DEMO_CLAIM,
+        reasoning: "Reciprocal reveal",
+      }),
+    });
+    expect(result.decision.action).toBe("reveal");
+    expect(result.decision.claimType).toBe(GUARDED_DEMO_CLAIM);
+    expect(result.overrideReason).toBe(
+      "replaced_with_reveal_accredited_institution",
+    );
+  });
 });
 
 describe("selectGuardedNegotiationMove — accept cross", () => {
-  it("accepts at counterpart standing terms when both sides have verified the demo claim", () => {
+  it("accepts at counterpart standing terms when both claims are verified", () => {
     const result = selectGuardedNegotiationMove({
       bounds,
       ctx: freshCtx({
         counterpartHasStandingTerms: true,
         counterpartStandingPrice: 70_080,
         counterpartStandingQuantity: 1,
-        receivedClaims: [GUARDED_DEMO_CLAIM],
-        priorReveals: [GUARDED_DEMO_CLAIM],
+        receivedClaims: [GUARDED_DEMO_CLAIM, GUARDED_SECONDARY_CLAIM],
+        priorReveals: [GUARDED_DEMO_CLAIM, GUARDED_SECONDARY_CLAIM],
       }),
       llmDecision: llmPropose(),
     });
