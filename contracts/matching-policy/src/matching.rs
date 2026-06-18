@@ -7,6 +7,18 @@
 //! still validates that the WASM exposes the required WIT world,
 //! which gives us a verifiable execution surface even though the
 //! body is pure.
+//!
+//! Wire format for prices and quantities (v0.4.0): a plain decimal
+//! string, optionally with a single `.` separating integer and
+//! fractional parts. Both sides carry their values at the same
+//! implicit scale (the contract's internal [`WIRE_SCALE`]); the
+//! orchestrator's `decimalString` serializer keeps the value
+//! human-readable (`"0.0001"`, `"70000"`) and the contract
+//! multiplies by `10^WIRE_SCALE` to a `u128` for deterministic
+//! cross / midpoint math. The settlement rail reads the same
+//! human-readable string with its per-asset decimals via
+//! `parseUnits(quantity.toString(), decimals)`, so the wire form
+//! matches both surfaces without a backend pre/post-scale step.
 
 extern crate alloc;
 
@@ -19,39 +31,107 @@ use crate::{
     SealIntentInput, SealIntentOutput,
 };
 
-/// Parse a non-negative decimal string into a `u128`. Rejects empty
-/// strings, leading `+`, signs, exponents, fractions, and underscores
-/// — the wire form is always a plain integer of base-10 digits, so a
-/// anything else means the caller (the backend) sent a malformed
-/// quantity/price and the pair must be a `no_match`, not a silent
-/// fill at a garbage price.
-fn parse_decimal_u128(value: &str) -> Option<u128> {
+/// Implicit wire scale for prices and quantities on
+/// `evaluate-match`. The orchestrator sends values as
+/// human-readable decimal strings (`"0.0001"`, `"70000"`); the
+/// contract internally multiplies by `10^WIRE_SCALE` and stores
+/// the result in a `u128` so the cross, fill, and midpoint math
+/// is exact (no IEEE-754 drift). 18 is the max decimals any
+/// real-world ERC-20 ships with, so every quantity and price the
+/// orchestrator produces fits in a `u128` after scaling without
+/// precision loss.
+pub(crate) const WIRE_SCALE: u32 = 18;
+
+/// 10^WIRE_SCALE precomputed once. The constant is a `u128`
+/// (1e18) and well within `u128::MAX`, so the unwrap is fine.
+pub(crate) const WIRE_SCALE_FACTOR: u128 = 1_000_000_000_000_000_000;
+
+/// Parse a non-negative decimal string into a scaled `u128`
+/// (value × 10^WIRE_SCALE). Accepts plain integers (`"70000"`)
+/// and fractional decimals (`"0.0001"`). Rejects:
+///   - empty strings,
+///   - signs (`+`, `-`),
+///   - exponents (`1e5`),
+///   - multiple `.` separators,
+///   - more than `WIRE_SCALE` fractional digits (would overflow),
+///   - any non-ASCII whitespace or non-digit non-`.` bytes.
+///
+/// The wire form is always a plain decimal of base-10 digits;
+/// anything else means the caller (the backend) sent a
+/// malformed quantity/price and the pair must be `no_match`,
+/// not a silent fill at a garbage price.
+pub(crate) fn parse_decimal(value: &str) -> Option<u128> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let mut accumulated: u128 = 0;
-    for byte in trimmed.bytes() {
-        if !byte.is_ascii_digit() {
-            return None;
+    let bytes = trimmed.as_bytes();
+    let mut int_part: u128 = 0;
+    let mut frac_part: u128 = 0;
+    let mut frac_digits: u32 = 0;
+    let mut in_frac = false;
+    for byte in bytes.iter().copied() {
+        match byte {
+            b'0'..=b'9' => {
+                let digit = u128::from(byte - b'0');
+                if in_frac {
+                    frac_digits += 1;
+                    if frac_digits > WIRE_SCALE {
+                        // More fractional digits than the wire
+                        // scale can represent without overflow.
+                        return None;
+                    }
+                    frac_part = frac_part.checked_mul(10)?;
+                    frac_part = frac_part.checked_add(digit)?;
+                } else {
+                    int_part = int_part.checked_mul(10)?;
+                    int_part = int_part.checked_add(digit)?;
+                }
+            }
+            b'.' => {
+                if in_frac {
+                    // Second dot is malformed.
+                    return None;
+                }
+                in_frac = true;
+            }
+            _ => return None,
         }
-        accumulated = match accumulated.checked_mul(10) {
-            Some(v) => v,
-            None => return None,
-        };
-        let digit = u128::from(byte - b'0');
-        accumulated = match accumulated.checked_add(digit) {
-            Some(v) => v,
-            None => return None,
-        };
     }
-    Some(accumulated)
+    let scale_up = 10u128.checked_pow(WIRE_SCALE - frac_digits)?;
+    let scaled_frac = frac_part.checked_mul(scale_up)?;
+    int_part
+        .checked_mul(WIRE_SCALE_FACTOR)?
+        .checked_add(scaled_frac)
 }
 
-/// Deterministic midpoint of two unsigned prices: `(a + b) / 2`
-/// rounded half-up. Uses `u128` throughout so there is no float
-/// drift, and `checked_add` so an overflow is reported as `None`
-/// (the caller treats that as `no_match` rather than wrapping).
+/// Render a scaled `u128` (value × 10^WIRE_SCALE) as a
+/// plain decimal string at the wire scale. Trailing zeros are
+/// trimmed from the fractional part so `"10000"`-style integers
+/// don't carry a `.000…000` suffix. Used to format
+/// `matched_quantity` and `execution_price` on the way out so
+/// the orchestrator (and the human reading the receipt) sees the
+/// value at its natural scale, not the contract's internal base
+/// units.
+pub(crate) fn format_decimal(scaled: u128) -> String {
+    let int_part = scaled / WIRE_SCALE_FACTOR;
+    let frac_raw = scaled % WIRE_SCALE_FACTOR;
+    if frac_raw == 0 {
+        return int_part.to_string();
+    }
+    let mut frac_str = frac_raw.to_string();
+    while frac_str.len() < WIRE_SCALE as usize {
+        frac_str.insert(0, '0');
+    }
+    let trimmed = frac_str.trim_end_matches('0');
+    format!("{}.{}", int_part, trimmed)
+}
+
+/// Deterministic midpoint of two scaled unsigned prices:
+/// `(a + b) / 2` rounded half-up. Uses `u128` throughout so
+/// there is no float drift, and `checked_add` so an overflow
+/// is reported as `None` (the caller treats that as `no_match`
+/// rather than wrapping).
 fn midpoint(a: u128, b: u128) -> Option<u128> {
     let sum = a.checked_add(b)?;
     Some(sum / 2 + (sum & 1))
@@ -296,10 +376,11 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // `MatchingOrchestrator`'s default intent TTL.
     let expires_at = format_expires_at(300);
 
-    // Parse the price/quantity wire fields into exact u128. Any
-    // malformed or missing value is a hard `no_match` — the
-    // contract must never fill at a price it could not parse.
-    let buy_price = match parse_decimal_u128(&parsed.buy_price) {
+    // Parse the price/quantity wire fields into exact scaled u128
+    // (value × 10^WIRE_SCALE). Any malformed or missing value is a
+    // hard `no_match` — the contract must never fill at a price it
+    // could not parse.
+    let buy_price = match parse_decimal(&parsed.buy_price) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -314,7 +395,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             );
         }
     };
-    let buy_quantity = match parse_decimal_u128(&parsed.buy_quantity) {
+    let buy_quantity = match parse_decimal(&parsed.buy_quantity) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -329,7 +410,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             );
         }
     };
-    let sell_price = match parse_decimal_u128(&parsed.sell_price) {
+    let sell_price = match parse_decimal(&parsed.sell_price) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -344,7 +425,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             );
         }
     };
-    let sell_quantity = match parse_decimal_u128(&parsed.sell_quantity) {
+    let sell_quantity = match parse_decimal(&parsed.sell_quantity) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -412,8 +493,12 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         seller_authority_ref,
         expires_at,
         status: "matched".to_string(),
-        matched_quantity: matched_quantity.to_string(),
-        execution_price: execution_price.to_string(),
+        // Wire the fill back at the natural decimal scale
+        // (`"0.0001"`, `"70000"`) so the orchestrator and the
+        // settlement rail can consume it directly without
+        // re-scaling.
+        matched_quantity: format_decimal(matched_quantity),
+        execution_price: format_decimal(execution_price),
     };
 
     serde_json::to_vec(&output)

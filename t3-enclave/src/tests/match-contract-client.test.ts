@@ -63,9 +63,10 @@ describe("match contract client", () => {
     // contract's `EvaluateMatchInput` deserializer in
     // contracts/matching-policy/src/lib.rs, and carries the
     // explicit contract version so the T3N adapter routes to the
-    // match-authoritative v0.2.0 build.
+    // v0.4.0 build (the first fractional-decimal wire form that
+    // accepts `"0.0001"` style quantities).
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.2.0",
+      version: "0.4.0",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
@@ -240,12 +241,83 @@ describe("match contract client", () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3MatchContractClient({
       networkClient,
-      contractVersion: "0.2.5",
+      contractVersion: "0.4.5",
     });
 
     await client.evaluateMatch(request);
 
     const body = networkClient.requests[0]?.body as Record<string, unknown>;
-    expect(body.version).toBe("0.2.5");
+    expect(body.version).toBe("0.4.5");
+  });
+
+  it("decodes fractional-decimal fill fields from the v0.4.0 wire form", async () => {
+    // v0.4.0 of the matching contract accepts and emits fractional
+    // decimal strings (e.g. `"0.0001"` for 0.0001 WBTC). The
+    // client must surface them as JS numbers without rounding
+    // them back to integers — the settlement rail takes those
+    // numbers and applies the per-asset decimals via
+    // `parseUnits(quantity.toString(), decimals)`.
+    class FractionalFillNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            outcome_ref: "match_outcome_fractional",
+            execution_ref: "t3exec_fractional",
+            buyer_institution_id: "",
+            seller_institution_id: "",
+            encrypted_trade_fields_ref: "fields_fractional",
+            buyer_authority_ref: "",
+            seller_authority_ref: "",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "matched",
+            matched_quantity: "0.0001",
+            execution_price: "50000",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new FractionalFillNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).resolves.toMatchObject({
+      status: "matched",
+      matchedQuantity: 0.0001,
+      executionPrice: 50000,
+    });
+  });
+
+  it("rejects a matched response whose matched_quantity is a malformed decimal", async () => {
+    // Anything that isn't a plain non-negative decimal (signs,
+    // exponents, underscores, embedded whitespace, multiple
+    // dots, etc.) is malformed and must not be trusted for
+    // settlement — the client rejects rather than letting
+    // `Number(...)` silently round through.
+    class MalformedFillNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            outcome_ref: "match_outcome_malformed",
+            execution_ref: "t3exec_malformed",
+            encrypted_trade_fields_ref: "fields_malformed",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "matched",
+            matched_quantity: "1e-4",
+            execution_price: "50000",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new MalformedFillNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).rejects.toThrow(
+      /matched_quantity/,
+    );
   });
 });

@@ -331,7 +331,7 @@ describe('AgentDeploymentGuide', () => {
 
     expect(screen.getByLabelText('Poll Interval (ms)')).toBeInTheDocument();
     expect(screen.getByLabelText('Max Ticks')).toBeInTheDocument();
-    expect(screen.getByLabelText('Groq Model')).toBeInTheDocument();
+    expect(screen.getByLabelText('LLM Provider Chain')).toBeInTheDocument();
     expect(screen.getByText('Dry Run Mode')).toBeInTheDocument();
   });
 
@@ -697,7 +697,6 @@ describe('AgentDeploymentGuide', () => {
           pollIntervalMs: 15000,
           maxTicks: 40,
           dryRun: false,
-          groqModel: 'qwen/qwen3-32b',
         },
         runtime: {
           running: true,

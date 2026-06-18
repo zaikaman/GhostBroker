@@ -4,8 +4,11 @@
  *
  * Calls `seal-intent` and `evaluate-match` against the live
  * tenant contract and prints the handles / outcome refs the
- * T3N tenant returns. If the contract is missing or broken,
- * the call surfaces a T3N error (no more silent 400 from the
+ * T3N tenant returns. Includes a sub-unit fill probe
+ * (`0.0001 WBTC`) that the pre-v0.4.0 contracts silently
+ * turned into `no_match` because their wire form was
+ * integer-only. If the contract is missing or broken, the call
+ * surfaces a T3N error (no more silent 400 from the
  * orchestrator route).
  *
  * Run from the workspace root:
@@ -119,9 +122,12 @@ async function main(): Promise<void> {
   // Call evaluate-match with a CROSSING pair: buyer bids 51000,
   // seller asks 49000 → the enclave should return `matched` with
   // matched_quantity = min(10, 4) = 4 and execution_price = midpoint
-  // = 50000. Prices and quantities travel as decimal strings for
-  // exact integer transport (see contracts/matching-policy/
-  // src/matching.rs).
+  // = 50000. Prices and quantities travel as fractional decimal
+  // strings at the contract's implicit 1e18 scale (see
+  // `WIRE_SCALE` in contracts/matching-policy/src/matching.rs);
+  // the orchestrator's `decimalString` keeps the wire form
+  // human-readable (`"0.0001"`, `"70000"`) so the settlement rail
+  // can consume it directly via `parseUnits(qty.toString(), 8)`.
   const crossInput = {
     buy_intent_handle: "intent_verify_buy_abc",
     sell_intent_handle: "intent_verify_sell_def",
@@ -150,6 +156,44 @@ async function main(): Promise<void> {
     console.log(
       "✓ evaluate-match (cross) response:",
       JSON.stringify(crossResult, null, 2),
+    );
+  }
+
+  console.log();
+
+  // Call evaluate-match with a CROSSING pair at a sub-unit fill
+  // (0.0001 WBTC) — this is the case the previous (0.3.0 / 0.2.0)
+  // contracts silently turned into `no_match` because the wire
+  // form was integer-only. v0.4.0 must return `matched` with
+  // `matched_quantity = "0.0001"` and `execution_price = "50000"`.
+  const fractionalInput = {
+    buy_intent_handle: "intent_verify_buy_frac",
+    sell_intent_handle: "intent_verify_sell_frac",
+    correlation_ref: "verify-match-frac-" + Date.now(),
+    asset_code: "WBTC",
+    buy_price: "51000",
+    buy_quantity: "0.0001",
+    sell_price: "49000",
+    sell_quantity: "0.0001",
+  };
+
+  console.log("→ calling evaluate-match (fractional 0.0001 WBTC cross)...");
+  const fractionalResult = await tenant.contracts
+    .execute("matching", {
+      version,
+      functionName: "evaluate-match",
+      input: { input: JSON.stringify(fractionalInput) },
+    })
+    .catch((err: unknown) => {
+      console.error(
+        `✗ evaluate-match (fractional) FAILED: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    });
+  if (fractionalResult) {
+    console.log(
+      "✓ evaluate-match (fractional) response:",
+      JSON.stringify(fractionalResult, null, 2),
     );
   }
 

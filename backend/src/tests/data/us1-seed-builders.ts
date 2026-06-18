@@ -25,7 +25,7 @@ export function buildBackendTestEnv(): BackendEnv {
     T3_NETWORK_URL: "https://t3.invalid",
     T3_TENANT_DID: "did:t3n:tenant:test",
     T3_MATCH_CONTRACT_ID: "contract:test",
-    T3_MATCHING_CONTRACT_VERSION: "0.2.0",
+    T3_MATCHING_CONTRACT_VERSION: "0.4.0",
     RECEIPT_KEY_VERSION: "receipt-key:test",
     SETTLEMENT_ASSET_CODE: "USDC",
   };

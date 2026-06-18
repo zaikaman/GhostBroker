@@ -65,12 +65,24 @@ const DEFAULT_MAX_ROUNDS = 12;
 const DEFAULT_DEADLINE_MS = 10 * 60 * 1000;
 
 /**
- * Render a price/quantity as a plain decimal string for exact
- * transport to the enclave round evaluator (mirrors the matching
- * orchestrator's `decimalString`).
+ * Render a price or quantity as a plain decimal string for exact
+ * transport to the enclave round evaluator. The matching
+ * contract (`contracts/matching-policy/src/matching.rs`,
+ * v0.4.0+) accepts fractional decimals (`"0.0001"`) and parses
+ * them into a scaled `u128` for the cross / midpoint math, so
+ * we MUST preserve fractional precision here. `Math.round`
+ * would round `0.0001` down to `"0"` and the enclave would
+ * return `no_match`. Mirrors the matching orchestrator's
+ * `decimalString`.
  */
 function decimalString(value: number): string {
-  return String(Math.round(value));
+  if (!Number.isFinite(value)) {
+    throw new Error(`decimalString: non-finite value ${value}`);
+  }
+  if (value < 0) {
+    throw new Error(`decimalString: negative value ${value}`);
+  }
+  return value.toString();
 }
 
 /**

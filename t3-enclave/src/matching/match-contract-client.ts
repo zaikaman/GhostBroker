@@ -56,12 +56,13 @@ export interface T3MatchContractClientOptions {
   contractPath?: string;
   /**
    * Explicit matching contract version to request from T3N.
-   * Defaults to `"0.2.0"` — the first version whose
-   * `evaluate-match` is match-authoritative (it returns
-   * `matched_quantity` / `execution_price` and decides the
-   * cross). The T3N adapter (`readVersionFromBody`) reads this
-   * off the request body so the tenant routes to the right
-   * published version.
+   * Defaults to `"0.4.0"` — the fractional-decimal wire form
+   * (`"0.0001"` for quantities, `"70000"` for prices) is
+   * required for sub-unit fills; the older `0.2.0` / `0.3.0`
+   * builds only accepted integer decimal strings and returned
+   * `no_match` on anything below 1. The T3N adapter
+   * (`readVersionFromBody`) reads this off the request body so
+   * the tenant routes to the right published version.
    */
   contractVersion?: string;
 }
@@ -81,12 +82,14 @@ interface T3MatchOutcomeResponse {
 }
 
 /**
- * First match-authoritative contract version. `evaluate-match` on
- * `0.1.0` always returned `"matched"` and left the real crossing
- * math in the backend; `0.2.0` moves cross/no-cross, fill
- * quantity, and execution price into the enclave.
+ * First matching contract version with fractional-decimal wire
+ * form. `0.4.0` accepts `"0.0001"` style quantities (and emits
+ * `matched_quantity` / `execution_price` in the same
+ * human-readable decimal form). `0.3.0` and earlier required
+ * integer-only decimals and silently returned `no_match` on
+ * any sub-unit fill.
  */
-const DEFAULT_MATCHING_CONTRACT_VERSION = "0.2.0";
+const DEFAULT_MATCHING_CONTRACT_VERSION = "0.4.0";
 
 function requireOpaque(value: string | undefined, field: string): string {
   if (!value || value.trim().length === 0) {
@@ -98,16 +101,28 @@ function requireOpaque(value: string | undefined, field: string): string {
 
 /**
  * Parse a decimal-string fill field returned by the enclave into a
- * finite, non-negative number. Returns `undefined` when the field is
- * absent, empty, or not a plain non-negative integer — the caller
- * treats that as a malformed matched response and rejects it.
+ * finite, non-negative number. Accepts plain integers (`"4"`,
+ * `"50000"`) and fractional decimals (`"0.0001"`) — the v0.4.0
+ * contract emits the same human-readable decimal form it accepts
+ * on the wire. Rejects scientific notation, signs, empty strings,
+ * whitespace, and any non-numeric byte. Returns `undefined` when
+ * the field is malformed; the caller treats that as a malformed
+ * matched response and rejects it.
  */
 function parseFillNumber(value: string | undefined): number | undefined {
   if (value === undefined) {
     return undefined;
   }
   const trimmed = value.trim();
-  if (trimmed.length === 0 || !/^\d+$/u.test(trimmed)) {
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  // Plain non-negative decimal: digits, with at most one `.`
+  // separator and at least one digit on each side. Rejects
+  // `+`, `-`, exponents, underscores, leading/trailing `.`,
+  // and embedded whitespace — anything that would silently
+  // round through `Number(...)` to a wrong value.
+  if (!/^\d+(?:\.\d+)?$/u.test(trimmed) && !/^\.\d+$/u.test(trimmed)) {
     return undefined;
   }
   const parsed = Number(trimmed);

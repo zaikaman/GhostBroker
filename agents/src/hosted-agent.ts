@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { loadAgentEnv } from "./env.js";
-import { GroqNegotiationClient } from "./negotiation-decision.js";
+import { NegotiationLlmClient } from "./negotiation-decision.js";
 import { runNegotiationLoop } from "./negotiation-loop.js";
+import { buildLlmChain } from "./llm/index.js";
 
 async function main(): Promise<void> {
   const env = loadAgentEnv();
@@ -26,10 +27,6 @@ async function main(): Promise<void> {
     console.error("Missing GHOSTBROKER_INSTITUTION_TENANT_DID");
     process.exit(2);
   }
-  if (!env.GROQ_API_KEY) {
-    console.error("Missing GROQ_API_KEY");
-    process.exit(2);
-  }
   if (!env.HOSTED_AGENT_ID) {
     console.error("Missing HOSTED_AGENT_ID");
     process.exit(2);
@@ -38,11 +35,26 @@ async function main(): Promise<void> {
     console.error("Missing HOSTED_MANDATE_ID");
     process.exit(2);
   }
+  if (!env.GEMINI_API_KEY && !env.OPENAI_API_KEY && !env.GROQ_API_KEY) {
+    console.error(
+      "Missing LLM provider credentials — set at least one of " +
+        "GEMINI_API_KEY (primary), OPENAI_API_KEY (fallback #1), or " +
+        "GROQ_API_KEY (fallback #2).",
+    );
+    process.exit(2);
+  }
 
-  const llm = new GroqNegotiationClient({
-    apiKey: env.GROQ_API_KEY,
-    model: env.GROQ_MODEL,
+  const chain = buildLlmChain({
+    env,
+    onFallback: (event) => {
+      console.warn(
+        `[HOSTED] LLM fallback: ${event.from} → ${event.to ?? "(none)"} (${event.error.kind}${event.error.status !== undefined ? ` ${event.error.status}` : ""}, ${event.remaining} left)`,
+      );
+    },
   });
+  console.log(`[HOSTED] LLM chain: ${chain.providerIds.join(" → ")}`);
+
+  const llm = new NegotiationLlmClient({ provider: chain });
 
   const result = await runNegotiationLoop({
     env,

@@ -195,7 +195,6 @@ export interface HostedAgentConfig {
   pollIntervalMs: number;
   maxTicks: number;
   dryRun: boolean;
-  groqModel?: string;
 }
 
 export interface HostedAgentRuntimeStatus {

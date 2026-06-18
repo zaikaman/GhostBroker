@@ -4,13 +4,15 @@
  *
  * Mirror of `buyer-agent.ts` with `side="sell"`. Post-Phase
  * 1, the preflight only requires `GHOSTBROKER_URL`,
- * `GHOSTBROKER_API_KEY`, and `GROQ_API_KEY`. The
- * delegation credential + agent identity are owned by
- * the backend.
+ * `GHOSTBROKER_API_KEY`, and at least one LLM provider
+ * credential (Gemini preferred, OpenAI first fallback,
+ * Groq last). The delegation credential + agent identity
+ * are owned by the backend.
  */
 import { loadAgentEnv, numberEnv, booleanEnv } from "./env.js";
-import { GroqLlmClient } from "./llm-decision.js";
+import { DecisionLlmClient } from "./llm-decision.js";
 import { runAgentLoop } from "./run-loop.js";
+import { buildLlmChain } from "./llm/index.js";
 
 async function main(): Promise<void> {
   const env = loadAgentEnv();
@@ -18,7 +20,16 @@ async function main(): Promise<void> {
 
   preflightCredentials(env);
 
-  const llm = new GroqLlmClient({ apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL });
+  const chain = buildLlmChain({
+    env,
+    onFallback: (event) => {
+      console.warn(
+        `[SELLER] LLM fallback: ${event.from} → ${event.to ?? "(none)"} (${event.error.kind}${event.error.status !== undefined ? ` ${event.error.status}` : ""}, ${event.remaining} left)`,
+      );
+    },
+  });
+  console.log(`[SELLER] LLM chain: ${chain.providerIds.join(" → ")}`);
+  const llm = new DecisionLlmClient({ provider: chain });
 
   const result = await runAgentLoop({
     side: "sell",
@@ -42,9 +53,11 @@ function preflightCredentials(env: ReturnType<typeof loadAgentEnv>): void {
     console.error("✗ Missing GHOSTBROKER_API_KEY");
     process.exit(2);
   }
-  if (!env.GROQ_API_KEY) {
+  if (!env.GEMINI_API_KEY && !env.OPENAI_API_KEY && !env.GROQ_API_KEY) {
     console.error(
-      "✗ Missing GROQ_API_KEY — set it in your shell or pass it through the spawn env",
+      "✗ Missing LLM provider credentials — set at least one of " +
+        "GEMINI_API_KEY (primary), OPENAI_API_KEY (fallback #1), or " +
+        "GROQ_API_KEY (fallback #2) in your shell or .env.",
     );
     process.exit(2);
   }

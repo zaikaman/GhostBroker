@@ -16,17 +16,33 @@ const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 30 * 1000;
 
 /**
- * Render a price/quantity as a plain non-negative decimal string for
- * exact integer transport to the enclave contract. JSON numbers may
- * serialize with an exponent or trailing float artifacts on some
- * hosts; the Rust `parse_decimal_u128` only accepts plain digits, so
- * we round to the nearest integer and stringify. Prices and
- * quantities in GhostBroker are always whole units (the matching
- * policy rounds the midpoint the same way), so no fractional
- * precision is lost.
+ * Render a price or quantity as a plain decimal string for exact
+ * transport to the enclave evaluator. The matching contract
+ * (`contracts/matching-policy/src/matching.rs`, v0.4.0+) accepts
+ * fractional decimals (`"0.0001"`) and parses them into a scaled
+ * `u128` for the cross / midpoint math, so we MUST preserve
+ * fractional precision here — `Math.round` would round
+ * `0.0001` down to `"0"` and the enclave would return
+ * `no_match` because the parsed quantity would be 0. The
+ * settlement rail consumes the same human-readable decimal
+ * string and applies its per-asset decimals via
+ * `parseUnits(quantity.toString(), decimals)`, so the wire form
+ * is the natural decimal at every layer.
  */
 function decimalString(value: number): string {
-  return String(Math.round(value));
+  if (!Number.isFinite(value)) {
+    throw new Error(`decimalString: non-finite value ${value}`);
+  }
+  if (value < 0) {
+    throw new Error(`decimalString: negative value ${value}`);
+  }
+  // `Number.prototype.toString()` round-trips the value's
+  // shortest decimal representation (up to 17 significant
+  // digits, more than enough for an ERC-20 quantity or price
+  // at the contract's 18-decimal internal scale). Values
+  // produced by the LLM prompt or `roundQty` / `roundPrice`
+  // never introduce IEEE-754 noise.
+  return value.toString();
 }
 
 /**

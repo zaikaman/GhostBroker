@@ -416,7 +416,20 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       POLL_INTERVAL_MS: String(runtime.config.pollIntervalMs),
       MAX_TICKS: String(runtime.config.maxTicks),
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
-      ...(runtime.config.groqModel ? { GROQ_MODEL: runtime.config.groqModel } : {}),
+      // Forward the LLM provider credentials so the spawned agent
+      // can build its fallback chain (gemini → openai → groq). The
+      // chain order is hardcoded in the agent runtime — these vars
+      // only carry the keys (and optional base URLs for proxy
+      // migration). End users do not pick models from the dashboard;
+      // the agent tries each in priority order on each LLM call.
+      ...(process.env.GEMINI_API_KEY ? { GEMINI_API_KEY: process.env.GEMINI_API_KEY } : {}),
+      ...(process.env.GEMINI_MODEL ? { GEMINI_MODEL: process.env.GEMINI_MODEL } : {}),
+      ...(process.env.GEMINI_BASE_URL ? { GEMINI_BASE_URL: process.env.GEMINI_BASE_URL } : {}),
+      ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
+      ...(process.env.OPENAI_MODEL ? { OPENAI_MODEL: process.env.OPENAI_MODEL } : {}),
+      ...(process.env.OPENAI_BASE_URL ? { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } : {}),
+      ...(process.env.GROQ_API_KEY ? { GROQ_API_KEY: process.env.GROQ_API_KEY } : {}),
+      ...(process.env.GROQ_MODEL ? { GROQ_MODEL: process.env.GROQ_MODEL } : {}),
     };
     const isWin = process.platform === "win32";
     const shell = isWin && this.runner[0] === "npm";

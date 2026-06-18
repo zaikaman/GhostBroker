@@ -1,5 +1,11 @@
-import Groq from "groq-sdk";
 import { z } from "zod";
+import type { FallbackEvent } from "./llm/index.js";
+import {
+  AggregateLlmError,
+  LlmProviderError,
+  type LlmProvider,
+  type LlmRequest,
+} from "./llm/index.js";
 
 export const decisionSchema = z.object({
   action: z.enum(["submit", "wait", "abort"]),
@@ -166,39 +172,92 @@ export function clampDecision(decision: Decision, ctx: DecisionContext): Decisio
 
 export interface LlmClient {
   decide(ctx: DecisionContext): Promise<Decision>;
+  /**
+   * Identifiers of the providers in the fallback chain, in order.
+   * Used by the agent loop to surface which provider actually served
+   * each tick (the provider returned on `LlmResponse.provider`).
+   */
+  readonly providerIds: readonly string[];
 }
 
-export class GroqLlmClient implements LlmClient {
-  private readonly client: Groq;
-  private readonly model: string;
-  private readonly temperature: number;
+export interface LlmClientOptions {
+  provider: LlmProvider;
+  temperature?: number;
+  topP?: number;
+  /**
+   * Optional listener invoked every time the chain falls back from
+   * one provider to the next. The hosted-agent loop uses this to
+   * log `[LLM] primary (gemini) failed (503), trying openai (1/2)`.
+   */
+  onFallback?: (event: FallbackEvent) => void;
+}
 
-  public constructor(options: { apiKey: string; model: string; temperature?: number }) {
-    if (!options.apiKey || options.apiKey.trim().length === 0) {
-      throw new Error("GroqLlmClient requires a non-empty apiKey");
+/**
+ * LLM client backed by the multi-provider fallback chain
+ * (`gemini → openai → groq`). The same prompts are sent to every
+ * provider; the chain only falls back on transient failures.
+ *
+ * `GroqLlmClient` (which wrapped the `groq-sdk` directly) was
+ * retired in favour of this uniform client; see `agents/src/llm/`
+ * for the per-provider implementations.
+ */
+export class DecisionLlmClient implements LlmClient {
+  private readonly provider: LlmProvider;
+  private readonly temperature: number;
+  private readonly topP: number;
+
+  public constructor(options: LlmClientOptions) {
+    if (!options.provider) {
+      throw new Error("DecisionLlmClient requires a non-null provider");
     }
-    this.client = new Groq({ apiKey: options.apiKey });
-    this.model = options.model;
+    this.provider = options.provider;
     this.temperature = options.temperature ?? 0.6;
+    this.topP = options.topP ?? 0.95;
+  }
+
+  public get providerIds(): readonly string[] {
+    if ("providerIds" in this.provider && Array.isArray((this.provider as { providerIds?: unknown }).providerIds)) {
+      return (this.provider as { providerIds: readonly string[] }).providerIds;
+    }
+    return [this.provider.id];
   }
 
   public async decide(ctx: DecisionContext): Promise<Decision> {
-    const completion = await this.client.chat.completions.create({
-      model: this.model,
-      temperature: this.temperature,
-      top_p: 0.95,
+    const request: LlmRequest = {
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userPromptTemplate(ctx) },
       ],
-    });
+      temperature: this.temperature,
+      topP: this.topP,
+    };
 
-    const raw = completion.choices[0]?.message?.content ?? "";
-    if (raw.length === 0) {
-      throw new Error("Groq returned an empty completion");
+    let response;
+    try {
+      response = await this.provider.complete(request);
+    } catch (err) {
+      throw rethrowForAgentLoop(err);
     }
-    const parsed = extractJsonObject(raw);
+
+    const text = response.text;
+    if (text.length === 0) {
+      throw new Error(
+        `LLM (${response.provider}/${response.model}) returned an empty completion`,
+      );
+    }
+    const parsed = extractJsonObject(text);
     const validated = decisionSchema.parse(parsed);
     return clampDecision(validated, ctx);
   }
+}
+
+function rethrowForAgentLoop(err: unknown): Error {
+  if (err instanceof AggregateLlmError) {
+    return err;
+  }
+  if (err instanceof LlmProviderError) {
+    return err;
+  }
+  if (err instanceof Error) return err;
+  return new Error(String(err));
 }

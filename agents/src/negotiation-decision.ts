@@ -1,4 +1,3 @@
-import Groq from "groq-sdk";
 import { z } from "zod";
 import {
   validateAgentDecision,
@@ -6,6 +5,13 @@ import {
   type NegotiationTurnContext,
 } from "@ghostbroker/negotiation-core";
 import { extractJsonObject } from "./llm-decision.js";
+import {
+  AggregateLlmError,
+  LlmProviderError,
+  type FallbackEvent,
+  type LlmProvider,
+  type LlmRequest,
+} from "./llm/index.js";
 
 // ---------------------------------------------------------------------------
 // Decision schema (mirrors the backend's expanded move contract)
@@ -509,48 +515,92 @@ export function clampNegotiationDecision(
 }
 
 // ---------------------------------------------------------------------------
-// LLM client interface & Groq implementation
+// LLM client interface & multi-provider implementation
 // ---------------------------------------------------------------------------
 
-export interface NegotiationLlmClient {
+export interface INegotiationLlmClient {
   decide(ctx: NegotiationContext): Promise<NegotiationDecision>;
+  readonly providerIds: readonly string[];
 }
 
-export class GroqNegotiationClient implements NegotiationLlmClient {
-  private readonly client: Groq;
-  private readonly model: string;
-  private readonly temperature: number;
+export interface NegotiationLlmClientOptions {
+  provider: LlmProvider;
+  temperature?: number;
+  topP?: number;
+  /**
+   * Optional listener invoked every time the chain falls back from
+   * one provider to the next. Used by the negotiation loop's
+   * `withRetries` wrapper to log which provider served each call.
+   */
+  onFallback?: (event: FallbackEvent) => void;
+}
 
-  public constructor(options: {
-    apiKey: string;
-    model: string;
-    temperature?: number;
-  }) {
-    if (!options.apiKey || options.apiKey.trim().length === 0) {
-      throw new Error("GroqNegotiationClient requires a non-empty apiKey");
+/**
+ * Negotiation LLM client backed by the multi-provider fallback chain
+ * (`gemini → openai → groq`). Same prompt is sent to every provider;
+ * the chain only falls back on transient failures.
+ *
+ * `GroqNegotiationClient` (which wrapped the `groq-sdk` directly) was
+ * retired in favour of this uniform client; see `agents/src/llm/`
+ * for the per-provider implementations.
+ */
+export class NegotiationLlmClient implements INegotiationLlmClient {
+  private readonly provider: LlmProvider;
+  private readonly temperature: number;
+  private readonly topP: number;
+
+  public constructor(options: NegotiationLlmClientOptions) {
+    if (!options.provider) {
+      throw new Error("NegotiationLlmClient requires a non-null provider");
     }
-    this.client = new Groq({ apiKey: options.apiKey });
-    this.model = options.model;
+    this.provider = options.provider;
     this.temperature = options.temperature ?? 0.5;
+    this.topP = options.topP ?? 0.95;
+  }
+
+  public get providerIds(): readonly string[] {
+    if ("providerIds" in this.provider && Array.isArray((this.provider as { providerIds?: unknown }).providerIds)) {
+      return (this.provider as { providerIds: readonly string[] }).providerIds;
+    }
+    return [this.provider.id];
   }
 
   public async decide(ctx: NegotiationContext): Promise<NegotiationDecision> {
-    const completion = await this.client.chat.completions.create({
-      model: this.model,
-      temperature: this.temperature,
-      top_p: 0.95,
+    const request: LlmRequest = {
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: negotiationUserPrompt(ctx) },
       ],
-    });
+      temperature: this.temperature,
+      topP: this.topP,
+    };
 
-    const raw = completion.choices[0]?.message?.content ?? "";
-    if (raw.length === 0) {
-      throw new Error("Groq returned an empty negotiation completion");
+    let response;
+    try {
+      response = await this.provider.complete(request);
+    } catch (err) {
+      throw rethrowForAgentLoop(err);
     }
-    const parsed = extractJsonObject(raw);
+
+    const text = response.text;
+    if (text.length === 0) {
+      throw new Error(
+        `LLM (${response.provider}/${response.model}) returned an empty negotiation completion`,
+      );
+    }
+    const parsed = extractJsonObject(text);
     const validated = negotiationDecisionSchema.parse(parsed);
     return clampNegotiationDecision(validated, ctx);
   }
+}
+
+function rethrowForAgentLoop(err: unknown): Error {
+  if (err instanceof AggregateLlmError) {
+    return err;
+  }
+  if (err instanceof LlmProviderError) {
+    return err;
+  }
+  if (err instanceof Error) return err;
+  return new Error(String(err));
 }

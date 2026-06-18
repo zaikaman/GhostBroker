@@ -7,7 +7,6 @@ export const hostedNegotiatorRuntimeConfigSchema = z.object({
   pollIntervalMs: z.number().int().positive().max(300_000),
   maxTicks: z.number().int().positive().max(10_000),
   dryRun: z.boolean().default(false),
-  groqModel: z.string().trim().min(1).max(200).optional(),
 });
 
 export type HostedNegotiatorRuntimeConfig = z.infer<

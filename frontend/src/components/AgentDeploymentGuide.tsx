@@ -37,14 +37,12 @@ interface RuntimeFormState {
   pollIntervalMs: string;
   maxTicks: string;
   dryRun: boolean;
-  groqModel: string;
 }
 
 const defaultRuntimeForm: RuntimeFormState = {
   pollIntervalMs: '15000',
   maxTicks: '40',
   dryRun: false,
-  groqModel: 'qwen/qwen3-32b',
 };
 
 function formatTimestamp(value?: string): string {
@@ -260,7 +258,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         pollIntervalMs: String(selectedHostedRecord.config.pollIntervalMs),
         maxTicks: String(selectedHostedRecord.config.maxTicks),
         dryRun: selectedHostedRecord.config.dryRun,
-        groqModel: selectedHostedRecord.config.groqModel ?? defaultRuntimeForm.groqModel,
       });
     }
   }, [selectedHostedRecord]);
@@ -326,7 +323,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
           pollIntervalMs: Number(runtimeForm.pollIntervalMs),
           maxTicks: Number(runtimeForm.maxTicks),
           dryRun: runtimeForm.dryRun,
-          ...(runtimeForm.groqModel.trim() ? { groqModel: runtimeForm.groqModel.trim() } : {}),
         },
         startOnCreate: true,
       };
@@ -727,8 +723,18 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     <input id="runtime-max-ticks" className="form-input font-mono" value={runtimeForm.maxTicks} onChange={(event) => setRuntimeForm((current) => ({ ...current, maxTicks: event.target.value }))} />
                   </div>
                   <div className="form-group">
-                    <label className="form-label" htmlFor="runtime-model">Groq Model</label>
-                    <input id="runtime-model" className="form-input font-mono" value={runtimeForm.groqModel} onChange={(event) => setRuntimeForm((current) => ({ ...current, groqModel: event.target.value }))} />
+                    <label className="form-label">LLM Provider Chain</label>
+                    <input
+                      id="runtime-llm-chain"
+                      className="form-input font-mono"
+                      value="gemini → openai → groq"
+                      readOnly
+                      aria-readonly="true"
+                      title="The agent automatically tries gemini-3.1-flash-lite first, then gpt-5-nano, then qwen/qwen3-32b on Groq. Configure credentials in the agent's environment (.env)."
+                      onChange={() => {
+                        /* read-only: chain is hardcoded in the agent runtime */
+                      }}
+                    />
                   </div>
                   <label 
                     className="deploy-inline-toggle" 

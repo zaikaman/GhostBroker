@@ -8,13 +8,18 @@
 //!                        execution price, then returns an opaque match
 //!                        outcome the orchestrator settles on.
 //!
-//! As of v0.2.0, match authority lives inside the enclave: the caller
-//! sends both sides' asset code, prices, and quantities, and the
-//! contract returns `status: "matched"` with `matched_quantity` and
-//! `execution_price` only when the buyer's bid crosses the seller's
-//! ask. The backend orchestrator is a verifier/orchestrator around
-//! the enclave outcome, not the price matcher. The functions stay
-//! pure and deterministic — no new enclave state is required.
+//! As of v0.4.0, the wire form for prices and quantities on
+//! `evaluate-match` is a plain decimal string at the contract's
+//! internal `WIRE_SCALE` (1e18): `"0.0001"`, `"70000"`,
+//! `"12345.6789"`. Match authority still lives inside the
+//! enclave: the caller sends both sides' asset code, prices, and
+//! quantities, and the contract returns `status: "matched"` with
+//! `matched_quantity` and `execution_price` (also in the same
+//! human-readable decimal form) only when the buyer's bid
+//! crosses the seller's ask. The backend orchestrator is a
+//! verifier/orchestrator around the enclave outcome, not the
+//! price matcher. The functions stay pure and deterministic —
+//! no new enclave state is required.
 
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
@@ -39,7 +44,7 @@ wit_bindgen::generate!({
 
 mod matching;
 
-pub const CONTRACT_VERSION: &str = "0.3.0";
+pub const CONTRACT_VERSION: &str = "0.4.0";
 
 struct Component;
 
@@ -143,11 +148,13 @@ pub struct EvaluateMatchInput {
     /// the enclave checks it too so a mismatch is a `no_match`, not a
     /// silent cross-asset fill.
     pub asset_code: String,
-    /// Buy/sell prices and quantities, carried as decimal strings so
-    /// the contract parses them into exact `u128` integers. JSON
-    /// numbers may be IEEE-754 doubles on some hosts; rounding them
-    /// would make the midpoint non-deterministic, so the wire form
-    /// is always a string.
+    /// Buy/sell prices and quantities, carried as plain decimal
+    /// strings at the contract's implicit `WIRE_SCALE` (1e18):
+    /// `"0.0001"`, `"70000"`, `"12345.6789"`. JSON numbers may
+    /// be IEEE-754 doubles on some hosts; rounding them would make
+    /// the midpoint non-deterministic, so the wire form is always
+    /// a decimal string the contract parses into an exact scaled
+    /// `u128` internally.
     pub buy_price: String,
     pub buy_quantity: String,
     pub sell_price: String,
@@ -166,12 +173,13 @@ pub struct EvaluateMatchOutput {
     pub expires_at: String,
     pub status: String,
     /// Filled quantity = `min(buy_quantity, sell_quantity)` when the
-    /// pair crosses. Emitted as a decimal string so the backend
-    /// parses it without float drift. Empty on `no_match`.
+    /// pair crosses. Emitted at the wire's natural decimal scale
+    /// (`"0.0001"`, `"4"`) so the backend and the settlement rail
+    /// consume it without re-scaling. Empty on `no_match`.
     pub matched_quantity: String,
     /// Execution price = deterministic midpoint of the buy and sell
-    /// prices, rounded half-up on the smallest unit. Emitted as a
-    /// decimal string. Empty on `no_match`.
+    /// prices, rounded half-up on the smallest unit. Emitted at the
+    /// same wire scale as the input (`"50000"`). Empty on `no_match`.
     pub execution_price: String,
 }
 

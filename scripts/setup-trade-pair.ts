@@ -11,7 +11,9 @@
  *        - requiredClaims: []           (no disclosure gate deadlock)
  *        - disclosableClaims: []
  *        - approvalPolicy: auto_settle  (no escalation stalls)
- *        - targetQuantity: 0.0001 WBTC
+ *        - targetQuantity: 0.0001 WBTC  (sub-unit fill; requires the
+ *                                    matching contract's fractional
+ *                                    wire form, v0.4.0+)
  *        - referencePrice: 70000        (matches the .env)
  *   4. Attaches a hosted-agent config to each agent and starts them.
  *   5. Polls the negotiation sessions until they reach `settled` (or
@@ -28,7 +30,7 @@ const BUYER_KEY = "gbk_DnOR8QnB_DnOR8QnBra5M5dUjnG_j2vxDyH6ILQspjIfnYwhD0GU";
 const SELLER_KEY = "gbk_RfylFnE0_RfylFnE0bVwn0bKgcapeeu8zmq02XGMmM5gFc1j15js";
 
 const REF_PRICE = 70_000;
-const TARGET_QTY = 1;
+const TARGET_QTY = 0.0001;
 const NOTIONAL = (REF_PRICE * TARGET_QTY).toFixed(2);
 const DEADLINE = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
@@ -205,7 +207,6 @@ async function createHostedConfig(
           pollIntervalMs: 5000,
           maxTicks: 30,
           dryRun: false,
-          groqModel: "qwen/qwen3-32b",
         },
       }),
     },

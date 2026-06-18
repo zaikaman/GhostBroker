@@ -5,8 +5,9 @@
  * Preflight: requires `GHOSTBROKER_URL` + `GHOSTBROKER_API_KEY`.
  * The delegation credential + agent identity are owned by
  * the backend post-Phase 1; the agent process only needs
- * the API key. If `GROQ_API_KEY` is missing, the preflight
- * exits with a clear message.
+ * the API key. At least one LLM provider credential must be
+ * present (Gemini preferred, OpenAI as first fallback, Groq
+ * last). See `agents/src/llm/` for the chain implementation.
  *
  * Used by:
  *   - The Phase 2.5 demo orchestrator (spawned as a child
@@ -16,12 +17,13 @@
  * Usage:
  *   GHOSTBROKER_URL=http://localhost:3001 \
  *   GHOSTBROKER_API_KEY=gbk_... \
- *   GROQ_API_KEY=gsk_... \
+ *   GEMINI_API_KEY=sk-... \
  *   npm run buyer
  */
 import { loadAgentEnv, numberEnv, booleanEnv } from "./env.js";
-import { GroqLlmClient } from "./llm-decision.js";
+import { DecisionLlmClient } from "./llm-decision.js";
 import { runAgentLoop } from "./run-loop.js";
+import { buildLlmChain } from "./llm/index.js";
 
 async function main(): Promise<void> {
   const env = loadAgentEnv();
@@ -29,7 +31,16 @@ async function main(): Promise<void> {
 
   preflightCredentials(env);
 
-  const llm = new GroqLlmClient({ apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL });
+  const chain = buildLlmChain({
+    env,
+    onFallback: (event) => {
+      console.warn(
+        `[BUYER ] LLM fallback: ${event.from} → ${event.to ?? "(none)"} (${event.error.kind}${event.error.status !== undefined ? ` ${event.error.status}` : ""}, ${event.remaining} left)`,
+      );
+    },
+  });
+  console.log(`[BUYER ] LLM chain: ${chain.providerIds.join(" → ")}`);
+  const llm = new DecisionLlmClient({ provider: chain });
 
   const result = await runAgentLoop({
     side: "buy",
@@ -53,9 +64,11 @@ function preflightCredentials(env: ReturnType<typeof loadAgentEnv>): void {
     console.error("✗ Missing GHOSTBROKER_API_KEY");
     process.exit(2);
   }
-  if (!env.GROQ_API_KEY) {
+  if (!env.GEMINI_API_KEY && !env.OPENAI_API_KEY && !env.GROQ_API_KEY) {
     console.error(
-      "✗ Missing GROQ_API_KEY — set it in your shell or pass it through the spawn env",
+      "✗ Missing LLM provider credentials — set at least one of " +
+        "GEMINI_API_KEY (primary), OPENAI_API_KEY (fallback #1), or " +
+        "GROQ_API_KEY (fallback #2) in your shell or .env.",
     );
     process.exit(2);
   }
