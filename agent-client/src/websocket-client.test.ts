@@ -161,7 +161,7 @@ describe("TelemetryClient", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("onSettled only fires for settlement_finalized events", () => {
+  it("onSettled fires for settlement_finalized and negotiation_settled events", () => {
     const { getLast } = stubWebSocket();
     const client = new TelemetryClient("https://api.example.com", "inst_1");
     const onSettled = vi.fn();
@@ -182,6 +182,14 @@ describe("TelemetryClient", () => {
     });
     expect(onSettled).toHaveBeenCalledTimes(1);
     expect(onSettled).toHaveBeenCalledWith("ref_1");
+
+    ws.onmessage?.({
+      data: JSON.stringify(
+        sampleEvent({ phase: "negotiation_settled", correlationRef: "ref_2" }),
+      ),
+    });
+    expect(onSettled).toHaveBeenCalledTimes(2);
+    expect(onSettled).toHaveBeenLastCalledWith("ref_2");
   });
 
   it("onError only fires for telemetry.error.changed events", () => {

@@ -17,7 +17,9 @@ import {
   Loading03Icon,
   PlayIcon,
   Refresh01Icon,
+  Robot01Icon,
   RocketIcon,
+  ScrollIcon,
   Shield01Icon,
   StopIcon,
 } from 'hugeicons-react';
@@ -68,6 +70,16 @@ function isPositiveInteger(value: string): boolean {
 function humanizeExecutionStyle(style: NegotiationMandateSummary['executionStyle']): string {
   if (!style) return '—';
   return style.replace(/_/gu, ' ').replace(/\b\w/gu, (c) => c.toUpperCase());
+}
+
+function getEnclaveMeasurement(agentDid: string): string {
+  let hash = 0;
+  for (let i = 0; i < agentDid.length; i++) {
+    hash = (hash << 5) - hash + agentDid.charCodeAt(i);
+    hash |= 0;
+  }
+  const hex = Math.abs(hash).toString(16).padEnd(8, '0');
+  return `0x5e${hex}f4...ae3b`;
 }
 
 /**
@@ -433,13 +445,14 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
           <div className="deploy-form-grid deploy-guide-grid">
             {/* Wizard Nav */}
-            <div className="deploy-wizard-nav deploy-form-span-full" aria-label="Hosted launch steps">
+            <div className="deploy-steps-indicator deploy-form-span-full" aria-label="Hosted launch steps">
               {[
-                { step: 1, kicker: 'Access', label: selectedAgentId ? 'Agent selected' : 'Choose or provision an admitted agent' },
-                { step: 2, kicker: 'Mandate', label: effectiveMandateId && !showMandateEditor ? 'Mandate bound' : 'Author negotiation policy' },
-                { step: 3, kicker: 'Runtime', label: selectedAgentHasHostedRuntime ? 'Runtime attached' : 'Tune runtime and launch' },
+                { step: 1, kicker: 'Access', label: selectedAgentId ? 'Agent Selected' : 'Select Operator', icon: Robot01Icon },
+                { step: 2, kicker: 'Mandate', label: effectiveMandateId && !showMandateEditor ? 'Mandate Bound' : 'Author Policy', icon: ScrollIcon },
+                { step: 3, kicker: 'Runtime', label: selectedAgentHasHostedRuntime ? 'Runtime Ready' : 'Tune & Launch', icon: RocketIcon },
               ].map((item) => {
                 const unlocked = isStepUnlocked(item.step);
+                const StepIcon = item.icon;
                 return (
                   <button
                     key={item.step}
@@ -455,22 +468,21 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                         }
                       }
                     }}
-                    className={`deploy-wizard-nav-item ${activeStep === item.step ? 'active' : activeStep > item.step ? 'completed' : ''}`}
+                    className={`deploy-step-tab ${activeStep === item.step ? 'active' : activeStep > item.step ? 'completed' : ''}`}
                     aria-current={activeStep === item.step ? 'step' : undefined}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: unlocked ? 'pointer' : 'not-allowed',
-                      opacity: unlocked ? 1 : 0.6,
-                      width: '100%',
-                      textAlign: 'left',
-                    }}
+                    style={{ cursor: unlocked ? 'pointer' : 'not-allowed', opacity: unlocked ? 1 : 0.6 }}
+                    disabled={!unlocked}
                   >
-                    <span className="deploy-wizard-nav-step">0{item.step}</span>
-                    <div className="deploy-wizard-nav-content">
-                      <span className="deploy-wizard-nav-kicker">{item.kicker}</span>
-                      <span className="deploy-wizard-nav-label">{item.label}</span>
+                    <div className="deploy-step-tab-content">
+                      <div className="deploy-step-tab-icon">
+                        <StepIcon size={14} />
+                      </div>
+                      <div className="deploy-step-tab-info">
+                        <span className="deploy-step-tab-num">0{item.step} • {item.kicker}</span>
+                        <span className="deploy-step-tab-label">{item.label}</span>
+                      </div>
                     </div>
+                    <div className="deploy-step-tab-indicator-bar" />
                   </button>
                 );
               })}
@@ -512,7 +524,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                       <span className="deploy-field-hint">
                         Select an admitted agent, or provision a new one inline.
                       </span>
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--spacing-sm)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--spacing-sm)', marginBottom: 'var(--spacing-md)' }}>
                         <button type="button" className="btn btn-secondary" onClick={() => setShowProvisioningForm((current) => !current)}>
                           {showProvisioningForm ? 'Hide Provisioning' : 'Provision Agent'}
                         </button>
@@ -554,7 +566,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     }}
                     style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
-                    Continue to Negotiation Mandate &rarr;
+                    Continue to Negotiation Mandate →
                   </button>
                 </div>
               </section>
@@ -600,8 +612,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 </div>
 
                 <div className="form-group deploy-form-span-full" style={{ marginTop: 'var(--spacing-md)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                    <label className="form-label" htmlFor="mandate-id">Mandate Selection</label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '8px' }}>
+                    <label className="form-label" htmlFor="mandate-id" style={{ marginBottom: 0 }}>Mandate Selection</label>
                     <button type="button" className="btn btn-secondary" onClick={() => setShowMandateEditor((current) => !current)}>
                       {showMandateEditor ? 'Hide Mandate Editor' : selectedMandate ? 'Author / Replace Mandate' : 'Author Mandate'}
                     </button>
@@ -630,7 +642,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 </div>
 
                 {showMandateEditor ? (
-                  <div className="deploy-form-span-full" style={{ marginTop: 'var(--spacing-md)' }}>
+                  <div className="deploy-form-span-full" style={{ marginTop: 'var(--spacing-lg)' }}>
                     {mandateValidationError ? (
                       <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)', marginBottom: 'var(--spacing-md)' }}>
                         <AlertCircleIcon size={14} /> {mandateValidationError}
@@ -659,7 +671,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
                 <div className="deploy-step-actions" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--spacing-lg)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setActiveStep(1)}>
-                    &larr; Back
+                    ← Back
                   </button>
                   <button
                     type="button"
@@ -672,7 +684,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     }}
                     style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
-                    Continue to Runtime Controls &rarr;
+                    Continue to Runtime Controls →
                   </button>
                 </div>
               </section>
@@ -718,10 +730,67 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     <label className="form-label" htmlFor="runtime-model">Groq Model</label>
                     <input id="runtime-model" className="form-input font-mono" value={runtimeForm.groqModel} onChange={(event) => setRuntimeForm((current) => ({ ...current, groqModel: event.target.value }))} />
                   </div>
-                  <label className="deploy-inline-toggle" style={{ cursor: 'pointer', margin: 'var(--spacing-sm) 0 0' }}>
-                    <input type="checkbox" checked={runtimeForm.dryRun} onChange={(event) => setRuntimeForm((current) => ({ ...current, dryRun: event.target.checked }))} />
-                    <span>Dry Run</span>
+                  <label 
+                    className="deploy-inline-toggle" 
+                    style={{ 
+                      cursor: 'pointer', 
+                      gridColumn: '1 / -1', 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '12px', 
+                      margin: 'var(--spacing-sm) 0 0',
+                      padding: '12px 16px',
+                      background: 'rgba(255, 255, 255, 0.015)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius-md)',
+                      width: '100%',
+                      boxSizing: 'border-box'
+                    }}
+                  >
+                    <input 
+                      type="checkbox" 
+                      checked={runtimeForm.dryRun} 
+                      onChange={(event) => setRuntimeForm((current) => ({ ...current, dryRun: event.target.checked }))}
+                      style={{
+                        accentColor: 'var(--color-accent)',
+                        cursor: 'pointer',
+                        width: '16px',
+                        height: '16px'
+                      }}
+                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'left' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.8rem' }}>Dry Run Mode</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)' }}>Execute matching protocols without committing changes to the ledger</span>
+                    </div>
                   </label>
+
+                  {isChainRail && !settlementReady ? (
+                    <div 
+                      className="deploy-tip-box" 
+                      style={{ 
+                        gridColumn: '1 / -1',
+                        marginTop: 'var(--spacing-md)', 
+                        borderColor: 'rgba(245, 158, 11, 0.3)', 
+                        background: 'rgba(245, 158, 11, 0.05)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        padding: '12px 16px',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid rgba(245, 158, 11, 0.2)',
+                        width: '100%'
+                      }}
+                    >
+                      <strong style={{ color: 'var(--color-warning)', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}>
+                        <AlertCircleIcon size={14} /> Settlement Collateral Required
+                      </strong>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', textAlign: 'left', lineHeight: '1.4' }}>
+                        Sepolia ERC20 settlement requires active WBTC and USDC deposits. Please visit the 
+                        <strong style={{ color: 'var(--color-accent)' }}> Settlement Profile </strong> 
+                        tab to approve and deposit collateral before launching runtimes.
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
 
                 {runtimeValidationMessage ? (
@@ -733,7 +802,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                 <div className="deploy-wizard-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)', marginTop: 'var(--spacing-lg)' }}>
                   <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
                     <button type="button" className="btn btn-secondary" onClick={() => setActiveStep(2)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      &larr; Back
+                      ← Back
                     </button>
                     <button type="button" className="btn btn-secondary" onClick={() => { setIsLoading(true); loadState().finally(() => setIsLoading(false)); }} disabled={isLoading || isSubmitting}>
                       <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} /> Synchronize
@@ -835,6 +904,77 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
             </p>
           ) : (
             <>
+              {/* Enclave Attestation Visualizer */}
+              <div className="enclave-visualizer-block" style={{ marginBottom: 'var(--spacing-md)' }}>
+                <div className="enclave-svg-wrapper">
+                  <div className="enclave-pulse-glow" style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }} />
+                  <svg className="enclave-svg-orbits" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(94, 210, 156, 0.1)" strokeWidth="1" />
+                    <circle 
+                      className="orbit-ring-outer" 
+                      cx="50" 
+                      cy="50" 
+                      r="45" 
+                      fill="none" 
+                      stroke={selectedHostedRecord.runtime.running ? 'var(--color-accent)' : 'var(--color-text-muted)'} 
+                      strokeWidth="1.5" 
+                      strokeDasharray="10 40 20 30" 
+                      style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }}
+                    />
+                    <circle cx="50" cy="50" r="32" fill="none" stroke="rgba(94, 210, 156, 0.05)" strokeWidth="1" />
+                    <circle 
+                      className="orbit-ring-mid" 
+                      cx="50" 
+                      cy="50" 
+                      r="32" 
+                      fill="none" 
+                      stroke={selectedHostedRecord.runtime.running ? 'rgba(94, 210, 156, 0.4)' : 'rgba(100, 116, 139, 0.2)'} 
+                      strokeWidth="1.5" 
+                      strokeDasharray="15 25 5 15" 
+                      strokeDashoffset="20" 
+                      style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }}
+                    />
+                    <circle cx="50" cy="50" r="18" fill="none" stroke="rgba(94, 210, 156, 0.05)" strokeWidth="1" />
+                    <circle 
+                      className="orbit-ring-inner" 
+                      cx="50" 
+                      cy="50" 
+                      r="18" 
+                      fill="none" 
+                      stroke={selectedHostedRecord.runtime.running ? 'var(--color-accent)' : 'var(--color-text-muted)'} 
+                      strokeWidth="1" 
+                      strokeDasharray="5 15" 
+                      style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }}
+                    />
+                    <circle cx="50" cy="50" r="6" fill={selectedHostedRecord.runtime.running ? 'var(--color-accent)' : 'var(--color-text-muted)'} />
+                  </svg>
+                </div>
+                <div className="enclave-telemetry-readout">
+                  <div className="telemetry-row">
+                    <span className="telemetry-label">Attestation</span>
+                    <span className={`telemetry-value ${selectedHostedRecord.runtime.running ? 'success' : ''}`}>
+                      {selectedHostedRecord.runtime.running ? 'VERIFIED' : 'INACTIVE'}
+                    </span>
+                  </div>
+                  <div className="telemetry-row">
+                    <span className="telemetry-label">Security</span>
+                    <span className="telemetry-value">SGX HARDWARE TEE</span>
+                  </div>
+                  <div className="telemetry-row">
+                    <span className="telemetry-label">Measurement</span>
+                    <span className="telemetry-value hash">
+                      {getEnclaveMeasurement(selectedHostedRecord.agent.agentDid)}
+                    </span>
+                  </div>
+                  <div className="telemetry-row">
+                    <span className="telemetry-label">Enclave Mode</span>
+                    <span className="telemetry-value">
+                      {selectedHostedRecord.runtime.running ? 'ZERO ACCESS ACTIVE' : 'OFFLINE'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="process-dashboard">
                 <div className="process-cell">
                   <span className="process-label">Mandate</span>

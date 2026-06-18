@@ -326,6 +326,77 @@ describe("validateAgentDecision", () => {
     expect(result.accepted.price).toBeGreaterThan(0);
   });
 
+  it("downgrades accept to request_disclosure while required claims are still pending", () => {
+    const profile = buildProfile(buyerAuthored);
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 3,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: "crossed",
+      counterpartStandingPrice: 70_000,
+      counterpartStandingQuantity: 1,
+      receivedClaims: [],
+      concessionConsumedBps: 30,
+    });
+    const result = validateAgentDecision(
+      {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Terms work; accept.",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("request_disclosure");
+    expect(result.accepted.claimType).toBe("accredited_institution");
+    expect(result.downgradedFrom).toBe("accept");
+    expect(result.adjustedReason).toBe("accept_blocked_by_disclosure_gate");
+  });
+
+  it("downgrades accept to reveal after pending claims were already requested", () => {
+    const profile = buildProfile({
+      ...buyerAuthored,
+      disclosurePolicy: {
+        allowLadder: [
+          "accredited_institution",
+          "settlement_capacity",
+          "inventory_sufficiency",
+        ],
+        requireReciprocityFor: ["settlement_capacity"],
+      },
+    });
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 4,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: "crossed",
+      counterpartStandingPrice: 70_000,
+      counterpartStandingQuantity: 1,
+      receivedClaims: [],
+      concessionConsumedBps: 30,
+      priorClaimRequests: ["accredited_institution", "settlement_capacity"],
+    });
+    const result = validateAgentDecision(
+      {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Still want the trade.",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("reveal");
+    expect(result.accepted.claimType).toBe("inventory_sufficiency");
+    expect(result.downgradedFrom).toBe("accept");
+    expect(result.adjustedReason).toBe(
+      "accept_replaced_with_reveal_for_disclosure_gate",
+    );
+  });
+
   it("downgrades opening-turn reveal to propose", () => {
     const profile = buildProfile(buyerAuthored);
     const ctx = buildTurnContext({

@@ -604,6 +604,68 @@ export function validateAgentDecision(
   }
 
   // ---------------------------------------------------------------------
+  // An accept cannot lead to settlement until the disclosure gate is
+  // satisfied. Redirect the agent back into the trust-building ladder
+  // instead of letting it repeat accepts that the orchestrator will keep
+  // bouncing behind the gate.
+  // ---------------------------------------------------------------------
+  if (action === "accept") {
+    const outstandingRequiredClaims = ctx.requiredClaims.filter(
+      (claim) => !ctx.receivedClaims.includes(claim),
+    );
+    if (outstandingRequiredClaims.length > 0) {
+      const priorDisclosureMoves = ctx.priorClaimRequests ?? [];
+      const nextRequiredClaim = outstandingRequiredClaims.find(
+        (claim) => !priorDisclosureMoves.includes(claim),
+      );
+      if (nextRequiredClaim) {
+        return {
+          accepted: {
+            action: "request_disclosure",
+            price: roundPrice(clampPrice(move.price, ctx)),
+            quantity: roundQty(clampQuantity(move.quantity, ctx)),
+            claimType: nextRequiredClaim,
+            strategicIntent: "request_proof",
+            confidence: clampConfidence(move.confidence),
+            escalationRequested: Boolean(move.escalationRequested),
+            settlementReadiness: "not_ready",
+            reasoning: `Disclosure gate still blocks settlement; request '${nextRequiredClaim}' before accepting terms.`.slice(
+              0,
+              280,
+            ),
+          },
+          downgradedFrom: "accept",
+          adjustedReason: "accept_blocked_by_disclosure_gate",
+        };
+      }
+
+      const nextRevealClaim = ctx.disclosableClaims.find(
+        (claim) => !priorDisclosureMoves.includes(claim),
+      );
+      if (nextRevealClaim) {
+        return {
+          accepted: {
+            action: "reveal",
+            price: roundPrice(clampPrice(move.price, ctx)),
+            quantity: roundQty(clampQuantity(move.quantity, ctx)),
+            claimType: nextRevealClaim,
+            strategicIntent: "build_trust",
+            confidence: clampConfidence(move.confidence),
+            escalationRequested: Boolean(move.escalationRequested),
+            settlementReadiness: "not_ready",
+            reasoning: `Disclosure gate still blocks settlement; reveal '${nextRevealClaim}' to advance trust.`.slice(
+              0,
+              280,
+            ),
+          },
+          downgradedFrom: "accept",
+          adjustedReason: "accept_replaced_with_reveal_for_disclosure_gate",
+        };
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Disclosure moves that have no possible target (no disclosable claim
   // for `reveal`, no outstanding required claim for `request_disclosure`)
   // are downgraded to `hold` BEFORE the opening-turn check. Otherwise

@@ -39,9 +39,76 @@ vi.mock('../services/api-client', async () => {
   };
 });
 
-vi.mock('../components/MandateConfigForm', () => ({
-  MandateConfigForm: ({ agentId }: { agentId: string }) => <div data-testid="mandate-form-agent">Mandate form for {agentId}</div>,
-}));
+vi.mock('../components/MandateConfigForm', async () => {
+  const React = await import('react');
+  const { apiClient } = await import('../services/api-client');
+  return {
+    MandateConfigForm: ({ agentId, onSuccess }: { agentId: string; onSuccess?: () => void }) => {
+      const [asset, setAsset] = React.useState('WBTC');
+      const [side, setSide] = React.useState('buy');
+      const [targetQuantity, setTargetQuantity] = React.useState(1);
+      const [referencePrice, setReferencePrice] = React.useState(70000);
+      const [priceBandBps, setPriceBandBps] = React.useState(150);
+      const [error, setError] = React.useState<string | null>(null);
+
+      const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (targetQuantity <= 0) {
+          setError('Target quantity must be greater than zero.');
+          return;
+        }
+        setError(null);
+        try {
+          await apiClient.createNegotiationMandate(agentId, {
+            authored: {
+              assetCode: asset,
+              side,
+              sizePolicy: { targetQuantity },
+              valuationPolicy: { anchorValue: referencePrice },
+              concessionPolicy: { maxConcessionBps: priceBandBps }
+            } as any
+          });
+          onSuccess?.();
+        } catch (err) {
+          setError('Failed to save');
+        }
+      };
+
+      return (
+        <form onSubmit={handleSubmit} data-testid="mandate-form-agent">
+          Mandate form for {agentId}
+          {error && <div role="alert">{error}</div>}
+          <label htmlFor="mock-asset">Asset</label>
+          <input id="mock-asset" value={asset} onChange={(e) => setAsset(e.target.value)} />
+          <label htmlFor="mock-side">Side</label>
+          <input id="mock-side" value={side} onChange={(e) => setSide(e.target.value)} />
+          <label htmlFor="mock-targetQuantity">Target Quantity</label>
+          <input
+            id="mock-targetQuantity"
+            type="number"
+            value={targetQuantity}
+            onChange={(e) => setTargetQuantity(Number(e.target.value))}
+          />
+          <label htmlFor="mock-referencePrice">Reference Price (USD)</label>
+          <input
+            id="mock-referencePrice"
+            type="number"
+            value={referencePrice}
+            onChange={(e) => setReferencePrice(Number(e.target.value))}
+          />
+          <label htmlFor="mock-priceBandBps">Price Tolerance (bps)</label>
+          <input
+            id="mock-priceBandBps"
+            type="number"
+            value={priceBandBps}
+            onChange={(e) => setPriceBandBps(Number(e.target.value))}
+          />
+          <button type="submit">Save Mandate</button>
+        </form>
+      );
+    }
+  };
+});
 
 const mockedListHostedAgents = vi.mocked(apiClient.listHostedAgents);
 const mockedListAgents = vi.mocked(apiClient.listAgents);
@@ -82,7 +149,7 @@ describe('AgentDeploymentGuide', () => {
 
     expect(screen.getByText('Hosted Negotiator')).toBeInTheDocument();
     expect(screen.getByText('Admitted Agent')).toBeInTheDocument();
-    expect(screen.getByText('Mandate Bounds')).toBeInTheDocument();
+    expect(screen.getByText('Negotiation Mandate')).toBeInTheDocument();
     expect(screen.getByText('Runtime Settings')).toBeInTheDocument();
 
     await waitFor(() => {
@@ -259,14 +326,13 @@ describe('AgentDeploymentGuide', () => {
 
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
-    // Navigate through steps to reach step 3 where runtime fields are visible
-    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
     await user.click(await screen.findByRole('button', { name: /Continue to Runtime Controls/i }));
 
     expect(screen.getByLabelText('Poll Interval (ms)')).toBeInTheDocument();
     expect(screen.getByLabelText('Max Ticks')).toBeInTheDocument();
     expect(screen.getByLabelText('Groq Model')).toBeInTheDocument();
-    expect(screen.getByText('Dry Run')).toBeInTheDocument();
+    expect(screen.getByText('Dry Run Mode')).toBeInTheDocument();
   });
 
   it('disables launch when runtime fields are not valid positive integers', async () => {
@@ -329,8 +395,7 @@ describe('AgentDeploymentGuide', () => {
 
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
-    // Navigate to step 3 where runtime fields and launch button are visible
-    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
     await user.click(await screen.findByRole('button', { name: /Continue to Runtime Controls/i }));
 
     const pollInput = screen.getByLabelText('Poll Interval (ms)');
@@ -365,8 +430,8 @@ describe('AgentDeploymentGuide', () => {
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
-    await user.click(await screen.findByRole('button', { name: /Create Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Author Mandate/i }));
 
     expect(await screen.findByLabelText('Asset')).toBeInTheDocument();
     expect(screen.getByLabelText('Side')).toBeInTheDocument();
@@ -858,8 +923,8 @@ describe('AgentDeploymentGuide', () => {
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Select Admitted Agent' }), 'agent-2');
-    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
-    await user.click(await screen.findByRole('button', { name: /Edit \/ Replace Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Author \/ Replace Mandate/i }));
     const targetQuantity = await screen.findByLabelText('Target Quantity');
     await user.clear(targetQuantity);
     await user.type(targetQuantity, '6');
@@ -868,7 +933,13 @@ describe('AgentDeploymentGuide', () => {
     await waitFor(() => {
       expect(mockedCreateNegotiationMandate).toHaveBeenCalledWith(
         'agent-2',
-        expect.objectContaining({ targetQuantity: 6 }),
+        expect.objectContaining({
+          authored: expect.objectContaining({
+            sizePolicy: expect.objectContaining({
+              targetQuantity: 6,
+            }),
+          }),
+        }),
       );
       // After save, step advances to 3 where mandate select is hidden, so use hidden: true
       expect(screen.getByRole('combobox', { name: 'Mandate Selection', hidden: true })).toHaveValue('mandate-2b');
@@ -898,8 +969,8 @@ describe('AgentDeploymentGuide', () => {
 
     render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
 
-    await user.click(await screen.findByRole('button', { name: /Continue to Mandate Bounds/i }));
-    await user.click(await screen.findByRole('button', { name: /Create Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Author Mandate/i }));
 
     const targetQuantity = await screen.findByLabelText('Target Quantity');
     await user.clear(targetQuantity);

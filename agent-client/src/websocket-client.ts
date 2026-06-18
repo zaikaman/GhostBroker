@@ -90,7 +90,10 @@ export class TelemetryClient {
    */
   public onSettled(handler: (correlationRef: string) => void): () => void {
     return this.onMessage((event) => {
-      if (event.phase === "settlement_finalized") {
+      if (
+        event.phase === "settlement_finalized" ||
+        event.phase === "negotiation_settled"
+      ) {
         handler(event.correlationRef ?? "");
       }
     });
