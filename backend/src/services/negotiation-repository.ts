@@ -14,10 +14,10 @@ import type {
   DerivedExecutionRails,
 } from "./negotiation-strategy.js";
 
-type QueryResult<TResult> = {
+interface QueryResult<TResult> {
   data: TResult[] | null;
   error: Error | null;
-};
+}
 
 interface QueryChain<TResult> extends PromiseLike<QueryResult<TResult>> {
   eq(column: string, value: string): QueryChain<TResult>;

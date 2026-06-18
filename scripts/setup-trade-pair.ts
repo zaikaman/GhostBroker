@@ -249,7 +249,7 @@ interface SessionSummary {
   disclosureProgress: { receivedVerifiedClaims: string[]; pendingRequiredClaims: string[] };
 }
 
-async function listSessions(token: string): Promise<SessionSummary[]> {
+async function _listSessions(token: string): Promise<SessionSummary[]> {
   const { status, body } = await callApi("/api/negotiations", token, {
     method: "GET",
   });

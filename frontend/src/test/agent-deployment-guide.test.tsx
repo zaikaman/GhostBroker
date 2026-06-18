@@ -66,10 +66,10 @@ vi.mock('../components/MandateConfigForm', async () => {
               sizePolicy: { targetQuantity },
               valuationPolicy: { anchorValue: referencePrice },
               concessionPolicy: { maxConcessionBps: priceBandBps }
-            } as any
+            }
           });
           onSuccess?.();
-        } catch (err) {
+        } catch {
           setError('Failed to save');
         }
       };

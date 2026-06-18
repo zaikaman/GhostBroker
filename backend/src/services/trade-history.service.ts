@@ -6,10 +6,10 @@ import {
 } from "../models/completed-trade.js";
 import type { AuditReceiptRecord } from "../models/audit-receipt.js";
 
-type QueryResult<TResult> = {
+interface QueryResult<TResult> {
   data: TResult[] | null;
   error: Error | null;
-};
+}
 
 interface SelectQuery<TResult> extends PromiseLike<QueryResult<TResult>> {
   or(expression: string): SelectQuery<TResult>;
