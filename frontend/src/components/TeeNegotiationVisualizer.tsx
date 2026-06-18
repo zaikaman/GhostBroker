@@ -137,7 +137,9 @@ export function TeeNegotiationVisualizer({
   // Generate simulated dialogue logs inside TEE to explain the processing events
   useEffect(() => {
     if (!latestPhase) {
-      setMessages([]);
+      setTimeout(() => {
+        setMessages([]);
+      }, 0);
       processedPhasesRef.current.clear();
       return;
     }
@@ -248,21 +250,25 @@ export function TeeNegotiationVisualizer({
     }
 
     if (newMessages.length > 0) {
-      setMessages(prev => {
-        const withIds = newMessages.map((m, idx) => ({
-          ...m,
-          id: `${latestPhase}-${Date.now()}-${idx}`
-        }));
-        // Cap dialogue to last 15 messages for cleaner view
-        return [...prev, ...withIds].slice(-15);
-      });
+      setTimeout(() => {
+        setMessages(prev => {
+          const withIds = newMessages.map((m, idx) => ({
+            ...m,
+            id: `${latestPhase}-${Date.now()}-${idx}`
+          }));
+          // Cap dialogue to last 15 messages for cleaner view
+          return [...prev, ...withIds].slice(-15);
+        });
+      }, 0);
     }
   }, [latestPhase, intents.length, localAgent, counterpartyAgent, institutionName]);
 
   // Clean state when agents are disconnected
   useEffect(() => {
     if (agents.length === 0 && intents.length === 0 && !localAgent) {
-      setMessages([]);
+      setTimeout(() => {
+        setMessages([]);
+      }, 0);
       processedPhasesRef.current.clear();
     }
   }, [agents, intents.length, localAgent]);

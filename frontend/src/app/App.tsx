@@ -213,6 +213,7 @@ import {
   RocketIcon,
   EyeIcon,
   CancelCircleIcon,
+  Wifi01Icon,
 } from 'hugeicons-react';
 
 function DashboardView({
@@ -374,7 +375,9 @@ function DashboardView({
                     letterSpacing: '0.05em'
                   }}
                 >
-                  📡 Matching Arena
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <Wifi01Icon size={12} /> Matching Arena
+                  </span>
                 </button>
                 <button
                   type="button"
@@ -388,7 +391,9 @@ function DashboardView({
                     letterSpacing: '0.05em'
                   }}
                 >
-                  📜 Detailed Logs
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <ScrollIcon size={12} /> Detailed Logs
+                  </span>
                 </button>
               </div>
 

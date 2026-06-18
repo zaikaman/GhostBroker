@@ -6,6 +6,7 @@ import {
   Link01Icon,
   LockIcon,
   Shield01Icon,
+  Clock01Icon,
 } from 'hugeicons-react';
 import { apiClient, type NegotiationSession } from '../services/api-client';
 import { DisclosureTimeline } from './DisclosureTimeline';
@@ -274,7 +275,9 @@ export function NegotiationRoomPanel(): React.JSX.Element {
                     {DISTANCE_LABELS[session.distanceSignal] ?? session.distanceSignal}
                   </span>
                 )}
-                <span>⏱ {deadlineCountdown(session.deadline)}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <Clock01Icon size={12} /> {deadlineCountdown(session.deadline)}
+                </span>
               </div>
             </div>
 

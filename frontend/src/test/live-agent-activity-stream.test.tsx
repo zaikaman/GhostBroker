@@ -78,10 +78,10 @@ describe('LiveAgentActivityStream Component', () => {
     expect(screen.getByText(/GhostBroker TEE/i)).toBeInTheDocument();
 
     // Verify mapped log messages are rendered
-    expect(screen.getByText('✅ Session verified.')).toBeInTheDocument();
-    expect(screen.getByText('🔑 Session Verified')).toBeInTheDocument();
-    expect(screen.getByText('📥 Mandate received.')).toBeInTheDocument();
-    expect(screen.getByText('📦 Order payload blinded.')).toBeInTheDocument();
+    expect(screen.getByText('Session verified.')).toBeInTheDocument();
+    expect(screen.getByText('Session Verified')).toBeInTheDocument();
+    expect(screen.getByText('Mandate received.')).toBeInTheDocument();
+    expect(screen.getByText('Order payload blinded.')).toBeInTheDocument();
   });
 
   it('truncates all agent DIDs and never renders them in full', () => {

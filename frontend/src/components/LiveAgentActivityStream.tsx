@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { AgentState, ProcessingIntent } from '../hooks/useConnectionTelemetry';
 import { telemetryClient, type TelemetryEvent } from '../services/telemetry-client';
 import { AgentLogEntry } from './AgentLogEntry';
-import { Robot01Icon, Shield01Icon } from 'hugeicons-react';
+import { Robot01Icon, Shield01Icon, LockIcon, Search01Icon, Key01Icon, FlashIcon, CleanIcon } from 'hugeicons-react';
 
 export interface LiveAgentActivityStreamProps {
   agents: AgentState[];
@@ -23,27 +23,27 @@ const mapPhaseToLogMessage = (phase: string): string => {
   switch (phase) {
     case 'agent_connecting':
     case 'agent_connected':
-      return '🔐 Authenticating to T3...';
+      return 'Authenticating to T3...';
     case 'agent_verifying':
-      return '🔍 Verifying credentials...';
+      return 'Verifying credentials...';
     case 'agent_verified':
-      return '✅ Session verified.';
+      return 'Session verified.';
     case 'agent_rejected':
-      return '🚫 Admission denied.';
+      return 'Admission denied.';
     case 'intent_received':
-      return '📥 Mandate received.';
+      return 'Mandate received.';
     case 'intent_sealed':
-      return '📦 Order payload blinded.';
+      return 'Order payload blinded.';
     case 'encrypted_evaluation':
-      return '🧠 Scanning queue...';
+      return 'Scanning queue...';
     case 'settlement_pending':
-      return '💰 Settlement executing...';
+      return 'Settlement executing...';
     case 'settlement_finalized':
-      return '✨ Settlement signed.';
+      return 'Settlement signed.';
     case 'settlement_failed':
-      return '❌ Settlement failed.';
+      return 'Settlement failed.';
     case 'receipt_available':
-      return '📜 Audit receipt issued.';
+      return 'Audit receipt issued.';
     default:
       return phase.replace(/_/g, ' ');
   }
@@ -692,28 +692,36 @@ export function LiveAgentActivityStream({
             
             <div className="mini-radar" style={{ width: '48px', height: '48px', marginBottom: '14px' }}>
               <div className="mini-radar-sweep"></div>
-              <span style={{ fontSize: '0.9rem', zIndex: 1 }}>🔒</span>
+              <LockIcon size={16} style={{ color: 'var(--color-accent)', zIndex: 1 }} />
             </div>
 
             <div className="enclave-timeline">
               <div className={`enclave-step scanning ${activeState === 'scanning' ? 'active' : ''}`}>
                 <div className="enclave-step-node"></div>
-                <span className="enclave-step-label">🔍 Scanning...</span>
+                <span className="enclave-step-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <Search01Icon size={12} /> Scanning...
+                </span>
               </div>
               
               <div className={`enclave-step verified ${activeState === 'verified' ? 'active' : ''}`}>
                 <div className="enclave-step-node"></div>
-                <span className="enclave-step-label">🔑 Session Verified</span>
+                <span className="enclave-step-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <Key01Icon size={12} /> Session Verified
+                </span>
               </div>
               
               <div className={`enclave-step executing ${activeState === 'executing' ? 'active' : ''}`}>
                 <div className="enclave-step-node"></div>
-                <span className="enclave-step-label">⚡ Match Execution</span>
+                <span className="enclave-step-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <FlashIcon size={12} /> Match Execution
+                </span>
               </div>
               
               <div className={`enclave-step purged ${activeState === 'purged' ? 'active' : ''}`}>
                 <div className="enclave-step-node"></div>
-                <span className="enclave-step-label">🧹 Memory Purged</span>
+                <span className="enclave-step-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <CleanIcon size={12} /> Memory Purged
+                </span>
               </div>
             </div>
           </div>

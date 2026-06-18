@@ -1,15 +1,16 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { LockIcon } from 'hugeicons-react';
 
 export function SecureCore3D(): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     let renderer: THREE.WebGLRenderer | null = null;
-    let fallbackElement: HTMLDivElement | null = null;
     let animationFrameId: number | null = null;
 
     // --- Scene, Camera Setup ---
@@ -29,25 +30,9 @@ export function SecureCore3D(): React.JSX.Element {
       container.appendChild(renderer.domElement);
     } catch (e) {
       console.warn('WebGL is not supported or failed to initialize:', e);
-      fallbackElement = document.createElement('div');
-      fallbackElement.style.width = '100%';
-      fallbackElement.style.height = '100%';
-      fallbackElement.style.display = 'flex';
-      fallbackElement.style.flexDirection = 'column';
-      fallbackElement.style.alignItems = 'center';
-      fallbackElement.style.justifyContent = 'center';
-      fallbackElement.style.color = 'var(--color-text-secondary)';
-      fallbackElement.style.fontFamily = 'var(--font-mono)';
-      fallbackElement.style.fontSize = '0.8rem';
-      fallbackElement.style.textAlign = 'center';
-      fallbackElement.style.padding = 'var(--spacing-md)';
-      fallbackElement.style.boxSizing = 'border-box';
-      fallbackElement.innerHTML = `
-        <div style="font-size: 2rem; margin-bottom: 8px;">🔒</div>
-        <div style="font-weight: bold; letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-accent);">TEE Enclave Core Active</div>
-        <div style="font-size: 0.7rem; margin-top: 4px; color: var(--color-text-muted);">[ Cryptographic Accelerator Link Secured ]</div>
-      `;
-      container.appendChild(fallbackElement);
+      setTimeout(() => {
+        setHasError(true);
+      }, 0);
     }
 
     // --- Resize Handler ---
@@ -291,11 +276,36 @@ export function SecureCore3D(): React.JSX.Element {
           container.removeChild(renderer.domElement);
         }
       }
-      if (fallbackElement && container.contains(fallbackElement)) {
-        container.removeChild(fallbackElement);
-      }
     };
   }, []);
+
+  if (hasError) {
+    return (
+      <div 
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          color: 'var(--color-text-secondary)', 
+          fontFamily: 'var(--font-mono)', 
+          fontSize: '0.8rem', 
+          textAlign: 'center', 
+          padding: 'var(--spacing-md)', 
+          boxSizing: 'border-box',
+          background: 'rgba(15, 21, 36, 0.5)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)'
+        }}
+      >
+        <LockIcon size={32} style={{ marginBottom: '8px', color: 'var(--color-accent)' }} />
+        <div style={{ fontWeight: 'bold', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--color-accent)' }}>TEE Enclave Core Active</div>
+        <div style={{ fontSize: '0.7rem', marginTop: '4px', color: 'var(--color-text-muted)' }}>[ Cryptographic Accelerator Link Secured ]</div>
+      </div>
+    );
+  }
 
   return (
     <div 

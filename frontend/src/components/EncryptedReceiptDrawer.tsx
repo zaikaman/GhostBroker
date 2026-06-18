@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import type { AuditReceipt } from '../services/api-client';
+import { Shield01Icon, AlertCircleIcon } from 'hugeicons-react';
 
 export interface EncryptedReceiptDrawerProps {
   receiptId: string | null;
@@ -44,8 +45,8 @@ export function EncryptedReceiptDrawer({
         data-testid="receipt-drawer"
       >
         <div className="drawer-header">
-          <h2 id="drawer-title" className="card-title" style={{ margin: 0, border: 'none', padding: 0 }}>
-            🛡️ Cryptographic Audit Receipt
+          <h2 id="drawer-title" className="card-title" style={{ margin: 0, border: 'none', padding: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Shield01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Cryptographic Audit Receipt
           </h2>
           <button 
             type="button" 
@@ -81,7 +82,9 @@ export function EncryptedReceiptDrawer({
                 lineHeight: '1.4'
               }}
             >
-              <div style={{ fontWeight: 'bold' }}>🚨 Decryption Authorization Failed</div>
+              <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertCircleIcon size={16} /> Decryption Authorization Failed
+              </div>
               {receiptId && <div style={{ fontSize: '0.75rem', opacity: 0.9 }}>Receipt ID: {receiptId}</div>}
               <div>{error}</div>
               <div style={{ fontSize: '0.75rem', marginTop: 'var(--spacing-xs)', color: 'rgba(244, 63, 94, 0.8)' }}>
