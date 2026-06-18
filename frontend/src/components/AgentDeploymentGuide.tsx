@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   apiClient,
+  ApiClientError,
   type Agent,
   type AuthSession,
   type CreateHostedAgentRequest,
@@ -13,6 +14,7 @@ import {
   Activity01Icon,
   AlertCircleIcon,
   ArrowLeft01Icon,
+  Cancel01Icon,
   Copy01Icon,
   Loading03Icon,
   PlayIcon,
@@ -22,6 +24,7 @@ import {
   ScrollIcon,
   Shield01Icon,
   StopIcon,
+  Wallet01Icon,
 } from 'hugeicons-react';
 import { AgentProvisioningForm } from './AgentProvisioningForm';
 import { MandateConfigForm } from './MandateConfigForm';
@@ -45,6 +48,54 @@ const defaultRuntimeForm: RuntimeFormState = {
   dryRun: false,
 };
 
+// Bounds for runtime knobs. The numbers come from the operator UX
+// guide: a poll faster than 2s hammers the relayer/portfolio APIs and
+// trips rate limits; slower than 5 minutes makes the agent miss
+// counterparties. Max ticks caps the runtime's lifetime so a stuck
+// agent cannot spin forever inside the enclave.
+const RUNTIME_BOUNDS = {
+  pollIntervalMs: { min: 2000, max: 300_000 },
+  maxTicks: { min: 1, max: 1000 },
+} as const;
+
+type AssetCode = 'WBTC' | 'USDC' | 'ETH';
+
+function isAssetCode(value: string): value is AssetCode {
+  return value === 'WBTC' || value === 'USDC' || value === 'ETH';
+}
+
+/**
+ * Parse a decimal string that may contain scientific notation or be
+ * empty/garbage. Returns null on invalid input so callers can produce
+ * a friendly validation message instead of `NaN` propagating to the
+ * backend.
+ */
+function parseDecimalAmount(value: string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  if (trimmed === '') return null;
+  if (!/^-?\d+(\.\d+)?$/u.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+}
+
+/**
+ * Render a balance string with asset-appropriate precision. The
+ * backend returns decimal strings (e.g. "1.5"); we just want to avoid
+ * showing absurd precision like `0.10000000000000001`.
+ */
+function formatBalance(value: string | undefined, asset: AssetCode): string {
+  if (!value) return '0';
+  const parsed = parseDecimalAmount(value);
+  if (parsed === null) return value;
+  const decimals = asset === 'WBTC' ? 8 : asset === 'USDC' ? 6 : 6;
+  return parsed.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  });
+}
+
 function formatTimestamp(value?: string): string {
   if (!value) return 'Not started';
   return new Date(value).toLocaleString('en-US', {
@@ -63,6 +114,41 @@ function truncateMiddle(value: string, keep = 12): string {
 function isPositiveInteger(value: string): boolean {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0;
+}
+
+function isWithinBounds(value: string, min: number, max: number): boolean {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= min && parsed <= max;
+}
+
+/**
+ * Translate raw errors from the api-client into operator-friendly
+ * strings. Falls back to the original message so we never lose
+ * information the backend intentionally surfaced.
+ */
+function deriveErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiClientError) {
+    if (err.code === 'authorization_failed') {
+      return 'Authorization failed. Refresh the operator session and retry.';
+    }
+    if (err.code === 'service_unavailable') {
+      return 'The settlement services are temporarily unavailable. Retry shortly.';
+    }
+    if (err.code === 'not_found') {
+      return 'The selected resource no longer exists. Refresh the page and try again.';
+    }
+    if (err.code === 'validation_failed') {
+      return err.message || 'The request was rejected as invalid.';
+    }
+    return err.message || fallback;
+  }
+  if (err instanceof Error) {
+    if (err.message.toLowerCase().includes('network') || err.message.toLowerCase().includes('fetch')) {
+      return 'Network unavailable. Check your connection and retry.';
+    }
+    return err.message;
+  }
+  return fallback;
 }
 
 function humanizeExecutionStyle(style: NegotiationMandateSummary['executionStyle']): string {
@@ -112,6 +198,133 @@ function summarizeMandate(mandate: NegotiationMandateSummary | null): { label: s
   ];
 }
 
+/**
+ * Map a mandate's asset code to the balance field exposed by the
+ * relayer-approval status endpoint. Returns `null` for assets we
+ * don't track on the deposit wallet (so the caller can skip the
+ * check rather than report a false negative).
+ */
+function depositBalanceKey(assetCode: string): keyof RelayerApprovalResponse['balances'] | null {
+  const normalized = assetCode.trim().toUpperCase();
+  if (normalized === 'WBTC') return 'wbtc';
+  if (normalized === 'USDC') return 'usdc';
+  if (normalized === 'ETH') return 'eth';
+  return null;
+}
+
+interface MandateCoverage {
+  ok: boolean;
+  message: string | null;
+  required: number | null;
+  available: number | null;
+  asset: AssetCode | null;
+}
+
+/**
+ * Evaluate whether the selected mandate is launchable given the
+ * deposit wallet's current balances. For sell-side mandates we
+ * require the deposit address to hold at least the target quantity of
+ * the mandate's asset; for buy-side mandates we only require the
+ * relayer to be approved for that asset (already enforced by
+ * `settlementReady`). For non-chain rails or unknown assets, the check
+ * is a no-op.
+ */
+function evaluateMandateCoverage(
+  mandate: NegotiationMandateSummary | null,
+  depositStatus: RelayerApprovalResponse | null,
+  isChainRail: boolean,
+  settlementReady: boolean,
+): MandateCoverage {
+  if (!mandate) {
+    return { ok: false, message: null, required: null, available: null, asset: null };
+  }
+  if (!isChainRail) {
+    return { ok: true, message: null, required: null, available: null, asset: null };
+  }
+  if (!depositStatus) {
+    return {
+      ok: false,
+      message: 'Deposit balances could not be loaded. Refresh and retry before launching.',
+      required: null,
+      available: null,
+      asset: null,
+    };
+  }
+
+  const assetRaw = mandate.assetCode.trim().toUpperCase();
+  const balanceKey = depositBalanceKey(assetRaw);
+  if (!balanceKey) {
+    return { ok: true, message: null, required: null, available: null, asset: null };
+  }
+  if (!isAssetCode(assetRaw)) {
+    return { ok: true, message: null, required: null, available: null, asset: null };
+  }
+  const asset = assetRaw;
+
+  if (!settlementReady) {
+    return {
+      ok: false,
+      message:
+        'Sepolia ERC20 relayer is not approved for this institution. Approve WBTC and USDC in the Settlement Profile before launching.',
+      required: null,
+      available: null,
+      asset,
+    };
+  }
+
+  const required = parseDecimalAmount(mandate.targetQuantity);
+  const available = parseDecimalAmount(depositStatus.balances[balanceKey]);
+  if (required === null) {
+    return {
+      ok: false,
+      message: 'Mandate target quantity is not a valid number. Re-author the mandate.',
+      required: null,
+      available,
+      asset,
+    };
+  }
+  if (available === null) {
+    return {
+      ok: false,
+      message: `Deposit balance for ${asset} is unavailable. Refresh and retry.`,
+      required,
+      available: null,
+      asset,
+    };
+  }
+
+  if (mandate.side === 'sell' && required > available) {
+    const shortfall = required - available;
+    return {
+      ok: false,
+      message:
+        `Insufficient ${asset} on the deposit wallet to satisfy this sell mandate. ` +
+        `Required ${required.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${asset}, ` +
+        `available ${available.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${asset} ` +
+        `(short ${shortfall.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${asset}). ` +
+        `Top up the deposit or reduce the target size.`,
+      required,
+      available,
+      asset,
+    };
+  }
+  return { ok: true, message: null, required, available, asset };
+}
+
+/**
+ * Detect a deadline that has already elapsed (or is so close that
+ * launching is reckless). Returns null when the mandate is still
+ * viable for launch.
+ */
+function validateMandateDeadline(mandate: NegotiationMandateSummary | null, now: number = Date.now()): string | null {
+  if (!mandate) return null;
+  const deadline = new Date(mandate.deadline).getTime();
+  if (Number.isNaN(deadline)) return 'Mandate deadline is not a valid date.';
+  if (deadline <= now) return 'Mandate deadline has already passed. Author a new mandate before launching.';
+  if (deadline - now < 60_000) return 'Mandate deadline is less than a minute away. Extend the deadline before launching.';
+  return null;
+}
+
 export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuideProps): React.JSX.Element {
   const [hostedAgents, setHostedAgents] = useState<HostedAgentRecord[]>([]);
   const [admittedAgents, setAdmittedAgents] = useState<Agent[]>([]);
@@ -130,16 +343,26 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const [mandateValidationError, setMandateValidationError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [activeStep, setActiveStep] = useState<number>(1);
+  const [pendingLaunch, setPendingLaunch] = useState(false);
+  // Monotonic counter that lets loadState calls know which one is
+  // the most recent request. Any in-flight call whose token doesn't
+  // match the latest will drop its results on the floor, preventing
+  // stale data from clobbering newer state (the classic race in
+  // auto-refreshing dashboards).
+  const loadRequestRef = useRef(0);
 
   const loadState = useCallback(async (preferredAgentId?: string | null) => {
+    const token = ++loadRequestRef.current;
     const [records, agents, inst] = await Promise.all([
       apiClient.listHostedAgents(),
       apiClient.listAgents('admitted'),
       apiClient.getInstitution(session.institution.id),
     ]);
+    if (token !== loadRequestRef.current) return;
     const mandateEntries = await Promise.all(
       agents.map(async (agent) => [agent.id, await apiClient.listNegotiationMandates(agent.id)] as const),
     );
+    if (token !== loadRequestRef.current) return;
     const nextMandatesByAgentId = Object.fromEntries(mandateEntries);
 
     setHostedAgents(records);
@@ -149,11 +372,17 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
     if (inst.settlementProfileRef === 'chain:sepolia:erc20') {
       try {
-        setDepositStatus(await apiClient.getDepositStatus(inst.id));
-      } catch {
+        const status = await apiClient.getDepositStatus(inst.id);
+        if (token !== loadRequestRef.current) return;
+        setDepositStatus(status);
+      } catch (err) {
+        if (token !== loadRequestRef.current) return;
         setDepositStatus(null);
+        const message = deriveErrorMessage(err, 'Deposit balances could not be loaded.');
+        setError((current) => (current?.startsWith('Deposit balances') ? current : message));
       }
     } else {
+      if (token !== loadRequestRef.current) return;
       setDepositStatus(null);
     }
 
@@ -166,6 +395,8 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       }
       return records[0]?.agent.id ?? agents[0]?.id ?? null;
     });
+    // Clear a stale selected mandate when the agent list changed.
+    setSelectedMandateId((current) => (current ? current : ''));
   }, [session.institution.id]);
 
   useEffect(() => {
@@ -175,7 +406,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       loadState()
         .catch((err: unknown) => {
           if (!cancelled) {
-            setError(err instanceof Error ? err.message : 'Failed to load hosted negotiator state.');
+            setError(deriveErrorMessage(err, 'Failed to load hosted negotiator state.'));
           }
         })
         .finally(() => {
@@ -186,12 +417,27 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     });
 
     const intervalId = window.setInterval(() => {
-      loadState().catch(() => undefined);
+      // Fire-and-forget but route errors through the same surface so
+      // transient outages don't silently disappear.
+      loadState().catch((err: unknown) => {
+        if (!cancelled) {
+          setError(deriveErrorMessage(err, 'Background refresh failed.'));
+        }
+      });
     }, 12000);
+
+    const handleOnline = () => {
+      // Re-sync as soon as connectivity returns. Without this a long
+      // offline window can leave the operator staring at stale
+      // balances for the full poll interval after reconnecting.
+      void loadState().catch(() => undefined);
+    };
+    window.addEventListener('online', handleOnline);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      window.removeEventListener('online', handleOnline);
     };
   }, [loadState]);
 
@@ -268,9 +514,40 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
   const runtimeValidationMessage = useMemo(() => {
     if (!isPositiveInteger(runtimeForm.pollIntervalMs)) return 'Poll interval must be a positive integer.';
     if (!isPositiveInteger(runtimeForm.maxTicks)) return 'Max ticks must be a positive integer.';
+    if (!isWithinBounds(runtimeForm.pollIntervalMs, RUNTIME_BOUNDS.pollIntervalMs.min, RUNTIME_BOUNDS.pollIntervalMs.max)) {
+      return `Poll interval must be between ${RUNTIME_BOUNDS.pollIntervalMs.min}ms and ${RUNTIME_BOUNDS.pollIntervalMs.max}ms.`;
+    }
+    if (!isWithinBounds(runtimeForm.maxTicks, RUNTIME_BOUNDS.maxTicks.min, RUNTIME_BOUNDS.maxTicks.max)) {
+      return `Max ticks must be between ${RUNTIME_BOUNDS.maxTicks.min} and ${RUNTIME_BOUNDS.maxTicks.max}.`;
+    }
     return null;
   }, [runtimeForm.pollIntervalMs, runtimeForm.maxTicks]);
-  const canLaunch = Boolean(selectedAgentId && effectiveMandateId) && settlementReady && !runtimeValidationMessage;
+
+  // Mandate coverage (balance availability for sell-side mandates).
+  const mandateCoverage = useMemo(
+    () => evaluateMandateCoverage(selectedMandate, depositStatus, isChainRail, settlementReady),
+    [selectedMandate, depositStatus, isChainRail, settlementReady],
+  );
+
+  const mandateDeadlineMessage = useMemo(
+    () => validateMandateDeadline(selectedMandate),
+    [selectedMandate],
+  );
+
+  const launchBlocker = useMemo<string | null>(() => {
+    if (!selectedAgentId) return 'Select an admitted agent before launching.';
+    if (!effectiveMandateId) return 'Attach a negotiation mandate before launching.';
+    if (!selectedMandate) return 'Selected mandate is no longer available. Pick a different mandate.';
+    if (mandateDeadlineMessage) return mandateDeadlineMessage;
+    if (runtimeValidationMessage) return runtimeValidationMessage;
+    if (!mandateCoverage.ok && mandateCoverage.message) return mandateCoverage.message;
+    if (!settlementReady) {
+      return 'Sepolia ERC20 relayer is not approved. Approve WBTC and USDC in the Settlement Profile first.';
+    }
+    return null;
+  }, [effectiveMandateId, mandateCoverage, mandateDeadlineMessage, runtimeValidationMessage, selectedAgentId, selectedMandate, settlementReady]);
+
+  const canLaunch = launchBlocker === null;
   const hasAdmittedAgents = admittedAgents.length > 0;
   const hasHostedAgents = hostedAgents.length > 0;
   const selectedAgentHasHostedRuntime = useMemo(
@@ -299,17 +576,22 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     setActiveStep(3);
   }, [loadState, selectedAgentId]);
 
-  const handleLaunch = useCallback(async () => {
-    if (!selectedAgentId) {
-      setError('Select an admitted agent before launching.');
+  /**
+   * Operator-facing confirmation step before firing the launch for
+   * non-dry-run sell-side mandates. A live sell on a deposit wallet
+   * with insufficient collateral is the failure mode the operator
+   * cares about most, so we surface it explicitly instead of relying
+   * on a backend error mid-transaction.
+   */
+  const executeLaunch = useCallback(async () => {
+    setPendingLaunch(false);
+    if (!selectedAgentId || !effectiveMandateId || !selectedMandate) {
+      setError('Selection changed before launch could complete. Pick an agent and mandate and retry.');
       return;
     }
-    if (!effectiveMandateId) {
-      setError('Attach a negotiation mandate before launching.');
-      return;
-    }
-    if (runtimeValidationMessage) {
-      setError(runtimeValidationMessage);
+    const blocker = launchBlocker;
+    if (blocker) {
+      setError(blocker);
       return;
     }
     setIsSubmitting(true);
@@ -330,11 +612,28 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       await loadState();
       setSelectedAgentId(record.agent.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to launch hosted negotiator.');
+      setError(deriveErrorMessage(err, 'Failed to launch hosted negotiator.'));
     } finally {
       setIsSubmitting(false);
     }
-  }, [loadState, runtimeForm, runtimeValidationMessage, selectedAgentId, effectiveMandateId, session.institution.id]);
+  }, [effectiveMandateId, launchBlocker, loadState, runtimeForm, selectedAgentId, selectedMandate, session.institution.id]);
+
+  const requestLaunch = useCallback(() => {
+    if (launchBlocker) {
+      setError(launchBlocker);
+      setActiveStep(3);
+      return;
+    }
+    if (!selectedMandate) {
+      setError('Selected mandate is no longer available.');
+      return;
+    }
+    if (!runtimeForm.dryRun && selectedMandate.side === 'sell' && isChainRail) {
+      setPendingLaunch(true);
+      return;
+    }
+    void executeLaunch();
+  }, [executeLaunch, isChainRail, launchBlocker, runtimeForm.dryRun, selectedMandate]);
 
   const handleStart = useCallback(async (id: string) => {
     setBusyAgentId(id);
@@ -344,7 +643,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       await loadState();
       setSelectedAgentId(id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start hosted negotiator.');
+      setError(deriveErrorMessage(err, 'Failed to start hosted negotiator.'));
     } finally {
       setBusyAgentId(null);
     }
@@ -358,7 +657,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       await loadState();
       setSelectedAgentId(id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop hosted negotiator.');
+      setError(deriveErrorMessage(err, 'Failed to stop hosted negotiator.'));
     } finally {
       setBusyAgentId(null);
     }
@@ -366,10 +665,20 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
 
   const handleCopyLogs = useCallback(() => {
     if (!selectedHostedRecord?.runtime.logTail) return;
-    navigator.clipboard.writeText(selectedHostedRecord.runtime.logTail).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    if (!navigator.clipboard) {
+      setError('Clipboard access is not available in this context. Copy the logs manually.');
+      return;
+    }
+    navigator.clipboard.writeText(selectedHostedRecord.runtime.logTail).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+      },
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Clipboard write was rejected.';
+        setError(`Unable to copy logs: ${message}`);
+      },
+    );
   }, [selectedHostedRecord]);
 
   const mandateSummary = summarizeMandate(selectedMandate);
@@ -427,8 +736,25 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       </header>
 
       {error ? (
-        <div className="status-badge error deploy-error-banner" style={{ borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <AlertCircleIcon size={14} /> {error}
+        <div
+          className="status-badge error deploy-error-banner"
+          role="alert"
+          aria-live="assertive"
+          style={{ borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <AlertCircleIcon size={14} />
+            <span style={{ overflowWrap: 'anywhere' }}>{error}</span>
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setError(null)}
+            aria-label="Dismiss error"
+            style={{ padding: '2px 8px', fontSize: '0.68rem', height: 'auto', minHeight: 'unset' }}
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -723,7 +1049,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     <input id="runtime-max-ticks" className="form-input font-mono" value={runtimeForm.maxTicks} onChange={(event) => setRuntimeForm((current) => ({ ...current, maxTicks: event.target.value }))} />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">LLM Provider Chain</label>
+                    <label className="form-label" htmlFor="runtime-llm-chain">LLM Provider Chain</label>
                     <input
                       id="runtime-llm-chain"
                       className="form-input font-mono"
@@ -771,12 +1097,12 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                   </label>
 
                   {isChainRail && !settlementReady ? (
-                    <div 
-                      className="deploy-tip-box" 
-                      style={{ 
+                    <div
+                      className="deploy-tip-box"
+                      style={{
                         gridColumn: '1 / -1',
-                        marginTop: 'var(--spacing-md)', 
-                        borderColor: 'rgba(245, 158, 11, 0.3)', 
+                        marginTop: 'var(--spacing-md)',
+                        borderColor: 'rgba(245, 158, 11, 0.3)',
                         background: 'rgba(245, 158, 11, 0.05)',
                         display: 'flex',
                         flexDirection: 'column',
@@ -791,17 +1117,59 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                         <AlertCircleIcon size={14} /> Settlement Collateral Required
                       </strong>
                       <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', textAlign: 'left', lineHeight: '1.4' }}>
-                        Sepolia ERC20 settlement requires active WBTC and USDC deposits. Please visit the 
-                        <strong style={{ color: 'var(--color-accent)' }}> Settlement Profile </strong> 
+                        Sepolia ERC20 settlement requires active WBTC and USDC deposits. Please visit the
+                        <strong style={{ color: 'var(--color-accent)' }}> Settlement Profile </strong>
                         tab to approve and deposit collateral before launching runtimes.
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {isChainRail && depositStatus && selectedMandate && mandateCoverage.asset ? (
+                    <div
+                      className="deploy-context-note"
+                      style={{
+                        gridColumn: '1 / -1',
+                        marginTop: 'var(--spacing-sm)',
+                        padding: '10px 14px',
+                        background: 'rgba(94, 210, 156, 0.04)',
+                        border: '1px solid rgba(94, 210, 156, 0.15)',
+                        borderRadius: 'var(--radius-md)',
+                        display: 'grid',
+                        gridTemplateColumns: 'auto 1fr',
+                        gap: '8px 12px',
+                        alignItems: 'center',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <Wallet01Icon size={14} style={{ color: 'var(--color-accent)' }} />
+                      <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', textAlign: 'left', lineHeight: 1.45 }}>
+                        Deposit wallet:&nbsp;
+                        <strong style={{ color: 'var(--color-text-primary)' }}>{formatBalance(depositStatus.balances.wbtc, 'WBTC')} WBTC</strong>
+                        &nbsp;·&nbsp;
+                        <strong style={{ color: 'var(--color-text-primary)' }}>{formatBalance(depositStatus.balances.usdc, 'USDC')} USDC</strong>
+                        &nbsp;·&nbsp;
+                        <strong style={{ color: 'var(--color-text-primary)' }}>{formatBalance(depositStatus.balances.eth, 'ETH')} ETH</strong>
+                      </span>
+                      <span />
+                      <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', textAlign: 'left', lineHeight: 1.45 }}>
+                        {selectedMandate.side === 'sell'
+                          ? `Sell mandate requires ${selectedMandate.targetQuantity} ${selectedMandate.assetCode}; deposit currently holds ${formatBalance(mandateCoverage.available !== null ? String(mandateCoverage.available) : depositStatus.balances[depositBalanceKey(selectedMandate.assetCode) ?? 'wbtc'], mandateCoverage.asset ?? 'WBTC')} ${mandateCoverage.asset}.`
+                          : `Buy mandate settles against the counterparty's collateral; deposit must remain approved for relayer fees.`}
                       </span>
                     </div>
                   ) : null}
                 </div>
 
-                {runtimeValidationMessage ? (
-                  <div className="status-badge error deploy-form-span-full" style={{ justifyContent: 'center', padding: 'var(--spacing-sm)', marginTop: 'var(--spacing-sm)' }}>
-                    <AlertCircleIcon size={14} /> {runtimeValidationMessage}
+                {(launchBlocker && activeStep === 3) ? (
+                  <div
+                    className="status-badge error deploy-form-span-full"
+                    role="alert"
+                    aria-live="polite"
+                    style={{ justifyContent: 'flex-start', padding: 'var(--spacing-sm) var(--spacing-md)', marginTop: 'var(--spacing-sm)', gap: '8px' }}
+                  >
+                    <AlertCircleIcon size={14} />
+                    <span style={{ fontSize: '0.74rem', lineHeight: 1.4, overflowWrap: 'anywhere' }}>{launchBlocker}</span>
                   </div>
                 ) : null}
 
@@ -810,16 +1178,21 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                     <button type="button" className="btn btn-secondary" onClick={() => setActiveStep(2)} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       ← Back
                     </button>
-                    <button type="button" className="btn btn-secondary" onClick={() => { setIsLoading(true); loadState().finally(() => setIsLoading(false)); }} disabled={isLoading || isSubmitting}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => { setError(null); setIsLoading(true); loadState().catch((err: unknown) => setError(deriveErrorMessage(err, 'Manual refresh failed.'))).finally(() => setIsLoading(false)); }}
+                      disabled={isLoading || isSubmitting}
+                    >
                       <Refresh01Icon size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} /> Synchronize
                     </button>
                   </div>
                   <button
                     type="button"
                     className="btn btn-primary"
-                    onClick={handleLaunch}
+                    onClick={requestLaunch}
                     disabled={!canLaunch || isSubmitting}
-                    title={!effectiveMandateId ? 'Create or attach a negotiation mandate first.' : runtimeValidationMessage ?? undefined}
+                    title={launchBlocker ?? (selectedMandate && !runtimeForm.dryRun && selectedMandate.side === 'sell' ? 'Dry-run is recommended for a first live sell-side launch.' : undefined)}
                     style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
                     {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RocketIcon size={14} />} Launch Hosted Negotiator
@@ -1045,6 +1418,108 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
           )}
         </section>
       </div>
+
+      {pendingLaunch && selectedMandate ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="launch-confirm-title"
+          aria-describedby="launch-confirm-desc"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2, 6, 12, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 50,
+            padding: 'var(--spacing-md)',
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setPendingLaunch(false);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setPendingLaunch(false);
+            }
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: '480px',
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--spacing-md)',
+              boxShadow: '0 30px 60px rgba(0, 0, 0, 0.45)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <RocketIcon size={18} style={{ color: 'var(--color-accent)' }} />
+              <h2 id="launch-confirm-title" style={{ margin: 0, fontSize: '0.95rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Confirm Live Sell Launch
+              </h2>
+            </div>
+            <p id="launch-confirm-desc" style={{ margin: 0, fontSize: '0.78rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+              You are about to launch a non-dry-run hosted negotiator that will execute a
+              {' '}<strong style={{ color: 'var(--color-warning)' }}>SELL</strong>{' '}
+              order for <strong>{selectedMandate.targetQuantity} {selectedMandate.assetCode}</strong> on the
+              Sepolia settlement rail. Settlement will draw from your deposit wallet on every
+              match the agent agrees to.
+            </p>
+            <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '0.74rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+              <li>
+                Deposit balance:&nbsp;
+                <strong style={{ color: 'var(--color-text-primary)' }}>
+                  {mandateCoverage.asset && depositStatus
+                    ? formatBalance(depositStatus.balances[depositBalanceKey(selectedMandate.assetCode) ?? 'wbtc'], mandateCoverage.asset)
+                    : '—'} {selectedMandate.assetCode}
+                </strong>
+              </li>
+              <li>
+                Required:&nbsp;
+                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedMandate.targetQuantity} {selectedMandate.assetCode}</strong>
+              </li>
+              <li>
+                Deadline:&nbsp;
+                <strong style={{ color: 'var(--color-text-primary)' }}>{new Date(selectedMandate.deadline).toLocaleString()}</strong>
+              </li>
+              <li>
+                Authority:&nbsp;
+                <strong style={{ color: 'var(--color-text-primary)' }}>{selectedAgent?.label ?? (selectedAgent ? truncateMiddle(selectedAgent.agentDid, 12) : 'Unknown')}</strong>
+              </li>
+            </ul>
+            <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+              Tip: enable <strong>Dry Run Mode</strong> in the runtime settings to validate the
+              negotiation flow without committing to the ledger.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--spacing-sm)' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setPendingLaunch(false)}
+                disabled={isSubmitting}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Cancel01Icon size={14} /> Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void executeLaunch()}
+                disabled={isSubmitting}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                {isSubmitting ? <Loading03Icon size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RocketIcon size={14} />}
+                Confirm Launch
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

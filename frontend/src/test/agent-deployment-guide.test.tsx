@@ -29,6 +29,7 @@ vi.mock('../services/api-client', async () => {
         t3TenantDid: 'did:t3:blackridge',
         settlementProfileRef: 'noop',
       }),
+      getDepositStatus: vi.fn(),
       provisionAgent: vi.fn(),
       createHostedAgent: vi.fn(),
       startHostedAgent: vi.fn(),
@@ -116,6 +117,7 @@ const mockedGetInstitution = vi.mocked(apiClient.getInstitution);
 const mockedProvisionAgent = vi.mocked(apiClient.provisionAgent);
 const mockedListNegotiationMandates = vi.mocked(apiClient.listNegotiationMandates);
 const mockedCreateNegotiationMandate = vi.mocked(apiClient.createNegotiationMandate);
+const mockedGetDepositStatus = vi.mocked(apiClient.getDepositStatus);
 
 const session = {
   token: 'session-token',
@@ -980,6 +982,277 @@ describe('AgentDeploymentGuide', () => {
       expect(screen.getAllByText('Target quantity must be greater than zero.').length).toBeGreaterThan(0);
       expect(mockedCreateNegotiationMandate).not.toHaveBeenCalled();
     });
+  });
+
+  it('blocks sell-side launch when the deposit wallet lacks the mandate asset', async () => {
+    const user = userEvent.setup();
+    mockedGetInstitution.mockResolvedValue({
+      id: 'institution-1',
+      legalName: 'Blackridge Capital',
+      displayName: 'Blackridge Capital',
+      status: 'active',
+      t3TenantDid: 'did:t3:blackridge',
+      settlementProfileRef: 'chain:sepolia:erc20',
+    });
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockedListNegotiationMandates.mockResolvedValue([
+      {
+        id: 'mandate-sell-wbtc',
+        assetCode: 'WBTC',
+        side: 'sell',
+        targetQuantity: '1',
+        referencePrice: '70000',
+        priceBandBps: 150,
+        maxNotional: '70000',
+        urgency: 'normal',
+        deadline: '2027-01-01T00:00:00.000Z',
+        disclosableClaims: [],
+        requiredCounterpartyClaims: {},
+        counterpartyConstraints: {},
+        operatorPrompt: 'Sell WBTC quietly.',
+        policyHash: 'policy-sell',
+        objective: null,
+        executionStyle: null,
+        valuationPolicy: null,
+        concessionPolicy: null,
+        disclosurePolicy: null,
+        approvalPolicy: null,
+        counterpartyRequirements: null,
+        sizePolicy: null,
+        timeWindow: null,
+        operatorInstructions: null,
+        minimumQuantity: null,
+        partialExecutionAllowed: null,
+        derivedAnchorValue: null,
+        derivedWalkawayMin: null,
+        derivedWalkawayMax: null,
+        derivedConcessionBudgetBps: null,
+        derivedNotionalCeiling: null,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-02T00:00:00.000Z',
+      },
+    ]);
+    const getDeposit = mockedGetDepositStatus;
+    getDeposit.mockResolvedValue({
+      depositAddress: '0x1111111111111111111111111111111111111111',
+      relayerContractAddress: '0x2222222222222222222222222222222222222222',
+      txHashes: {},
+      balances: { eth: '1', wbtc: '0.25', usdc: '1000' },
+      approved: { wbtc: true, usdc: true },
+    });
+    const createHosted = vi.mocked(apiClient.createHostedAgent);
+    createHosted.mockResolvedValue({
+      agent: {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      config: {
+        mandateId: 'mandate-sell-wbtc',
+        pollIntervalMs: 15000,
+        maxTicks: 40,
+        dryRun: false,
+      },
+      runtime: { running: false, logTail: '' },
+      mandate: null,
+      migrationState: 'ready',
+    });
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Runtime Controls/i }));
+
+    const launch = await screen.findByRole('button', { name: /Launch Hosted Negotiator/i });
+    expect(launch).toBeDisabled();
+    expect(await screen.findByText(/Insufficient WBTC on the deposit wallet/i)).toBeInTheDocument();
+    expect(createHosted).not.toHaveBeenCalled();
+  });
+
+  it('blocks launch when the mandate deadline has already passed', async () => {
+    const user = userEvent.setup();
+    mockedGetInstitution.mockResolvedValue({
+      id: 'institution-1',
+      legalName: 'Blackridge Capital',
+      displayName: 'Blackridge Capital',
+      status: 'active',
+      t3TenantDid: 'did:t3:blackridge',
+      settlementProfileRef: 'noop',
+    });
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockedListNegotiationMandates.mockResolvedValue([
+      {
+        id: 'mandate-expired',
+        assetCode: 'WBTC',
+        side: 'buy',
+        targetQuantity: '0.5',
+        referencePrice: '70000',
+        priceBandBps: 150,
+        maxNotional: '35000',
+        urgency: 'low',
+        deadline: '2020-01-01T00:00:00.000Z',
+        disclosableClaims: [],
+        requiredCounterpartyClaims: {},
+        counterpartyConstraints: {},
+        operatorPrompt: 'Expired mandate.',
+        policyHash: 'policy-expired',
+        objective: null,
+        executionStyle: null,
+        valuationPolicy: null,
+        concessionPolicy: null,
+        disclosurePolicy: null,
+        approvalPolicy: null,
+        counterpartyRequirements: null,
+        sizePolicy: null,
+        timeWindow: null,
+        operatorInstructions: null,
+        minimumQuantity: null,
+        partialExecutionAllowed: null,
+        derivedAnchorValue: null,
+        derivedWalkawayMin: null,
+        derivedWalkawayMax: null,
+        derivedConcessionBudgetBps: null,
+        derivedNotionalCeiling: null,
+        createdAt: '2019-12-01T00:00:00.000Z',
+        updatedAt: '2019-12-31T00:00:00.000Z',
+      },
+    ]);
+    const createHosted = vi.mocked(apiClient.createHostedAgent);
+    createHosted.mockReset();
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Runtime Controls/i }));
+
+    const launch = await screen.findByRole('button', { name: /Launch Hosted Negotiator/i });
+    expect(launch).toBeDisabled();
+    expect(await screen.findByText(/Mandate deadline has already passed/i)).toBeInTheDocument();
+    expect(createHosted).not.toHaveBeenCalled();
+  });
+
+  it('enforces poll-interval bounds and disables launch accordingly', async () => {
+    const user = userEvent.setup();
+    mockedGetInstitution.mockResolvedValue({
+      id: 'institution-1',
+      legalName: 'Blackridge Capital',
+      displayName: 'Blackridge Capital',
+      status: 'active',
+      t3TenantDid: 'did:t3:blackridge',
+      settlementProfileRef: 'noop',
+    });
+    mockedListAgents.mockResolvedValue([
+      {
+        id: 'agent-1',
+        institutionId: 'institution-1',
+        agentDid: 'did:t3:agent-1',
+        status: 'admitted',
+        authorityRef: 'authority-1',
+        label: 'Agent One',
+        instrumentScope: null,
+        directionScope: null,
+        maxNotional: null,
+        limitReference: null,
+        policyHash: 'policy-1',
+        metadata: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+    mockedListNegotiationMandates.mockResolvedValue([
+      {
+        id: 'mandate-1',
+        assetCode: 'WBTC',
+        side: 'buy',
+        targetQuantity: '0.5',
+        referencePrice: '70000',
+        priceBandBps: 150,
+        maxNotional: '35000',
+        urgency: 'normal',
+        deadline: '2027-01-01T00:00:00.000Z',
+        disclosableClaims: [],
+        requiredCounterpartyClaims: {},
+        counterpartyConstraints: {},
+        operatorPrompt: 'Buy carefully.',
+        policyHash: 'policy-1',
+        objective: null,
+        executionStyle: null,
+        valuationPolicy: null,
+        concessionPolicy: null,
+        disclosurePolicy: null,
+        approvalPolicy: null,
+        counterpartyRequirements: null,
+        sizePolicy: null,
+        timeWindow: null,
+        operatorInstructions: null,
+        minimumQuantity: null,
+        partialExecutionAllowed: null,
+        derivedAnchorValue: null,
+        derivedWalkawayMin: null,
+        derivedWalkawayMax: null,
+        derivedConcessionBudgetBps: null,
+        derivedNotionalCeiling: null,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-02T00:00:00.000Z',
+      },
+    ]);
+
+    render(<AgentDeploymentGuide session={session} onBack={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: /Continue to Negotiation Mandate/i }));
+    await user.click(await screen.findByRole('button', { name: /Continue to Runtime Controls/i }));
+
+    const pollInput = screen.getByLabelText('Poll Interval (ms)');
+    await user.clear(pollInput);
+    await user.type(pollInput, '999999999');
+
+    expect(await screen.findByText(/Poll interval must be between/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Launch Hosted Negotiator/i })).toBeDisabled();
   });
 });
 
