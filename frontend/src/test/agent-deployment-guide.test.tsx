@@ -62,11 +62,19 @@ vi.mock('../components/MandateConfigForm', async () => {
         try {
           await apiClient.createNegotiationMandate(agentId, {
             authored: {
+              objective: 'Mock mandate',
               assetCode: asset,
-              side,
-              sizePolicy: { targetQuantity },
-              valuationPolicy: { anchorValue: referencePrice },
-              concessionPolicy: { maxConcessionBps: priceBandBps }
+              side: side as 'buy' | 'sell',
+              sizePolicy: { targetQuantity, minimumQuantity: 0, partialExecutionAllowed: true },
+              urgency: 'normal',
+              executionStyle: 'balanced',
+              valuationPolicy: { source: 'auto_anchor', anchorValue: referencePrice },
+              concessionPolicy: { pace: 'balanced', maxConcessionBps: priceBandBps },
+              disclosurePolicy: { allowLadder: [] },
+              counterpartyRequirements: { requiredClaims: [], disallowedTraits: [] },
+              approvalPolicy: { mode: 'auto_settle' },
+              timeWindow: { deadline: new Date().toISOString() },
+              operatorInstructions: ''
             }
           });
           onSuccess?.();

@@ -42,6 +42,7 @@ export function useConnectionTelemetry(token?: string): ConnectionTelemetry {
 
     // Process incoming telemetry events
     const unsubscribeMessages = telemetryClient.onMessage((event: TelemetryEvent) => {
+      console.log('[Telemetry WS Message Received]:', event);
       const { type, phase, correlationRef, agentId, severity } = event;
       const parsedAgentDid = agentId || correlationRef || '';
 
@@ -57,7 +58,11 @@ export function useConnectionTelemetry(token?: string): ConnectionTelemetry {
         phase === 'intent_received' ||
         phase === 'intent_sealed' ||
         phase === 'encrypted_evaluation' ||
-        phase === 'settlement_pending'
+        phase === 'settlement_pending' ||
+        (phase.startsWith('negotiation_') &&
+          phase !== 'negotiation_walked_away' &&
+          phase !== 'negotiation_expired' &&
+          phase !== 'negotiation_settled')
       ) {
         setEnclaveStatus('processing');
       } else {

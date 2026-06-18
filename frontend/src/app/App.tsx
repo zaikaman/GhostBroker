@@ -29,6 +29,7 @@ const AgentsPanel = React.lazy(async () => ({ default: (await import('../compone
 const SettingsPanel = React.lazy(async () => ({ default: (await import('../components/SettingsPanel')).SettingsPanel }));
 const MandateConfigForm = React.lazy(async () => ({ default: (await import('../components/MandateConfigForm')).MandateConfigForm }));
 const NegotiationRoomPanel = React.lazy(async () => ({ default: (await import('../components/NegotiationRoomPanel')).NegotiationRoomPanel }));
+const TeeNegotiationVisualizer = React.lazy(async () => ({ default: (await import('../components/TeeNegotiationVisualizer')).TeeNegotiationVisualizer }));
 
 const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSProperties }) => (
   <svg
@@ -280,6 +281,8 @@ function DashboardView({
 
   const { receipt, isLoading: isReceiptLoading, error: receiptError } = useReceipt(selectedReceiptId);
 
+  const [telemetryView, setTelemetryView] = useState<'visual' | 'logs'>('visual');
+
   const handleViewReceipt = (receiptId: string) => {
     setSelectedReceiptId(receiptId);
     setIsDrawerOpen(true);
@@ -351,20 +354,73 @@ function DashboardView({
               </React.Suspense>
             </div>
             <div className="layout-col-2" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-              <div className="card">
-                <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading status…</div>}>
-                  <ProcessingStatusRail intents={intents} />
-                </React.Suspense>
+              {/* Telemetry View Tab Controls */}
+              <div style={{
+                display: 'flex',
+                gap: '8px',
+                borderBottom: '1px solid var(--color-border)',
+                paddingBottom: '8px',
+                marginBottom: '-8px'
+              }}>
+                <button
+                  type="button"
+                  className={`btn ${telemetryView === 'visual' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setTelemetryView('visual')}
+                  style={{
+                    padding: '6px 16px',
+                    fontSize: '0.75rem',
+                    fontFamily: 'var(--font-mono)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}
+                >
+                  📡 Matching Arena
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${telemetryView === 'logs' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setTelemetryView('logs')}
+                  style={{
+                    padding: '6px 16px',
+                    fontSize: '0.75rem',
+                    fontFamily: 'var(--font-mono)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}
+                >
+                  📜 Detailed Logs
+                </button>
               </div>
-              <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading activity stream…</div>}>
-                  <LiveAgentActivityStream
+
+              {/* RENDER Matching Arena */}
+              <div style={{ display: telemetryView === 'visual' ? 'contents' : 'none' }}>
+                <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading matching arena…</div>}>
+                  <TeeNegotiationVisualizer
                     agents={agents}
                     intents={intents}
                     institutionName={session.institution.displayName}
                     institutionDid={session.institution.t3TenantDid}
                   />
                 </React.Suspense>
+              </div>
+
+              {/* RENDER Detailed Logs */}
+              <div style={{ display: telemetryView === 'logs' ? 'contents' : 'none', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+                <div className="card">
+                  <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading status…</div>}>
+                    <ProcessingStatusRail intents={intents} />
+                  </React.Suspense>
+                </div>
+                <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading activity stream…</div>}>
+                    <LiveAgentActivityStream
+                      agents={agents}
+                      intents={intents}
+                      institutionName={session.institution.displayName}
+                      institutionDid={session.institution.t3TenantDid}
+                    />
+                  </React.Suspense>
+                </div>
               </div>
             </div>
           </div>

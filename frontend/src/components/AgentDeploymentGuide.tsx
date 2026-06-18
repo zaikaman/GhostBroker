@@ -30,6 +30,8 @@ import { AgentProvisioningForm } from './AgentProvisioningForm';
 import { MandateConfigForm } from './MandateConfigForm';
 import '../styles/deploy.css';
 import { dispatchAgentsUpdated } from '../services/agent-events';
+import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
+import { TeeNegotiationVisualizer } from './TeeNegotiationVisualizer';
 
 interface AgentDeploymentGuideProps {
   session: AuthSession;
@@ -156,15 +158,6 @@ function humanizeExecutionStyle(style: NegotiationMandateSummary['executionStyle
   return style.replace(/_/gu, ' ').replace(/\b\w/gu, (c) => c.toUpperCase());
 }
 
-function getEnclaveMeasurement(agentDid: string): string {
-  let hash = 0;
-  for (let i = 0; i < agentDid.length; i++) {
-    hash = (hash << 5) - hash + agentDid.charCodeAt(i);
-    hash |= 0;
-  }
-  const hex = Math.abs(hash).toString(16).padEnd(8, '0');
-  return `0x5e${hex}f4...ae3b`;
-}
 
 /**
  * Summarize the bound mandate from the authored AI-first fields when
@@ -326,6 +319,7 @@ function validateMandateDeadline(mandate: NegotiationMandateSummary | null, now:
 }
 
 export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuideProps): React.JSX.Element {
+  const { agents, intents } = useConnectionTelemetry(session.institution.id);
   const [hostedAgents, setHostedAgents] = useState<HostedAgentRecord[]>([]);
   const [admittedAgents, setAdmittedAgents] = useState<Agent[]>([]);
   const [mandatesByAgentId, setMandatesByAgentId] = useState<Record<string, NegotiationMandateSummary[]>>({});
@@ -445,6 +439,19 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     () => hostedAgents.find((record) => record.agent.id === selectedAgentId) ?? null,
     [hostedAgents, selectedAgentId],
   );
+
+  const activeTelemetryAgents = useMemo(() => {
+    if (agents.length > 0) return agents;
+    if (selectedHostedRecord && selectedHostedRecord.runtime.running) {
+      return [{
+        agentDid: selectedHostedRecord.agent.agentDid,
+        status: 'verified' as const,
+        connected: true,
+        timestamp: new Date().toISOString()
+      }];
+    }
+    return [];
+  }, [agents, selectedHostedRecord]);
 
   const selectedAgent = useMemo(
     () => admittedAgents.find((agent) => agent.id === selectedAgentId) ?? selectedHostedRecord?.agent ?? null,
@@ -1284,74 +1291,14 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
           ) : (
             <>
               {/* Enclave Attestation Visualizer */}
-              <div className="enclave-visualizer-block" style={{ marginBottom: 'var(--spacing-md)' }}>
-                <div className="enclave-svg-wrapper">
-                  <div className="enclave-pulse-glow" style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }} />
-                  <svg className="enclave-svg-orbits" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(94, 210, 156, 0.1)" strokeWidth="1" />
-                    <circle 
-                      className="orbit-ring-outer" 
-                      cx="50" 
-                      cy="50" 
-                      r="45" 
-                      fill="none" 
-                      stroke={selectedHostedRecord.runtime.running ? 'var(--color-accent)' : 'var(--color-text-muted)'} 
-                      strokeWidth="1.5" 
-                      strokeDasharray="10 40 20 30" 
-                      style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }}
-                    />
-                    <circle cx="50" cy="50" r="32" fill="none" stroke="rgba(94, 210, 156, 0.05)" strokeWidth="1" />
-                    <circle 
-                      className="orbit-ring-mid" 
-                      cx="50" 
-                      cy="50" 
-                      r="32" 
-                      fill="none" 
-                      stroke={selectedHostedRecord.runtime.running ? 'rgba(94, 210, 156, 0.4)' : 'rgba(100, 116, 139, 0.2)'} 
-                      strokeWidth="1.5" 
-                      strokeDasharray="15 25 5 15" 
-                      strokeDashoffset="20" 
-                      style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }}
-                    />
-                    <circle cx="50" cy="50" r="18" fill="none" stroke="rgba(94, 210, 156, 0.05)" strokeWidth="1" />
-                    <circle 
-                      className="orbit-ring-inner" 
-                      cx="50" 
-                      cy="50" 
-                      r="18" 
-                      fill="none" 
-                      stroke={selectedHostedRecord.runtime.running ? 'var(--color-accent)' : 'var(--color-text-muted)'} 
-                      strokeWidth="1" 
-                      strokeDasharray="5 15" 
-                      style={{ animationPlayState: selectedHostedRecord.runtime.running ? 'running' : 'paused' }}
-                    />
-                    <circle cx="50" cy="50" r="6" fill={selectedHostedRecord.runtime.running ? 'var(--color-accent)' : 'var(--color-text-muted)'} />
-                  </svg>
-                </div>
-                <div className="enclave-telemetry-readout">
-                  <div className="telemetry-row">
-                    <span className="telemetry-label">Attestation</span>
-                    <span className={`telemetry-value ${selectedHostedRecord.runtime.running ? 'success' : ''}`}>
-                      {selectedHostedRecord.runtime.running ? 'VERIFIED' : 'INACTIVE'}
-                    </span>
-                  </div>
-                  <div className="telemetry-row">
-                    <span className="telemetry-label">Security</span>
-                    <span className="telemetry-value">SGX HARDWARE TEE</span>
-                  </div>
-                  <div className="telemetry-row">
-                    <span className="telemetry-label">Measurement</span>
-                    <span className="telemetry-value hash">
-                      {getEnclaveMeasurement(selectedHostedRecord.agent.agentDid)}
-                    </span>
-                  </div>
-                  <div className="telemetry-row">
-                    <span className="telemetry-label">Enclave Mode</span>
-                    <span className="telemetry-value">
-                      {selectedHostedRecord.runtime.running ? 'ZERO ACCESS ACTIVE' : 'OFFLINE'}
-                    </span>
-                  </div>
-                </div>
+              <div style={{ marginBottom: 'var(--spacing-md)' }}>
+                <TeeNegotiationVisualizer
+                  agents={activeTelemetryAgents}
+                  intents={intents}
+                  institutionName={session.institution.displayName}
+                  institutionDid={session.institution.t3TenantDid}
+                  compact={true}
+                />
               </div>
 
               <div className="process-dashboard">
