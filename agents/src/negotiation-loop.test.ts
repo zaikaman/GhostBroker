@@ -87,73 +87,104 @@ describe("pickLiveSession", () => {
     expect(pickLiveSession([active, expired], "session-2")).toBe(expired);
   });
 
-  it("skips terminal sessions and picks the most recent actionable one", () => {
+  it("returns null when no sessionId is known and no actionable session matches our side", () => {
     const expired = build({ id: "old-expired", status: "expired" });
     const walkedAway = build({ id: "old-walked", status: "walked_away" });
     const settled = build({ id: "old-settled", status: "settled" });
-    const active = build({ id: "fresh-active", status: "active" });
-    // Sessions are ordered created_at desc by the backend; the most
-    // recent actionable session is the one the agent should join.
-    expect(pickLiveSession([active, expired, walkedAway, settled], undefined)).toBe(active);
+    const futureDeadline = new Date(Date.now() + 600_000).toISOString();
+    // Active session at the OTHER side's turn — we cannot act on it
+    // yet. The agent must keep polling for the orchestrator to
+    // pair us into a session that is at our turn.
+    const otherTurn = build({
+      id: "other-turn",
+      status: "active",
+      currentTurn: "sell",
+      deadline: futureDeadline,
+    });
+    expect(
+      pickLiveSession([otherTurn, expired, walkedAway, settled], undefined, Date.now(), "buy"),
+    ).toBeNull();
   });
 
   it("returns null when only terminal sessions are visible (pairing wait)", () => {
     const expired = build({ id: "old-expired", status: "expired" });
     const walkedAway = build({ id: "old-walked", status: "walked_away" });
-    expect(pickLiveSession([expired, walkedAway], undefined)).toBeNull();
+    expect(pickLiveSession([expired, walkedAway], undefined, Date.now(), "buy")).toBeNull();
   });
 
-  it("regression: does not blindly pick sessions[0] when a stale expired session sits at the top", () => {
-    // This is the exact shape that caused the hosted agent to bail
-    // out at tick 1: the SELL agent's submitTicket returned
-    // sessionId=null (no pairing yet), then the loop's first
-    // listNegotiationSessions returned an old expired session from
-    // a previous run as `sessions[0]`. The agent picked it up,
-    // surfaced `expired`, and exited before the BUY agent's
-    // ticket could pair with it.
-    const staleExpired = build({ id: "stale", status: "expired" });
-    const freshActive = build({ id: "fresh", status: "active" });
-    expect(pickLiveSession([staleExpired, freshActive], undefined)).toBe(freshActive);
+  it("with side filter: returns the freshest active session where it is our turn", () => {
+    const otherTurn = build({ id: "not-our-turn", status: "active", currentTurn: "sell" });
+    const ourTurn = build({ id: "our-turn", status: "active", currentTurn: "buy" });
+    const futureDeadline = new Date(Date.now() + 600_000).toISOString();
+    const freshOurTurn = build({
+      id: "fresh-our-turn",
+      status: "active",
+      currentTurn: "buy",
+      deadline: futureDeadline,
+    });
+    // The session list is ordered created_at desc; the freshest
+    // session whose currentTurn matches our side is the one we
+    // were just paired into.
+    expect(
+      pickLiveSession([freshOurTurn, ourTurn, otherTurn], undefined, Date.now(), "buy"),
+    ).toBe(freshOurTurn);
   });
 
-  it("regression: ignores a zombie 'active' session whose deadline has already passed", () => {
+  it("with side filter: skips sessions whose currentTurn is the other side", () => {
+    // Regression: the legacy pickLiveSession would adopt the
+    // freshest actionable session regardless of whose turn it is.
+    // The seller in a fresh pairing was adopting the buyer's
+    // session and submitting moves on the buyer's turn, which
+    // the orchestrator accepted (because the move itself was
+    // structurally valid) but advanced the wrong turn — silently
+    // corrupting session state. The `currentTurn === side` filter
+    // fixes that.
+    const ourTurn = build({ id: "our-turn", status: "active", currentTurn: "buy" });
+    const otherTurn = build({ id: "other-turn", status: "active", currentTurn: "sell" });
+    expect(
+      pickLiveSession([otherTurn, ourTurn], undefined, Date.now(), "buy"),
+    ).toBe(ourTurn);
+  });
+
+  it("regression: still ignores a zombie 'active' session whose deadline has already passed once we have a sessionId", () => {
     // A previous run may have left a session in `status = "active"`
     // in the database if the agent exhausted MAX_TICKS without ever
     // calling `submitMove` after the deadline (so the orchestrator
-    // never explicitly flipped it to "expired"). A status-only
-    // filter would still pick this zombie up; the deadline is the
-    // only reliable signal that it is dead.
+    // never explicitly flipped it to "expired"). When the agent
+    // DOES have a sessionId, the existing session-lookup path
+    // returns the requested session regardless of its deadline;
+    // the orchestrator's own deadline check is what terminates it
+    // on submit.
     const zombie = build({
       id: "zombie",
       status: "active",
       deadline: pastDeadline,
     });
     const fresh = build({ id: "fresh", status: "active" });
-    expect(pickLiveSession([zombie, fresh], undefined)).toBe(fresh);
-    expect(pickLiveSession([zombie], undefined)).toBeNull();
+    expect(pickLiveSession([zombie, fresh], "zombie")).toBe(zombie);
+    expect(pickLiveSession([zombie, fresh], "fresh")).toBe(fresh);
   });
 
-  it("regression: refuses to attach to a fresh-looking session that has already missed its deadline", () => {
-    // New ticket was sealed, pairing just happened, but the
-    // orchestrator's deadline has already lapsed (e.g. pairing took
-    // so long that there is no time to negotiate). The agent should
-    // treat this as no actionable session and keep polling rather
-    // than adopt a session that will expire on the first move.
-    const almostDone = build({
-      id: "almost-done",
+  it("regression: returns null when only zombie 'active' sessions are visible and we have no sessionId", () => {
+    const zombie = build({
+      id: "zombie",
       status: "active",
       deadline: pastDeadline,
     });
-    expect(pickLiveSession([almostDone], undefined)).toBeNull();
+    expect(pickLiveSession([zombie], undefined, Date.now(), "buy")).toBeNull();
   });
 
   it("accepts an injected 'now' for deterministic tests", () => {
     const now = Date.parse("2026-06-18T00:00:00.000Z");
     const before = new Date(now - 1).toISOString();
     const after = new Date(now + 1).toISOString();
-    const pastSession = build({ id: "past", status: "active", deadline: before });
-    const futureSession = build({ id: "future", status: "active", deadline: after });
-    expect(pickLiveSession([pastSession, futureSession], undefined, now)).toBe(futureSession);
+    const pastSession = build({ id: "past", status: "active", currentTurn: "buy", deadline: before });
+    const futureSession = build({ id: "future", status: "active", currentTurn: "buy", deadline: after });
+    // sessionId-bound: returns the requested session regardless of deadline.
+    expect(pickLiveSession([pastSession, futureSession], "past", now)).toBe(pastSession);
+    expect(pickLiveSession([pastSession, futureSession], "future", now)).toBe(futureSession);
+    // No sessionId + side filter: respects deadline.
+    expect(pickLiveSession([pastSession, futureSession], undefined, now, "buy")).toBe(futureSession);
   });
 });
 

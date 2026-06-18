@@ -301,7 +301,10 @@ export class InMemoryNegotiationRepository implements NegotiationRepository {
           round.actor_side === counterpartSide &&
           (round.move_type === "propose" ||
             round.move_type === "counter" ||
-            round.move_type === "accept"),
+            round.move_type === "accept" ||
+            round.move_type === "request_disclosure" ||
+            round.move_type === "reveal" ||
+            round.move_type === "hold"),
       );
     return {
       id: session.id,
@@ -390,7 +393,10 @@ function pickStanding(
     if (
       round.move_type !== "propose" &&
       round.move_type !== "counter" &&
-      round.move_type !== "accept"
+      round.move_type !== "accept" &&
+      round.move_type !== "request_disclosure" &&
+      round.move_type !== "reveal" &&
+      round.move_type !== "hold"
     ) {
       continue;
     }

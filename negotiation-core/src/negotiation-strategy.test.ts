@@ -397,6 +397,44 @@ describe("validateAgentDecision", () => {
     );
   });
 
+  it("downgrades accept to propose when pending claims remain and no disclosure move is left", () => {
+    const profile = buildProfile({
+      ...buyerAuthored,
+      disclosurePolicy: {
+        allowLadder: ["accredited_institution", "settlement_capacity"],
+        requireReciprocityFor: ["settlement_capacity"],
+      },
+    });
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 5,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: "crossed",
+      counterpartStandingPrice: 70_000,
+      counterpartStandingQuantity: 1,
+      receivedClaims: [],
+      concessionConsumedBps: 30,
+      priorClaimRequests: ["accredited_institution", "settlement_capacity"],
+    });
+    const result = validateAgentDecision(
+      {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Still feasible; accept.",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("propose");
+    expect(result.accepted.settlementReadiness).toBe("not_ready");
+    expect(result.downgradedFrom).toBe("accept");
+    expect(result.adjustedReason).toBe(
+      "accept_replaced_with_propose_for_disclosure_gate",
+    );
+  });
+
   it("downgrades opening-turn reveal to propose", () => {
     const profile = buildProfile(buyerAuthored);
     const ctx = buildTurnContext({

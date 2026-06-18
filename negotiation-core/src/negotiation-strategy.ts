@@ -662,6 +662,24 @@ export function validateAgentDecision(
           adjustedReason: "accept_replaced_with_reveal_for_disclosure_gate",
         };
       }
+
+      return {
+        accepted: {
+          action: "propose",
+          price: roundPrice(clampPrice(move.price, ctx)),
+          quantity: roundQty(clampQuantity(move.quantity, ctx)),
+          strategicIntent: "build_trust",
+          confidence: clampConfidence(move.confidence),
+          escalationRequested: Boolean(move.escalationRequested),
+          settlementReadiness: "not_ready",
+          reasoning: `Disclosure gate still blocks settlement; restate terms while awaiting verification of ${outstandingRequiredClaims.join(", ")}.`.slice(
+            0,
+            280,
+          ),
+        },
+        downgradedFrom: "accept",
+        adjustedReason: "accept_replaced_with_propose_for_disclosure_gate",
+      };
     }
   }
 

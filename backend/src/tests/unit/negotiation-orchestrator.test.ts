@@ -574,4 +574,28 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
     });
     expect(seller.status).toBe("settled");
   });
+
+  it("keeps counterpart standing terms visible across disclosure-only moves", async () => {
+    const harness = await buildHarness({ approvalMode: "auto_settle" });
+    const sessionId = await openSession(harness);
+    await harness.repository.appendRound({
+      sessionId,
+      roundNumber: 1,
+      actorDid: SELL_AGENT_DID,
+      actorSide: "sell",
+      moveType: "request_disclosure",
+      proposalCiphertext: Buffer.from(
+        JSON.stringify({ price: 70_020, quantity: 1 }),
+        "utf8",
+      ).toString("base64url"),
+      disclosedClaimRefs: ["accredited_institution"],
+      reasoning: "Need proof first",
+    });
+
+    const buyerView = await harness.repository.getSession(sessionId, BUY_INSTITUTION);
+    expect(buyerView?.counterpartStandingProposal).toEqual({
+      price: 70_020,
+      quantity: 1,
+    });
+  });
 });

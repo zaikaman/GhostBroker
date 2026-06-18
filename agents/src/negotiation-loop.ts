@@ -38,7 +38,14 @@ interface RuntimeMandate {
   urgency: "low" | "normal" | "high" | "critical";
   deadline: string;
   disclosableClaims: string[];
-  requiredCounterpartyClaims: string[];
+  /**
+   * Legacy field. The wire shape (per `negotiationMandateSchema`) is
+   * a `{ [claimType]: jsonValue }` record; the synthesized authored
+   * policy below treats the *keys* as the required-claim list. The
+   * authored-form mandates expose the same data as
+   * `counterpartyRequirements.requiredClaims: string[]` instead.
+   */
+  requiredCounterpartyClaims: Record<string, unknown> | string[];
   counterpartyConstraints: Record<string, unknown>;
   operatorPrompt: string;
   policyHash: string;
@@ -281,7 +288,7 @@ export async function runNegotiationLoop(
     }
 
     const listed = await client.listNegotiationSessions();
-    const liveSession = pickLiveSession(listed.sessions, sessionId);
+    const liveSession = pickLiveSession(listed.sessions, sessionId, Date.now(), side);
     if (!liveSession) {
       lastOutcome = "awaiting counterparty pairing";
       await sleep(env.POLL_INTERVAL_MS);
@@ -587,7 +594,7 @@ function profileFromRuntimeMandate(mandate: RuntimeMandate): NegotiationStrategy
     },
     disclosurePolicy: { allowLadder: mandate.disclosableClaims ?? [] },
     counterpartyRequirements: {
-      requiredClaims: mandate.requiredCounterpartyClaims ?? [],
+      requiredClaims: normalizeRequiredClaims(mandate.requiredCounterpartyClaims),
       disallowedTraits: [],
     },
     approvalPolicy: { mode: "auto_settle" },
@@ -595,6 +602,27 @@ function profileFromRuntimeMandate(mandate: RuntimeMandate): NegotiationStrategy
     operatorInstructions: mandate.operatorPrompt,
   };
   return normalizeStrategy(synthesized);
+}
+
+/**
+ * The legacy `requiredCounterpartyClaims` field is a
+ * `Record<claimType, jsonValue>` map. The synthesized authored policy
+ * expects `string[]`. Normalize the wire shape so the shared
+ * validator's `requiredClaims.every(...)` call does not crash on a
+ * non-array value (this was the cause of the recurring
+ * `TypeError: requiredClaims.every is not a function` abort at the
+ * second tick of every legacy-mandate run).
+ */
+function normalizeRequiredClaims(
+  value: Record<string, unknown> | string[] | null | undefined,
+): string[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((claim): claim is string => typeof claim === "string");
+  }
+  return Object.keys(value);
 }
 
 function deriveCounterpartPattern(
@@ -691,22 +719,36 @@ export function isActionableSessionStatus(
  *
  *   - When we already have a `sessionId` (e.g. we were paired at
  *     `submitTicket` time), follow that exact session.
- *   - When `sessionId` is undefined (our ticket was sealed but the
+ *   - When `sessionId` is undefined, our ticket was sealed but the
  *     orchestrator had no partner yet, so it parked us in
- *     `pendingTickets`), pick the most recent session we are a
- *     participant in that is still in an actionable state AND whose
- *     deadline has not yet passed.
+ *     `pendingTickets`. We need to discover the session that the
+ *     orchestrator has now paired us into. The listed surface
+ *     contains every session our institution is a party to,
+ *     including stale sessions from prior runs that the agent is
+ *     not actually in. We filter to sessions that:
  *
- * Critically, we must NOT blindly take `sessions[0]` in the second
- * case: the listed surface includes stale sessions from earlier
- * runs. Returning one of those would cause the agent to immediately
- * exit with `expired`/`walked_away`/`settled` and abandon the freshly
- * submitted ticket before the orchestrator ever pairs it. Worse,
- * a prior session whose `status` is still `active` in the database
- * (because the previous run never called `submitMove` after the
- * deadline, so `expireSession` was never invoked) would slip past a
- * status-only filter — its `deadline` is the only reliable signal
- * that it is dead.
+ *       1. Are still actionable (`active` / `awaiting_approval` /
+ *          `converged` / `settling`),
+ *       2. Have not yet hit their deadline,
+ *       3. Whose `currentTurn` matches our `side` (otherwise the
+ *          agent would adopt a session it cannot act on).
+ *
+ *     The most recent such session is the one we just got paired
+ *     into. This is what was happening before, but the legacy
+ *     version skipped the `currentTurn` check and would happily
+ *     adopt a stale `active` session from a previous run where the
+ *     agent's DID is not in the session's `buy_agent_did` /
+ *     `sell_agent_did` — the orchestrator would then bounce every
+ *     move with 403 on `resolveActorSide`. The `currentTurn` filter
+ *     alone is enough to rule those out: a prior session in
+ *     `active` state from the same side is virtually always at a
+ *     later round and may have the agent's turn pending, but if
+ *     the previous run left a session in `active` with a deadline
+ *     still in the future, the dead-or-zombie filter in
+ *     `isActionableSessionStatus` is the safety net. (We still
+ *     honour an explicit `sessionId` even when its deadline has
+ *     passed — the orchestrator's own deadline check is what
+ *     terminates it on submit.)
  *
  * Returns `null` when no actionable session is visible — the caller
  * should keep polling for the orchestrator to pair the pending
@@ -716,15 +758,32 @@ export function pickLiveSession(
   sessions: readonly RedactedNegotiationSessionView[],
   sessionId: string | undefined,
   now: number = Date.now(),
+  side?: "buy" | "sell",
 ): RedactedNegotiationSessionView | null {
   if (sessionId !== undefined) {
     return sessions.find((item) => item.id === sessionId) ?? null;
   }
-  return (
-    sessions.find(
-      (item) =>
-        isActionableSessionStatus(item.status) &&
-        Date.parse(item.deadline) > now,
-    ) ?? null
-  );
+  // No sessionId yet — discover the session the orchestrator paired
+  // us into. The listed surface is institution-scoped (we only see
+  // sessions our institution is a party to), but it also contains
+  // stale `active` sessions from prior runs that we are NOT in.
+  // Filtering by `currentTurn === side` (when we know our side)
+  // rules out most of those: a stale session from a previous
+  // buyer run is either at the buyer's turn (in which case it
+  // would be picked up — see below for the deadline check) or
+  // already advanced past us. The deadline check is the hard
+  // safety net.
+  const candidateSessions = side !== undefined
+    ? sessions.filter(
+        (item) =>
+          isActionableSessionStatus(item.status) &&
+          Date.parse(item.deadline) > now &&
+          item.currentTurn === side,
+      )
+    : sessions.filter(
+        (item) =>
+          isActionableSessionStatus(item.status) &&
+          Date.parse(item.deadline) > now,
+      );
+  return candidateSessions[0] ?? null;
 }

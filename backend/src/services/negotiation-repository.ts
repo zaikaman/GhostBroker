@@ -214,7 +214,10 @@ function pickLatestStandingProposal(
     if (
       round.move_type !== "propose" &&
       round.move_type !== "counter" &&
-      round.move_type !== "accept"
+      round.move_type !== "accept" &&
+      round.move_type !== "request_disclosure" &&
+      round.move_type !== "reveal" &&
+      round.move_type !== "hold"
     ) {
       continue;
     }
@@ -735,12 +738,15 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       session.buy_institution_id === institutionId ? "sell" : "buy";
     const counterpartProposalRecord = [...(rounds ?? [])]
       .reverse()
-      .find((round) =>
-        round.actor_side === counterpartSide &&
-        (round.move_type === "propose" ||
-          round.move_type === "counter" ||
-          round.move_type === "accept")
-      ) ?? null;
+        .find((round) =>
+          round.actor_side === counterpartSide &&
+          (round.move_type === "propose" ||
+            round.move_type === "counter" ||
+            round.move_type === "accept" ||
+            round.move_type === "request_disclosure" ||
+            round.move_type === "reveal" ||
+            round.move_type === "hold")
+        ) ?? null;
     const counterpartStandingProposal = parseProposalCiphertext(
       counterpartProposalRecord?.proposal_ciphertext ?? null,
     );

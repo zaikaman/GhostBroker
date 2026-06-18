@@ -27,8 +27,15 @@ function legacyNumber(name: string, fallback: number): number {
 
 const LEGACY_REFERENCE_PRICE = legacyNumber("AGENT_REFERENCE_PRICE", legacyNumber("REFERENCE_PRICE", 70_000));
 const LEGACY_PRICE_BAND_BPS = legacyNumber("PRICE_BAND_BPS", 200);
-const LEGACY_QUANTITY_MIN = legacyNumber("AGENT_QUANTITY_MIN", legacyNumber("QUANTITY_MIN", 0.05));
-const LEGACY_QUANTITY_MAX = legacyNumber("AGENT_QUANTITY_MAX", legacyNumber("QUANTITY_MAX", 1.0));
+// T3 match contract on the testnet sandbox only accepts integer
+// quantities — anything below 1 rounds to 0 and the orchestrator
+// returns no_match. Default the legacy buyer/seller scripts to
+// 1 WBTC (the test institutions have plenty on either side) so
+// the legacy pipeline can also converge end-to-end. The
+// hosted-mandate path can still pick any targetQuantity from
+// the persisted mandate.
+const LEGACY_QUANTITY_MIN = legacyNumber("AGENT_QUANTITY_MIN", legacyNumber("QUANTITY_MIN", 1));
+const LEGACY_QUANTITY_MAX = legacyNumber("AGENT_QUANTITY_MAX", legacyNumber("QUANTITY_MAX", 1));
 const LEGACY_TICK_INTERVAL_MS = legacyNumber("TICK_INTERVAL_MS", 15_000);
 const LEGACY_OPERATOR_PROMPT = process.env.AGENT_OPERATOR_PROMPT ?? undefined;
 

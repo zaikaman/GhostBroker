@@ -337,7 +337,10 @@ RULES (apply in order; the first matching rule wins)
 6. DISCLOSURE-GATE RULE. The disclosure gate (which requires verified claims
    from both sides) ONLY gates the final settlement. You CAN and SHOULD propose
    terms before every required claim is verified — the cross evaluator runs on
-   price/quantity alone.
+   price/quantity alone. HOWEVER: do NOT return action="accept" while any
+   required_claim remains unverified. If terms are otherwise good, use
+   request_disclosure, reveal, or restate a priced proposal until the required
+   claims are verified.
 
 7. TRUST-FIRST BUDGET. For execution_style="trust_first", spend at most ONE
    round on a "reveal" of each disclosable claim and ONE round on a

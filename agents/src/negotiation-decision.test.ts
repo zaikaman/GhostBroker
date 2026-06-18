@@ -409,6 +409,57 @@ describe("clampNegotiationDecision — disclosure moves", () => {
     );
     expect(out.action).toBe("propose");
   });
+
+  it("downgrades accept to request_disclosure when required claims are still pending", () => {
+    const crossedCtx: NegotiationContext = {
+      ...postOpeningCtx,
+      distanceSignal: "crossed",
+      counterpartStandingPrice: 70_000,
+      counterpartStandingQuantity: 1,
+      requiredClaims: ["accredited_institution", "settlement_capacity"],
+      receivedClaims: [],
+      trustLevel: "none",
+    };
+    const out = clampNegotiationDecision(
+      {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Cross is feasible; accept now.",
+      },
+      crossedCtx,
+    );
+    expect(out.action).toBe("request_disclosure");
+    expect(out.claimType).toBe("accredited_institution");
+    expect(out.strategicIntent).toBe("request_proof");
+    expect(out.settlementReadiness).toBe("not_ready");
+  });
+
+  it("downgrades accept to propose when required claims remain pending and every disclosure move was already used", () => {
+    const exhaustedCtx: NegotiationContext = {
+      ...postOpeningCtx,
+      distanceSignal: "crossed",
+      counterpartStandingPrice: 70_000,
+      counterpartStandingQuantity: 1,
+      requiredClaims: ["accredited_institution", "settlement_capacity"],
+      receivedClaims: [],
+      disclosableClaims: [],
+      priorClaimRequests: ["accredited_institution", "settlement_capacity"],
+      trustLevel: "none",
+    };
+    const out = clampNegotiationDecision(
+      {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Cross is feasible; accept now.",
+      },
+      exhaustedCtx,
+    );
+    expect(out.action).toBe("propose");
+    expect(out.strategicIntent).toBe("build_trust");
+    expect(out.settlementReadiness).toBe("not_ready");
+  });
 });
 
 describe("clampNegotiationDecision — walkaway", () => {

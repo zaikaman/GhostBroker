@@ -586,12 +586,28 @@ export class NegotiationOrchestrator {
           : input.move.action === "hold"
             ? "negotiation_held"
             : "negotiation_move_submitted";
+      const proposalCiphertext =
+        input.move.price !== undefined &&
+        Number.isFinite(input.move.price) &&
+        input.move.price > 0 &&
+        input.move.quantity !== undefined &&
+        Number.isFinite(input.move.quantity) &&
+        input.move.quantity > 0
+          ? Buffer.from(
+              JSON.stringify({
+                price: input.move.price,
+                quantity: input.move.quantity,
+              }),
+              "utf8",
+            ).toString("base64url")
+          : null;
       await this.repository.appendRound({
         sessionId: session.id,
         roundNumber: session.round_number + 1,
         actorDid: input.agentDid,
         actorSide,
         moveType: input.move.action,
+        ...(proposalCiphertext ? { proposalCiphertext } : {}),
         ...(input.move.claimType
           ? { disclosedClaimRefs: [input.move.claimType] }
           : {}),
@@ -964,12 +980,29 @@ export class NegotiationOrchestrator {
       t3AttestationRef: verified.t3AttestationRef,
     });
 
+    const proposalCiphertext =
+      input.move.price !== undefined &&
+      Number.isFinite(input.move.price) &&
+      input.move.price > 0 &&
+      input.move.quantity !== undefined &&
+      Number.isFinite(input.move.quantity) &&
+      input.move.quantity > 0
+        ? Buffer.from(
+            JSON.stringify({
+              price: input.move.price,
+              quantity: input.move.quantity,
+            }),
+            "utf8",
+          ).toString("base64url")
+        : null;
+
     await this.repository.appendRound({
       sessionId: input.session.id,
       roundNumber: input.session.round_number + 1,
       actorDid: input.agentDid,
       actorSide: input.actorSide,
       moveType: "reveal",
+      ...(proposalCiphertext ? { proposalCiphertext } : {}),
       disclosedClaimRefs: [verified.claimType],
       reasoning: input.move.reasoning,
       strategicIntent: input.move.strategicIntent ?? "build_trust",
