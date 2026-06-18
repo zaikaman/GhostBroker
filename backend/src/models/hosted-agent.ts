@@ -7,6 +7,26 @@ export const hostedNegotiatorRuntimeConfigSchema = z.object({
   pollIntervalMs: z.number().int().positive().max(300_000),
   maxTicks: z.number().int().positive().max(10_000),
   dryRun: z.boolean().default(false),
+  /**
+   * Protocol choreography mode the hosted agent loop uses.
+   *
+   *   - `"guarded_fast"` (default for newly created hosted agents):
+   *       The LLM still proposes price / rationale, but the
+   *       `selectGuardedNegotiationMove` helper owns the action
+   *       choreography — opening turn always proposes, only
+   *       `accredited_institution` is asked for or revealed,
+   *       `settlement_capacity` is never asked for at runtime, and
+   *       the post-submit sleep is reduced to a short tick.
+   *
+   *   - `"llm_freeform"`:
+   *       The LLM owns every action; the loop forwards its decision
+   *       verbatim (kept for non-demo experimentation).
+   *
+   * Existing hosted-agent records written before this field existed
+   * are read back as `"guarded_fast"` by `readHostedNegotiatorRuntimeConfig`
+   * — the default applies both at create time and at deserialization.
+   */
+  protocolMode: z.enum(["guarded_fast", "llm_freeform"]).default("guarded_fast"),
 });
 
 export type HostedNegotiatorRuntimeConfig = z.infer<

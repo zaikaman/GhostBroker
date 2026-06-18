@@ -10,12 +10,26 @@
 
 GhostBroker is an institutional dark pool where autonomous trading agents submit buy/sell intents that are matched and settled **without any counterparty ever seeing another counterparty's parameters**. Active order data lives only inside the Terminal 3 TEE; the dashboard, the API, the database, and the WebSocket telemetry stream see only opaque handles, sanitized state labels, and completed trade records. Agents are admitted and authorized via the Terminal 3 Agent Auth SDK; humans operate a read-only Observatory Console to monitor connectivity and review completed history with encrypted audit receipts.
 
-The repository is a four-package monorepo:
+The repository is a six-package monorepo:
 
 - `frontend/` — Vite + React dashboard (Vercel target)
 - `backend/` — Express + WebSocket API (Heroku target)
 - `database/` — Supabase migrations + RLS
 - `t3-enclave/` — Terminal 3 ADK boundary, ADK sessions, DID registry, Agent Auth SDK adapter, blind-intent client, match-contract client, settlement command builder
+- `agent-client/` — shared Node.js API client + WebSocket telemetry client (consumed by the hosted agents)
+- `agents/` — hosted negotiator agents (multi-provider LLM chain, negotiation-loop, guarded protocol)
+- `negotiation-core/` — shared strategy / turn-context / decision-validation math consumed by both the backend orchestrator and the hosted runtime
+
+## Hackathon story: institutional agents on a mandate rail
+
+The hosted demo runs two institutional LLM agents that negotiate **inside** a verifiable authority protocol, not in a free-form LLM-vs-LLM chat:
+
+- Each agent has a Terminal 3 DID minted on admit, a server-side delegation VC, and a pre-cleared settlement capacity (deposit relayer approvals verified by the backend before the hosted process ever starts).
+- The orchestrator owns the price band, the concession budget, the disclosure gate, the escalation gate, and the settlement command; the LLM owns strategy — opening price, rationale, confidence — **inside** those rails.
+- The agent loop defaults to `protocolMode: "guarded_fast"`. A small deterministic helper (`agents/src/guarded-protocol.ts`) owns the action choreography: opening turn always proposes, the only claim exchanged at runtime is `accredited_institution`, `settlement_capacity` is never requested round-by-round, and the post-submit delay is reduced to a short tick so the demo converges in roughly four actionable turns instead of 10-40.
+- `protocolMode: "llm_freeform"` remains available for experimentation but is not the default hackathon path.
+
+What the operator sees in the log: agent DID boot, settlement pre-clear, ticket sealed, at least one LLM decision (rationale visible), disclosure verified, accept, settled trade ref. What they do **not** see: free-form disclosure deadlock loops, repeated asks for `settlement_capacity`, or per-round reconciliation of settlement readiness — those facts are pre-launch guarantees, not negotiated claims.
 
 ## Terminal 3 Agent Auth SDK integration
 

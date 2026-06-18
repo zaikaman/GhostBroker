@@ -19,6 +19,20 @@ import {
 } from "./negotiation-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
 import { buildSelfAttestedClaimCredential } from "./claim-credential.js";
+import { selectGuardedNegotiationMove } from "./guarded-protocol.js";
+
+/**
+ * The host environment tells the agent loop how to wait between
+ * ticks. The default `POLL_INTERVAL_MS` is for slow demos / LLMs;
+ * the guarded fast-path uses a short post-submit delay so the
+ * counterpart's turn comes back inside a single demo beat instead
+ * of waiting a full poll interval after every submit.
+ *
+ * Exported so the agent loop tests can assert the wiring: when
+ * `PROTOCOL_MODE === "guarded_fast"`, the loop must use this
+ * constant for its post-submit sleep instead of `POLL_INTERVAL_MS`.
+ */
+export const GUARDED_POST_SUBMIT_DELAY_MS = 250;
 
 /**
  * The expanded runtime mandate as returned by the hosted-mandate
@@ -77,6 +91,13 @@ interface RuntimeMandate {
 export interface NegotiationLoopOptions {
   env: AgentEnv;
   llm: NegotiationLlmClient;
+  /**
+   * Optional pre-built GhostBroker client. When omitted (the
+   * production path) the loop constructs one from `env`. Tests
+   * inject a mock client to exercise the loop without standing up
+   * the full backend.
+   */
+  client?: GhostBrokerClient;
 }
 
 export interface NegotiationLoopResult {
@@ -91,6 +112,15 @@ export interface NegotiationLoopResult {
   lastDecision: NegotiationDecision | undefined;
   settlementCorrelationRef: string | undefined;
   admissionAuthorityRef: string | undefined;
+  /** Diagnostic: which protocol mode the loop actually ran in. */
+  protocolMode: AgentEnv["PROTOCOL_MODE"];
+  /**
+   * When `PROTOCOL_MODE === "guarded_fast"`, the number of times
+   * the helper overrode the LLM's proposed action. Always 0 in
+   * `llm_freeform`. Surfaced for the agent loop tests so they
+   * can assert the guard was actually exercised.
+   */
+  guardedOverrides: number;
 }
 
 function buildSessionFromEnv(env: AgentEnv): AuthSession | undefined {
@@ -157,15 +187,17 @@ export async function runNegotiationLoop(
   const identity = loadOrGenerateIdentity(env.AGENT_IDENTITY_CONFIG_PATH);
 
   const seededSession = buildSessionFromEnv(env);
-  const client = new GhostBrokerClient({
-    baseUrl: env.GHOSTBROKER_URL,
-    ...(seededSession
-      ? {
-          token: seededSession.token,
-          institutionId: seededSession.institution.id,
-        }
-      : {}),
-  });
+  const client =
+    options.client ??
+    new GhostBrokerClient({
+      baseUrl: env.GHOSTBROKER_URL,
+      ...(seededSession
+        ? {
+            token: seededSession.token,
+            institutionId: seededSession.institution.id,
+          }
+        : {}),
+    });
 
   let session: AuthSession;
   try {
@@ -185,6 +217,8 @@ export async function runNegotiationLoop(
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
+      protocolMode: env.PROTOCOL_MODE,
+      guardedOverrides: 0,
     };
   }
 
@@ -197,6 +231,8 @@ export async function runNegotiationLoop(
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
+      protocolMode: env.PROTOCOL_MODE,
+      guardedOverrides: 0,
     };
   }
 
@@ -212,6 +248,8 @@ export async function runNegotiationLoop(
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
+      protocolMode: env.PROTOCOL_MODE,
+      guardedOverrides: 0,
     };
   }
 
@@ -223,8 +261,18 @@ export async function runNegotiationLoop(
     side,
     `Mandate: ${mandate.objective ?? "(legacy)"} style=${mandate.executionStyle ?? "(legacy)"} urgency=${mandate.urgency}`,
   );
+  log(
+    side,
+    `Protocol mode: ${env.PROTOCOL_MODE} ` +
+      `(pollIntervalMs=${env.POLL_INTERVAL_MS}, maxTicks=${env.MAX_TICKS}, ` +
+      `postSubmitDelayMs=${
+        env.PROTOCOL_MODE === "guarded_fast"
+          ? GUARDED_POST_SUBMIT_DELAY_MS
+          : env.POLL_INTERVAL_MS
+      })`,
+  );
 
-  let admission: AgentAdmission;
+let admission: AgentAdmission;
   try {
     admission = await client.admitAgent({
       institutionId: session.institution.id,
@@ -239,6 +287,8 @@ export async function runNegotiationLoop(
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
+      protocolMode: env.PROTOCOL_MODE,
+      guardedOverrides: 0,
     };
   }
 
@@ -270,6 +320,7 @@ export async function runNegotiationLoop(
   let lastDecision: NegotiationDecision | undefined;
   let lastOutcome = "(start of negotiation)";
   let priorMoveRationale: string | undefined;
+  let guardedOverrides = 0;
 
   for (let tick = 1; tick <= env.MAX_TICKS; tick += 1) {
     log(side, `Negotiation tick ${tick}/${env.MAX_TICKS}`);
@@ -284,6 +335,8 @@ export async function runNegotiationLoop(
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
+        protocolMode: env.PROTOCOL_MODE,
+        guardedOverrides,
       };
     }
 
@@ -306,6 +359,8 @@ export async function runNegotiationLoop(
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
+        protocolMode: env.PROTOCOL_MODE,
+        guardedOverrides,
       };
     }
     if (liveSession.status === "expired") {
@@ -318,6 +373,8 @@ export async function runNegotiationLoop(
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
+        protocolMode: env.PROTOCOL_MODE,
+        guardedOverrides,
       };
     }
     if (liveSession.status === "settled") {
@@ -330,6 +387,8 @@ export async function runNegotiationLoop(
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
+        protocolMode: env.PROTOCOL_MODE,
+        guardedOverrides,
       };
     }
 
@@ -405,13 +464,67 @@ export async function runNegotiationLoop(
       `[${decision.strategicIntent ?? "?"}] ${decision.action} qty=${decision.quantity ?? 0} price=${decision.price ?? 0} conf=${decision.confidence?.toFixed(2) ?? "?"} escalate=${decision.escalationRequested} ready=${decision.settlementReadiness ?? "?"} (${decision.reasoning.slice(0, 120)})`,
     );
 
+    // When the runtime is in `guarded_fast` mode the helper owns the
+    // action choreography. The LLM's price / quantity / rationale
+    // are still visible — only the action / claimType are
+    // overridden when the protocol demands it. `llm_freeform`
+    // forwards the LLM's decision verbatim.
+    let moveToSubmit: NegotiationDecision = decision;
+    if (env.PROTOCOL_MODE === "guarded_fast") {
+      const counterpartSide = side === "buy" ? "sell" : "buy";
+      const receivedClaims = liveSession.disclosedClaims
+        .filter((claim) => claim.verified && claim.fromSide === counterpartSide)
+        .map((claim) => claim.claimType);
+      const guarded = selectGuardedNegotiationMove({
+        bounds: {
+          minPrice: ctx.minPrice,
+          maxPrice: ctx.maxPrice,
+          targetQuantity: ctx.targetQuantity,
+          minimumQuantity: ctx.minimumQuantity,
+        },
+        ctx: {
+          side,
+          counterpartHasStandingTerms:
+            liveSession.counterpartStandingProposal.price !== null &&
+            liveSession.counterpartStandingProposal.quantity !== null,
+          counterpartStandingPrice:
+            liveSession.counterpartStandingProposal.price,
+          counterpartStandingQuantity:
+            liveSession.counterpartStandingProposal.quantity,
+          receivedClaims,
+          priorReveals: priorDisclosureReveals,
+          priorRequests: priorDisclosureRequests,
+          // `settlement_capacity` is pre-cleared by
+          // `assertSettlementReady()` on the backend before the
+          // hosted agent ever starts; the guard's job is to make
+          // sure the LLM never asks for it at runtime.
+          settlementCapacityPreCleared: true,
+        },
+        llmDecision: decision,
+      });
+      moveToSubmit = guarded.decision;
+      if (guarded.overrideReason !== "preserved_llm_decision") {
+        guardedOverrides += 1;
+        log(
+          side,
+          `guarded_fast override: ${decision.action}` +
+            (decision.claimType ? ` ${decision.claimType}` : "") +
+            ` -> ${guarded.decision.action}` +
+            (guarded.decision.claimType
+              ? ` ${guarded.decision.claimType}`
+              : "") +
+            ` (${guarded.overrideReason})`,
+        );
+      }
+    }
+
     try {
-      if (decision.action === "walkaway") {
+      if (moveToSubmit.action === "walkaway") {
         const result = await client.walkAwayNegotiation(sessionId, {
           agentId: env.HOSTED_AGENT_ID ?? "00000000-0000-0000-0000-000000000000",
           agentDid: identity.did,
           authorityRef: admission.authorityRef,
-          reasoning: decision.reasoning,
+          reasoning: moveToSubmit.reasoning,
         });
         lastOutcome = `walkaway -> ${result.status}`;
       } else {
@@ -422,11 +535,11 @@ export async function runNegotiationLoop(
         // looping on `request_disclosure`) even when running outside a
         // T3-enclave attestation pipeline.
         const claimCredential =
-          decision.action === "reveal" && decision.claimType
+          moveToSubmit.action === "reveal" && moveToSubmit.claimType
             ? buildSelfAttestedClaimCredential({
                 issuerDid: identity.did,
                 subjectId: session.institution.displayName,
-                claimType: decision.claimType,
+                claimType: moveToSubmit.claimType,
               })
             : undefined;
 
@@ -434,7 +547,7 @@ export async function runNegotiationLoop(
           agentId: env.HOSTED_AGENT_ID ?? "00000000-0000-0000-0000-000000000000",
           agentDid: identity.did,
           authorityRef: admission.authorityRef,
-          move: decision,
+          move: moveToSubmit,
           ...(claimCredential !== undefined ? { claimCredential } : {}),
         });
         lastOutcome = `move -> ${result.status}`;
@@ -444,7 +557,7 @@ export async function runNegotiationLoop(
       if (err instanceof GhostBrokerApiError) {
         log(
           side,
-          `Move rejected: ${err.status} ${err.code} ${message} (action=${decision.action} price=${decision.price} qty=${decision.quantity})`,
+          `Move rejected: ${err.status} ${err.code} ${message} (action=${moveToSubmit.action} price=${moveToSubmit.price} qty=${moveToSubmit.quantity})`,
         );
         if (err.status === 409 || err.status === 403) {
           lastOutcome = `move rejected ${err.status}`;
@@ -462,7 +575,16 @@ export async function runNegotiationLoop(
       throw err;
     }
 
-    await sleep(env.POLL_INTERVAL_MS);
+    // After a successful submit the guarded fast-path uses a
+    // short delay so the counterpart's turn comes back inside
+    // a single demo beat instead of waiting a full
+    // POLL_INTERVAL_MS. Pairing / counter-turn / approval / LLM
+    // failure paths still use the full poll interval.
+    const postSubmitDelayMs =
+      env.PROTOCOL_MODE === "guarded_fast"
+        ? GUARDED_POST_SUBMIT_DELAY_MS
+        : env.POLL_INTERVAL_MS;
+    await sleep(postSubmitDelayMs);
   }
 
   stopOnSettle();
@@ -474,6 +596,8 @@ export async function runNegotiationLoop(
     lastDecision,
     settlementCorrelationRef,
     admissionAuthorityRef: admission.authorityRef,
+    protocolMode: env.PROTOCOL_MODE,
+    guardedOverrides,
   };
 }
 

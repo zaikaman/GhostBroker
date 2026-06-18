@@ -31,6 +31,8 @@ agents/
 │   ├── sealed-envelope.ts          # TEE-shaped base64url envelope
 │   ├── llm-decision.ts             # decision schema + clamps + LLM client
 │   ├── negotiation-decision.ts     # negotiation schema + clamps + LLM client
+│   ├── guarded-protocol.ts         # deterministic action choreography for
+│   │                               #   protocolMode=guarded_fast
 │   ├── run-loop.ts                 # shared per-tick loop (buyer/seller)
 │   ├── negotiation-loop.ts         # shared per-tick loop (hosted)
 │   ├── llm/                        # multi-provider LLM chain

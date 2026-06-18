@@ -201,6 +201,13 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
         tenantDid: institution.t3TenantDid,
       },
     );
+    // The settlement readiness check (assertSettlementReady above) is
+    // what makes `settlement_capacity` a pre-launch readiness fact,
+    // not a per-round negotiated claim. Log the pre-clear so the
+    // demo narrative stays honest.
+    console.log(
+      `[HOSTED] settlement pre-clear: deposit relayer approvals verified for ${institution.displayName}; launching ${record.config.protocolMode} runtime (pollIntervalMs=${record.config.pollIntervalMs}, maxTicks=${record.config.maxTicks})`,
+    );
     const state: HostedAgentRuntimeState = {
       agentId: id,
       institutionId,
@@ -415,6 +422,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       HOSTED_MANDATE_ID: runtime.config.mandateId,
       POLL_INTERVAL_MS: String(runtime.config.pollIntervalMs),
       MAX_TICKS: String(runtime.config.maxTicks),
+      PROTOCOL_MODE: runtime.config.protocolMode,
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
       // Forward the LLM provider credentials so the spawned agent
       // can build its fallback chain (gemini → openai → groq). The
