@@ -80,8 +80,14 @@ export class NegotiationClient {
 
   public async listSessions(
     token: string,
+    agentDid?: string,
   ): Promise<{ sessions: RedactedNegotiationSessionView[] }> {
-    const response = await fetch(`${this.baseUrl}/api/negotiations`, {
+    const url = new URL(`${this.baseUrl}/api/negotiations`);
+    if (agentDid) {
+      url.searchParams.set("agentDid", agentDid);
+    }
+
+    const response = await fetch(url, {
       method: "GET",
       headers: {
         Accept: "application/json",

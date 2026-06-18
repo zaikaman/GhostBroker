@@ -178,7 +178,10 @@ export interface NegotiationRepository {
     verified: boolean;
     t3AttestationRef: string;
   }): Promise<NegotiationDisclosureRecord>;
-  listSessions(institutionId: string): Promise<RedactedNegotiationSessionView[]>;
+  listSessions(
+    institutionId: string,
+    agentDid?: string,
+  ): Promise<RedactedNegotiationSessionView[]>;
   getSession(
     sessionId: string,
     institutionId: string,
@@ -658,17 +661,31 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
 
   public async listSessions(
     institutionId: string,
+    agentDid?: string,
   ): Promise<RedactedNegotiationSessionView[]> {
-    const { data: buyData, error: buyError } = await this.client
+    let buyQuery = this.client
       .from("negotiation_sessions")
       .select("*")
-      .eq("buy_institution_id", institutionId)
-      .order("created_at", { ascending: false });
-    const { data: sellData, error: sellError } = await this.client
+      .eq("buy_institution_id", institutionId);
+    if (agentDid) {
+      buyQuery = buyQuery.eq("buy_agent_did", agentDid);
+    }
+    const { data: buyData, error: buyError } = await buyQuery.order(
+      "created_at",
+      { ascending: false },
+    );
+
+    let sellQuery = this.client
       .from("negotiation_sessions")
       .select("*")
-      .eq("sell_institution_id", institutionId)
-      .order("created_at", { ascending: false });
+      .eq("sell_institution_id", institutionId);
+    if (agentDid) {
+      sellQuery = sellQuery.eq("sell_agent_did", agentDid);
+    }
+    const { data: sellData, error: sellError } = await sellQuery.order(
+      "created_at",
+      { ascending: false },
+    );
 
     if (buyError && sellError) {
       throw new PublicError("service_unavailable", 503, buyError);
@@ -680,6 +697,13 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
         return false;
       }
       seen.add(session.id);
+      if (
+        agentDid &&
+        session.buy_agent_did !== agentDid &&
+        session.sell_agent_did !== agentDid
+      ) {
+        return false;
+      }
       return true;
     });
 

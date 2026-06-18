@@ -218,13 +218,22 @@ export class InMemoryNegotiationRepository implements NegotiationRepository {
     return Promise.resolve(record);
   }
 
-  public listSessions(institutionId: string): Promise<RedactedNegotiationSessionView[]> {
+  public listSessions(
+    institutionId: string,
+    agentDid?: string,
+  ): Promise<RedactedNegotiationSessionView[]> {
     return Promise.resolve(
       Array.from(this.sessions.values())
         .filter(
           (s) =>
             s.buy_institution_id === institutionId ||
             s.sell_institution_id === institutionId,
+        )
+        .filter(
+          (s) =>
+            !agentDid ||
+            s.buy_agent_did === agentDid ||
+            s.sell_agent_did === agentDid,
         )
         .map((s) => this.toView(s.id, institutionId))
         .filter((view): view is RedactedNegotiationSessionView => view !== null),

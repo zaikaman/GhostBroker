@@ -287,7 +287,7 @@ export async function runNegotiationLoop(
       };
     }
 
-    const listed = await client.listNegotiationSessions();
+    const listed = await client.listNegotiationSessions(identity.did);
     const liveSession = pickLiveSession(listed.sessions, sessionId, Date.now(), side);
     if (!liveSession) {
       lastOutcome = "awaiting counterparty pairing";

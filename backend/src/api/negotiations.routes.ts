@@ -15,6 +15,9 @@ const negotiationIdParamsSchema = revokeAgentParamsSchema;
 const agentMandateQuerySchema = z.object({
   mandateId: z.string().uuid().optional(),
 });
+const negotiationSessionsQuerySchema = z.object({
+  agentDid: z.string().trim().min(1).optional(),
+});
 
 const escalationDecisionSchema = z.object({
   reason: z.string().trim().min(1).max(4000).optional(),
@@ -25,11 +28,23 @@ export function createNegotiationsRouter(
 ): Router {
   const router = Router();
 
-  router.get("/negotiations", async (_request, response, next) => {
+  router.get("/negotiations", async (request, response, next) => {
     try {
       const operatorAuth = requireOperatorAuth(response);
+      const query = negotiationSessionsQuerySchema.safeParse(request.query);
+      if (!query.success) {
+        throw new PublicError("validation_failed", 400, query.error);
+      }
+      if (
+        query.data.agentDid &&
+        operatorAuth.did &&
+        operatorAuth.did !== query.data.agentDid
+      ) {
+        throw new PublicError("authorization_failed", 403);
+      }
       const sessions = await negotiationService.listSessions(
         operatorAuth.institutionId,
+        query.data.agentDid,
       );
       response.status(200).json({ sessions });
     } catch (error) {

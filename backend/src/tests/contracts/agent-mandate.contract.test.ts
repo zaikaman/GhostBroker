@@ -51,10 +51,10 @@ function buildServices(
   };
 }
 
-function issueToken(): string {
+function issueToken(did = "did:t3n:operator:us1"): string {
   return issueOperatorSessionToken({
     secret: "development-only-auth-session-secret-change-before-production",
-    did: "did:t3n:operator:us1",
+    did,
     institutionId: us1OperatorInstitutionId,
   });
 }
@@ -150,5 +150,102 @@ describe("GET /api/agents/:id/mandate contract", () => {
       agentId,
       policyHash: "policy:selected",
     });
+  });
+});
+
+describe("GET /api/negotiations contract", () => {
+  it("passes a same-DID agent filter to the negotiation service", async () => {
+    const agentDid = "did:t3n:demo-hosted-agent";
+    let capturedAgentDid: string | undefined;
+    const negotiationService: NegotiationManagementService = {
+      createMandate: async () => {
+        throw new Error("not used");
+      },
+      getMandateByAgent: async () => {
+        throw new Error("not used");
+      },
+      listMandatesByAgent: async () => {
+        throw new Error("not used");
+      },
+      getMandate: async () => {
+        throw new Error("not used");
+      },
+      submitTicket: async () => {
+        throw new Error("not used");
+      },
+      submitMove: async () => {
+        throw new Error("not used");
+      },
+      approveEscalation: async () => {
+        throw new Error("not used");
+      },
+      declineEscalation: async () => {
+        throw new Error("not used");
+      },
+      listSessions: async (_institutionId, requestedAgentDid) => {
+        capturedAgentDid = requestedAgentDid;
+        return [];
+      },
+      getSession: async () => {
+        throw new Error("not used");
+      },
+    };
+
+    const app = createApp(buildBackendTestEnv(), buildServices(negotiationService));
+
+    await request(app)
+      .get("/api/negotiations")
+      .query({ agentDid })
+      .set("Authorization", `Bearer ${issueToken(agentDid)}`)
+      .expect(200);
+
+    expect(capturedAgentDid).toBe(agentDid);
+  });
+
+  it("rejects an agent filter that does not match the authenticated DID", async () => {
+    let listCalled = false;
+    const negotiationService: NegotiationManagementService = {
+      createMandate: async () => {
+        throw new Error("not used");
+      },
+      getMandateByAgent: async () => {
+        throw new Error("not used");
+      },
+      listMandatesByAgent: async () => {
+        throw new Error("not used");
+      },
+      getMandate: async () => {
+        throw new Error("not used");
+      },
+      submitTicket: async () => {
+        throw new Error("not used");
+      },
+      submitMove: async () => {
+        throw new Error("not used");
+      },
+      approveEscalation: async () => {
+        throw new Error("not used");
+      },
+      declineEscalation: async () => {
+        throw new Error("not used");
+      },
+      listSessions: async () => {
+        listCalled = true;
+        return [];
+      },
+      getSession: async () => {
+        throw new Error("not used");
+      },
+    };
+
+    const app = createApp(buildBackendTestEnv(), buildServices(negotiationService));
+
+    await request(app)
+      .get("/api/negotiations")
+      .query({ agentDid: "did:t3n:other-agent" })
+      .set("Authorization", `Bearer ${issueToken("did:t3n:demo-hosted-agent")}`)
+      .expect(403);
+
+    expect(listCalled).toBe(false);
   });
 });

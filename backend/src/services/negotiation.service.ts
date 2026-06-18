@@ -76,7 +76,10 @@ export interface NegotiationManagementService {
     reason?: string;
     correlationRef: string;
   }): Promise<{ status: NegotiationSessionRecord["status"] }>;
-  listSessions(institutionId: string): Promise<RedactedNegotiationSessionView[]>;
+  listSessions(
+    institutionId: string,
+    agentDid?: string,
+  ): Promise<RedactedNegotiationSessionView[]>;
   getSession(
     institutionId: string,
     sessionId: string,
@@ -249,8 +252,9 @@ export class NegotiationService implements NegotiationManagementService {
 
   public async listSessions(
     institutionId: string,
+    agentDid?: string,
   ): Promise<RedactedNegotiationSessionView[]> {
-    return this.repository.listSessions(institutionId);
+    return this.repository.listSessions(institutionId, agentDid);
   }
 
   public async getSession(

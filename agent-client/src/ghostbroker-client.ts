@@ -171,8 +171,10 @@ export class GhostBrokerClient {
     return this.negotiations.submitTicket(request, this.token ?? "");
   }
 
-  public async listNegotiationSessions(): Promise<{ sessions: RedactedNegotiationSessionView[] }> {
-    return this.negotiations.listSessions(this.token ?? "");
+  public async listNegotiationSessions(
+    agentDid?: string,
+  ): Promise<{ sessions: RedactedNegotiationSessionView[] }> {
+    return this.negotiations.listSessions(this.token ?? "", agentDid);
   }
 
   public async getNegotiationSession(
