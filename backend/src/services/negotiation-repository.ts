@@ -276,29 +276,23 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
   ): Promise<NegotiationMandate> {
     const { authored, rails, legacy } = input;
 
-    // Replace semantics: delete any existing mandates for this agent
-    // so the insert below does not collide with the
-    // `uniq_negotiation_mandates_agent_active` unique constraint.
-    // The UI presents this as "Author / Replace Mandate".
+    // Replace semantics: UPDATE any existing mandate for this agent
+    // instead of deleting it. The mandate row is referenced from
+    // `negotiation_sessions.buy_mandate_id` /
+    // `negotiation_sessions.sell_mandate_id` (audit trail for past
+    // sessions), so a hard DELETE trips the foreign-key constraint.
+    // The schema's `uniq_negotiation_mandates_agent_active` unique
+    // index guarantees there is at most one row per agent, so this
+    // update is unambiguous; if no row exists, we INSERT a fresh one.
     const existing = await this.listMandatesByAgent(
       input.institutionId,
       input.agentId,
     );
-    if (existing.length > 0) {
-      const { error: deleteError } = await this.client
-        .from("negotiation_mandates")
-        .delete()
-        .eq("agent_id", input.agentId)
-        .eq("institution_id", input.institutionId);
-      if (deleteError) {
-        throw new PublicError("service_unavailable", 503, deleteError);
-      }
-    }
 
     // Resolve the persisted row. The authored policy is primary; the
     // derived rails feed the legacy numeric columns so the enclave/
     // contract authority path keeps working unchanged.
-    const insertRow: Record<string, unknown> = {
+    const updateRow: Record<string, unknown> = {
       institution_id: input.institutionId,
       agent_id: input.agentId,
       agent_did: input.agentDid,
@@ -306,16 +300,16 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     };
 
     if (authored && rails) {
-      insertRow.asset_code = authored.assetCode;
-      insertRow.side = authored.side;
-      insertRow.target_quantity = rails.targetQuantity;
-      insertRow.reference_price = rails.referencePrice;
-      insertRow.price_band_bps = rails.priceBandBps;
-      insertRow.deadline = authored.timeWindow.deadline;
-      insertRow.urgency = authored.urgency;
-      insertRow.max_notional = rails.notionalCeiling.toString();
-      insertRow.disclosable_claims = authored.disclosurePolicy.allowLadder;
-      insertRow.required_counterparty_claims =
+      updateRow.asset_code = authored.assetCode;
+      updateRow.side = authored.side;
+      updateRow.target_quantity = rails.targetQuantity;
+      updateRow.reference_price = rails.referencePrice;
+      updateRow.price_band_bps = rails.priceBandBps;
+      updateRow.deadline = authored.timeWindow.deadline;
+      updateRow.urgency = authored.urgency;
+      updateRow.max_notional = rails.notionalCeiling.toString();
+      updateRow.disclosable_claims = authored.disclosurePolicy.allowLadder;
+      updateRow.required_counterparty_claims =
         authored.counterpartyRequirements.requiredClaims.length > 0
           ? Object.fromEntries(
               authored.counterpartyRequirements.requiredClaims.map((claim) => [
@@ -324,43 +318,43 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
               ]),
             )
           : {};
-      insertRow.counterparty_constraints = {
+      updateRow.counterparty_constraints = {
         disallowedTraits: authored.counterpartyRequirements.disallowedTraits,
         reputationTier: authored.counterpartyRequirements.reputationTier ?? null,
       };
-      insertRow.operator_prompt = authored.operatorInstructions;
+      updateRow.operator_prompt = authored.operatorInstructions;
       // Authored columns.
-      insertRow.objective = authored.objective;
-      insertRow.execution_style = authored.executionStyle;
-      insertRow.valuation_policy = authored.valuationPolicy;
-      insertRow.concession_policy = authored.concessionPolicy;
-      insertRow.disclosure_policy = authored.disclosurePolicy;
-      insertRow.approval_policy = authored.approvalPolicy;
-      insertRow.counterparty_requirements = authored.counterpartyRequirements;
-      insertRow.size_policy = authored.sizePolicy;
-      insertRow.time_window = authored.timeWindow;
-      insertRow.operator_instructions = authored.operatorInstructions;
-      insertRow.minimum_quantity = rails.minimumQuantity;
-      insertRow.partial_execution_allowed = rails.partialExecutionAllowed;
+      updateRow.objective = authored.objective;
+      updateRow.execution_style = authored.executionStyle;
+      updateRow.valuation_policy = authored.valuationPolicy;
+      updateRow.concession_policy = authored.concessionPolicy;
+      updateRow.disclosure_policy = authored.disclosurePolicy;
+      updateRow.approval_policy = authored.approvalPolicy;
+      updateRow.counterparty_requirements = authored.counterpartyRequirements;
+      updateRow.size_policy = authored.sizePolicy;
+      updateRow.time_window = authored.timeWindow;
+      updateRow.operator_instructions = authored.operatorInstructions;
+      updateRow.minimum_quantity = rails.minimumQuantity;
+      updateRow.partial_execution_allowed = rails.partialExecutionAllowed;
       // Derived rails.
-      insertRow.derived_anchor_value = rails.anchorValue;
-      insertRow.derived_walkaway_min = rails.walkawayMin;
-      insertRow.derived_walkaway_max = rails.walkawayMax;
-      insertRow.derived_concession_budget_bps = rails.concessionBudgetBps;
-      insertRow.derived_notional_ceiling = rails.notionalCeiling;
+      updateRow.derived_anchor_value = rails.anchorValue;
+      updateRow.derived_walkaway_min = rails.walkawayMin;
+      updateRow.derived_walkaway_max = rails.walkawayMax;
+      updateRow.derived_concession_budget_bps = rails.concessionBudgetBps;
+      updateRow.derived_notional_ceiling = rails.notionalCeiling;
     } else if (legacy) {
-      insertRow.asset_code = legacy.assetCode;
-      insertRow.side = legacy.side;
-      insertRow.target_quantity = legacy.targetQuantity;
-      insertRow.reference_price = legacy.referencePrice;
-      insertRow.price_band_bps = legacy.priceBandBps;
-      insertRow.deadline = legacy.deadline;
-      insertRow.urgency = legacy.urgency;
-      insertRow.max_notional = legacy.maxNotional;
-      insertRow.disclosable_claims = legacy.disclosableClaims;
-      insertRow.required_counterparty_claims = legacy.requiredCounterpartyClaims;
-      insertRow.counterparty_constraints = legacy.counterpartyConstraints;
-      insertRow.operator_prompt = legacy.operatorPrompt;
+      updateRow.asset_code = legacy.assetCode;
+      updateRow.side = legacy.side;
+      updateRow.target_quantity = legacy.targetQuantity;
+      updateRow.reference_price = legacy.referencePrice;
+      updateRow.price_band_bps = legacy.priceBandBps;
+      updateRow.deadline = legacy.deadline;
+      updateRow.urgency = legacy.urgency;
+      updateRow.max_notional = legacy.maxNotional;
+      updateRow.disclosable_claims = legacy.disclosableClaims;
+      updateRow.required_counterparty_claims = legacy.requiredCounterpartyClaims;
+      updateRow.counterparty_constraints = legacy.counterpartyConstraints;
+      updateRow.operator_prompt = legacy.operatorPrompt;
     } else {
       throw new PublicError(
         "validation_failed",
@@ -370,9 +364,24 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       );
     }
 
+    const live = existing[0];
+    if (live) {
+      const { data, error } = await this.client
+        .from("negotiation_mandates")
+        .update(updateRow)
+        .eq("id", live.id)
+        .select("*")
+        .single();
+
+      if (error || !data) {
+        throw new PublicError("service_unavailable", 503, error);
+      }
+      return negotiationMandateFromRecord(data);
+    }
+
     const { data, error } = await this.client
       .from("negotiation_mandates")
-      .insert(insertRow)
+      .insert(updateRow)
       .select("*")
       .single();
 
