@@ -14,12 +14,18 @@ import type {
   DerivedExecutionRails,
 } from "./negotiation-strategy.js";
 
-interface QueryChain<TResult> {
+type QueryResult<TResult> = {
+  data: TResult[] | null;
+  error: Error | null;
+};
+
+interface QueryChain<TResult> extends PromiseLike<QueryResult<TResult>> {
   eq(column: string, value: string): QueryChain<TResult>;
+  in(column: string, values: readonly string[]): QueryChain<TResult>;
   order(
     column: string,
     options?: { ascending?: boolean },
-  ): Promise<{ data: TResult[] | null; error: Error | null }>;
+  ): QueryChain<TResult>;
   single(): Promise<{ data: TResult | null; error: Error | null }>;
 }
 
@@ -670,11 +676,6 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     if (agentDid) {
       buyQuery = buyQuery.eq("buy_agent_did", agentDid);
     }
-    const { data: buyData, error: buyError } = await buyQuery.order(
-      "created_at",
-      { ascending: false },
-    );
-
     let sellQuery = this.client
       .from("negotiation_sessions")
       .select("*")
@@ -682,19 +683,24 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     if (agentDid) {
       sellQuery = sellQuery.eq("sell_agent_did", agentDid);
     }
-    const { data: sellData, error: sellError } = await sellQuery.order(
-      "created_at",
-      { ascending: false },
-    );
 
-    if (buyError && sellError) {
-      throw new PublicError("service_unavailable", 503, buyError);
+    const [buyResult, sellResult] = await Promise.all([
+      buyQuery.order("created_at", { ascending: false }),
+      sellQuery.order("created_at", { ascending: false }),
+    ]);
+
+    if (buyResult.error && sellResult.error) {
+      throw new PublicError("service_unavailable", 503, buyResult.error);
     }
 
     const seen = new Set<string>();
-    const sessions = [...(buyData ?? []), ...(sellData ?? [])].filter((session) => {
+    const sessions: NegotiationSessionRecord[] = [];
+    for (const session of [
+      ...(buyResult.data ?? []),
+      ...(sellResult.data ?? []),
+    ]) {
       if (seen.has(session.id)) {
-        return false;
+        continue;
       }
       seen.add(session.id);
       if (
@@ -702,14 +708,20 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
         session.buy_agent_did !== agentDid &&
         session.sell_agent_did !== agentDid
       ) {
-        return false;
+        continue;
       }
-      return true;
-    });
+      sessions.push(session);
+    }
 
+    if (sessions.length === 0) {
+      return [];
+    }
+
+    const sessionIds = sessions.map((session) => session.id);
+    const viewsById = await this.loadSessionViews(sessionIds, institutionId);
     const results: RedactedNegotiationSessionView[] = [];
     for (const session of sessions) {
-      const view = await this.getSession(session.id, institutionId);
+      const view = viewsById.get(session.id);
       if (view) {
         results.push(view);
       }
@@ -738,134 +750,252 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       return null;
     }
 
-    const { data: rounds } = await this.client
-      .from("negotiation_rounds")
-      .select("*")
-      .eq("session_id", sessionId)
-      .order("round_number", { ascending: true });
-    const { data: disclosures } = await this.client
-      .from("negotiation_disclosures")
-      .select("*")
-      .eq("session_id", sessionId)
-      .order("created_at", { ascending: true });
+    const viewsById = await this.loadSessionViews([session.id], institutionId);
+    return viewsById.get(session.id) ?? null;
+  }
 
-    // Load both mandates so the trust state is sourced from the
-    // AUTHORED counterparty requirements, not from which claims were
-    // explicitly asked for in a prior round. This is the single
-    // authority for the disclosure gate.
-    const [buyMandate, sellMandate] = await Promise.all([
-      this.getMandateById(session.buy_mandate_id, session.buy_institution_id),
-      this.getMandateById(session.sell_mandate_id, session.sell_institution_id),
+  /**
+   * Batch-load the per-session derived data (rounds, disclosures,
+   * mandates) for a list of session ids in three queries total,
+   * regardless of the number of sessions. Returns a map of
+   * `sessionId -> RedactedNegotiationSessionView` for the sessions
+   * the operator's institution actually participates in.
+   *
+   * The previous per-session implementation did 4 sequential
+   * queries per session (session, rounds, disclosures, two
+   * mandates); for an operator with N sessions, that's 4N
+   * round-trips. The batched version is constant in the number of
+   * sessions (3 queries, plus one batched mandate fetch) so the
+   * dashboard's Negotiations tab stops being N+1.
+   *
+   * `requestingInstitutionId` is the operator's institution: it's
+   * used to derive `counterpartSide` per session (the side the
+   * operator is NOT on). All sessions passed in here are
+   * guaranteed to have `requestingInstitutionId` as either
+   * `buy_institution_id` or `sell_institution_id` — the caller
+   * (`listSessions` and `getSession`) is responsible for that
+   * filter.
+   */
+  private async loadSessionViews(
+    sessionIds: readonly string[],
+    requestingInstitutionId: string,
+  ): Promise<Map<string, RedactedNegotiationSessionView>> {
+    const result = new Map<string, RedactedNegotiationSessionView>();
+    if (sessionIds.length === 0) {
+      return result;
+    }
+
+    const [sessionsResult, roundsResult, disclosuresResult] = await Promise.all([
+      this.client
+        .from("negotiation_sessions")
+        .select("*")
+        .in("id", [...sessionIds]),
+      this.client
+        .from("negotiation_rounds")
+        .select("*")
+        .in("session_id", [...sessionIds])
+        .order("round_number", { ascending: true }),
+      this.client
+        .from("negotiation_disclosures")
+        .select("*")
+        .in("session_id", [...sessionIds])
+        .order("created_at", { ascending: true }),
     ]);
 
-    const counterpartSide =
-      session.buy_institution_id === institutionId ? "sell" : "buy";
-    const counterpartProposalRecord = [...(rounds ?? [])]
-      .reverse()
-        .find((round) =>
-          round.actor_side === counterpartSide &&
-          (round.move_type === "propose" ||
-            round.move_type === "counter" ||
-            round.move_type === "accept" ||
-            round.move_type === "request_disclosure" ||
-            round.move_type === "reveal" ||
-            round.move_type === "hold")
-        ) ?? null;
-    const counterpartStandingProposal = parseProposalCiphertext(
-      counterpartProposalRecord?.proposal_ciphertext ?? null,
-    );
-    const distanceSignalRecord = [...(rounds ?? [])]
-      .reverse()
-      .find((round) => round.opaque_signal !== null) ?? null;
-
-    const verifiedDisclosures = (disclosures ?? []).filter(
-      (disclosure) => disclosure.verified,
-    );
-    const receivedVerifiedClaims = verifiedDisclosures.map(
-      (disclosure) => disclosure.claim_type,
-    );
-
-    // Mandate-sourced required claims: union of both sides' authored
-    // `counterpartyRequirements.requiredClaims`. The round-derived
-    // `request_disclosure` set is now a secondary, informational-only
-    // signal that the UI can surface if it wants.
-    const authorRequired = new Set<string>();
-    if (buyMandate) {
-      for (const claim of authoredRequiredClaimsFor(buyMandate)) {
-        authorRequired.add(claim);
-      }
+    if (sessionsResult.error || !sessionsResult.data) {
+      throw new PublicError("service_unavailable", 503, sessionsResult.error);
     }
-    if (sellMandate) {
-      for (const claim of authoredRequiredClaimsFor(sellMandate)) {
-        authorRequired.add(claim);
-      }
+
+    const sessions = sessionsResult.data;
+    const mandateIdSet = new Set<string>();
+    for (const session of sessions) {
+      mandateIdSet.add(session.buy_mandate_id);
+      mandateIdSet.add(session.sell_mandate_id);
     }
-    const requiredClaims = Array.from(authorRequired);
+    const mandateIds = Array.from(mandateIdSet);
+    const mandatesById = await this.loadMandatesByIds(mandateIds);
 
-    const askedRequired = Array.from(
-      new Set(
-        (rounds ?? [])
-          .filter((round) => round.move_type === "request_disclosure")
-          .flatMap((round) => round.disclosed_claim_refs ?? []),
-      ),
-    );
-    const pendingRequiredClaims = requiredClaims.filter(
-      (claim) => !receivedVerifiedClaims.includes(claim),
-    );
-    const trustLevel: RedactedNegotiationSessionView["trustLevel"] =
-      requiredClaims.length === 0
-        ? "established"
-        : pendingRequiredClaims.length === 0
-          ? "established"
-          : receivedVerifiedClaims.length === 0
-            ? "none"
-            : "partial";
+    const roundsBySession = new Map<string, NegotiationRoundRecord[]>();
+    for (const round of roundsResult.data ?? []) {
+      const list = roundsBySession.get(round.session_id) ?? [];
+      list.push(round);
+      roundsBySession.set(round.session_id, list);
+    }
+    const disclosuresBySession = new Map<string, NegotiationDisclosureRecord[]>();
+    for (const disclosure of disclosuresResult.data ?? []) {
+      const list = disclosuresBySession.get(disclosure.session_id) ?? [];
+      list.push(disclosure);
+      disclosuresBySession.set(disclosure.session_id, list);
+    }
 
-    const escalationStatus = session.escalation_status;
-    const escalationPending = escalationStatus === "pending";
-    const escalationReason = pendingEscalationReason(rounds ?? []);
+    for (const session of sessions) {
+      const rounds = roundsBySession.get(session.id) ?? [];
+      const disclosures = disclosuresBySession.get(session.id) ?? [];
+      const buyMandate = mandatesById.get(session.buy_mandate_id) ?? null;
+      const sellMandate = mandatesById.get(session.sell_mandate_id) ?? null;
+      const counterpartSide: "buy" | "sell" =
+        session.buy_institution_id === requestingInstitutionId ? "sell" : "buy";
+      result.set(
+        session.id,
+        buildSessionView(session, rounds, disclosures, buyMandate, sellMandate, counterpartSide),
+      );
+    }
 
-    const latestStrategyRound = [...(rounds ?? [])]
-      .reverse()
-      .find((round) => round.strategic_intent !== null) ?? null;
-
-    return {
-      id: session.id,
-      assetCode: session.asset_code,
-      status: session.status,
-      currentTurn: session.current_turn,
-      roundNumber: session.round_number,
-      maxRounds: session.max_rounds,
-      deadline: session.deadline,
-      tradeRef: session.trade_ref,
-      counterpartStandingProposal,
-      distanceSignal:
-        distanceSignalRecord?.opaque_signal === "crossed" ||
-        distanceSignalRecord?.opaque_signal === "near" ||
-        distanceSignalRecord?.opaque_signal === "moderate" ||
-        distanceSignalRecord?.opaque_signal === "far"
-          ? distanceSignalRecord.opaque_signal
-          : null,
-      trustLevel,
-      disclosureProgress: {
-        requiredClaims,
-        receivedVerifiedClaims,
-        pendingRequiredClaims,
-      },
-      escalationStatus,
-      escalationPending,
-      escalationReason,
-      latestStrategySignal: latestStrategyRound?.strategic_intent ?? null,
-      disclosedClaims: (disclosures ?? []).map(toDisclosureView),
-      rounds: (rounds ?? []).map(toRoundView),
-      // Surface the round-derived required set as a non-breaking
-      // informational field for the UI. The authoritative source is
-      // `requiredClaims` above.
-      ...({ askedRequiredClaims: askedRequired } as Record<string, unknown>),
-      createdAt: session.created_at,
-      updatedAt: session.updated_at,
-    } as RedactedNegotiationSessionView;
+    return result;
   }
+
+  /**
+   * Batch-fetch mandates by id. Mandates are identified by a
+   * primary key (`id`) so we can use `in(id, [...])` to collapse
+   * the per-session `getMandateById` calls into a single query.
+   * The institution-scope filter is dropped here because the
+   * mandate's PK is sufficient to disambiguate rows and the
+   * caller already knows which mandate belongs to which side
+   * from the session record (buy_mandate_id ↔ buy_institution_id,
+   * sell_mandate_id ↔ sell_institution_id).
+   */
+  private async loadMandatesByIds(
+    mandateIds: readonly string[],
+  ): Promise<Map<string, NegotiationMandate>> {
+    const result = new Map<string, NegotiationMandate>();
+    if (mandateIds.length === 0) {
+      return result;
+    }
+    const { data, error } = await this.client
+      .from("negotiation_mandates")
+      .select("*")
+      .in("id", [...mandateIds]);
+    if (error || !data) {
+      return result;
+    }
+    for (const record of data) {
+      result.set(record.id, negotiationMandateFromRecord(record));
+    }
+    return result;
+  }
+}
+
+/**
+ * Build the redacted, operator-safe view of a negotiation session
+ * from the already-loaded rows. Pure function — no I/O — so the
+ * batched `loadSessionViews` path doesn't pay the cost of N
+ * separate view assemblies.
+ *
+ * `counterpartSide` is the side the requesting operator is NOT
+ * on. The caller (`loadSessionViews`) derives it per session from
+ * the session's `buy_institution_id` / `sell_institution_id` pair
+ * and the requesting institution.
+ */
+function buildSessionView(
+  session: NegotiationSessionRecord,
+  rounds: readonly NegotiationRoundRecord[],
+  disclosures: readonly NegotiationDisclosureRecord[],
+  buyMandate: NegotiationMandate | null,
+  sellMandate: NegotiationMandate | null,
+  counterpartSide: "buy" | "sell",
+): RedactedNegotiationSessionView {
+  const counterpartProposalRecord = [...rounds]
+    .reverse()
+    .find(
+      (round) =>
+        round.actor_side === counterpartSide &&
+        (round.move_type === "propose" ||
+          round.move_type === "counter" ||
+          round.move_type === "accept" ||
+          round.move_type === "request_disclosure" ||
+          round.move_type === "reveal" ||
+          round.move_type === "hold"),
+    ) ?? null;
+  const counterpartStandingProposal = parseProposalCiphertext(
+    counterpartProposalRecord?.proposal_ciphertext ?? null,
+  );
+  const distanceSignalRecord = [...rounds]
+    .reverse()
+    .find((round) => round.opaque_signal !== null) ?? null;
+
+  const verifiedDisclosures = disclosures.filter((d) => d.verified);
+  const receivedVerifiedClaims = verifiedDisclosures.map((d) => d.claim_type);
+
+  // Mandate-sourced required claims: union of both sides' authored
+  // `counterpartyRequirements.requiredClaims`. The round-derived
+  // `request_disclosure` set is now a secondary, informational-only
+  // signal that the UI can surface if it wants.
+  const authorRequired = new Set<string>();
+  if (buyMandate) {
+    for (const claim of authoredRequiredClaimsFor(buyMandate)) {
+      authorRequired.add(claim);
+    }
+  }
+  if (sellMandate) {
+    for (const claim of authoredRequiredClaimsFor(sellMandate)) {
+      authorRequired.add(claim);
+    }
+  }
+  const requiredClaims = Array.from(authorRequired);
+
+  const askedRequired = Array.from(
+    new Set(
+      rounds
+        .filter((round) => round.move_type === "request_disclosure")
+        .flatMap((round) => round.disclosed_claim_refs ?? []),
+    ),
+  );
+  const pendingRequiredClaims = requiredClaims.filter(
+    (claim) => !receivedVerifiedClaims.includes(claim),
+  );
+  const trustLevel: RedactedNegotiationSessionView["trustLevel"] =
+    requiredClaims.length === 0
+      ? "established"
+      : pendingRequiredClaims.length === 0
+        ? "established"
+        : receivedVerifiedClaims.length === 0
+          ? "none"
+          : "partial";
+
+  const escalationStatus = session.escalation_status;
+  const escalationPending = escalationStatus === "pending";
+  const escalationReason = pendingEscalationReason(rounds);
+
+  const latestStrategyRound = [...rounds]
+    .reverse()
+    .find((round) => round.strategic_intent !== null) ?? null;
+
+  return {
+    id: session.id,
+    assetCode: session.asset_code,
+    status: session.status,
+    currentTurn: session.current_turn,
+    roundNumber: session.round_number,
+    maxRounds: session.max_rounds,
+    deadline: session.deadline,
+    tradeRef: session.trade_ref,
+    counterpartStandingProposal,
+    distanceSignal:
+      distanceSignalRecord?.opaque_signal === "crossed" ||
+      distanceSignalRecord?.opaque_signal === "near" ||
+      distanceSignalRecord?.opaque_signal === "moderate" ||
+      distanceSignalRecord?.opaque_signal === "far"
+        ? distanceSignalRecord.opaque_signal
+        : null,
+    trustLevel,
+    disclosureProgress: {
+      requiredClaims,
+      receivedVerifiedClaims,
+      pendingRequiredClaims,
+    },
+    escalationStatus,
+    escalationPending,
+    escalationReason,
+    latestStrategySignal: latestStrategyRound?.strategic_intent ?? null,
+    disclosedClaims: disclosures.map(toDisclosureView),
+    rounds: rounds.map(toRoundView),
+    // Surface the round-derived required set as a non-breaking
+    // informational field for the UI. The authoritative source is
+    // `requiredClaims` above.
+    ...({ askedRequiredClaims: askedRequired } as Record<string, unknown>),
+    createdAt: session.created_at,
+    updatedAt: session.updated_at,
+  } as RedactedNegotiationSessionView;
 }
 
 function authoredRequiredClaimsFor(
@@ -880,7 +1010,7 @@ function authoredRequiredClaimsFor(
   return Object.keys(mandate.requiredCounterpartyClaims);
 }
 
-function pendingEscalationReason(rounds: NegotiationRoundRecord[]): string | null {
+function pendingEscalationReason(rounds: readonly NegotiationRoundRecord[]): string | null {
   for (let i = rounds.length - 1; i >= 0; i -= 1) {
     const round = rounds[i];
     if (!round) continue;

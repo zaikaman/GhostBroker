@@ -6,18 +6,18 @@ import {
 } from "../models/completed-trade.js";
 import type { AuditReceiptRecord } from "../models/audit-receipt.js";
 
-interface SelectQuery<TResult> {
+type QueryResult<TResult> = {
+  data: TResult[] | null;
+  error: Error | null;
+};
+
+interface SelectQuery<TResult> extends PromiseLike<QueryResult<TResult>> {
   or(expression: string): SelectQuery<TResult>;
   gte(column: string, value: string): SelectQuery<TResult>;
   lte(column: string, value: string): SelectQuery<TResult>;
-  order(column: string, options: { ascending: boolean }): Promise<{
-    data: TResult[] | null;
-    error: Error | null;
-  }>;
-  eq(column: string, value: string): Promise<{
-    data: TResult[] | null;
-    error: Error | null;
-  }>;
+  in(column: string, values: readonly string[]): SelectQuery<TResult>;
+  order(column: string, options: { ascending: boolean }): SelectQuery<TResult>;
+  eq(column: string, value: string): SelectQuery<TResult>;
 }
 
 interface TableQuery<TResult> {
@@ -89,21 +89,23 @@ export class SupabaseTradeHistoryRepository implements TradeHistoryRepository {
 
     const tradeIds = new Set(data.map((trade) => trade.id));
     const receiptIdsByTradeId = new Map<string, string[]>();
-    const receiptsResult = await this.client
+    if (tradeIds.size === 0) {
+      return [];
+    }
+    const { data: receiptRows, error: receiptError } = await this.client
       .from("audit_receipts")
       .select("id,completed_trade_id")
+      .in("completed_trade_id", Array.from(tradeIds))
       .eq("institution_id", institutionId);
 
-    if (receiptsResult.error || !receiptsResult.data) {
-      throw new PublicError("service_unavailable", 503, receiptsResult.error);
+    if (receiptError || !receiptRows) {
+      throw new PublicError("service_unavailable", 503, receiptError);
     }
 
-    for (const receipt of receiptsResult.data) {
-      if (tradeIds.has(receipt.completed_trade_id)) {
-        const receiptIds = receiptIdsByTradeId.get(receipt.completed_trade_id) ?? [];
-        receiptIds.push(receipt.id);
-        receiptIdsByTradeId.set(receipt.completed_trade_id, receiptIds);
-      }
+    for (const receipt of receiptRows) {
+      const receiptIds = receiptIdsByTradeId.get(receipt.completed_trade_id) ?? [];
+      receiptIds.push(receipt.id);
+      receiptIdsByTradeId.set(receipt.completed_trade_id, receiptIds);
     }
 
     return data.map((record) =>
@@ -115,28 +117,19 @@ export class SupabaseTradeHistoryRepository implements TradeHistoryRepository {
     institutionId: string,
     tradeRef: string,
   ): Promise<CompletedTrade | null> {
-    // The repository's Supabase client has a strict
-    // query chain; the unique `trade_ref` index makes
-    // a separate `eq` filter redundant. We use the
-    // existing `or` + `order` shape: order by
-    // `settled_at DESC` and return the first row that
-    // matches the institution scope. The unique
-    // index guarantees at most one row exists.
     const { data, error } = await this.client
       .from("completed_trades")
       .select("*")
       .or(
         `buy_institution_id.eq.${institutionId},sell_institution_id.eq.${institutionId}`,
       )
+      .eq("trade_ref", tradeRef)
       .order("settled_at", { ascending: false });
-    if (error || !data) {
+    const record = data?.[0];
+    if (error || !record) {
       return null;
     }
-    const match = data.find((row) => row.trade_ref === tradeRef);
-    if (!match) {
-      return null;
-    }
-    return completedTradeFromRecord(match);
+    return completedTradeFromRecord(record);
   }
 }
 
