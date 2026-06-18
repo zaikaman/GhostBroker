@@ -397,6 +397,45 @@ describe("validateAgentDecision", () => {
     );
   });
 
+  it("allows revealing a claim even after requesting the same claim from the counterparty", () => {
+    const profile = buildProfile({
+      ...buyerAuthored,
+      disclosurePolicy: {
+        allowLadder: ["accredited_institution", "settlement_capacity"],
+        requireReciprocityFor: ["settlement_capacity"],
+      },
+    });
+    const ctx = buildTurnContext({
+      profile,
+      side: "buy",
+      roundNumber: 6,
+      maxRounds: 12,
+      deadline: profile.authored.timeWindow.deadline,
+      distanceSignal: "crossed",
+      counterpartStandingPrice: 70_000,
+      counterpartStandingQuantity: 1,
+      receivedClaims: ["accredited_institution"],
+      concessionConsumedBps: 30,
+      priorDisclosureRequests: ["settlement_capacity"],
+      priorDisclosureReveals: ["accredited_institution"],
+    });
+    const result = validateAgentDecision(
+      {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Terms work once reciprocal capacity is clear.",
+      },
+      ctx,
+    );
+    expect(result.accepted.action).toBe("reveal");
+    expect(result.accepted.claimType).toBe("settlement_capacity");
+    expect(result.downgradedFrom).toBe("accept");
+    expect(result.adjustedReason).toBe(
+      "accept_replaced_with_reveal_for_disclosure_gate",
+    );
+  });
+
   it("downgrades accept to propose when pending claims remain and no disclosure move is left", () => {
     const profile = buildProfile({
       ...buyerAuthored,

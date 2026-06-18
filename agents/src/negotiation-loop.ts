@@ -354,9 +354,14 @@ export async function runNegotiationLoop(
     // so the validator can cap repeated disclosure-only moves. The
     // round view's `disclosedClaimRefs` carries the claim type the
     // actor named when it asked (or revealed) on each past round.
-    const priorClaimRequests: string[] = liveSession.rounds
+    const priorDisclosureRequests: string[] = liveSession.rounds
       .filter((round) => round.actorSide === side)
-      .filter((round) => round.moveType === "request_disclosure" || round.moveType === "reveal")
+      .filter((round) => round.moveType === "request_disclosure")
+      .flatMap((round) => round.disclosedClaimRefs)
+      .filter((claim): claim is string => typeof claim === "string" && claim.length > 0);
+    const priorDisclosureReveals: string[] = liveSession.rounds
+      .filter((round) => round.actorSide === side)
+      .filter((round) => round.moveType === "reveal")
       .flatMap((round) => round.disclosedClaimRefs)
       .filter((claim): claim is string => typeof claim === "string" && claim.length > 0);
 
@@ -366,7 +371,8 @@ export async function runNegotiationLoop(
       session: liveSession,
       lastOutcome,
       priorMoveRationale,
-      priorClaimRequests,
+      priorDisclosureRequests,
+      priorDisclosureReveals,
     });
 
     let decision: NegotiationDecision;
@@ -485,13 +491,25 @@ function buildNegotiationContext(input: {
   session: RedactedNegotiationSessionView;
   lastOutcome: string;
   priorMoveRationale?: string;
-  priorClaimRequests?: string[];
+  priorDisclosureRequests?: string[];
+  priorDisclosureReveals?: string[];
 }): NegotiationContext {
-  const { mandate, quoteAssetCode, session, lastOutcome, priorMoveRationale, priorClaimRequests } =
+  const {
+    mandate,
+    quoteAssetCode,
+    session,
+    lastOutcome,
+    priorMoveRationale,
+    priorDisclosureRequests,
+    priorDisclosureReveals,
+  } =
     input;
 
   const profile = profileFromRuntimeMandate(mandate);
-  const receivedClaims = session.disclosureProgress.receivedVerifiedClaims;
+  const counterpartSide = mandate.side === "buy" ? "sell" : "buy";
+  const receivedClaims = session.disclosedClaims
+    .filter((claim) => claim.verified && claim.fromSide === counterpartSide)
+    .map((claim) => claim.claimType);
   const concessionConsumedBps = Math.round(
     Math.min(
       profile.rails.concessionBudgetBps,
@@ -522,8 +540,11 @@ function buildNegotiationContext(input: {
             mandate.operatorInstructions ?? mandate.operatorPrompt,
         }
       : {}),
-    ...(priorClaimRequests !== undefined && priorClaimRequests.length > 0
-      ? { priorClaimRequests }
+    ...(priorDisclosureRequests !== undefined && priorDisclosureRequests.length > 0
+      ? { priorDisclosureRequests }
+      : {}),
+    ...(priorDisclosureReveals !== undefined && priorDisclosureReveals.length > 0
+      ? { priorDisclosureReveals }
       : {}),
     lastOutcome,
     ...(priorMoveRationale !== undefined ? { priorMoveRationale } : {}),

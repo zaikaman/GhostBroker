@@ -67,17 +67,19 @@ const crossEvaluator: NegotiationRoundEvaluator = {
 };
 
 class ApproveDisclosureVerifier implements NegotiationDisclosureVerifier {
-  public async verifyDisclosure(): Promise<{
+  public async verifyDisclosure(
+    request: Parameters<NegotiationDisclosureVerifier["verifyDisclosure"]>[0],
+  ): Promise<{
     claimType: string;
     assertionCiphertext: string;
     verified: true;
     t3AttestationRef: string;
   }> {
     return {
-      claimType: "accredited_institution",
-      assertionCiphertext: "ciphertext-stub",
+      claimType: request.claimType,
+      assertionCiphertext: `ciphertext-${request.claimType}`,
       verified: true,
-      t3AttestationRef: "att-stub",
+      t3AttestationRef: `att-${request.claimType}`,
     };
   }
 }
@@ -198,10 +200,33 @@ interface Harness {
 
 async function buildHarness(options: {
   approvalMode: "auto_settle" | "escalate_outside_envelope";
+  reciprocalDisclosureGate?: boolean;
 }): Promise<Harness> {
   const repository = new InMemoryNegotiationRepository();
-  repository.registerMandate(buyMandateRecord(options.approvalMode));
-  repository.registerMandate(sellMandateRecord());
+  if (options.reciprocalDisclosureGate === true) {
+    const requiredClaims = ["accredited_institution", "settlement_capacity"];
+    repository.registerMandate({
+      ...buyMandateRecord(options.approvalMode),
+      counterparty_requirements: { requiredClaims, disallowedTraits: [] },
+      disclosure_policy: {
+        allowLadder: requiredClaims,
+        requireReciprocityFor: ["settlement_capacity"],
+      },
+      disclosable_claims: requiredClaims,
+    });
+    repository.registerMandate({
+      ...sellMandateRecord(),
+      counterparty_requirements: { requiredClaims, disallowedTraits: [] },
+      disclosure_policy: {
+        allowLadder: requiredClaims,
+        requireReciprocityFor: ["settlement_capacity"],
+      },
+      disclosable_claims: requiredClaims,
+    });
+  } else {
+    repository.registerMandate(buyMandateRecord(options.approvalMode));
+    repository.registerMandate(sellMandateRecord());
+  }
   const telemetry = new TelemetryBus();
   const orchestrator = new NegotiationOrchestrator({
     ticketClient,
@@ -528,6 +553,182 @@ describe("NegotiationOrchestrator — escalation gate", () => {
 });
 
 describe("NegotiationOrchestrator — disclosure gate", () => {
+  it("settles end to end after reciprocal accredited institution and settlement capacity disclosures", async () => {
+    const harness = await buildHarness({
+      approvalMode: "auto_settle",
+      reciprocalDisclosureGate: true,
+    });
+    const sessionId = await openSession(harness);
+    harnessState.crossed = true;
+    harnessState.nextExecutionPrice = 70_000;
+    harnessState.nextMatchedQuantity = 1;
+
+    const buyerOpen = await harness.orchestrator.submitMove({
+      institutionId: BUY_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "propose",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Open at the shared anchor.",
+        escalationRequested: false,
+      },
+      correlationRef: "test:e2e:buyer-open",
+    });
+    expect(buyerOpen.status).toBe("active");
+
+    const sellerRevealInstitution = await harness.orchestrator.submitMove({
+      institutionId: SELL_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "reveal",
+        claimType: "accredited_institution",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Reveal institution status before settlement.",
+        escalationRequested: false,
+      },
+      claimCredential: { claimType: "accredited_institution", subject: SELL_AGENT_DID },
+      correlationRef: "test:e2e:seller-reveal-institution",
+    });
+    expect(sellerRevealInstitution.status).toBe("active");
+
+    const buyerRequestCapacity = await harness.orchestrator.submitMove({
+      institutionId: BUY_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "request_disclosure",
+        claimType: "settlement_capacity",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Request seller settlement capacity.",
+        escalationRequested: false,
+      },
+      correlationRef: "test:e2e:buyer-request-capacity",
+    });
+    expect(buyerRequestCapacity.status).toBe("active");
+
+    const sellerRevealCapacity = await harness.orchestrator.submitMove({
+      institutionId: SELL_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "reveal",
+        claimType: "settlement_capacity",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Reveal seller settlement capacity.",
+        escalationRequested: false,
+      },
+      claimCredential: { claimType: "settlement_capacity", subject: SELL_AGENT_DID },
+      correlationRef: "test:e2e:seller-reveal-capacity",
+    });
+    expect(sellerRevealCapacity.status).toBe("active");
+
+    const buyerRevealInstitution = await harness.orchestrator.submitMove({
+      institutionId: BUY_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "reveal",
+        claimType: "accredited_institution",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Reveal buyer institution status.",
+        escalationRequested: false,
+      },
+      claimCredential: { claimType: "accredited_institution", subject: BUY_AGENT_DID },
+      correlationRef: "test:e2e:buyer-reveal-institution",
+    });
+    expect(buyerRevealInstitution.status).toBe("active");
+
+    const sellerRequestCapacity = await harness.orchestrator.submitMove({
+      institutionId: SELL_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "request_disclosure",
+        claimType: "settlement_capacity",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Request buyer settlement capacity.",
+        escalationRequested: false,
+      },
+      correlationRef: "test:e2e:seller-request-capacity",
+    });
+    expect(sellerRequestCapacity.status).toBe("active");
+
+    const buyerRevealCapacity = await harness.orchestrator.submitMove({
+      institutionId: BUY_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "reveal",
+        claimType: "settlement_capacity",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Reveal buyer settlement capacity.",
+        escalationRequested: false,
+      },
+      claimCredential: { claimType: "settlement_capacity", subject: BUY_AGENT_DID },
+      correlationRef: "test:e2e:buyer-reveal-capacity",
+    });
+    expect(buyerRevealCapacity.status).toBe("active");
+
+    const sellerAccept = await harness.orchestrator.submitMove({
+      institutionId: SELL_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "All reciprocal proof is verified; accept crossed terms.",
+        escalationRequested: false,
+      },
+      correlationRef: "test:e2e:seller-accept",
+    });
+    expect(sellerAccept.status).toBe("settled");
+
+    const session = await harness.repository.getSessionRecord(sessionId);
+    expect(session?.status).toBe("settled");
+    expect(session?.trade_ref).toMatch(/^trade-/);
+    expect(harness.repository.tradeLinks.get(sessionId)).toBe(session?.trade_ref);
+    expect(
+      harness.repository.disclosures
+        .filter((disclosure) => disclosure.session_id === sessionId)
+        .map((disclosure) => ({
+          fromSide: disclosure.from_side,
+          claimType: disclosure.claim_type,
+          verified: disclosure.verified,
+        })),
+    ).toEqual([
+      { fromSide: "sell", claimType: "accredited_institution", verified: true },
+      { fromSide: "sell", claimType: "settlement_capacity", verified: true },
+      { fromSide: "buy", claimType: "accredited_institution", verified: true },
+      { fromSide: "buy", claimType: "settlement_capacity", verified: true },
+    ]);
+  });
+
   it("blocks settlement until a mandate-required claim is verified", async () => {
     const harness = await buildHarness({ approvalMode: "auto_settle" });
     const sessionId = await openSession(harness);
@@ -573,6 +774,54 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
       correlationRef: "test:seller:1",
     });
     expect(seller.status).toBe("settled");
+  });
+
+  it("does not let a side's own disclosure satisfy its counterparty proof gate", async () => {
+    const harness = await buildHarness({ approvalMode: "auto_settle" });
+    const sessionId = await openSession(harness);
+    await harness.repository.appendDisclosure({
+      sessionId,
+      fromDid: BUY_AGENT_DID,
+      fromSide: "buy",
+      claimType: "accredited_institution",
+      claimAssertionCiphertext: "ct-buyer",
+      verified: true,
+      t3AttestationRef: "att-buyer",
+    });
+    harnessState.crossed = true;
+    harnessState.nextExecutionPrice = 70_050;
+    await harness.orchestrator.submitMove({
+      institutionId: BUY_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "propose",
+        price: 70_020,
+        quantity: 1,
+        reasoning: "Open",
+      },
+      correlationRef: "test:buyer:1",
+    });
+    const seller = await harness.orchestrator.submitMove({
+      institutionId: SELL_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "counter",
+        price: 70_050,
+        quantity: 1,
+        reasoning: "Meet",
+      },
+      correlationRef: "test:seller:1",
+    });
+    expect(seller.status).toBe("active");
+    const session = await harness.repository.getSessionRecord(sessionId);
+    expect(session?.status).toBe("active");
+    expect(session?.trade_ref).toBeNull();
   });
 
   it("keeps counterpart standing terms visible across disclosure-only moves", async () => {

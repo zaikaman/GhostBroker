@@ -424,12 +424,16 @@ function negotiationUserPrompt(ctx: NegotiationContext): string {
     `disclosable_claims: ${ctx.disclosableClaims.length > 0 ? ctx.disclosableClaims.join(", ") : "(none)"}`,
     `received_claims: ${ctx.receivedClaims.length > 0 ? ctx.receivedClaims.join(", ") : "(none)"}`,
     `required_claims: ${ctx.requiredClaims.length > 0 ? ctx.requiredClaims.join(", ") : "(none)"}`,
-    `prior_claim_requests_this_session: ${
-      ctx.priorClaimRequests && ctx.priorClaimRequests.length > 0
-        ? ctx.priorClaimRequests.join(", ")
-        : "(none — this is your first disclosure-related move)"
+    `prior_disclosure_requests_this_session: ${
+      ctx.priorDisclosureRequests && ctx.priorDisclosureRequests.length > 0
+        ? ctx.priorDisclosureRequests.join(", ")
+        : "(none)"
     }`,
-    ``,
+    `prior_disclosure_reveals_this_session: ${
+      ctx.priorDisclosureReveals && ctx.priorDisclosureReveals.length > 0
+        ? ctx.priorDisclosureReveals.join(", ")
+        : "(none)"
+    }`,    ``,
     `=== HISTORY ===`,
     `last_round_outcome: ${ctx.lastOutcome ?? "(none)"}`,
     `prior_move_rationale: ${ctx.priorMoveRationale ?? "(none)"}`,

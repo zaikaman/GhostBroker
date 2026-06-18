@@ -413,8 +413,14 @@ export interface NegotiationTurnContext {
    * counterpart to verify (or has revealed itself) on prior rounds.
    * Used by the validator to cap repeated disclosure moves so the
    * session doesn't loop on trust-building indefinitely.
+   *
+   * @deprecated Use priorDisclosureRequests and priorDisclosureReveals.
    */
   priorClaimRequests?: string[];
+  /** Claim types this actor has already asked the counterparty to verify. */
+  priorDisclosureRequests?: string[];
+  /** Claim types this actor has already revealed. */
+  priorDisclosureReveals?: string[];
   lastOutcome?: string;
   priorMoveRationale?: string;
 }
@@ -443,6 +449,10 @@ export function buildTurnContext(input: {
    * disclosure moves. If omitted, the validator assumes an empty
    * history (the agent's very first turn). */
   priorClaimRequests?: string[];
+  /** Claim types this actor has already asked the counterparty to verify. */
+  priorDisclosureRequests?: string[];
+  /** Claim types this actor has already revealed. */
+  priorDisclosureReveals?: string[];
   lastOutcome?: string;
   priorMoveRationale?: string;
   /** Optional: trust level computed upstream from a mandate-sourced
@@ -505,6 +515,12 @@ export function buildTurnContext(input: {
     operatorInstructions: input.operatorInstructions ?? "",
     ...(input.priorClaimRequests !== undefined
       ? { priorClaimRequests: input.priorClaimRequests }
+      : {}),
+    ...(input.priorDisclosureRequests !== undefined
+      ? { priorDisclosureRequests: input.priorDisclosureRequests }
+      : {}),
+    ...(input.priorDisclosureReveals !== undefined
+      ? { priorDisclosureReveals: input.priorDisclosureReveals }
       : {}),
     ...(input.lastOutcome !== undefined ? { lastOutcome: input.lastOutcome } : {}),
     ...(input.priorMoveRationale !== undefined
@@ -614,9 +630,12 @@ export function validateAgentDecision(
       (claim) => !ctx.receivedClaims.includes(claim),
     );
     if (outstandingRequiredClaims.length > 0) {
-      const priorDisclosureMoves = ctx.priorClaimRequests ?? [];
+      const priorDisclosureRequests =
+        ctx.priorDisclosureRequests ?? ctx.priorClaimRequests ?? [];
+      const priorDisclosureReveals =
+        ctx.priorDisclosureReveals ?? ctx.priorClaimRequests ?? [];
       const nextRequiredClaim = outstandingRequiredClaims.find(
-        (claim) => !priorDisclosureMoves.includes(claim),
+        (claim) => !priorDisclosureRequests.includes(claim),
       );
       if (nextRequiredClaim) {
         return {
@@ -640,7 +659,7 @@ export function validateAgentDecision(
       }
 
       const nextRevealClaim = ctx.disclosableClaims.find(
-        (claim) => !priorDisclosureMoves.includes(claim),
+        (claim) => !priorDisclosureReveals.includes(claim),
       );
       if (nextRevealClaim) {
         return {
@@ -737,7 +756,10 @@ export function validateAgentDecision(
   // on previous rounds. Asking a second time without putting terms on
   // the table is downgraded to a `propose`.
   // ---------------------------------------------------------------------
-  const priorRequested = ctx.priorClaimRequests ?? [];
+  const priorRequested =
+    ctx.priorDisclosureRequests ?? ctx.priorClaimRequests ?? [];
+  const priorRevealed =
+    ctx.priorDisclosureReveals ?? ctx.priorClaimRequests ?? [];
   if (action === "request_disclosure" && move.claimType) {
     const repeatedRequestCount = priorRequested.filter(
       (claim) => claim === move.claimType,
@@ -756,7 +778,7 @@ export function validateAgentDecision(
     }
   }
   if (action === "reveal" && move.claimType) {
-    const repeatedRevealCount = priorRequested.filter(
+    const repeatedRevealCount = priorRevealed.filter(
       (claim) => claim === move.claimType,
     ).length;
     if (repeatedRevealCount >= 2) {

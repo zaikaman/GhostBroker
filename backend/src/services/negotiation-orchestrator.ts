@@ -653,7 +653,9 @@ export class NegotiationOrchestrator {
       mandate,
       profile,
       move: input.move,
+      agentId: input.agentId,
       agentDid: input.agentDid,
+      claimCredential: input.claimCredential,
       correlationRef: input.correlationRef,
     });
   }
@@ -665,10 +667,23 @@ export class NegotiationOrchestrator {
     mandate: NegotiationMandate;
     profile: NegotiationStrategyProfile;
     move: NegotiationMove;
+    agentId: string;
     agentDid: string;
+    claimCredential?: unknown;
     correlationRef: string;
   }): Promise<{ status: NegotiationSessionRecord["status"] }> {
-    const { session, actorSide, institutionId, mandate, profile, move, agentDid, correlationRef } = args;
+    const {
+      session,
+      actorSide,
+      institutionId,
+      mandate,
+      profile,
+      move,
+      agentId,
+      agentDid,
+      claimCredential,
+      correlationRef,
+    } = args;
     const band = derivedPriceBandFor(profile.rails, actorSide);
     const operatorInstructions =
       (mandate.operatorInstructions as string | null | undefined) ??
@@ -678,18 +693,43 @@ export class NegotiationOrchestrator {
       session.id,
       institutionId,
     );
+    const standing = await this.repository.getStandingProposals(session.id);
+    const counterpartSide = actorSide === "buy" ? "sell" : "buy";
+    const counterpartStanding =
+      counterpartSide === "buy" ? standing.buy : standing.sell;
+    const receivedCounterpartyClaims =
+      liveSessionView?.disclosedClaims
+        .filter((claim) => claim.verified && claim.fromSide === counterpartSide)
+        .map((claim) => claim.claimType) ?? [];
+    const priorDisclosureRequests =
+      liveSessionView?.rounds
+        .filter((round) => round.actorSide === actorSide)
+        .filter((round) => round.moveType === "request_disclosure")
+        .flatMap((round) => round.disclosedClaimRefs)
+        .filter((claim): claim is string => claim.length > 0) ?? [];
+    const priorDisclosureReveals =
+      liveSessionView?.rounds
+        .filter((round) => round.actorSide === actorSide)
+        .filter((round) => round.moveType === "reveal")
+        .flatMap((round) => round.disclosedClaimRefs)
+        .filter((claim): claim is string => claim.length > 0) ?? [];
     const ctx = buildTurnContext({
       profile,
       side: actorSide,
       roundNumber: session.round_number + 1,
       maxRounds: session.max_rounds,
       deadline: session.deadline,
-      distanceSignal: null,
-      counterpartStandingPrice: null,
-      counterpartStandingQuantity: null,
-      receivedClaims:
-        liveSessionView?.disclosureProgress.receivedVerifiedClaims ?? [],
+      distanceSignal: liveSessionView?.distanceSignal ?? null,
+      counterpartStandingPrice: counterpartStanding?.price ?? null,
+      counterpartStandingQuantity: counterpartStanding?.quantity ?? null,
+      receivedClaims: receivedCounterpartyClaims,
       concessionConsumedBps: 0,
+      ...(priorDisclosureRequests.length > 0
+        ? { priorDisclosureRequests }
+        : {}),
+      ...(priorDisclosureReveals.length > 0
+        ? { priorDisclosureReveals }
+        : {}),
       ...(operatorInstructions ? { operatorInstructions } : {}),
     });
     const validation = validateAgentDecision(
@@ -714,7 +754,79 @@ export class NegotiationOrchestrator {
       },
       ctx,
     );
-    const bounded = validation.accepted;
+    let effectiveMove = validation.accepted;
+    if (
+      effectiveMove.action === "reveal" &&
+      move.action !== "reveal" &&
+      claimCredential === undefined
+    ) {
+      effectiveMove = {
+        ...effectiveMove,
+        action: "propose",
+        strategicIntent: "build_trust",
+        settlementReadiness: "not_ready",
+        reasoning:
+          "Disclosure gate still blocks settlement; restating terms until a verifiable disclosure credential is available.",
+      };
+    }
+
+    if (effectiveMove.action === "reveal") {
+      await this.handleDisclosure({
+        session,
+        actorSide,
+        agentDid,
+        institutionId,
+        agentId,
+        move: effectiveMove,
+        mandate,
+        claimCredential,
+        correlationRef,
+      });
+      await this.advanceTurn(session, actorSide);
+      return { status: "active" };
+    }
+
+    if (
+      effectiveMove.action === "request_disclosure" ||
+      effectiveMove.action === "hold"
+    ) {
+      const proposalCiphertext =
+        effectiveMove.price !== undefined &&
+        Number.isFinite(effectiveMove.price) &&
+        effectiveMove.price > 0 &&
+        effectiveMove.quantity !== undefined &&
+        Number.isFinite(effectiveMove.quantity) &&
+        effectiveMove.quantity > 0
+          ? Buffer.from(
+              JSON.stringify({
+                price: effectiveMove.price,
+                quantity: effectiveMove.quantity,
+              }),
+              "utf8",
+            ).toString("base64url")
+          : null;
+      await this.repository.appendRound({
+        sessionId: session.id,
+        roundNumber: session.round_number + 1,
+        actorDid: agentDid,
+        actorSide,
+        moveType: effectiveMove.action,
+        ...(proposalCiphertext ? { proposalCiphertext } : {}),
+        ...(effectiveMove.claimType
+          ? { disclosedClaimRefs: [effectiveMove.claimType] }
+          : {}),
+        reasoning: effectiveMove.reasoning,
+        strategicIntent: effectiveMove.strategicIntent ?? null,
+        confidence: effectiveMove.confidence ?? null,
+        escalationRequested: effectiveMove.escalationRequested ?? null,
+        settlementReadiness: effectiveMove.settlementReadiness ?? null,
+      });
+      await this.advanceTurn(session, actorSide);
+      this.publish(institutionId, "negotiation_move_submitted", correlationRef, agentDid);
+      return { status: "active" };
+    }
+
+    const bounded = effectiveMove;
     const boundedPrice = bounded.price ?? 0;
     const boundedQuantity = bounded.quantity ?? 0;
     const price =
@@ -752,7 +864,6 @@ export class NegotiationOrchestrator {
 
     // Evaluate the round confidentially against the counterpart's
     // standing proposal (if any). The enclave decides the cross.
-    const counterpartSide = actorSide === "buy" ? "sell" : "buy";
     const counterpartyMandate = await this.loadMandateForSide(
       session,
       counterpartSide,
@@ -835,14 +946,14 @@ export class NegotiationOrchestrator {
       roundNumber: session.round_number + 1,
       actorDid: agentDid,
       actorSide,
-      moveType: move.action,
+      moveType: effectiveMove.action,
       proposalCiphertext,
       opaqueSignal,
-      reasoning: move.reasoning,
-      strategicIntent: move.strategicIntent ?? null,
-      confidence: move.confidence ?? null,
+      reasoning: effectiveMove.reasoning,
+      strategicIntent: effectiveMove.strategicIntent ?? null,
+      confidence: effectiveMove.confidence ?? null,
       escalationRequested,
-      settlementReadiness: move.settlementReadiness ?? null,
+      settlementReadiness: effectiveMove.settlementReadiness ?? null,
     });
 
     this.publish(institutionId, "negotiation_move_submitted", correlationRef, agentDid);
@@ -859,7 +970,7 @@ export class NegotiationOrchestrator {
         actorInstitutionId: institutionId,
         initiatingRoundId: appendedRound.id,
         reason:
-          move.strategicIntent ?? move.reasoning ?? null,
+          effectiveMove.strategicIntent ?? effectiveMove.reasoning ?? null,
         correlationRef,
       });
       return { status: "awaiting_approval" };
@@ -1051,21 +1162,26 @@ export class NegotiationOrchestrator {
     if (!view) {
       return true;
     }
-    const receivedVerifiedClaims = view.disclosureProgress.receivedVerifiedClaims;
+    const buyerReceivedVerifiedClaims = view.disclosedClaims
+      .filter((claim) => claim.verified && claim.fromSide === "sell")
+      .map((claim) => claim.claimType);
+    const sellerReceivedVerifiedClaims = view.disclosedClaims
+      .filter((claim) => claim.verified && claim.fromSide === "buy")
+      .map((claim) => claim.claimType);
 
     const buyerRequired = requiredClaimsFor(buyMandate);
     const sellerRequired = requiredClaimsFor(sellMandate);
 
     // Each side's required claims must have been disclosed AND verified
-    // by the counterparty. A claim verified in the session counts for
-    // whichever side required it.
+    // by the counterparty. A side's own disclosures never satisfy its
+    // counterparty gate.
     const buyerOk = disclosureGateSatisfied({
       requiredClaims: buyerRequired,
-      receivedVerifiedClaims,
+      receivedVerifiedClaims: buyerReceivedVerifiedClaims,
     });
     const sellerOk = disclosureGateSatisfied({
       requiredClaims: sellerRequired,
-      receivedVerifiedClaims,
+      receivedVerifiedClaims: sellerReceivedVerifiedClaims,
     });
     return buyerOk && sellerOk;
   }
