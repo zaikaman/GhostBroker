@@ -26,8 +26,7 @@ The hosted demo runs two institutional LLM agents that negotiate **inside** a ve
 
 - Each agent has a Terminal 3 DID minted on admit, a server-side delegation VC, and a pre-cleared settlement capacity (deposit relayer approvals verified by the backend before the hosted process ever starts).
 - The orchestrator owns the price band, the concession budget, the disclosure gate, the escalation gate, and the settlement command; the LLM owns strategy — opening price, rationale, confidence — **inside** those rails.
-- The agent loop defaults to `protocolMode: "guarded_fast"`. A small deterministic helper (`agents/src/guarded-protocol.ts`) owns the action choreography: opening turn always proposes, the only claim exchanged at runtime is `accredited_institution`, `settlement_capacity` is never requested round-by-round, and the post-submit delay is reduced to a short tick so the demo converges in roughly four actionable turns instead of 10-40.
-- `protocolMode: "llm_freeform"` remains available for experimentation but is not the default hackathon path.
+- The agent loop defaults to `protocolMode: "llm_freeform"`. The LLM owns every action decision and the loop forwards its decision verbatim. The `guarded_fast` mode (`agents/src/guarded-protocol.ts`) is available as an alternative — it uses a deterministic action choreography where the opening turn always proposes, the only claim exchanged at runtime is `accredited_institution`, `settlement_capacity` is never requested round-by-round, and the post-submit delay is reduced to a short tick.
 
 What the operator sees in the log: agent DID boot, settlement pre-clear, ticket sealed, at least one LLM decision (rationale visible), disclosure verified, accept, settled trade ref. What they do **not** see: free-form disclosure deadlock loops, repeated asks for `settlement_capacity`, or per-round reconciliation of settlement readiness — those facts are pre-launch guarantees, not negotiated claims.
 

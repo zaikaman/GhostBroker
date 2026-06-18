@@ -206,7 +206,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     // not a per-round negotiated claim. Log the pre-clear so the
     // demo narrative stays honest.
     console.log(
-      `[HOSTED] settlement pre-clear: deposit relayer approvals verified for ${institution.displayName}; launching ${record.config.protocolMode} runtime (pollIntervalMs=${record.config.pollIntervalMs}, maxTicks=${record.config.maxTicks})`,
+      `[HOSTED] settlement pre-clear: deposit relayer approvals verified for ${institution.displayName}; launching runtime (mode=llm_freeform, pollIntervalMs=${record.config.pollIntervalMs}, maxTicks=${record.config.maxTicks})`,
     );
     const state: HostedAgentRuntimeState = {
       agentId: id,
@@ -422,7 +422,8 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       HOSTED_MANDATE_ID: runtime.config.mandateId,
       POLL_INTERVAL_MS: String(runtime.config.pollIntervalMs),
       MAX_TICKS: String(runtime.config.maxTicks),
-      PROTOCOL_MODE: runtime.config.protocolMode,
+      // PROTOCOL_MODE is intentionally omitted — the agent runtime's
+      // code default ("llm_freeform") is now the system-wide default.
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
       // Forward the LLM provider credentials so the spawned agent
       // can build its fallback chain (gemini → openai → groq). The

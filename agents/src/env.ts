@@ -133,20 +133,19 @@ export const agentEnvSchema = z.object({
   /**
    * Protocol choreography mode for the hosted negotiator.
    *
-   *   - `"guarded_fast"` (default for hosted demo): the LLM still
-   *      proposes price / rationale, but the agent loop's
-   *      `selectGuardedNegotiationMove` helper owns the action
-   *      choreography (open with `propose`, request and reveal
-   *      `accredited_institution` once, never ask for
+   *   - `"guarded_fast"`: the LLM still proposes price / rationale,
+   *      but the agent loop's `selectGuardedNegotiationMove` helper
+   *      owns the action choreography (open with `propose`, request
+   *      and reveal `accredited_institution` once, never ask for
    *      `settlement_capacity`, accept when the cross is feasible).
    *
-   *   - `"llm_freeform"`: the LLM owns every action and the loop
-   *      forwards its decision verbatim (kept for non-demo
-   *      experimentation).
+   *   - `"llm_freeform"` (default): the LLM owns every action and
+   *      the loop forwards its decision verbatim.
    */
   PROTOCOL_MODE: z
     .enum(["guarded_fast", "llm_freeform"])
-    .default("guarded_fast"),
+    .default("llm_freeform"),
+
   AGENT_AVAILABLE_QUOTE_BALANCE: z.coerce.number().nonnegative().optional(),
   AGENT_AVAILABLE_BASE_BALANCE: z.coerce.number().nonnegative().optional(),
   HOSTED_AGENT_ID: z.string().uuid().optional(),
@@ -185,7 +184,7 @@ export function loadAgentEnv(): AgentEnv {
     AGENT_QUOTE_ASSET_CODE: optionalEnv("AGENT_QUOTE_ASSET_CODE", "USDC"),
     MAX_TICKS: numberEnv("MAX_TICKS", 40),
     DRY_RUN: booleanEnv("DRY_RUN", false),
-    PROTOCOL_MODE: optionalEnv("PROTOCOL_MODE", "guarded_fast"),
+    PROTOCOL_MODE: optionalEnv("PROTOCOL_MODE", "llm_freeform"),
     AGENT_AVAILABLE_QUOTE_BALANCE: numberEnvMany(
       ["AGENT_AVAILABLE_QUOTE_BALANCE", "AGENT_AVAILABLE_USDC"],
       undefined,

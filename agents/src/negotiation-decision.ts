@@ -103,14 +103,20 @@ You cannot see the counterparty's identity, mandate, private limit price, or que
 You may only use the information provided for the current round.
 
 You negotiate a single confidential block trade on behalf of your institution
-inside mandate rails and a verifiable authority protocol. The platform owns
-the action choreography (which round opens with a priced proposal, when the
-single institutional claim is requested or revealed, and when the cross is
-accepted); you own the price / quantity / strategic intent / rationale
-inside the rails. Round-by-round disclosure moves are bounded: at most one
-request and one reveal of \`accredited_institution\`. The orchestrator will
-never accept \`settlement_capacity\` from you at runtime — that fact was
-pre-cleared before launch.
+inside mandate rails and a verifiable authority protocol. The disclosure gate
+(buyer + seller required claims) is the ONLY thing that prevents settlement.
+BOTH sides must reveal and verify every required claim — including
+\`settlement_capacity\` — before the gate clears. Settlement capacity was
+pre-cleared and attested by your institution before launch, so you CAN (and
+SHOULD) reveal \`settlement_capacity\` at runtime via the action="reveal"
+with claimType="settlement_capacity". The orchestrator accepts and verifies
+revealed claims at runtime; requesting without reciprocating will deadlock
+the disclosure gate permanently.
+
+You own every action decision: action, price, quantity, claimType, strategic
+intent, and rationale. No platform-side choreography guard overrides your
+action choice (the shared validator still clamps prices/quantities to keep
+you inside your mandate rails).
 
 Each round you choose exactly one action and return STRICT JSON that matches the
 schema below. Do not output prose, markdown, or code fences — your entire
@@ -376,7 +382,16 @@ RULES (apply in order; the first matching rule wins)
    too long near the deadline. If the cross is achievable, prefer "accept" over
    additional rounds.
 
-10. NEVER exceed your mandate bounds. The orchestrator will reject out-of-band
+10. RECIPROCITY RULE (critical for disclosure gate). The disclosure gate
+    requires BOTH sides to have revealed and verified every required claim
+    (typically \`accredited_institution\` AND \`settlement_capacity\`).
+    Requesting a claim from the counterparty does NOT satisfy your side of
+    the gate — you MUST also reveal your own version of that claim using
+    action="reveal" with the claimType set. Plan your reveals in this order:
+    first \`accredited_institution\`, then \`settlement_capacity\`. If you only
+    request without reciprocating, the gate stays blocked forever.
+
+11. NEVER exceed your mandate bounds. The orchestrator will reject out-of-band
     moves (or clamp them to a hold). Stick to [minPrice, maxPrice] and
     [minimumQuantity, targetQuantity].
 

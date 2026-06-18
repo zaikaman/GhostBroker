@@ -1016,12 +1016,20 @@ export class NegotiationOrchestrator {
         await this.advanceTurn(session, actorSide);
         return { status: "active" };
       }
-      await this.convergeAndSettle({
-        session,
-        executionPrice,
-        matchedQuantity,
-        correlationRef,
-      });
+      try {
+        await this.convergeAndSettle({
+          session,
+          executionPrice,
+          matchedQuantity,
+          correlationRef,
+        });
+      } catch {
+        // convergeAndSettle reset the session to "active" and
+        // published settlement_failed telemetry before re-throwing.
+        // Return "active" so the agent gets a clean response and
+        // can retry on its next tick instead of crashing on a 503.
+        return { status: "active" };
+      }
       return { status: "settled" };
     }
 
@@ -1312,10 +1320,30 @@ export class NegotiationOrchestrator {
         `${outcomeRef}:${randomUUID()}`,
       );
     } catch (settleError) {
+      const detail =
+        settleError instanceof Error
+          ? `${settleError.message} | ${settleError.stack ?? "(no stack)"}`
+          : String(settleError);
       console.error(
-        `[CONVERGE] ${session.id} executeSettlement failed: ` +
-        `${settleError instanceof Error ? settleError.message : String(settleError)} ` +
-        `${settleError instanceof Error && settleError.stack ? settleError.stack.split("\n").slice(0, 2).join(" | ") : ""}`
+        `[CONVERGE] ${session.id} executeSettlement failed, resetting to active: ${detail.slice(0, 500)}`,
+      );
+      // Reset the session back to active so the agent loop can retry.
+      // Then re-throw so the caller (runPricedMove) can catch the
+      // error and return a clean status to the agent instead of
+      // propagating the 503 all the way to the Express error handler.
+      await this.repository.updateSession({
+        sessionId: session.id,
+        patch: { status: "active" },
+      });
+      this.publish(
+        session.buy_institution_id,
+        "settlement_failed",
+        input.correlationRef,
+      );
+      this.publish(
+        session.sell_institution_id,
+        "settlement_failed",
+        input.correlationRef,
       );
       throw settleError;
     }
