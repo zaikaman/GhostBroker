@@ -301,6 +301,15 @@ export interface NegotiationSessionRecord {
   escalation_status: z.infer<typeof negotiationEscalationStatusSchema>;
   escalation_initiated_round_id: string | null;
   escalation_resolved_at: string | null;
+  /**
+   * Per-side Ghostbroker delegation W3C VCs snapshotted at
+   * session creation (migration 018). The settlement command
+   * builder re-verifies these VCs verbatim at settlement time.
+   * Shape: `{ buy?: unknown, sell?: unknown }`. A `null` / missing
+   * slot means the orchestrator never snapshotted a VC for that
+   * side; the settlement command builder fails closed on null.
+   */
+  delegation_credentials: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }

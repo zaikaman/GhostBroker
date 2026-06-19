@@ -91,6 +91,24 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
       request.institutionId,
       request.agentDid,
     );
+    if (!delegationCredential) {
+      // The settlement command builder re-verifies the
+      // delegation W3C VC at match time and fails closed on
+      // null. If we cannot load the VC now — Supabase
+      // transient error, agent record missing, or the
+      // `metadata.delegation_credential` JSONB was never
+      // populated — refuse to queue the intent at all. A
+      // queued intent with a null VC would die at the next
+      // match, and the operator would have no way to recover
+      // the locked balance short of TTL eviction. The
+      // admit-time check at `agentService.admitAgent` already
+      // requires a VC to be present and persisted, so a null
+      // here is a data-integrity issue (replication lag,
+      // metadata wiped, or a re-admit that dropped the
+      // credential) — surface it as a 403, not a silent
+      // queued intent.
+      throw new PublicError("authorization_failed", 403);
+    }
     await this.assertAuthority(request, delegationCredential);
 
     const sealed = await this.blindIntentClient.sealIntent({
@@ -131,6 +149,12 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     // / price; the T3 enclave is the single source of truth on
     // those values. The reservation is taken from the TEE's seal
     // response, not from any plaintext on the wire.
+    //
+    // `delegationCredential` is the verified Ghostbroker W3C VC
+    // the orchestrator will re-verify at settlement time. The
+    // submit-time null check above guarantees this is non-null
+    // here — TypeScript still sees `unknown` so we narrow
+    // explicitly.
     const pendingIntent: PendingIntent = {
       correlationRef: context.correlationRef,
       institutionId: request.institutionId,
@@ -139,7 +163,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
       executionRef: sealed.executionRef,
       encryptedEnvelope: request.encryptedIntentEnvelope,
       authorityRef: request.authorityRef,
-      delegationCredential: delegationCredential ?? null,
+      delegationCredential,
       opaqueLockDescriptor: sealed.lockDescriptor,
       sealedAt: sealed.sealedAt,
     };
@@ -350,7 +374,11 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   /**
    * Look up the Ghostbroker delegation VC persisted at admit time. Returns
    * `null` if the agent record is missing or has no credential --
-   * the verifier will then reject as `unverified` / `malformed`.
+   * the submit-time check in `submitIntent` then refuses the
+   * intent. The method used to swallow DB errors silently here;
+   * it now logs a structured warning so a Supabase transient
+   * error is observable to operators instead of being
+   * indistinguishable from "no VC exists".
    */
   private async loadDelegationCredential(
     institutionId: string,
@@ -371,7 +399,22 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         agent.metadata as Record<string, unknown> | null
       )?.["delegation_credential"];
       return credential ?? null;
-    } catch {
+    } catch (error) {
+      logger.error(
+        {
+          event: "hidden_intent.load_delegation_credential_failed",
+          institutionId,
+          agentDid,
+          err: redactForbiddenOrderFields({
+            name: error instanceof Error ? error.name : "Error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "non-Error thrown from agentRepository.findByAgentDid",
+          }),
+        },
+        "agentRepository.findByAgentDid threw; refusing to queue an intent without a verified VC.",
+      );
       return null;
     }
   }

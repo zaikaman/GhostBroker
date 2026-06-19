@@ -28,6 +28,7 @@ import {
   makePortfolioRecord,
 } from "../support/in-memory-portfolio-client.js";
 import { InMemoryIntentLockClient } from "../support/in-memory-intent-lock-client.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 
 const buyerId = "00000000-0000-4000-8000-0000000007a1";
 const sellerId = "00000000-0000-4000-8000-0000000007a2";
@@ -41,6 +42,21 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
       agentDid: request.agentDid,
       authorityRef: request.authorityRef,
       policyHash: "policy:fills",
+      delegationCredential: request.delegationCredential,
+    };
+  }
+
+  public async loadAndVerify(input: {
+    agentId: string;
+    agentDid: string;
+    requestedAction: AgentDelegationVerificationRequest["requestedAction"];
+  }): Promise<AgentDelegationVerificationResult> {
+    return {
+      status: "verified",
+      agentDid: input.agentDid,
+      authorityRef: "auth-stub-fills",
+      policyHash: "policy:fills",
+      delegationCredential: { id: `vc-${input.agentDid}` },
     };
   }
 }
@@ -234,7 +250,7 @@ function buildStack(
   matchClient: MatchContractClient,
   settlement: Pick<SettlementService, "executeSettlement">,
   lockClient: InMemoryIntentLockClient,
-  agentRepository?: AgentRepository,
+  agentRepository: AgentRepository = new FakeAgentRepository(),
 ): { service: HiddenIntentService; orchestrator: MatchingOrchestrator } {
   const portfolioService = new PortfolioService(client as never, "USDC");
   const orchestrator = new MatchingOrchestrator(

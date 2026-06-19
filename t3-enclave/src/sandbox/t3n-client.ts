@@ -51,14 +51,6 @@ function ensureDid(value: string | undefined): string {
   return value;
 }
 
-function normalizeUnknownBody(value: unknown): unknown {
-  if (value && typeof value === "object" && "tenant" in value) {
-    return value;
-  }
-
-  return value;
-}
-
 export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
   private readonly t3n: T3nClient;
   private readonly tenant: TenantClient;
@@ -95,7 +87,7 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
 
       if (request.path === "/tenant/register") {
         await this.tenant.tenant.claim();
-        const tenant = normalizeUnknownBody(await this.tenant.tenant.me()) as
+        const tenant = (await this.tenant.tenant.me()) as
           | TenantMeResponse
           | undefined;
 

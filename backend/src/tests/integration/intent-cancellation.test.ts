@@ -15,6 +15,7 @@ import { HiddenIntentService } from "../../services/hidden-intent.service.js";
 import { MatchingOrchestrator } from "../../services/matching-orchestrator.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
 import type { SettlementService } from "../../services/settlement.service.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import {
   buildHiddenIntentRequest,
   us2AgentDid,
@@ -33,6 +34,21 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
       agentDid: request.agentDid,
       authorityRef: us2AuthorityRef,
       policyHash: "policy:us2",
+      delegationCredential: request.delegationCredential,
+    };
+  }
+
+  public async loadAndVerify(input: {
+    agentId: string;
+    agentDid: string;
+    requestedAction: AgentDelegationVerificationRequest["requestedAction"];
+  }): Promise<AgentDelegationVerificationResult> {
+    return {
+      status: "verified",
+      agentDid: input.agentDid,
+      authorityRef: us2AuthorityRef,
+      policyHash: "policy:us2",
+      delegationCredential: { id: `vc-${input.agentDid}` },
     };
   }
 }
@@ -97,6 +113,14 @@ class FailingAuthorization implements AgentAuthorizationFacade {
       reason: "unverified",
     };
   }
+
+  public async loadAndVerify(): Promise<AgentDelegationVerificationResult> {
+    return {
+      status: "rejected",
+      agentDid: us2AgentDid,
+      reason: "unverified",
+    };
+  }
 }
 
 describe("intent cancellation", () => {
@@ -115,6 +139,7 @@ describe("intent cancellation", () => {
       telemetry,
       undefined,
       orchestrator,
+      new FakeAgentRepository(),
     );
 
     const accepted = await service.submitIntent(buildHiddenIntentRequest(), {
@@ -160,6 +185,7 @@ describe("intent cancellation", () => {
       telemetry,
       undefined,
       orchestrator,
+      new FakeAgentRepository(),
     );
 
     const accepted = await service.submitIntent(buildHiddenIntentRequest(), {
@@ -192,6 +218,7 @@ describe("intent cancellation", () => {
       telemetry,
       undefined,
       orchestrator,
+      new FakeAgentRepository(),
     );
 
     const result = await service.cancelIntent({
@@ -219,6 +246,7 @@ describe("intent cancellation", () => {
       telemetry,
       undefined,
       orchestrator,
+      new FakeAgentRepository(),
     );
 
     const accepted = await service.submitIntent(buildHiddenIntentRequest(), {
@@ -252,6 +280,7 @@ describe("intent cancellation", () => {
       telemetry,
       undefined,
       orchestrator,
+      new FakeAgentRepository(),
     );
 
     await expect(

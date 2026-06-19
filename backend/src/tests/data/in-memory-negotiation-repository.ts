@@ -29,6 +29,7 @@ type SessionPatch = Partial<
     | "escalation_status"
     | "escalation_initiated_round_id"
     | "escalation_resolved_at"
+    | "delegation_credentials"
   >
 >;
 
@@ -81,8 +82,39 @@ export class InMemoryNegotiationRepository implements NegotiationRepository {
   ): Promise<({ id: string } & Record<string, unknown>) | null> {
     const session = this.sessions.get(sessionId);
     if (!session) return Promise.resolve(null);
-    const key = `${sessionId}:${side}`;
-    return Promise.resolve(this.delegationCredentials.get(key) ?? null);
+    const snapshot = (session.delegation_credentials ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const credential = snapshot[side];
+    if (!credential || typeof credential !== "object") {
+      return Promise.resolve(null);
+    }
+    const typed = credential as { id?: unknown } & Record<string, unknown>;
+    if (typeof typed.id !== "string") {
+      return Promise.resolve(null);
+    }
+    return Promise.resolve(typed as { id: string } & Record<string, unknown>);
+  }
+
+  public setSessionDelegation(input: {
+    sessionId: string;
+    side: "buy" | "sell";
+    delegationCredential: unknown;
+  }): Promise<void> {
+    const existing = this.sessions.get(input.sessionId);
+    if (!existing) {
+      return Promise.reject(new PublicError("not_found", 404));
+    }
+    this.sessions.set(input.sessionId, {
+      ...existing,
+      delegation_credentials: {
+        ...(existing.delegation_credentials ?? {}),
+        [input.side]: input.delegationCredential,
+      },
+      updated_at: new Date().toISOString(),
+    });
+    return Promise.resolve();
   }
 
   public linkSettledTrade(sessionId: string, tradeRef: string): Promise<void> {
@@ -121,6 +153,7 @@ export class InMemoryNegotiationRepository implements NegotiationRepository {
       escalation_status: "none",
       escalation_initiated_round_id: null,
       escalation_resolved_at: null,
+      delegation_credentials: {},
       created_at: now,
       updated_at: now,
     };
@@ -256,7 +289,15 @@ export class InMemoryNegotiationRepository implements NegotiationRepository {
     side: "buy" | "sell",
     credential: { id: string } & Record<string, unknown>,
   ): void {
-    this.delegationCredentials.set(`${sessionId}:${side}`, credential);
+    // Mirrors what the orchestrator does at session creation via
+    // `setSessionDelegation`. Kept as a sync helper for test
+    // ergonomics so a test that wants to skip the orchestrator's
+    // snapshot can pre-populate the column directly.
+    void this.setSessionDelegation({
+      sessionId,
+      side,
+      delegationCredential: credential,
+    });
   }
 
   private toView(

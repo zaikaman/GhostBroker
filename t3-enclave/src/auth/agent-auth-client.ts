@@ -80,6 +80,17 @@ export interface VerifiedAgentDelegation {
   agentDid: string;
   authorityRef: string;
   policyHash: string;
+  /**
+   * The Ghostbroker delegation W3C VC the facade verified. Carried
+   * on the result so the orchestrator can snapshot it onto the
+   * in-flight session / intent and re-verify the same credential at
+   * settlement time. Without this, the orchestrator has no way to
+   * pin the VC that was authorized at open time and a later
+   * "Regenerate Delegation" re-mint (or a Supabase transient error
+   * in the snapshot path) would let settlement re-verify against
+   * the wrong credential.
+   */
+  delegationCredential: unknown;
 }
 
 export interface RejectedAgentDelegation {
@@ -152,6 +163,7 @@ export class GhostbrokerDelegationAgentAuthClient
       agentDid: request.agentDid,
       authorityRef: result.authorityRef,
       policyHash: result.policyHash,
+      delegationCredential: request.delegationCredential,
     };
   }
 }

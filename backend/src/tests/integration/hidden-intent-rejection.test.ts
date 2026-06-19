@@ -8,6 +8,7 @@ import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { PublicError } from "../../errors/public-error.js";
 import { HiddenIntentService } from "../../services/hidden-intent.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import { buildHiddenIntentRequest } from "../data/us2-encrypted-intent-builders.js";
 
 class RejectedAuthorization implements AgentAuthorizationFacade {
@@ -19,6 +20,10 @@ class RejectedAuthorization implements AgentAuthorizationFacade {
       agentDid: request.agentDid,
       reason: "over_scoped",
     };
+  }
+
+  public async loadAndVerify(): Promise<AgentDelegationVerificationResult> {
+    throw new PublicError("authorization_failed", 403);
   }
 }
 
@@ -33,6 +38,9 @@ describe("hidden intent rejection", () => {
       new RejectedAuthorization(),
       blindIntentClient,
       new TelemetryBus(),
+      undefined,
+      undefined,
+      new FakeAgentRepository(),
     );
 
     await expect(

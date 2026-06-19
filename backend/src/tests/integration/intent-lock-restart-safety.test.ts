@@ -27,6 +27,7 @@ import {
   InMemoryPortfolioClient,
   makePortfolioRecord,
 } from "../support/in-memory-portfolio-client.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 
 /**
  * The core safety property of the lock-refs work:
@@ -59,6 +60,21 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
       agentDid: request.agentDid,
       authorityRef: us2AuthorityRef,
       policyHash: "policy:restart-safety",
+      delegationCredential: request.delegationCredential,
+    };
+  }
+
+  public async loadAndVerify(input: {
+    agentId: string;
+    agentDid: string;
+    requestedAction: AgentDelegationVerificationRequest["requestedAction"];
+  }): Promise<AgentDelegationVerificationResult> {
+    return {
+      status: "verified",
+      agentDid: input.agentDid,
+      authorityRef: us2AuthorityRef,
+      policyHash: "policy:restart-safety",
+      delegationCredential: { id: `vc-${input.agentDid}` },
     };
   }
 }
@@ -159,7 +175,7 @@ describe("orphan-lock restart safety", () => {
       telemetry,
       undefined,
       orchestrator1,
-      undefined,
+      new FakeAgentRepository(),
       portfolioService1,
       lockClient,
     );
@@ -265,7 +281,7 @@ describe("orphan-lock restart safety", () => {
       telemetry,
       undefined,
       orchestrator,
-      undefined,
+      new FakeAgentRepository(),
       portfolioService,
       lockClient,
     );
@@ -324,7 +340,7 @@ describe("orphan-lock restart safety", () => {
       telemetry,
       undefined,
       orchestrator,
-      undefined,
+      new FakeAgentRepository(),
       portfolioService,
       lockClient,
     );

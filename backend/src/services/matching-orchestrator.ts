@@ -457,6 +457,46 @@ export class MatchingOrchestrator {
         sellerSettlementProfileRef = sellerConfig?.settlementProfileRef;
       }
 
+      // Defense in depth: refuse to push a settlement request
+      // with a null credential. The submit-time check in
+      // `HiddenIntentService.submitIntent` already rejects null
+      // VCs at admission, so a null here means a legacy intent
+      // slipped through (admitted before the check landed) or
+      // the metadata was wiped after admit. Logging a
+      // structured error and skipping the match is the only
+      // safe option — the settlement command builder would
+      // throw `SettlementAuthorityError` on null and the fill
+      // would die without any observable signal.
+      if (!buyIntent.delegationCredential || !sellIntent.delegationCredential) {
+        logger.error(
+          {
+            event: "matching_orchestrator.settle.missing_intent_delegation",
+            buyIntentHandle: buyIntent.intentHandle,
+            sellIntentHandle: sellIntent.intentHandle,
+            hasBuyerCredential: buyIntent.delegationCredential !== null,
+            hasSellerCredential: sellIntent.delegationCredential !== null,
+            buyerInstitutionId: buyIntent.institutionId,
+            sellerInstitutionId: sellIntent.institutionId,
+          },
+          "Intent queue has a null delegation credential; refusing to push to settlement.",
+        );
+        this.telemetryBus.publish({
+          institutionId: buyIntent.institutionId,
+          type: "telemetry.error.changed",
+          phase: "authorization_failed",
+          severity: "error",
+          correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+          agentId: buyIntent.agentDid,
+        });
+        this.releaseLockFor(buyIntent);
+        this.deleteLockRefFor(buyIntent);
+        this.removeIntent(buyIntent);
+        this.releaseLockFor(sellIntent);
+        this.deleteLockRefFor(sellIntent);
+        this.removeIntent(sellIntent);
+        return;
+      }
+
       const request: SettlementExecutionRequest = {
         matchOutcome: normalizedOutcome,
         buyerAgentDid: buyIntent.agentDid,

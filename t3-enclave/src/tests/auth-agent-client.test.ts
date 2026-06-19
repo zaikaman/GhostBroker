@@ -41,6 +41,7 @@ describe("T3 agent delegation adapter", () => {
       authorityRef: baseRequest.authorityRef,
       policyHash:
         "ce3b08cb992446501f996876ef99c9b1df7bff343186555495966dbf3a3725ec",
+      delegationCredential: vc,
     });
   });
 

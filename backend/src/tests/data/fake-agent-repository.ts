@@ -4,10 +4,23 @@ import type { AgentRepository } from "../../services/agent-repository.js";
 /**
  * In-memory fake AgentRepository for unit/integration tests
  * that don't need real Supabase connectivity.
+ *
+ * By default, any `findByAgentDid` lookup for an agent that has
+ * not been pre-registered returns a synthetic agent with a
+ * placeholder delegation VC in metadata. That keeps the
+ * submit-time null check in `HiddenIntentService.submitIntent`
+ * satisfied without requiring every test to register agents
+ * explicitly. Tests that need to exercise the missing-agent
+ * path can call `disableAutoRegister()`.
  */
 export class FakeAgentRepository implements AgentRepository {
   private readonly agents: Agent[] = [];
   private nextId = 1;
+  private autoRegister = true;
+
+  public disableAutoRegister(): void {
+    this.autoRegister = false;
+  }
 
   public async create(params: {
     institutionId: string;
@@ -19,6 +32,7 @@ export class FakeAgentRepository implements AgentRepository {
     maxNotional?: string | null;
     limitReference?: string | null;
     policyHash?: string | null;
+    delegationCredential?: unknown;
   }): Promise<Agent> {
     const id = `test-agent-${this.nextId++}`;
     const now = new Date().toISOString();
@@ -34,7 +48,10 @@ export class FakeAgentRepository implements AgentRepository {
       maxNotional: params.maxNotional ?? null,
       limitReference: params.limitReference ?? null,
       policyHash: params.policyHash ?? null,
-      metadata: {},
+      metadata:
+        params.delegationCredential !== undefined
+          ? { delegation_credential: params.delegationCredential }
+          : {},
       createdAt: now,
       updatedAt: now,
     };
@@ -87,12 +104,28 @@ export class FakeAgentRepository implements AgentRepository {
     institutionId: string,
     agentDid: string,
   ): Promise<Agent | null> {
-    return (
-      this.agents.find(
-        (a) =>
-          a.institutionId === institutionId && a.agentDid === agentDid,
-      ) ?? null
+    const existing = this.agents.find(
+      (a) => a.institutionId === institutionId && a.agentDid === agentDid,
     );
+    if (existing) {
+      return existing;
+    }
+    if (!this.autoRegister) {
+      return null;
+    }
+    // Synthesize a placeholder agent so the submit-time VC
+    // load check passes. The agent's `delegationCredential` is
+    // a placeholder `{ id }` object that the verifier accepts
+    // as "verified" when paired with a matching
+    // `VerifiedAuthorization` stub (the test fakes don't run
+    // the real verifier; they short-circuit on the authz
+    // facade). Production never hits this path.
+    return this.create({
+      institutionId,
+      agentDid,
+      authorityRef: `authority:${agentDid}`,
+      delegationCredential: { id: `vc-${agentDid}` },
+    });
   }
 
   public async updateMetadata(

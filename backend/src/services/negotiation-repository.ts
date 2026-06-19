@@ -61,7 +61,7 @@ interface UpdateQuery<TResult> {
       select(columns?: string): {
         single(): Promise<{ data: TResult | null; error: Error | null }>;
       };
-    };
+    } & Promise<DeleteResult>;
   };
 }
 
@@ -117,6 +117,30 @@ export interface NegotiationRepository {
     institutionId: string,
   ): Promise<NegotiationMandate | null>;
   getSessionRecord(sessionId: string): Promise<NegotiationSessionRecord | null>;
+  /**
+   * Snapshot a per-side Ghostbroker delegation W3C VC onto the
+   * session at open time. The snapshot is the authoritative VC
+   * the settlement command builder re-verifies at settlement
+   * time, so a later "Regenerate Delegation" re-mint or a
+   * transient DB error in the agent-record lookup cannot change
+   * which credential the orchestrator settles against.
+   *
+   * The implementation MUST be idempotent: the orchestrator
+   * may snapshot the same VC more than once across the open /
+   * move / disclose calls.
+   */
+  setSessionDelegation(input: {
+    sessionId: string;
+    side: "buy" | "sell";
+    delegationCredential: unknown;
+  }): Promise<void>;
+  /**
+   * Return the per-side delegation VC the orchestrator
+   * snapshotted at session creation. Returns `null` when the
+   * slot was never populated (legacy session, or the orchestrator
+   * failed to snapshot). The settlement command builder treats
+   * `null` as a hard fail.
+   */
   getSessionDelegation(
     sessionId: string,
     side: "buy" | "sell",
@@ -470,21 +494,11 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     if (!session) {
       return null;
     }
-    const agentDid =
-      side === "buy" ? session.buy_agent_did : session.sell_agent_did;
-
-    const { data, error } = await this.client
-      .from("agents")
-      .select("metadata")
-      .eq("agent_did", agentDid)
-      .single();
-
-    if (error || !data || !data.metadata) {
-      return null;
-    }
-    const credential = (data.metadata as Record<string, unknown>)[
-      "delegation_credential"
-    ];
+    const snapshot = (session.delegation_credentials ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const credential = snapshot[side];
     if (!credential || typeof credential !== "object") {
       return null;
     }
@@ -493,6 +507,28 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
       return null;
     }
     return typed as { id: string } & Record<string, unknown>;
+  }
+
+  public async setSessionDelegation(input: {
+    sessionId: string;
+    side: "buy" | "sell";
+    delegationCredential: unknown;
+  }): Promise<void> {
+    const existing = await this.getSessionRecord(input.sessionId);
+    if (!existing) {
+      throw new PublicError("not_found", 404);
+    }
+    const snapshot = {
+      ...(existing.delegation_credentials ?? {}),
+      [input.side]: input.delegationCredential,
+    };
+    const { error } = await this.client
+      .from("negotiation_sessions")
+      .update({ delegation_credentials: snapshot })
+      .eq("id", input.sessionId);
+    if (error) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
   }
 
   public async linkSettledTrade(

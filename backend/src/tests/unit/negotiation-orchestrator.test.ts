@@ -19,6 +19,7 @@ const stubAuth: AgentAuthorizationFacade = {
       agentDid: "did:stub",
       authorityRef: "auth-stub",
       policyHash: "hash-stub",
+      delegationCredential: { id: "vc-stub" },
     };
   },
   async loadAndVerify(input) {
@@ -28,6 +29,7 @@ const stubAuth: AgentAuthorizationFacade = {
       agentDid: "did:stub",
       authorityRef: "auth-stub",
       policyHash: "hash-stub",
+      delegationCredential: { id: "vc-stub" },
     };
   },
 };

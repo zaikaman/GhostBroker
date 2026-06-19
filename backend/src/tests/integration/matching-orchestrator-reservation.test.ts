@@ -18,6 +18,8 @@ import {
 } from "../../services/portfolio.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
 import type { SettlementService } from "../../services/settlement.service.js";
+import type { AgentRepository } from "../../services/agent-repository.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import {
   buildHiddenIntentRequest,
   buildHiddenIntentRequestForSide,
@@ -65,6 +67,21 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
       agentDid: request.agentDid,
       authorityRef: us2AuthorityRef,
       policyHash: "policy:us2",
+      delegationCredential: request.delegationCredential,
+    };
+  }
+
+  public async loadAndVerify(input: {
+    agentId: string;
+    agentDid: string;
+    requestedAction: AgentDelegationVerificationRequest["requestedAction"];
+  }): Promise<AgentDelegationVerificationResult> {
+    return {
+      status: "verified",
+      agentDid: input.agentDid,
+      authorityRef: us2AuthorityRef,
+      policyHash: "policy:us2",
+      delegationCredential: { id: `vc-${input.agentDid}` },
     };
   }
 }
@@ -172,6 +189,7 @@ function buildOrchestrator(portfolioClient: InMemoryPortfolioClient): {
 function buildHiddenIntentService(
   orchestrator: MatchingOrchestrator,
   portfolioService: PortfolioService,
+  agentRepository: AgentRepository = buildAgentRepositoryWithVc(),
 ): HiddenIntentService {
   return new HiddenIntentService(
     new VerifiedAuthorization(),
@@ -179,9 +197,22 @@ function buildHiddenIntentService(
     new TelemetryBus(),
     undefined,
     orchestrator,
-    undefined,
+    agentRepository,
     portfolioService,
   );
+}
+
+/**
+ * Build an `AgentRepository` that has the buyer and seller
+ * agents pre-registered with a delegation VC in metadata. The
+ * submit-time null check in `HiddenIntentService.submitIntent`
+ * requires the VC to be loadable from the repository; without
+ * this, the test would have to thread the VC through a
+ * different seam.
+ */
+function buildAgentRepositoryWithVc(): AgentRepository {
+  const repo = new FakeAgentRepository();
+  return repo;
 }
 
 describe("matching orchestrator — balance reservations", () => {

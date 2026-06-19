@@ -37,6 +37,13 @@ import {
  * A negotiation ticket awaiting pairing. Held in memory between
  * `submitTicket` and the matchmaker pairing it with a compatible
  * opposite-side ticket from a different institution.
+ *
+ * `delegationCredential` is the Ghostbroker W3C VC the facade
+ * verified at submit time. The orchestrator snapshots it onto the
+ * session via `repository.setSessionDelegation(...)` immediately
+ * after `createSession` so a later "Regenerate Delegation" re-mint
+ * or a transient DB error in the agent-record lookup cannot change
+ * which credential the settlement command builder re-verifies.
  */
 interface PendingTicket {
   ticketHandle: string;
@@ -49,6 +56,7 @@ interface PendingTicket {
   mandate: NegotiationMandate;
   profile: NegotiationStrategyProfile | null;
   sealedAt: string;
+  delegationCredential: unknown;
 }
 
 /**
@@ -318,13 +326,13 @@ export class NegotiationOrchestrator {
     compatibilityToken: string;
     correlationRef: string;
   }): Promise<{ ticketHandle: string; sessionId: string | null }> {
-    const verification = await this.authorization.loadAndVerify?.({
+    const verification = await this.authorization.loadAndVerify({
       institutionId: input.institutionId,
       agentId: input.agentId,
       agentDid: input.agentDid,
       requestedAction: "negotiation.open",
     });
-    if (!verification || verification.status !== "verified") {
+    if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }
 
@@ -361,6 +369,7 @@ export class NegotiationOrchestrator {
       mandate,
       profile: profileFromMandate(mandate),
       sealedAt: sealed.sealedAt,
+      delegationCredential: verification.delegationCredential,
     };
 
     this.publish(
@@ -437,6 +446,54 @@ export class NegotiationOrchestrator {
       deadline,
     });
 
+    // Pin both per-side Ghostbroker delegation W3C VCs onto the
+    // session right after the row is created. The settlement
+    // command builder re-verifies these VCs verbatim at settlement
+    // time, so a later "Regenerate Delegation" re-mint or a
+    // transient DB error in the agent-record lookup cannot change
+    // which credential is re-verified. The snapshot failures are
+    // logged but the session still opens — the settlement path
+    // re-reads the snapshot and fails closed on null, which is
+    // the same defense in depth the verifier already enforces.
+    try {
+      await this.repository.setSessionDelegation({
+        sessionId: session.id,
+        side: "buy",
+        delegationCredential: buyTicket.delegationCredential,
+      });
+    } catch (snapshotError) {
+      logger.error(
+        {
+          event: "negotiation.session.delegation_snapshot_failed",
+          sessionId: session.id,
+          side: "buy",
+          institutionId: buyTicket.institutionId,
+          agentDid: buyTicket.agentDid,
+          err: redactForbiddenOrderFields(snapshotError),
+        },
+        "Failed to snapshot buy-side delegation VC; settlement will fail closed.",
+      );
+    }
+    try {
+      await this.repository.setSessionDelegation({
+        sessionId: session.id,
+        side: "sell",
+        delegationCredential: sellTicket.delegationCredential,
+      });
+    } catch (snapshotError) {
+      logger.error(
+        {
+          event: "negotiation.session.delegation_snapshot_failed",
+          sessionId: session.id,
+          side: "sell",
+          institutionId: sellTicket.institutionId,
+          agentDid: sellTicket.agentDid,
+          err: redactForbiddenOrderFields(snapshotError),
+        },
+        "Failed to snapshot sell-side delegation VC; settlement will fail closed.",
+      );
+    }
+
     this.publish(buyTicket.institutionId, "negotiation_paired", correlationRef, buyTicket.agentDid);
     this.publish(sellTicket.institutionId, "negotiation_paired", correlationRef, sellTicket.agentDid);
     this.publish(buyTicket.institutionId, "negotiation_round_open", correlationRef, buyTicket.agentDid);
@@ -472,13 +529,13 @@ export class NegotiationOrchestrator {
       `action=${input.move.action} price=${input.move.price} qty=${input.move.quantity} ` +
       `inst=${input.institutionId}`
     );
-    const verification = await this.authorization.loadAndVerify?.({
+    const verification = await this.authorization.loadAndVerify({
       institutionId: input.institutionId,
       agentId: input.agentId,
       agentDid: input.agentDid,
       requestedAction: "negotiation.move",
     });
-    if (!verification || verification.status !== "verified") {
+    if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }
 
@@ -1031,7 +1088,17 @@ export class NegotiationOrchestrator {
         // can retry on its next tick instead of crashing on a 503.
         return { status: "active" };
       }
-      return { status: "settled" };
+      // `convergeAndSettle` may abort the session (e.g. when
+      // the snapshotted delegation VC is missing) and mark it
+      // `expired` without throwing. Reflect the durable
+      // session state in the response so the agent / test
+      // sees the real outcome.
+      const settledSession = await this.repository.getSessionRecord(
+        session.id,
+      );
+      return {
+        status: settledSession?.status === "expired" ? "expired" : "settled",
+      };
     }
 
     await this.advanceTurn(session, actorSide);
@@ -1097,13 +1164,13 @@ export class NegotiationOrchestrator {
       throw new PublicError("validation_failed", 400);
     }
 
-    const discloseAuth = await this.authorization.loadAndVerify?.({
+    const discloseAuth = await this.authorization.loadAndVerify({
       institutionId: input.institutionId,
       agentId: input.agentId,
       agentDid: input.agentDid,
       requestedAction: "negotiation.disclose",
     });
-    if (!discloseAuth || discloseAuth.status !== "verified") {
+    if (discloseAuth.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }
 
@@ -1248,6 +1315,43 @@ export class NegotiationOrchestrator {
       session.id,
       "sell",
     );
+
+    // Defense in depth: if either side's snapshotted VC is
+    // missing, refuse to push a settlement request with a null
+    // credential. The settlement command builder would throw
+    // `SettlementAuthorityError` on null and the whole fill
+    // would die; better to abort here with a clear log so an
+    // operator can re-mint the agent's VC and re-open the
+    // session. The session transitions to `expired` so the
+    // in-memory queue and the durable row agree on the state.
+    if (!buyerCredential || !sellerCredential) {
+      logger.error(
+        {
+          event: "negotiation.settle.missing_session_delegation",
+          sessionId: session.id,
+          buyAgentDid: session.buy_agent_did,
+          sellAgentDid: session.sell_agent_did,
+          hasBuyerCredential: buyerCredential !== null,
+          hasSellerCredential: sellerCredential !== null,
+        },
+        "Session is missing one or both snapshotted delegation VCs; refusing to settle.",
+      );
+      await this.repository.updateSession({
+        sessionId: session.id,
+        patch: { status: "expired" },
+      });
+      this.publish(
+        session.buy_institution_id,
+        "negotiation_expired",
+        input.correlationRef,
+      );
+      this.publish(
+        session.sell_institution_id,
+        "negotiation_expired",
+        input.correlationRef,
+      );
+      return;
+    }
     // Note: the buyer and seller delegation credentials were
     // resolved above and snapshotted into the settlement request
     // (`buyerDelegationCredential`, `sellerDelegationCredential`).
@@ -1601,7 +1705,13 @@ export class NegotiationOrchestrator {
       matchedQuantity: evaluation.matchedQuantity,
       correlationRef: input.correlationRef,
     });
-    return { status: "settled" };
+    // `convergeAndSettle` may abort and mark the session
+    // `expired` without throwing (e.g. when the snapshotted
+    // delegation VC is missing). Reflect the durable state.
+    const settledSession = await this.repository.getSessionRecord(session.id);
+    return {
+      status: settledSession?.status === "expired" ? "expired" : "settled",
+    };
   }
 
   /**

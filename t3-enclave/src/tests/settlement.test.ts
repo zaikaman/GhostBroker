@@ -38,6 +38,7 @@ class Verifier implements SettlementAuthorityVerifier {
         agentDid: request.agentDid,
         authorityRef: request.authorityRef,
         policyHash: "policy:us3",
+        delegationCredential: request.delegationCredential,
       };
     }
 

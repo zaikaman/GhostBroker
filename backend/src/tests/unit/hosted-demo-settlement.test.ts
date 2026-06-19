@@ -37,6 +37,7 @@ const stubAuth: AgentAuthorizationFacade = {
       agentDid: "did:stub",
       authorityRef: "auth-stub",
       policyHash: "hash-stub",
+      delegationCredential: { id: "vc-stub" },
     };
   },
   async loadAndVerify(input) {
@@ -46,6 +47,7 @@ const stubAuth: AgentAuthorizationFacade = {
       agentDid: "did:stub",
       authorityRef: "auth-stub",
       policyHash: "hash-stub",
+      delegationCredential: { id: "vc-stub" },
     };
   },
 };
@@ -185,6 +187,7 @@ interface DemoHarness {
   orchestrator: NegotiationOrchestrator;
   repository: InMemoryNegotiationRepository;
   telemetry: TelemetryBus;
+  ticketClient: NegotiationTicketClient;
 }
 
 async function buildDemoHarness(): Promise<DemoHarness> {
@@ -218,7 +221,7 @@ async function buildDemoHarness(): Promise<DemoHarness> {
     maxRounds: 12,
     deadlineMs: 60 * 60 * 1000,
   });
-  return { orchestrator, repository, telemetry };
+  return { orchestrator, repository, telemetry, ticketClient };
 }
 
 async function openDemoSession(harness: DemoHarness): Promise<string> {
@@ -622,5 +625,103 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       correlationRef: "test:recip:accept",
     });
     expect(accepted.status).toBe("settled");
+  });
+
+  it("fails closed when a session is missing its snapshotted delegation VCs (legacy / data-integrity)", async () => {
+    // A session row whose `delegation_credentials` JSONB is
+    // empty (legacy session, or the orchestrator's snapshot
+    // failed) must not push a null-credential settlement
+    // request to the settlement service. The orchestrator
+    // aborts the session and marks it `expired`.
+    const harness = await buildDemoHarness();
+    const sessionId = await openDemoSession(harness);
+    // Wipe the snapshot we registered in `openDemoSession`
+    // to simulate a legacy session that pre-dates
+    // migration 018.
+    await harness.repository.updateSession({
+      sessionId,
+      patch: { delegation_credentials: {} },
+    });
+    const wiped = await harness.repository.getSessionRecord(sessionId);
+    expect(wiped?.delegation_credentials).toEqual({});
+    harnessState.crossed = true;
+    harnessState.nextExecutionPrice = 70_000;
+    harnessState.nextMatchedQuantity = 1;
+    let settleCalls = 0;
+    const settlementStub: Pick<SettlementService, "executeSettlement"> = {
+      async executeSettlement() {
+        settleCalls += 1;
+        throw new Error(
+          "settlement service should NOT be called when the snapshot is missing",
+        );
+      },
+    };
+    const orchestrator = new NegotiationOrchestrator({
+      ticketClient: harness.ticketClient,
+      roundEvaluator: crossEvaluator,
+      disclosureVerifier: new ApproveDisclosureVerifier(),
+      authorization: stubAuth,
+      repository: harness.repository,
+      settlementService: settlementStub as unknown as SettlementService,
+      telemetryBus: new TelemetryBus(),
+      settlementAssetCode: "USDC",
+      maxRounds: 12,
+      deadlineMs: 60 * 60 * 1000,
+    });
+    await orchestrator.submitMove({
+      institutionId: BUY_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000d101",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: { action: "propose", price: 70_000, quantity: 1, reasoning: "Open" },
+      correlationRef: "test:nodelegation:open",
+    });
+    await orchestrator.submitMove({
+      institutionId: SELL_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000d102",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "reveal",
+        claimType: "accredited_institution",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Reciprocal reveal",
+      },
+      correlationRef: "test:nodelegation:reveal-buy",
+    });
+    await orchestrator.submitMove({
+      institutionId: BUY_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000d101",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "reveal",
+        claimType: "accredited_institution",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Reciprocal reveal",
+      },
+      correlationRef: "test:nodelegation:reveal-sell",
+    });
+    const accepted = await orchestrator.submitMove({
+      institutionId: SELL_INSTITUTION,
+      sessionId,
+      agentId: "00000000-0000-4000-8000-00000000d102",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      move: {
+        action: "accept",
+        price: 70_000,
+        quantity: 1,
+        reasoning: "Accept",
+      },
+      correlationRef: "test:nodelegation:accept",
+    });
+    expect(accepted.status).toBe("expired");
+    expect(settleCalls).toBe(0);
   });
 });

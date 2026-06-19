@@ -430,13 +430,7 @@ async function tryLiveVerify(
       policyHash: policyHashFor(safe),
       verificationMode: "live",
     };
-  } catch (error: unknown) {
-    // Reference the error once so the catch binding is used
-    // by a future structured-log path without changing the
-    // current return shape.
-    void (
-      error instanceof Error ? error.message : "VC verification error"
-    );
+  } catch {
     // Production-grade default: fail closed on any SDK
     // exception in `live` or `structural` mode. The legacy
     // `VC_VERIFY_STRICT=true` opt-in is now a no-op — the
@@ -445,7 +439,6 @@ async function tryLiveVerify(
     // if they want the historical "verified on SDK error"
     // behaviour. The flag is retained so existing operator
     // scripts that set it keep working.
-    void process.env["VC_VERIFY_STRICT"];
     if (mode === "sandbox") {
       return {
         status: "verified",

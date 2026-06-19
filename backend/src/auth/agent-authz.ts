@@ -37,17 +37,8 @@ export interface AgentAuthorizationFacade {
    * Server-side: load the persisted VC for the agent and
    * verify it. This is the post-Phase 1 default. The agent
    * process never sends the VC; the backend owns it.
-   *
-   * Marked optional on the interface so the
-   * pre-Phase 1 test fakes (which only stub
-   * `verifyAgentAuthority`) keep typechecking. The
-   * production `T3AgentAuthorizationFacade` implements it;
-   * a fake that doesn't override it falls through to the
-   * default no-op that throws `authorization_failed`,
-   * which is the right behavior for tests that don't
-   * exercise the load-and-verify path.
    */
-  loadAndVerify?(input: {
+  loadAndVerify(input: {
     institutionId: string;
     agentId: string;
     agentDid: string;
@@ -108,6 +99,7 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
       agentDid: request.agentDid,
       authorityRef: result.authorityRef,
       policyHash: result.policyHash,
+      delegationCredential: request.delegationCredential,
     };
   }
 

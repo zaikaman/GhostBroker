@@ -147,11 +147,10 @@ CREATE TABLE public.negotiation_mandates (
   counterparty_constraints jsonb NOT NULL DEFAULT '{}'::jsonb,
   operator_prompt text NOT NULL CHECK (operator_prompt <> ''::text),
   policy_hash text NOT NULL CHECK (policy_hash <> ''::text),
-  -- Authored AI-first policy surface (migration 016). These are the
-  -- operator-authored mandate fields; the trader-style numeric rails
-  -- above are derived from them by the strategy normalizer.
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
   objective text,
-  execution_style text CHECK (execution_style IS NULL OR execution_style = ANY (ARRAY['patient'::text, 'balanced'::text, 'aggressive'::text, 'relationship_first'::text, 'trust_first'::text])),
+  execution_style text CHECK (execution_style IS NULL OR (execution_style = ANY (ARRAY['patient'::text, 'balanced'::text, 'aggressive'::text, 'relationship_first'::text, 'trust_first'::text]))),
   valuation_policy jsonb,
   concession_policy jsonb,
   disclosure_policy jsonb,
@@ -160,17 +159,14 @@ CREATE TABLE public.negotiation_mandates (
   size_policy jsonb,
   time_window jsonb,
   operator_instructions text,
-  minimum_quantity numeric(40, 8),
+  minimum_quantity numeric,
   partial_execution_allowed boolean,
-  -- Derived execution rails, written by the strategy normalizer.
-  derived_anchor_value numeric(40, 8),
-  derived_walkaway_min numeric(40, 8),
-  derived_walkaway_max numeric(40, 8),
+  derived_anchor_value numeric,
+  derived_walkaway_min numeric,
+  derived_walkaway_max numeric,
   derived_concession_budget_bps integer,
-  derived_notional_ceiling numeric(40, 8),
-  decision_meta jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  derived_notional_ceiling numeric,
+  decision_meta jsonb DEFAULT '{}'::jsonb,
   CONSTRAINT negotiation_mandates_pkey PRIMARY KEY (id),
   CONSTRAINT negotiation_mandates_institution_id_fkey FOREIGN KEY (institution_id) REFERENCES public.institutions(id),
   CONSTRAINT negotiation_mandates_agent_id_fkey FOREIGN KEY (agent_id) REFERENCES public.agents(id)
@@ -190,21 +186,18 @@ CREATE TABLE public.negotiation_sessions (
   max_rounds integer NOT NULL CHECK (max_rounds > 0),
   deadline timestamp with time zone NOT NULL,
   trade_ref text,
-  -- Authoritative escalation gating (migration 017). When
-  -- `escalation_status` is `pending`, the session status reads
-  -- `awaiting_approval` and the orchestrator will refuse to settle
-  -- priced crosses until an operator approves or declines.
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
   escalation_status text NOT NULL DEFAULT 'none'::text CHECK (escalation_status = ANY (ARRAY['none'::text, 'pending'::text, 'approved'::text, 'declined'::text])),
   escalation_initiated_round_id uuid,
   escalation_resolved_at timestamp with time zone,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  delegation_credentials jsonb NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT negotiation_sessions_pkey PRIMARY KEY (id),
   CONSTRAINT negotiation_sessions_buy_institution_id_fkey FOREIGN KEY (buy_institution_id) REFERENCES public.institutions(id),
   CONSTRAINT negotiation_sessions_sell_institution_id_fkey FOREIGN KEY (sell_institution_id) REFERENCES public.institutions(id),
   CONSTRAINT negotiation_sessions_buy_mandate_id_fkey FOREIGN KEY (buy_mandate_id) REFERENCES public.negotiation_mandates(id),
   CONSTRAINT negotiation_sessions_sell_mandate_id_fkey FOREIGN KEY (sell_mandate_id) REFERENCES public.negotiation_mandates(id),
-  CONSTRAINT negotiation_sessions_escalation_initiated_round_id_fkey FOREIGN KEY (escalation_initiated_round_id) REFERENCES public.negotiation_rounds(id) ON DELETE SET NULL
+  CONSTRAINT negotiation_sessions_escalation_initiated_round_id_fkey FOREIGN KEY (escalation_initiated_round_id) REFERENCES public.negotiation_rounds(id)
 );
 CREATE TABLE public.negotiation_rounds (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -217,11 +210,11 @@ CREATE TABLE public.negotiation_rounds (
   disclosed_claim_refs ARRAY NOT NULL DEFAULT ARRAY[]::text[],
   opaque_signal text,
   reasoning text,
-  strategic_intent text,
-  confidence numeric(3, 2),
-  escalation_requested boolean DEFAULT false,
-  settlement_readiness text CHECK (settlement_readiness IS NULL OR settlement_readiness = ANY (ARRAY['not_ready'::text, 'near'::text, 'ready'::text])),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
+  strategic_intent text,
+  confidence numeric,
+  escalation_requested boolean DEFAULT false,
+  settlement_readiness text CHECK (settlement_readiness IS NULL OR (settlement_readiness = ANY (ARRAY['not_ready'::text, 'near'::text, 'ready'::text]))),
   CONSTRAINT negotiation_rounds_pkey PRIMARY KEY (id),
   CONSTRAINT negotiation_rounds_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.negotiation_sessions(id)
 );

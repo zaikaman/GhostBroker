@@ -70,26 +70,8 @@ export class SettlementCommandBuilder {
       throw new SettlementExpiredIntentError();
     }
 
-    // Sandbox bypass: when EITHER delegation credential is null
-    // (sandbox-admitted agents without persisted delegation VCs),
-    // skip verification. The backend's sandbox admit path already
-    // ran the structural check, and forcing a null credential through
-    // the verifier would throw a spurious 403 that kills a perfectly
-    // good negotiation. The live production path always has a real
-    // tenant-signed VC on both sides.
     if (!request.buyerDelegationCredential || !request.sellerDelegationCredential) {
-      // One or both credentials null — skip verification for sandbox.
-      // Safe because sandbox-admitted agents are authenticated via
-      // API key at the route level.
-      return {
-      commandRef: `settlement_${randomUUID()}`,
-      outcomeRef: request.matchOutcome.outcomeRef,
-      executionRef: request.matchOutcome.executionRef,
-      buyerInstitutionId: request.matchOutcome.buyerInstitutionId,
-      sellerInstitutionId: request.matchOutcome.sellerInstitutionId,
-      encryptedTradeFieldsRef: request.matchOutcome.encryptedTradeFieldsRef,
-      submittedAt: now.toISOString(),
-    };
+      throw new SettlementAuthorityError();
     }
 
     const [buyerAuthority, sellerAuthority] = await Promise.all([

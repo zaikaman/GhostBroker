@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { assertInstitutionScope, requireOperatorAuth } from "../auth/operator-auth.js";
 import { PublicError } from "../errors/public-error.js";
+import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
 import {
   admitAgentRequestSchema,
   configureAgentRequestSchema,
@@ -69,15 +70,13 @@ export function createAgentsRouter(
       const admission = await agentService.admitAgent(parsed.data);
       response.status(200).json(admission);
     } catch (error) {
-      console.error("[ADMIT DEBUG]", error instanceof Error ? error.message : error);
-      if (error instanceof PublicError) {
-        console.error("[ADMIT DEBUG] code:", error.code, "status:", error.statusCode);
-        if (error.cause) {
-          console.error("[ADMIT DEBUG] cause:", error.cause);
-        }
-      } else if (error instanceof Error && error.stack) {
-        console.error("[ADMIT DEBUG] stack:", error.stack);
-      }
+      logger.error(
+        {
+          event: "agents.admit.failed",
+          err: redactForbiddenOrderFields(error),
+        },
+        "Agent admit request failed.",
+      );
       next(error);
     }
   });
@@ -355,12 +354,17 @@ export function createAgentsRouter(
         // "T3N returned a transient error". Both come back as
         // 503 because the agent cannot recover by retrying —
         // the operator must fix the T3N registration first.
-        console.error(
-          "[SUBMIT INTENT SEAL FAILURE]",
-          `kind=${error.kind}`,
-          `upstream_status=${error.status}`,
-          `upstream_body=${JSON.stringify(error.upstreamBody)}`,
-          `cause=${error.message}`,
+        logger.error(
+          {
+            event: "agents.intents.submit.seal_failed",
+            err: redactForbiddenOrderFields({
+              kind: error.kind,
+              status: error.status,
+              upstreamBody: error.upstreamBody,
+              message: error.message,
+            }),
+          },
+          "T3 enclave refused to seal hidden intent.",
         );
         next(
           new PublicError("sealing_failed", 503, error),
@@ -368,7 +372,13 @@ export function createAgentsRouter(
         return;
       }
 
-      console.error("[SUBMIT INTENT ERROR]", error);
+      logger.error(
+        {
+          event: "agents.intents.submit.failed",
+          err: redactForbiddenOrderFields(error),
+        },
+        "Hidden intent submission failed.",
+      );
       next(new PublicError("validation_failed", 400, error));
     }
   });
