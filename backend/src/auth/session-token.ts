@@ -1,6 +1,16 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
+/**
+ * Structured auth-failure reason so the middleware can log
+ * exactly why verification failed instead of a silent 401.
+ */
+export type TokenVerificationFailure =
+  | { kind: "malformed"; detail: string }
+  | { kind: "signature_mismatch"; detail: string }
+  | { kind: "expired"; detail: string }
+  | { kind: "parse_error"; detail: string };
+
 export interface OperatorSessionClaims {
   sub: string;
   did: string;
@@ -99,17 +109,33 @@ function toOperatorSessionClaims(parsed: ParsedClaims): OperatorSessionClaims {
 export function verifyOperatorSessionToken(
   token: string,
   secret: string,
-): OperatorSessionClaims | undefined {
+):
+  | { ok: true; claims: OperatorSessionClaims }
+  | { ok: false; failure: TokenVerificationFailure }
+{
   const parts = token.split(".");
 
   if (parts.length !== 3) {
-    return undefined;
+    return {
+      ok: false,
+      failure: {
+        kind: "malformed",
+        detail: `expected 3 dot-separated segments, got ${parts.length}`,
+      },
+    };
   }
 
   const [header, payload, signature] = parts;
   if (!header || !payload || !signature) {
-    return undefined;
+    return {
+      ok: false,
+      failure: {
+        kind: "malformed",
+        detail: "one or more JWT segments are empty",
+      },
+    };
   }
+
   const expected = sign(`${header}.${payload}`, secret);
   const expectedBytes = Buffer.from(expected);
   const actualBytes = Buffer.from(signature);
@@ -118,7 +144,14 @@ export function verifyOperatorSessionToken(
     expectedBytes.byteLength !== actualBytes.byteLength ||
     !timingSafeEqual(expectedBytes, actualBytes)
   ) {
-    return undefined;
+    return {
+      ok: false,
+      failure: {
+        kind: "signature_mismatch",
+        detail:
+          "HMAC-SHA256 signature does not match; token was not issued by this backend or AUTH_SESSION_SECRET has changed",
+      },
+    };
   }
 
   try {
@@ -126,12 +159,26 @@ export function verifyOperatorSessionToken(
       JSON.parse(Buffer.from(payload, "base64url").toString("utf8")),
     );
 
-    if (parsed.exp <= Math.floor(Date.now() / 1000)) {
-      return undefined;
+    const now = Math.floor(Date.now() / 1000);
+    if (parsed.exp <= now) {
+      const expiryDate = new Date(parsed.exp * 1000).toISOString();
+      return {
+        ok: false,
+        failure: {
+          kind: "expired",
+          detail: `token expired at ${expiryDate} (now=${now}, exp=${parsed.exp})`,
+        },
+      };
     }
 
-    return toOperatorSessionClaims(parsed);
-  } catch {
-    return undefined;
+    return { ok: true, claims: toOperatorSessionClaims(parsed) };
+  } catch (err) {
+    return {
+      ok: false,
+      failure: {
+        kind: "parse_error",
+        detail: `failed to parse or validate claims: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
   }
 }

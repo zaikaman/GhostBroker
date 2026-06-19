@@ -206,7 +206,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     // not a per-round negotiated claim. Log the pre-clear so the
     // demo narrative stays honest.
     console.log(
-      `[HOSTED] settlement pre-clear: deposit relayer approvals verified for ${institution.displayName}; launching runtime (mode=llm_freeform, pollIntervalMs=${record.config.pollIntervalMs}, maxTicks=${record.config.maxTicks})`,
+      `[HOSTED] settlement pre-clear: deposit relayer approvals verified for ${institution.displayName}; launching runtime (pollIntervalMs=${record.config.pollIntervalMs}, maxTicks=${record.config.maxTicks})`,
     );
     const state: HostedAgentRuntimeState = {
       agentId: id,
@@ -422,25 +422,21 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       HOSTED_MANDATE_ID: runtime.config.mandateId,
       POLL_INTERVAL_MS: String(runtime.config.pollIntervalMs),
       MAX_TICKS: String(runtime.config.maxTicks),
-      // PROTOCOL_MODE is intentionally omitted — the agent runtime's
-      // code default ("llm_freeform") is now the system-wide default.
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
-      // Forward the LLM provider credentials so the spawned agent
-      // can build its fallback chain (gemini → openai → groq). The
-      // chain order is configurable via the `LLM_PROVIDER_CHAIN`
-      // env var (default: `gemini,openai,groq`) — these vars only
-      // carry the keys and optional base URLs for proxy migration.
-      // End users do not pick models from the dashboard; the agent
-      // tries each provider in priority order on each LLM call and
-      // falls back on transient failures (5xx / 429 / network).
-      ...(process.env.GEMINI_API_KEY ? { GEMINI_API_KEY: process.env.GEMINI_API_KEY } : {}),
-      ...(process.env.GEMINI_MODEL ? { GEMINI_MODEL: process.env.GEMINI_MODEL } : {}),
-      ...(process.env.GEMINI_BASE_URL ? { GEMINI_BASE_URL: process.env.GEMINI_BASE_URL } : {}),
-      ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
-      ...(process.env.OPENAI_MODEL ? { OPENAI_MODEL: process.env.OPENAI_MODEL } : {}),
-      ...(process.env.OPENAI_BASE_URL ? { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } : {}),
-      ...(process.env.GROQ_API_KEY ? { GROQ_API_KEY: process.env.GROQ_API_KEY } : {}),
-      ...(process.env.GROQ_MODEL ? { GROQ_MODEL: process.env.GROQ_MODEL } : {}),
+      // LLM provider credentials are deliberately NOT forwarded from
+      // the backend's environment. The hosted agent reads them from
+      // agents/.env via loadDotEnv(). This ensures a fresh dev setup
+      // works without needing to set these vars in the backend's shell
+      // or worry about stale backend env vars overriding the agent's
+      // .env (which is the canonical source for agent LLM keys).
+      GEMINI_API_KEY: undefined,
+      GEMINI_MODEL: undefined,
+      GEMINI_BASE_URL: undefined,
+      OPENAI_API_KEY: undefined,
+      OPENAI_MODEL: undefined,
+      OPENAI_BASE_URL: undefined,
+      GROQ_API_KEY: undefined,
+      GROQ_MODEL: undefined,
     };
     const isWin = process.platform === "win32";
     const shell = isWin && this.runner[0] === "npm";

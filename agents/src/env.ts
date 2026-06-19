@@ -23,9 +23,15 @@ export function loadDotEnv(): void {
       ) {
         value = value.slice(1, -1);
       }
-      // Always set the value from .env — this ensures the file
-      // takes precedence over stale shell environment variables.
-      process.env[key] = value;
+      // Standard dotenv semantics: .env fills in missing vars but does
+      // NOT override values already set in the environment. This is
+      // critical for the hosted agent: when the backend spawns the child
+      // process it injects a fresh JWT via process.env (spawn()'s `env`
+      // option), and .env must not overwrite that fresh token with a
+      // stale file-backed value.
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
     }
   }
 }
@@ -130,21 +136,6 @@ export const agentEnvSchema = z.object({
   AGENT_QUOTE_ASSET_CODE: z.string().trim().min(1).max(32).default("USDC"),
   MAX_TICKS: z.number().positive().default(40),
   DRY_RUN: z.boolean().default(false),
-  /**
-   * Protocol choreography mode for the hosted negotiator.
-   *
-   *   - `"guarded_fast"`: the LLM still proposes price / rationale,
-   *      but the agent loop's `selectGuardedNegotiationMove` helper
-   *      owns the action choreography (open with `propose`, request
-   *      and reveal `accredited_institution` once, never ask for
-   *      `settlement_capacity`, accept when the cross is feasible).
-   *
-   *   - `"llm_freeform"` (default): the LLM owns every action and
-   *      the loop forwards its decision verbatim.
-   */
-  PROTOCOL_MODE: z
-    .enum(["guarded_fast", "llm_freeform"])
-    .default("llm_freeform"),
 
   AGENT_AVAILABLE_QUOTE_BALANCE: z.coerce.number().nonnegative().optional(),
   AGENT_AVAILABLE_BASE_BALANCE: z.coerce.number().nonnegative().optional(),
@@ -184,7 +175,6 @@ export function loadAgentEnv(): AgentEnv {
     AGENT_QUOTE_ASSET_CODE: optionalEnv("AGENT_QUOTE_ASSET_CODE", "USDC"),
     MAX_TICKS: numberEnv("MAX_TICKS", 40),
     DRY_RUN: booleanEnv("DRY_RUN", false),
-    PROTOCOL_MODE: optionalEnv("PROTOCOL_MODE", "llm_freeform"),
     AGENT_AVAILABLE_QUOTE_BALANCE: numberEnvMany(
       ["AGENT_AVAILABLE_QUOTE_BALANCE", "AGENT_AVAILABLE_USDC"],
       undefined,

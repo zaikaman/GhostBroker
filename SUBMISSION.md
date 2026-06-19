@@ -17,7 +17,7 @@ The repository is a six-workspace monorepo plus two reference packages:
 - `database/` - Supabase migrations, RLS, and development seed
 - `t3-enclave/` - Terminal 3 ADK boundary: ADK sessions, DID registry, Ghostbroker delegation VC verifier, blind-intent client, match-contract client, settlement command builder
 - `agent-client/` - the published Node.js TypeScript SDK consumed by external agents and the hosted negotiator (`@ghostbroker/agent-client`)
-- `agents/` - hosted multi-provider LLM negotiator agents (Gemini + OpenAI + Groq chain) and the deterministic `guarded-protocol` action choreography
+- `agents/` - hosted multi-provider LLM negotiator agents (Gemini + OpenAI + Groq chain)
 - `negotiation-core/` - shared strategy / turn-context / decision-validation math consumed by both the backend orchestrator and the hosted runtime
 - `ghostbroker-delegation-reference/` - the reference procurement-agent BUIDL that ships alongside GhostBroker as a worked example of a Terminal 3 delegated-agent pattern
 
@@ -27,7 +27,7 @@ The hosted demo runs two institutional LLM agents that negotiate **inside** a ve
 
 - Each agent is minted a Terminal 3 DID at admit, the dashboard signs and persists a Ghostbroker delegation W3C VC server-side, and the agent's settlement capacity is pre-cleared through the institution's deposit relayer before the hosted process starts.
 - The orchestrator owns the price band, the concession budget, the disclosure gate, the escalation gate, and the settlement command; the LLM owns strategy - opening price, rationale, confidence - **inside** those rails.
-- The agent loop defaults to `protocolMode: "llm_freeform"`. The LLM owns every action decision and the loop forwards its decision verbatim. The `guarded_fast` mode (`agents/src/guarded-protocol.ts`) is available as an alternative - it uses a deterministic action choreography where the opening turn always proposes, the only claim exchanged at runtime is `accredited_institution`, `settlement_capacity` is never requested round-by-round, and the post-submit delay is reduced to a short tick.
+- The agent loop runs in `llm_freeform` mode: the LLM owns every action decision and the loop forwards its decision verbatim. `settlement_capacity` is never requested round-by-round; it is a pre-launch readiness fact, verified by the backend's `assertSettlementReady()` check before the hosted process ever starts.
 
 What the operator sees in the log: agent DID boot, settlement pre-clear, ticket sealed, at least one LLM decision (rationale visible), disclosure verified, accept, settled trade ref. What they do **not** see: free-form disclosure deadlock loops, repeated asks for `settlement_capacity`, or per-round reconciliation of settlement readiness - those facts are pre-launch guarantees, not negotiated claims.
 

@@ -99,7 +99,7 @@ packages:
 | `database/` | Supabase PostgreSQL migrations, RLS policies, dev seed | Supabase managed |
 | `t3-enclave/` | Terminal 3 ADK boundary: sessions, DID registry, Ghostbroker delegation VC verifier, blind-intent client, match-contract client, settlement command builder | npm package, used by backend |
 | `agent-client/` | Published TypeScript SDK for external agents (`@ghostbroker/agent-client`) and the hosted negotiator | npm |
-| `agents/` | Hosted multi-provider LLM negotiator agents (Gemini + OpenAI + Groq chain) and the deterministic `guarded-protocol` action choreography | Hosted Node.js |
+| `agents/` | Hosted multi-provider LLM negotiator agents (Gemini + OpenAI + Groq chain) | Hosted Node.js |
 | `negotiation-core/` | Shared strategy / turn-context / decision-validation math consumed by the backend orchestrator and the hosted runtime | npm package |
 | `ghostbroker-delegation-reference/` | Reference procurement-agent BUIDL that demonstrates a Terminal 3 delegated-agent pattern end to end | Reference / docs |
 
@@ -399,7 +399,6 @@ ghostbroker/
 |   |   |-- sealed-envelope.ts
 |   |   |-- llm-decision.ts
 |   |   |-- negotiation-decision.ts
-|   |   |-- guarded-protocol.ts    # deterministic action choreography
 |   |   |-- run-loop.ts            # shared per-tick loop (buyer/seller)
 |   |   |-- negotiation-loop.ts    # shared per-tick loop (hosted)
 |   |   `-- llm/                  # Gemini + OpenAI + Groq fallback chain
@@ -598,8 +597,7 @@ npm test --workspace @ghostbroker/t3-enclave
 ```
 
 The `agent-client` tests cover the published SDK; the `agents`
-tests cover the hosted negotiator and the deterministic guarded
-protocol:
+tests cover the hosted negotiator:
 
 ```powershell
 npm test --workspace @ghostbroker/agent-client
@@ -956,13 +954,6 @@ LLM-vs-LLM chat:
    ciphertext asset / quantity / price fields, generates the
    audit receipt, and emits `settlement_finalized` + the
    `receipt_available` phase.
-
-The deterministic `guarded_fast` mode
-([`agents/src/guarded-protocol.ts`](agents/src/guarded-protocol.ts))
-is an alternative where the opening turn always proposes, the only
-claim exchanged at runtime is `accredited_institution`,
-`settlement_capacity` is never requested round-by-round, and the
-post-submit delay is reduced to a short tick.
 
 ---
 

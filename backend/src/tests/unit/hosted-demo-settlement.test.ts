@@ -13,7 +13,7 @@ import type { NegotiationMandateRecord } from "../../models/negotiation.js";
 
 /**
  * End-to-end orchestrator coverage for the hackathon demo's
- * "guarded fast" hosted path.
+ * hosted path.
  *
  * Pre-repositioning, the hackathon demo's hosted agents would
  * negotiate `settlement_capacity` round-by-round alongside
@@ -244,7 +244,7 @@ async function openDemoSession(harness: DemoHarness): Promise<string> {
 
 describe("NegotiationOrchestrator — hosted demo settlement path", () => {
   it("settles end-to-end when both sides only require accredited_institution", async () => {
-    // The demo's "guarded fast" mandate only requires the
+    // The demo's hosted mandate only requires the
     // institutional accreditation claim from the counterpart.
     // `settlement_capacity` is pre-cleared by the backend
     // before the hosted process ever starts — the orchestrator

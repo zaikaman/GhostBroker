@@ -20,7 +20,6 @@ const hostedConfig: HostedNegotiatorRuntimeConfig = {
   pollIntervalMs: 1000,
   maxTicks: 5,
   dryRun: true,
-  protocolMode: "guarded_fast",
 };
 
 function buildAgent(): Agent {

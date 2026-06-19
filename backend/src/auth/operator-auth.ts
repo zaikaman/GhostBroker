@@ -89,23 +89,27 @@ export function operatorAuthMiddleware(
       return;
     }
 
-    const claims = verifyOperatorSessionToken(token, sessionSecret);
-    if (!claims) {
+    const result = verifyOperatorSessionToken(token, sessionSecret);
+    if (!result.ok) {
+      const { failure } = result;
+      console.warn(
+        `[AUTH] session token verification failed — ${failure.kind}: ${failure.detail}`,
+      );
       next(new PublicError("authorization_failed", 401));
       return;
     }
 
     const authContext: OperatorAuthContext = {
-      institutionId: claims.institutionId,
-      operatorId: claims.operatorId,
-      did: claims.did,
+      institutionId: result.claims.institutionId,
+      operatorId: result.claims.operatorId,
+      did: result.claims.did,
     };
 
-    if (claims.walletAddress) {
-      authContext.walletAddress = claims.walletAddress;
+    if (result.claims.walletAddress) {
+      authContext.walletAddress = result.claims.walletAddress;
     }
-    if (claims.depositAddress) {
-      authContext.depositAddress = claims.depositAddress;
+    if (result.claims.depositAddress) {
+      authContext.depositAddress = result.claims.depositAddress;
     }
 
     response.locals[operatorAuthLocalKey] = authContext;

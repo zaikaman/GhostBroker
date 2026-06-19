@@ -19,20 +19,6 @@ import {
 } from "./negotiation-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
 import { buildSelfAttestedClaimCredential } from "./claim-credential.js";
-import { selectGuardedNegotiationMove } from "./guarded-protocol.js";
-
-/**
- * The host environment tells the agent loop how to wait between
- * ticks. The default `POLL_INTERVAL_MS` is for slow demos / LLMs;
- * the guarded fast-path uses a short post-submit delay so the
- * counterpart's turn comes back inside a single demo beat instead
- * of waiting a full poll interval after every submit.
- *
- * Exported so the agent loop tests can assert the wiring: when
- * `PROTOCOL_MODE === "guarded_fast"`, the loop must use this
- * constant for its post-submit sleep instead of `POLL_INTERVAL_MS`.
- */
-export const GUARDED_POST_SUBMIT_DELAY_MS = 250;
 
 /**
  * The expanded runtime mandate as returned by the hosted-mandate
@@ -112,15 +98,6 @@ export interface NegotiationLoopResult {
   lastDecision: NegotiationDecision | undefined;
   settlementCorrelationRef: string | undefined;
   admissionAuthorityRef: string | undefined;
-  /** Diagnostic: which protocol mode the loop actually ran in. */
-  protocolMode: AgentEnv["PROTOCOL_MODE"];
-  /**
-   * When `PROTOCOL_MODE === "guarded_fast"`, the number of times
-   * the helper overrode the LLM's proposed action. Always 0 in
-   * `llm_freeform`. Surfaced for the agent loop tests so they
-   * can assert the guard was actually exercised.
-   */
-  guardedOverrides: number;
 }
 
 function buildSessionFromEnv(env: AgentEnv): AuthSession | undefined {
@@ -217,8 +194,6 @@ export async function runNegotiationLoop(
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
-      protocolMode: env.PROTOCOL_MODE,
-      guardedOverrides: 0,
     };
   }
 
@@ -231,8 +206,6 @@ export async function runNegotiationLoop(
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
-      protocolMode: env.PROTOCOL_MODE,
-      guardedOverrides: 0,
     };
   }
 
@@ -248,8 +221,6 @@ export async function runNegotiationLoop(
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
-      protocolMode: env.PROTOCOL_MODE,
-      guardedOverrides: 0,
     };
   }
 
@@ -263,13 +234,7 @@ export async function runNegotiationLoop(
   );
   log(
     side,
-    `Protocol mode: ${env.PROTOCOL_MODE} ` +
-      `(pollIntervalMs=${env.POLL_INTERVAL_MS}, maxTicks=${env.MAX_TICKS}, ` +
-      `postSubmitDelayMs=${
-        env.PROTOCOL_MODE === "guarded_fast"
-          ? GUARDED_POST_SUBMIT_DELAY_MS
-          : env.POLL_INTERVAL_MS
-      })`,
+    `Runtime config: pollIntervalMs=${env.POLL_INTERVAL_MS}, maxTicks=${env.MAX_TICKS}`,
   );
 
 let admission: AgentAdmission;
@@ -287,8 +252,6 @@ let admission: AgentAdmission;
       lastDecision: undefined,
       settlementCorrelationRef: undefined,
       admissionAuthorityRef: undefined,
-      protocolMode: env.PROTOCOL_MODE,
-      guardedOverrides: 0,
     };
   }
 
@@ -321,7 +284,6 @@ let admission: AgentAdmission;
   let lastDecision: NegotiationDecision | undefined;
   let lastOutcome = "(start of negotiation)";
   let priorMoveRationale: string | undefined;
-  let guardedOverrides = 0;
 
   for (let tick = 1; tick <= env.MAX_TICKS; tick += 1) {
     log(side, `Negotiation tick ${tick}/${env.MAX_TICKS}`);
@@ -336,8 +298,6 @@ let admission: AgentAdmission;
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
-        protocolMode: env.PROTOCOL_MODE,
-        guardedOverrides,
       };
     }
 
@@ -366,8 +326,6 @@ let admission: AgentAdmission;
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
-        protocolMode: env.PROTOCOL_MODE,
-        guardedOverrides,
       };
     }
     if (liveSession.status === "expired") {
@@ -380,8 +338,6 @@ let admission: AgentAdmission;
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
-        protocolMode: env.PROTOCOL_MODE,
-        guardedOverrides,
       };
     }
     if (liveSession.status === "settled") {
@@ -394,8 +350,6 @@ let admission: AgentAdmission;
         lastDecision,
         settlementCorrelationRef,
         admissionAuthorityRef: admission.authorityRef,
-        protocolMode: env.PROTOCOL_MODE,
-        guardedOverrides,
       };
     }
 
@@ -471,59 +425,9 @@ let admission: AgentAdmission;
       `[${decision.strategicIntent ?? "?"}] ${decision.action} qty=${decision.quantity ?? 0} price=${decision.price ?? 0} conf=${decision.confidence?.toFixed(2) ?? "?"} escalate=${decision.escalationRequested} ready=${decision.settlementReadiness ?? "?"} (${decision.reasoning.slice(0, 120)})`,
     );
 
-    // When the runtime is in `guarded_fast` mode the helper owns the
-    // action choreography. The LLM's price / quantity / rationale
-    // are still visible — only the action / claimType are
-    // overridden when the protocol demands it. `llm_freeform`
-    // forwards the LLM's decision verbatim.
-    let moveToSubmit: NegotiationDecision = decision;
-    if (env.PROTOCOL_MODE === "guarded_fast") {
-      const counterpartSide = side === "buy" ? "sell" : "buy";
-      const receivedClaims = liveSession.disclosedClaims
-        .filter((claim) => claim.verified && claim.fromSide === counterpartSide)
-        .map((claim) => claim.claimType);
-      const guarded = selectGuardedNegotiationMove({
-        bounds: {
-          minPrice: ctx.minPrice,
-          maxPrice: ctx.maxPrice,
-          targetQuantity: ctx.targetQuantity,
-          minimumQuantity: ctx.minimumQuantity,
-        },
-        ctx: {
-          side,
-          counterpartHasStandingTerms:
-            liveSession.counterpartStandingProposal.price !== null &&
-            liveSession.counterpartStandingProposal.quantity !== null,
-          counterpartStandingPrice:
-            liveSession.counterpartStandingProposal.price,
-          counterpartStandingQuantity:
-            liveSession.counterpartStandingProposal.quantity,
-          receivedClaims,
-          priorReveals: priorDisclosureReveals,
-          priorRequests: priorDisclosureRequests,
-          // `settlement_capacity` is pre-cleared by
-          // `assertSettlementReady()` on the backend before the
-          // hosted agent ever starts; the guard's job is to make
-          // sure the LLM never asks for it at runtime.
-          settlementCapacityPreCleared: true,
-        },
-        llmDecision: decision,
-      });
-      moveToSubmit = guarded.decision;
-      if (guarded.overrideReason !== "preserved_llm_decision") {
-        guardedOverrides += 1;
-        log(
-          side,
-          `guarded_fast override: ${decision.action}` +
-            (decision.claimType ? ` ${decision.claimType}` : "") +
-            ` -> ${guarded.decision.action}` +
-            (guarded.decision.claimType
-              ? ` ${guarded.decision.claimType}`
-              : "") +
-            ` (${guarded.overrideReason})`,
-        );
-      }
-    }
+    // The LLM owns every action decision; the loop forwards its
+    // decision verbatim.
+    const moveToSubmit: NegotiationDecision = decision;
 
     try {
       if (moveToSubmit.action === "walkaway") {
@@ -582,16 +486,7 @@ let admission: AgentAdmission;
       throw err;
     }
 
-    // After a successful submit the guarded fast-path uses a
-    // short delay so the counterpart's turn comes back inside
-    // a single demo beat instead of waiting a full
-    // POLL_INTERVAL_MS. Pairing / counter-turn / approval / LLM
-    // failure paths still use the full poll interval.
-    const postSubmitDelayMs =
-      env.PROTOCOL_MODE === "guarded_fast"
-        ? GUARDED_POST_SUBMIT_DELAY_MS
-        : env.POLL_INTERVAL_MS;
-    await sleep(postSubmitDelayMs);
+    await sleep(env.POLL_INTERVAL_MS);
   }
 
   stopOnSettle();
@@ -603,8 +498,6 @@ let admission: AgentAdmission;
     lastDecision,
     settlementCorrelationRef,
     admissionAuthorityRef: admission.authorityRef,
-    protocolMode: env.PROTOCOL_MODE,
-    guardedOverrides,
   };
 }
 

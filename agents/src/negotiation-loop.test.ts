@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RedactedNegotiationSessionView } from "@ghostbroker/agent-client";
 import {
-  GUARDED_POST_SUBMIT_DELAY_MS,
   isActionableSessionStatus,
   pickLiveSession,
   withRetries,
@@ -303,92 +302,6 @@ describe("withRetries", () => {
     expect(result).toBe("ok");
     expect(attempts).toBe(2);
     expect(elapsed).toBeLessThan(100);
-  });
-});
-
-describe("GUARDED_POST_SUBMIT_DELAY_MS — guarded fast-path pacing", () => {
-  it("is a small fraction of the default POLL_INTERVAL_MS so the counterpart's turn comes back inside one demo beat", () => {
-    // The default POLL_INTERVAL_MS for hosted demo is 1000ms. The
-    // guarded fast-path post-submit delay is 250ms — a quarter of
-    // the poll interval — so two-sided reveals and accepts happen
-    // back-to-back instead of waiting a full poll between every
-    // round.
-    expect(GUARDED_POST_SUBMIT_DELAY_MS).toBeLessThanOrEqual(500);
-    expect(GUARDED_POST_SUBMIT_DELAY_MS).toBeGreaterThan(0);
-  });
-});
-
-describe("negotiation-loop wiring — protocolMode behaviour", () => {
-  it("imports selectGuardedNegotiationMove so the loop can apply the deterministic action choreography", async () => {
-    // Static wiring check: the loop must import the guarded
-    // selector. If a future refactor accidentally drops the
-    // import, this test fails (the helper is otherwise only
-    // referenced by the loop's body).
-    const source = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./negotiation-loop.ts", import.meta.url), "utf8"),
-    );
-    expect(source).toMatch(
-      /import\s+\{\s*selectGuardedNegotiationMove\s*\}\s+from\s+["']\.\/guarded-protocol\.js["']/u,
-    );
-  });
-
-  it("applies the guarded selector only when PROTOCOL_MODE === 'guarded_fast' and never in llm_freeform", async () => {
-    const source = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./negotiation-loop.ts", import.meta.url), "utf8"),
-    );
-    // The selector is invoked inside an explicit guard so a
-    // regression that flips the branch would be caught here.
-    const guardMatch = source.match(
-      /if\s*\(\s*env\.PROTOCOL_MODE\s*===\s*["']guarded_fast["']\s*\)\s*\{[\s\S]*?selectGuardedNegotiationMove\(/u,
-    );
-    expect(guardMatch, "guarded selector must only run when PROTOCOL_MODE=guarded_fast").not.toBeNull();
-  });
-
-  it("uses the short post-submit delay only when PROTOCOL_MODE === 'guarded_fast' and POLL_INTERVAL_MS otherwise", async () => {
-    const source = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./negotiation-loop.ts", import.meta.url), "utf8"),
-    );
-    const postSubmitBlock = source.match(
-      /const\s+postSubmitDelayMs\s*=\s*[\s\S]*?;\s*\n\s*await\s+sleep\(postSubmitDelayMs\)/u,
-    );
-    expect(postSubmitBlock, "post-submit delay branch must be present").not.toBeNull();
-    expect(postSubmitBlock?.[0] ?? "").toContain("GUARDED_POST_SUBMIT_DELAY_MS");
-    expect(postSubmitBlock?.[0] ?? "").toContain("env.POLL_INTERVAL_MS");
-  });
-
-  it("exports the result fields needed by the agent loop tests (protocolMode + guardedOverrides)", async () => {
-    // The agent loop tests assert on `protocolMode` and
-    // `guardedOverrides` after running the loop. Verify the
-    // fields are declared on `NegotiationLoopResult`.
-    const source = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./negotiation-loop.ts", import.meta.url), "utf8"),
-    );
-    expect(source).toMatch(/protocolMode:\s*AgentEnv\[["']PROTOCOL_MODE["']\]/u);
-    expect(source).toMatch(/guardedOverrides:\s*number/u);
-  });
-});
-
-describe("NegotiationLoopResult — protocolMode shape", () => {
-  // Compile-time + runtime smoke test: build a minimal
-  // NegotiationLoopResult object to make sure the new fields
-  // are accepted by the type system. If a future refactor drops
-  // either field, this test stops compiling.
-  it("accepts the protocolMode and guardedOverrides fields on the result", () => {
-    const resultShape = {
-      outcome: "settled" as const,
-      ticksRun: 4,
-      sessionId: "session-1",
-      lastDecision: undefined,
-      settlementCorrelationRef: "corr-1",
-      admissionAuthorityRef: "auth-1",
-      protocolMode: "guarded_fast" as const,
-      guardedOverrides: 2,
-    };
-    expect(resultShape.protocolMode).toBe("guarded_fast");
-    expect(resultShape.guardedOverrides).toBe(2);
-    // Suppress unused-variable warning while still keeping the
-    // smoke check on the shape.
-    void resultShape;
   });
 });
 
