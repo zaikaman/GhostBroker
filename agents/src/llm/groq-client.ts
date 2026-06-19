@@ -167,9 +167,8 @@ function buildGroqRequestBody(request: LlmRequest, model: string): Record<string
   if (typeof request.topP === "number") {
     body.top_p = clamp(request.topP, 0, 1);
   }
-  if (typeof request.maxOutputTokens === "number") {
-    body.max_tokens = Math.max(1, Math.floor(request.maxOutputTokens));
-  }
+  // max_tokens intentionally omitted — the model determines its
+  // output length without artificial limits.
   return body;
 }
 

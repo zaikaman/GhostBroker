@@ -23,9 +23,9 @@ export function loadDotEnv(): void {
       ) {
         value = value.slice(1, -1);
       }
-      if (!(key in process.env)) {
-        process.env[key] = value;
-      }
+      // Always set the value from .env — this ensures the file
+      // takes precedence over stale shell environment variables.
+      process.env[key] = value;
     }
   }
 }

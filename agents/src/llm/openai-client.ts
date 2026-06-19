@@ -28,7 +28,7 @@ export interface OpenAIProviderOptions {
   fetchImpl?: typeof fetch;
 }
 
-const DEFAULT_BASE_URL = "https://roguegoescrazy.openai.azure.com/openai/v1";
+const DEFAULT_BASE_URL = "https://roguegoescrazy.services.ai.azure.com/openai/v1";
 const DEFAULT_MODEL = "gpt-5-nano";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -169,9 +169,8 @@ function buildOpenAIRequestBody(request: LlmRequest, model: string): Record<stri
   if (typeof request.topP === "number") {
     body.top_p = clamp(request.topP, 0, 1);
   }
-  if (typeof request.maxOutputTokens === "number") {
-    body.max_completion_tokens = Math.max(1, Math.floor(request.maxOutputTokens));
-  }
+  // max_completion_tokens intentionally omitted — the model
+  // determines its output length without artificial limits.
   if (request.includeThoughts === true) {
     body.reasoning_effort = "low";
   }

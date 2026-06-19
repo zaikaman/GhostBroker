@@ -197,9 +197,8 @@ function buildGeminiRequestBody(request: LlmRequest): Record<string, unknown> {
   if (typeof request.topP === "number") {
     generationConfig.topP = clamp(request.topP, 0, 1);
   }
-  if (typeof request.maxOutputTokens === "number") {
-    generationConfig.maxOutputTokens = Math.max(1, Math.floor(request.maxOutputTokens));
-  }
+  // maxOutputTokens intentionally omitted — the model determines
+  // its output length without artificial limits.
 
   if (request.includeThoughts === true || typeof request.thinkingBudget === "number") {
     const thinkingConfig: Record<string, unknown> = {
