@@ -1247,10 +1247,12 @@ export class NegotiationOrchestrator {
       session.id,
       "sell",
     );
+    const buyerId = buyerCredential?.id;
+    const sellerId = sellerCredential?.id;
     console.log(
       `[CONVERGE] ${session.id} getSessionDelegation: ` +
-      `buy=${"id" in (buyerCredential ?? {}) ? buyerCredential!.id.slice(0, 30) : "null"} ` +
-      `sell=${"id" in (sellerCredential ?? {}) ? sellerCredential!.id.slice(0, 30) : "null"}`
+      `buy=${buyerId ? buyerId.slice(0, 30) : "null"} ` +
+      `sell=${sellerId ? sellerId.slice(0, 30) : "null"}`
     );
 
     await this.repository.updateSession({

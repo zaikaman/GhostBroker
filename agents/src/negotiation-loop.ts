@@ -918,7 +918,7 @@ export function pickLiveSession(input: {
    */
   sessionCreatedAfter?: number;
 }): RedactedNegotiationSessionView | null {
-  const { sessions, sessionId, now, side, sessionCreatedAfter } = input;
+  const { sessions, sessionId, now, side: _side, sessionCreatedAfter } = input;
 
   if (sessionId !== undefined) {
     return sessions.find((item) => item.id === sessionId) ?? null;

@@ -36,9 +36,9 @@ export interface AgentIdentity {
 function bytesToHex(bytes: Uint8Array): string {
   const hexChars = "0123456789abcdef";
   let out = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    out += hexChars[(bytes[i] ?? 0) >> 4];
-    out += hexChars[(bytes[i] ?? 0) & 0x0f];
+  for (const byte of bytes) {
+    out += hexChars[byte >> 4];
+    out += hexChars[byte & 0x0f];
   }
   return out;
 }
