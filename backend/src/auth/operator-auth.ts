@@ -28,8 +28,7 @@ function readHeader(request: Request, name: string): string | undefined {
   return value && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function readBearerToken(request: Request): string | undefined {
-  const authorization = readHeader(request, "authorization");
+function readBearerTokenFromValue(authorization: string | undefined): string | undefined {
   const match = authorization ? /^Bearer\s+(.+)$/iu.exec(authorization) : null;
   return match?.[1]?.trim();
 }
@@ -40,16 +39,29 @@ function readBearerToken(request: Request): string | undefined {
  * 2. An API key (`gbk_xxx`) for persistent agent authentication.
  *
  * Pass an `apiKeyService` to enable API key authentication.
+ *
+ * Production-safety: `env.AUTH_SESSION_SECRET` is mandatory in every
+ * runtime environment (the env schema rejects boots with a missing or
+ * short secret). The middleware does not silently substitute a
+ * development placeholder — a misconfigured deployment fails to issue
+ * any session tokens and every Bearer-protected route returns 401.
  */
 export function operatorAuthMiddleware(
-  env?: Pick<BackendEnv, "NODE_ENV" | "AUTH_SESSION_SECRET">,
+  env: Pick<BackendEnv, "NODE_ENV" | "AUTH_SESSION_SECRET">,
   apiKeyService?: ApiKeyManagementService,
 ): RequestHandler {
+  const sessionSecret = env.AUTH_SESSION_SECRET;
+
+  if (!sessionSecret) {
+    // Fail closed: refuse to mount JWT auth without a secret so a
+    // missing env var cannot lead to silently issued tokens.
+    throw new Error(
+      "operatorAuthMiddleware requires AUTH_SESSION_SECRET; configure it in the deployment environment before starting the backend.",
+    );
+  }
+
   return async (request: Request, response: Response, next: NextFunction) => {
     const authorization = readHeader(request, "authorization");
-    const sessionSecret =
-      env?.AUTH_SESSION_SECRET ??
-      "development-only-auth-session-secret-change-before-production";
 
     if (!authorization) {
       next(new PublicError("authorization_failed", 401));
@@ -70,9 +82,9 @@ export function operatorAuthMiddleware(
     }
 
     // Fall through to JWT session authentication
-    const token = readBearerToken(request);
+    const token = readBearerTokenFromValue(authorization);
 
-    if (!token || !sessionSecret) {
+    if (!token) {
       next(new PublicError("authorization_failed", 401));
       return;
     }

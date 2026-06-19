@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ApiKeyManagementService } from "../../services/api-key.service.js";
 import type { AuthInstitutionRepository } from "../../services/auth.service.js";
 import { DidAuthService } from "../../services/auth.service.js";
+import { TEST_AUTH_SESSION_SECRET } from "../data/us1-seed-builders.js";
 
 describe("DidAuthService wallet auth", () => {
   it("creates institution and issues session with connected wallet metadata", async () => {
@@ -49,7 +50,7 @@ describe("DidAuthService wallet auth", () => {
       institutions,
       identityVerifier,
       apiKeyService,
-      sessionSecret: "development-only-auth-session-secret-change-before-production",
+      sessionSecret: TEST_AUTH_SESSION_SECRET,
     });
 
     const challenge = await authService.createChallenge(

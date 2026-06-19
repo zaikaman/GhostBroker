@@ -121,7 +121,7 @@ export function createAgentsRouter(
 
       const { agent, policyHash } = await agentService.configureAgent({
         institutionId: parsed.data.institutionId,
-        ...(parsed.data.agentDid ? { agentDid: parsed.data.agentDid } : {}),
+        agentDid: parsed.data.agentDid,
         ...(parsed.data.label ? { label: parsed.data.label } : {}),
         policy: provisionPolicy,
         signCredential: (input) => tenantSigner.mint({

@@ -7,6 +7,7 @@ import type { HiddenIntentSubmissionService } from "../../services/hidden-intent
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import {
   buildBackendTestEnv,
+  TEST_AUTH_SESSION_SECRET,
   us2AgentDid,
   us2AuthorityRef,
   us2InstitutionId,
@@ -41,7 +42,7 @@ function buildServices(
 
 describe("POST /api/agents/intents/cancel contract", () => {
   const token = issueOperatorSessionToken({
-    secret: "development-only-auth-session-secret-change-before-production",
+    secret: TEST_AUTH_SESSION_SECRET,
     did: "did:t3n:operator:us2",
     institutionId: us2InstitutionId,
   });

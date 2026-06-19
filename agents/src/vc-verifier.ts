@@ -24,6 +24,27 @@ export interface VerificationResult {
   warnings: string[];
 }
 
+/**
+ * Markers that identify a non-cryptographically-signed (demo/test)
+ * Ghostbroker delegation VC. The verifier checks the JWS for any of
+ * these substrings and routes the credential through the
+ * mode-appropriate path:
+ *
+ *   - `sandbox` mode: structural checks only; demo markers pass.
+ *   - `live` mode:    demo markers are rejected with
+ *                      `demo_proof_in_live_mode`; the verifier refuses
+ *                      to admit an agent presenting an unsigned VC
+ *                      when production crypto verification is on.
+ *   - `structural` mode: shape + time-window + DID-binding checks;
+ *                        demo markers pass with a warning logged.
+ *
+ * The markers are explicit strings rather than a missing `proof.jws`
+ * so production logs can grep for them and so a VC without a marker
+ * in live mode is treated as a real (cryptographically signed) VC and
+ * passed to `@terminal3/verify_vc`. They are NOT placeholders for
+ * missing functionality — they are a deliberate discriminator in a
+ * three-mode verifier (sandbox / structural / live).
+ */
 const SANDBOX_PROOF_MARKERS = [
   "sandbox-proof-placeholder",
   "live-demo-unsigned",

@@ -6,6 +6,7 @@ import { DidAuthService } from "../../services/auth.service.js";
 import type { Institution } from "../../models/institution.js";
 import type { WalletPortfolioSyncService } from "../../services/sepolia-portfolio-sync.service.js";
 import type { DepositWalletService } from "../../services/deposit-wallet.service.js";
+import { TEST_AUTH_SESSION_SECRET } from "../data/us1-seed-builders.js";
 
 /**
  * Records every syncInstitutionPortfolio call so the tests can assert
@@ -78,7 +79,7 @@ describe("DidAuthService deposit-wallet portfolio sync", () => {
       identityVerifier: verifiedIdentityVerifier,
       apiKeyService: noopApiKeyService,
       walletPortfolioSyncService: syncService,
-      sessionSecret: "development-only-auth-session-secret-change-before-production",
+      sessionSecret: TEST_AUTH_SESSION_SECRET,
     });
 
     const challenge = await authService.createChallenge(CONNECTED_DID);
@@ -112,7 +113,7 @@ describe("DidAuthService deposit-wallet portfolio sync", () => {
       identityVerifier: verifiedIdentityVerifier,
       apiKeyService: noopApiKeyService,
       walletPortfolioSyncService: syncService,
-      sessionSecret: "development-only-auth-session-secret-change-before-production",
+      sessionSecret: TEST_AUTH_SESSION_SECRET,
     });
 
     const challenge = await authService.createChallenge(CONNECTED_DID);
@@ -154,7 +155,7 @@ describe("DidAuthService deposit-wallet portfolio sync", () => {
       apiKeyService: noopApiKeyService,
       walletPortfolioSyncService: syncService,
       depositWalletService,
-      sessionSecret: "development-only-auth-session-secret-change-before-production",
+      sessionSecret: TEST_AUTH_SESSION_SECRET,
     });
 
     const challenge = await authService.createChallenge(CONNECTED_DID);
@@ -188,7 +189,7 @@ describe("DidAuthService deposit-wallet portfolio sync", () => {
       institutions: buildInstitutionRepository(institution),
       identityVerifier: verifiedIdentityVerifier,
       apiKeyService: noopApiKeyService,
-      sessionSecret: "development-only-auth-session-secret-change-before-production",
+      sessionSecret: TEST_AUTH_SESSION_SECRET,
     });
 
     const challenge = await authService.createChallenge(CONNECTED_DID);

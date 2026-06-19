@@ -77,7 +77,13 @@ const envSchema = z.object({
   ETHERSCAN_API_KEY: z.string().min(1).optional(),
   SEPOLIA_WBTC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
   SEPOLIA_USDC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
-  AUTH_SESSION_SECRET: z.string().min(32).optional(),
+  /**
+   * HMAC-SHA256 secret used to sign operator session JWTs. The
+   * middleware in `auth/operator-auth.ts` fails closed when this is
+   * missing — there is no development fallback. Minimum length is
+   * 32 characters so a 256-bit key always fits in the digest.
+   */
+  AUTH_SESSION_SECRET: z.string().min(32),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
   PORTFOLIO_SYNC_TOKEN: z.string().min(32).optional(),
   /**

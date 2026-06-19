@@ -64,10 +64,12 @@ export function createInstitutionsRouter(
   // WS3: PATCH /api/institutions/:id. Updates the
   // settlement profile and/or the chain-rail metadata.
   // Both fields are optional in the body; if neither is
-  // supplied the call is a no-op (and the route returns
-  // 400 validation_failed). The metadata-only path is
-  // fully supported in v1; the profile-change path is a
-  // 503 stub pending WS3.5.
+  // supplied the call is rejected with 400. The metadata
+  // path is fully wired (repository.updateMetadata);
+  // the profile-change path is wired through
+  // repository.updateProfile, with the service refusing
+  // to silently drop a profile change when the repository
+  // is missing the writer.
   router.patch("/institutions/:id", authMiddleware, async (request, response, next) => {
     try {
       const operatorAuth = requireOperatorAuth(response);

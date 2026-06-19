@@ -6,7 +6,10 @@ import { auditReceiptFromRecord } from "../../models/audit-receipt.js";
 import type { AgentManagementService } from "../../services/agent.service.js";
 import type { InstitutionManagementService } from "../../services/institution.service.js";
 import { ReceiptService } from "../../services/receipt.service.js";
-import { buildBackendTestEnv } from "../data/us2-encrypted-intent-builders.js";
+import {
+  buildBackendTestEnv,
+  TEST_AUTH_SESSION_SECRET,
+} from "../data/us2-encrypted-intent-builders.js";
 import {
   buildAuditReceiptRecord,
   us3BuyerInstitutionId,
@@ -57,7 +60,7 @@ describe("GET /api/receipts/:receiptId contract", () => {
     );
 
     const buyerToken = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us3-buyer",
       institutionId: us3BuyerInstitutionId,
     });
@@ -82,7 +85,7 @@ describe("GET /api/receipts/:receiptId contract", () => {
     );
 
     const unrelatedToken = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us3-unrelated",
       institutionId: us3UnrelatedInstitutionId,
     });

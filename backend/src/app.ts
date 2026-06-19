@@ -608,17 +608,16 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     tenantDelegationSigner,
     negotiationService,
     ...(institutionApprovalService ? { institutionApprovalService } : {}),
-    ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),      hostedAgentService: new ChildProcessHostedAgentService({
-        agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
-        backendUrl: `http://localhost:${env.PORT}`,
-        authSessionSecret:
-          env.AUTH_SESSION_SECRET ??
-          "development-only-auth-session-secret-change-before-production",
-        agentService,
-        institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
-        negotiationService,
-        ...(institutionApprovalService ? { institutionApprovalService } : {}),
-      }),
+    ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),
+    hostedAgentService: new ChildProcessHostedAgentService({
+      agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
+      backendUrl: `http://localhost:${env.PORT}`,
+      authSessionSecret: env.AUTH_SESSION_SECRET,
+      agentService,
+      institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
+      negotiationService,
+      ...(institutionApprovalService ? { institutionApprovalService } : {}),
+    }),
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
@@ -628,9 +627,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       ...(Object.keys(defaultChainTokenAddresses).length > 0
         ? { defaultChainTokenAddresses }
         : {}),
-      sessionSecret:
-        env.AUTH_SESSION_SECRET ??
-        "development-only-auth-session-secret-change-before-production",
+      sessionSecret: env.AUTH_SESSION_SECRET,
     }),
   };
 }

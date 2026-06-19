@@ -8,6 +8,7 @@ import {
   buildAdmitAgentRequest,
   buildBackendTestEnv,
   buildInstitution,
+  TEST_AUTH_SESSION_SECRET,
   us1AgentDid,
   us1OperatorInstitutionId,
 } from "../data/us1-seed-builders.js";
@@ -41,7 +42,7 @@ describe("POST /api/agents/admit contract", () => {
     const app = createApp(buildBackendTestEnv(), buildServices(agentService));
 
     const token = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us1",
       institutionId: us1OperatorInstitutionId,
     });
@@ -79,7 +80,7 @@ describe("POST /api/agents/admit contract", () => {
     );
 
     const token = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us1",
       institutionId: us1OperatorInstitutionId,
     });
@@ -185,7 +186,7 @@ describe("POST /api/agents/admit contract", () => {
     });
 
     const token = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us1",
       institutionId: us1OperatorInstitutionId,
     });
@@ -195,6 +196,7 @@ describe("POST /api/agents/admit contract", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({
         institutionId: us1OperatorInstitutionId,
+        agentDid: us1AgentDid,
         label: "Northstar Negotiator",
         policy: {
           maxSpendUsd: 1,

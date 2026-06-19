@@ -1,5 +1,8 @@
 import type { BackendEnv } from "../../config/env.js";
 import type { HiddenIntentRequest } from "../../models/hidden-intent.js";
+import { TEST_AUTH_SESSION_SECRET } from "./us1-seed-builders.js";
+
+export { TEST_AUTH_SESSION_SECRET };
 
 export const us2InstitutionId = "00000000-0000-4000-8000-000000000201";
 export const us2AgentDid = "did:t3n:agent:us2-authorized";
@@ -25,6 +28,8 @@ export function buildBackendTestEnv(
     T3_MATCHING_CONTRACT_VERSION: "0.4.0",
     RECEIPT_KEY_VERSION: "receipt-key-v1",
     SETTLEMENT_ASSET_CODE: "USDC",
+    AUTH_SESSION_SECRET:
+      "test-auth-session-secret-with-at-least-thirty-two-characters",
     ...overrides,
   };
 }

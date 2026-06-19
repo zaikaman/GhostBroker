@@ -8,6 +8,7 @@ import type { NegotiationManagementService } from "../../services/negotiation.se
 import {
   buildBackendTestEnv,
   buildInstitution,
+  TEST_AUTH_SESSION_SECRET,
   us1OperatorInstitutionId,
 } from "../data/us1-seed-builders.js";
 
@@ -53,7 +54,7 @@ function buildServices(
 
 function issueToken(did = "did:t3n:operator:us1"): string {
   return issueOperatorSessionToken({
-    secret: "development-only-auth-session-secret-change-before-production",
+    secret: TEST_AUTH_SESSION_SECRET,
     did,
     institutionId: us1OperatorInstitutionId,
   });

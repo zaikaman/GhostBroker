@@ -9,6 +9,7 @@ import type { InstitutionManagementService } from "../../services/institution.se
 import {
   buildBackendTestEnv,
   buildHiddenIntentRequest,
+  TEST_AUTH_SESSION_SECRET,
   us2InstitutionId,
 } from "../data/us2-encrypted-intent-builders.js";
 
@@ -56,7 +57,7 @@ describe("POST /api/agents/intents contract", () => {
     );
 
     const token = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us2",
       institutionId: us2InstitutionId,
     });
@@ -107,7 +108,7 @@ describe("POST /api/agents/intents contract", () => {
     );
 
     const token = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us2",
       institutionId: us2InstitutionId,
     });
@@ -138,7 +139,7 @@ describe("POST /api/agents/intents contract", () => {
     );
 
     const token = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us2",
       institutionId: us2InstitutionId,
     });

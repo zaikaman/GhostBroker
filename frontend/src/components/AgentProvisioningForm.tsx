@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CheckmarkCircle01Icon, Loading03Icon, Robot01Icon } from 'hugeicons-react';
 import { apiClient, type Agent } from '../services/api-client';
+import { generateAgentIdentity } from '../services/agent-identity';
 
 interface AgentProvisioningFormProps {
   institutionId: string;
@@ -44,8 +45,16 @@ export function AgentProvisioningForm({
     setSuccess(null);
 
     try {
+      // Mint a fresh secp256k1 keypair in the browser and derive
+      // `did:t3n:0x<eth-address>` so the agent's delegation VC is
+      // cryptographically bound to a keypair the dashboard actually
+      // holds (not a backend-minted placeholder). The private key
+      // stays in memory; only the public DID crosses the wire.
+      const identity = generateAgentIdentity();
+
       const result = await apiClient.provisionAgent({
         institutionId,
+        agentDid: identity.agentDid,
         label: form.label.trim(),
         policy: {
           maxSpendUsd: Number(form.maxSpendUsd),

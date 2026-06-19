@@ -50,6 +50,13 @@ export interface InstitutionRepository {
   findByTenantDid(did: string): Promise<Institution | null>;
   findById(id: string): Promise<Institution | null>;
   updateMetadata?(id: string, metadata: Readonly<Record<string, unknown>>): Promise<Institution>;
+  /**
+   * Update the institution's `settlement_profile_ref` column
+   * in-place. Used by the WS3 PATCH endpoint when the operator
+   * switches the institution between rails (e.g. `wallet:default`
+   * to `chain:sepolia:erc20` after on-chain deposit setup).
+   */
+  updateProfile?(id: string, settlementProfileRef: string): Promise<Institution>;
 }
 
 export interface InstitutionManagementService {
@@ -155,6 +162,24 @@ export class SupabaseInstitutionRepository implements InstitutionRepository {
 
     return institutionFromRecord(data);
   }
+
+  public async updateProfile(
+    id: string,
+    settlementProfileRef: string,
+  ): Promise<Institution> {
+    const { data, error } = await this.client
+      .from("institutions")
+      .update({ settlement_profile_ref: settlementProfileRef })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      throw new PublicError("service_unavailable", 503, error);
+    }
+
+    return institutionFromRecord(data);
+  }
 }
 
 export class InstitutionService implements InstitutionManagementService {
@@ -247,13 +272,12 @@ export class InstitutionService implements InstitutionManagementService {
 
     // Persist the metadata update first via the repository's
     // `updateMetadata`, then the profile via a direct
-    // settlement_profile_ref write. The repository's
-    // `updateMetadata` is the only available writer for
-    // metadata; the profile field requires its own
-    // write path. For v1 the only profile writer is the
-    // existing `createInstitution` insert; the simplest
-    // production-grade path is a single new repo method
-    // `updateProfile` (not added in WS3 — out of scope).
+    // `settlement_profile_ref` write. Both writers are part
+    // of the production `SupabaseInstitutionRepository`; the
+    // service refuses to silently no-op a profile change
+    // when the repository is missing the writer, so a
+    // misconfigured test composition surfaces the gap
+    // explicitly.
     if (request.metadata !== undefined) {
       if (!this.repository.updateMetadata) {
         throw new PublicError(
@@ -265,29 +289,19 @@ export class InstitutionService implements InstitutionManagementService {
       await this.repository.updateMetadata(id, nextMetadata);
     }
     if (request.settlementProfileRef !== undefined) {
-      // WS3 v1: the existing repo does not expose a
-      // profile-only update. The frontend should pass
-      // both `settlementProfileRef` and (a no-op)
-      // `metadata` in the PATCH if a profile change is
-      // required; the metadata write above already
-      // persists the merged metadata. The profile change
-      // itself is a TODO for WS3.5: add a
-      // `SupabaseInstitutionRepository.updateProfile`
-      // method. For the demo this is acceptable because
-      // institutions are recreated when their profile
-      // changes (the dashboard's "create institution" flow
-      // is the supported path for v1).
-      //
-      // To keep the contract honest, we still validate
-      // the new profile shape and throw a typed error if
-      // the caller expected a profile change but the
-      // repository lacks the writer. The error message
-      // names WS3.5 as the next step.
-      throw new PublicError(
-        "service_unavailable",
-        503,
-        `updateInstitution: settlement_profile_ref change requires SupabaseInstitutionRepository.updateProfile (planned for WS3.5). Recreate the institution to change its settlement profile in v1.`,
-      );
+      if (!this.repository.updateProfile) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          "updateInstitution: repository does not support updateProfile; the institution service must be wired with SupabaseInstitutionRepository for settlement-profile changes.",
+        );
+      }
+      return this.repository.updateProfile(id, nextProfile);
+    }
+
+    if (request.metadata !== undefined) {
+      const refreshed = await this.repository.findById(id);
+      return refreshed ?? current;
     }
 
     return {

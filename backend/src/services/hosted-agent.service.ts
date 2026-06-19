@@ -427,10 +427,12 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
       // Forward the LLM provider credentials so the spawned agent
       // can build its fallback chain (gemini → openai → groq). The
-      // chain order is hardcoded in the agent runtime — these vars
-      // only carry the keys (and optional base URLs for proxy
-      // migration). End users do not pick models from the dashboard;
-      // the agent tries each in priority order on each LLM call.
+      // chain order is configurable via the `LLM_PROVIDER_CHAIN`
+      // env var (default: `gemini,openai,groq`) — these vars only
+      // carry the keys and optional base URLs for proxy migration.
+      // End users do not pick models from the dashboard; the agent
+      // tries each provider in priority order on each LLM call and
+      // falls back on transient failures (5xx / 429 / network).
       ...(process.env.GEMINI_API_KEY ? { GEMINI_API_KEY: process.env.GEMINI_API_KEY } : {}),
       ...(process.env.GEMINI_MODEL ? { GEMINI_MODEL: process.env.GEMINI_MODEL } : {}),
       ...(process.env.GEMINI_BASE_URL ? { GEMINI_BASE_URL: process.env.GEMINI_BASE_URL } : {}),

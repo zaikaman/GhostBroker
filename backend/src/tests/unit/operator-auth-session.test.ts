@@ -8,10 +8,9 @@ import {
   buildAdmitAgentRequest,
   buildBackendTestEnv,
   buildInstitution,
+  TEST_AUTH_SESSION_SECRET,
   us1OperatorInstitutionId,
 } from "../data/us1-seed-builders.js";
-
-const authSecret = "test-auth-session-secret-with-more-than-32-characters";
 
 function buildServices(agentService: AgentManagementService): BackendServices {
   return {
@@ -27,14 +26,14 @@ function buildServices(agentService: AgentManagementService): BackendServices {
 describe("operator auth bearer sessions", () => {
   it("uses the verified DID session as the institution scope", async () => {
     const token = issueOperatorSessionToken({
-      secret: authSecret,
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3:0x0000000000000000000000000000000000000301",
       institutionId: us1OperatorInstitutionId,
     });
     const app = createApp(
       {
         ...buildBackendTestEnv(),
-        AUTH_SESSION_SECRET: authSecret,
+        AUTH_SESSION_SECRET: TEST_AUTH_SESSION_SECRET,
       },
       buildServices({
         admitAgent: async () => ({
@@ -65,7 +64,7 @@ describe("operator auth bearer sessions", () => {
     const app = createApp(
       {
         ...buildBackendTestEnv(),
-        AUTH_SESSION_SECRET: authSecret,
+        AUTH_SESSION_SECRET: TEST_AUTH_SESSION_SECRET,
       },
       buildServices({
         admitAgent: async () => ({

@@ -9,7 +9,7 @@ import {
   buildCompletedTradeRecord,
   us3BuyerInstitutionId,
 } from "../data/us3-settlement-builders.js";
-import { buildBackendTestEnv } from "../data/us2-encrypted-intent-builders.js";
+import { buildBackendTestEnv, TEST_AUTH_SESSION_SECRET } from "../data/us2-encrypted-intent-builders.js";
 import { completedTradeFromRecord } from "../../models/completed-trade.js";
 
 function buildServices(tradeHistoryService: TradeHistoryService): BackendServices {
@@ -55,7 +55,7 @@ describe("GET /api/trades/completed contract", () => {
     );
 
     const token = issueOperatorSessionToken({
-      secret: "development-only-auth-session-secret-change-before-production",
+      secret: TEST_AUTH_SESSION_SECRET,
       did: "did:t3n:operator:us3",
       institutionId: us3BuyerInstitutionId,
     });

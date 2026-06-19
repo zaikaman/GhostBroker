@@ -10,6 +10,7 @@ import type { MatchingOrchestrator } from "../../services/matching-orchestrator.
 import type { PendingIntent } from "../../models/hidden-intent.js";
 import {
   buildBackendTestEnv,
+  TEST_AUTH_SESSION_SECRET,
   us2AgentDid,
   us2InstitutionId,
 } from "../data/us2-encrypted-intent-builders.js";
@@ -105,7 +106,7 @@ class StubOrchestrator {
 
 describe("GET /api/portfolios/:institutionId?agentDid=... contract", () => {
   const token = issueOperatorSessionToken({
-    secret: "development-only-auth-session-secret-change-before-production",
+    secret: TEST_AUTH_SESSION_SECRET,
     did: "did:t3n:operator:us2",
     institutionId: us2InstitutionId,
   });

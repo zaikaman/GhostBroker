@@ -209,14 +209,15 @@ export const mintDelegationResponseSchema = z.object({
 export const configureAgentRequestSchema = z.object({
   institutionId: z.string().uuid(),
   /**
-   * Optional explicit agent DID. When omitted, the
-   * backend mints a synthetic `did:t3n:demo-<random>`
-   * placeholder (the agent process re-uses the same
-   * DID on admit). The dashboard's "Configure Agent"
-   * form mints a secp256k1-derived DID in the browser
-   * and passes it here.
+   * The secp256k1-derived agent DID the dashboard minted in the
+   * browser (`did:t3n:0x<eth-address>`). Required: the backend
+   * binds the tenant-signed delegation VC to this DID, so the
+   * dashboard (which holds the matching private keypair) is the
+   * authoritative source of agent identity. A backend-minted
+   * placeholder DID would let any caller mint + sign an admission
+   * without holding a keypair, so it has been removed.
    */
-  agentDid: agentDidSchema.optional(),
+  agentDid: agentDidSchema,
   label: z.string().trim().min(1).max(100).optional(),
   policy: mintDelegationPolicySchema,
 });

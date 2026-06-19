@@ -1,5 +1,4 @@
 import { PublicError } from "../errors/public-error.js";
-import { randomBytes } from "node:crypto";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import type {
   AdmitAgentRequest,
@@ -73,7 +72,7 @@ export interface AgentManagementService extends AgentAdmissionService {
    */
   configureAgent(input: {
     institutionId: string;
-    agentDid?: string;
+    agentDid: string;
     label?: string;
     policy: {
       maxSpendUsd: number;
@@ -160,18 +159,22 @@ export class AgentService implements AgentManagementService {
       }
     }
 
-    // When delegationCredential is still undefined (no inline VC,
-    // no persisted VC — e.g. direct agent run without the demo
-    // orchestrator or the dashboard Configure Agent flow), fall
-    // back to a sandbox admit in development mode. The agent is
-    // already authenticated via API key and scoped to the
-    // institution; the sandbox authority ref lets the admit
-    // complete so the agent can submit intents. In live mode
-    // this path rejects with 403.
+    // A delegation credential is the production contract. Whether
+    // the request carries it inline or the agent record has it
+    // persisted, the backend MUST have a Ghostbroker-style W3C VC
+    // before admitting the agent. There is no sandbox admit
+    // shortcut: synthetic authority refs and demo DID placeholders
+    // were removed because they bypassed the live cryptographic
+    // verification gate that the verifier runs on every privileged
+    // call. Every code path (dashboard Configure Agent, hosted
+    // agent spawn, E2E test) flows through the dashboard's
+    // configure-agent endpoint, which always signs a real VC.
     if (!delegationCredential) {
-      return this.sandboxAdmit({
-        request,
-      });
+      throw new PublicError(
+        "authorization_failed",
+        403,
+        "admitAgent: no delegation credential supplied and no persisted VC found for the agent DID. Run the dashboard 'Configure Agent' flow to mint + persist a signed W3C VC before admitting.",
+      );
     }
 
     const verification = await this.authorization.verifyAgentAuthority({
@@ -217,72 +220,6 @@ export class AgentService implements AgentManagementService {
    * record (with the Ghostbroker delegation VC stored in `metadata`) and
    * returns the public `AgentAdmission` shape.
    */
-  /**
-   * Sandbox admit path for agents that run without a delegation
-   * VC (e.g. direct `npm run buyer` without the demo orchestrator
-   * or dashboard Configure Agent flow). Generates a synthetic
-   * authority ref and admits the agent so it can submit intents.
-   *
-   * This is safe because the agent is already authenticated via
-   * API key (scoped to a specific institution). The sandbox mode
-   * is the default when `VC_VERIFY_MODE` is not set to `live`.
-   * In live production, this path throws 403 to enforce the
-   * delegation VC requirement.
-   */
-  private async sandboxAdmit(input: {
-    request: AdmitAgentRequest;
-  }): Promise<AgentAdmission> {
-    const { request } = input;
-
-    // Only allow sandbox admit in non-live environments. The
-    // mode is read from the env var (same convention as
-    // `verifyGhostbrokerDelegationCredential`).
-    const mode = (process.env.VC_VERIFY_MODE ?? "sandbox").trim().toLowerCase();
-    if (mode === "live") {
-      throw new PublicError("authorization_failed", 403);
-    }
-
-    // Check if the agent already exists (e.g. a previous
-    // sandbox admit created the record). The agents table has
-    // a unique constraint on (institution_id, agent_did), so
-    // we must return the existing admission rather than
-    // attempting a duplicate insert.
-    const existing = await this.repository.findByAgentDid(
-      request.institutionId,
-      request.agentDid,
-    );
-    console.log(
-      "[SANDBOX]",
-      "did:", request.agentDid.slice(0, 30),
-      "existing:", existing ? existing.id : "null",
-    );
-    if (existing) {
-      return {
-        id: existing.id,
-        agentDid: existing.agentDid,
-        status: "admitted",
-        authorityRef: existing.authorityRef,
-      };
-    }
-
-    const agent = await this.repository.create({
-      institutionId: request.institutionId,
-      agentDid: request.agentDid,
-      authorityRef: `ghostbroker-delegation:sandbox-admit-${cryptoRandomHex(16)}`,
-      instrumentScope: request.limits?.instrumentScope ?? null,
-      directionScope: request.limits?.directionScope ?? null,
-      maxNotional: request.limits?.maxNotional ?? null,
-      limitReference: request.limits?.limitReference ?? null,
-      policyHash: cryptoRandomHex(32),
-    });
-
-    return {
-      id: agent.id,
-      agentDid: agent.agentDid,
-      status: "admitted",
-      authorityRef: agent.authorityRef,
-    };
-  }
 
   private async persistAdmittedAgent(input: {
     request: AdmitAgentRequest;
@@ -433,7 +370,7 @@ export class AgentService implements AgentManagementService {
 
   public async configureAgent(input: {
     institutionId: string;
-    agentDid?: string;
+    agentDid: string;
     label?: string;
     policy: {
       maxSpendUsd: number;
@@ -458,13 +395,14 @@ export class AgentService implements AgentManagementService {
       validityMonths?: number;
     }) => Promise<{ credential: DelegationCredential; policyHash: string }>;
   }): Promise<{ agent: Agent; policyHash: string }> {
-    // The agent DID is either the one the dashboard
-    // minted client-side, or a synthetic
-    // `did:t3n:demo-<random>` placeholder minted by the
-    // backend for the demo orchestrator path. The agent
-    // process re-uses this exact DID on its admit call.
-    const agentDid =
-      input.agentDid ?? `did:t3n:demo-${cryptoRandomHex(24)}`;
+    // The agent DID is the secp256k1-derived DID the dashboard
+    // minted in the browser (`did:t3n:0x<eth-address>`). The
+    // dashboard holds the matching private keypair; the backend's
+    // tenant signer binds the delegation VC to this DID. The
+    // previous `did:t3n:demo-<random>` backend-minted fallback
+    // has been removed because it let any caller create an
+    // admission without holding a keypair.
+    const agentDid = input.agentDid;
 
     const { credential, policyHash } = await input.signCredential({
       agentDid,
@@ -493,17 +431,5 @@ export class AgentService implements AgentManagementService {
 
     return { agent, policyHash };
   }
-}
-
-/**
- * Generate a short random hex string. The T3N DID
- * convention is `did:t3n:<identifier>`; for the demo
- * orchestrator path we mint a synthetic identifier
- * derived from `randomBytes(12)` (24 hex chars). 48
- * bits of entropy is enough to disambiguate concurrent
- * demo runs on the same institution.
- */
-function cryptoRandomHex(byteLength: number): string {
-  return randomBytes(byteLength).toString("hex");
 }
 

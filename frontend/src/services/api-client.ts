@@ -94,7 +94,15 @@ export interface ProvisionAgentPolicy {
 export interface ProvisionAgentRequest {
   institutionId: string;
   label?: string;
-  agentDid?: string;
+  /**
+   * The dashboard-minted secp256k1-derived DID the agent will use
+   * (`did:t3n:0x<eth-address>`). The dashboard holds the matching
+   * private keypair in memory; only the public DID crosses the wire
+   * and the backend's tenant signer binds the delegation VC to it.
+   * Required — the backend rejects configuration requests that
+   * omit it.
+   */
+  agentDid: string;
   policy: ProvisionAgentPolicy;
 }
 

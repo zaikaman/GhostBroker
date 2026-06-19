@@ -8,6 +8,7 @@ import type { InstitutionManagementService } from "../../services/institution.se
 import type { PendingIntent } from "../../models/hidden-intent.js";
 import {
   buildBackendTestEnv,
+  TEST_AUTH_SESSION_SECRET,
   us2AgentDid,
   us2InstitutionId,
 } from "../data/us2-encrypted-intent-builders.js";
@@ -61,7 +62,7 @@ const sampleIntent: PendingIntent = {
 
 describe("GET /api/agents/intents contract", () => {
   const token = issueOperatorSessionToken({
-    secret: "development-only-auth-session-secret-change-before-production",
+    secret: TEST_AUTH_SESSION_SECRET,
     did: "did:t3n:operator:us2",
     institutionId: us2InstitutionId,
   });
