@@ -1,14 +1,14 @@
 //! Core logic for the matching contract.
 //!
-//! The two exported functions (`seal_intent`, `evaluate_match`)
-//! parse the JSON payload, compute deterministic opaque handles,
-//! and return a JSON response. All host imports are intentionally
-//! unused here — the contract is a pure function. The dispatcher
-//! still validates that the WASM exposes the required WIT world,
-//! which gives us a verifiable execution surface even though the
-//! body is pure.
+//! The exported functions (`seal_ticket`, `seal_intent`,
+//! `evaluate_match`, `evaluate_pair`) parse the JSON payload,
+//! compute deterministic opaque handles, and return a JSON
+//! response. All host imports are intentionally unused here — the
+//! contract is a pure function. The dispatcher still validates
+//! that the WASM exposes the required WIT world, which gives us
+//! a verifiable execution surface even though the body is pure.
 //!
-//! Wire format for prices and quantities (v0.4.0): a plain decimal
+//! Wire format for prices and quantities (v0.6.0): a plain decimal
 //! string, optionally with a single `.` separating integer and
 //! fractional parts. Both sides carry their values at the same
 //! implicit scale (the contract's internal [`WIRE_SCALE`]); the
@@ -19,6 +19,14 @@
 //! human-readable string with its per-asset decimals via
 //! `parseUnits(quantity.toString(), decimals)`, so the wire form
 //! matches both surfaces without a backend pre/post-scale step.
+//!
+//! Pair authority (`evaluate_pair`): the TEE is the structural
+//! authority on whether a candidate pair of sealed negotiation
+//! tickets is matchable. The orchestrator owns the in-memory
+//! pending queue but is NOT allowed to pair tickets the TEE
+//! rejects; the TEE returns a precise `reason_code` for every
+//! rejection so the orchestrator can log a meaningful audit
+//! trail. See `evaluate_pair` below for the rules.
 
 extern crate alloc;
 
@@ -171,15 +179,32 @@ pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     if parsed.side.is_empty() {
         return Err("seal-ticket: side is required".to_string());
     }
+    if parsed.policy_hash.is_empty() {
+        return Err("seal-ticket: policy_hash is required".to_string());
+    }
+    if parsed.compatibility_token.is_empty() {
+        return Err("seal-ticket: compatibility_token is required".to_string());
+    }
     if parsed.correlation_ref.is_empty() {
         return Err("seal-ticket: correlation_ref is required".to_string());
     }
 
     // The ticket handle is the canonical TEE seal identifier.
-    // Hash a stable concatenation of all the input fields so
-    // (a) the same input always maps to the same handle, and
-    // (b) different inputs are guaranteed to map to different
-    // handles (within SHA-256 collision probability).
+    // Hash a stable concatenation of ALL input fields — including
+    // `policy_hash` and `compatibility_token` — so (a) the same
+    // input always maps to the same handle, and (b) the handle is
+    // bound to the agent's policy attestation and the
+    // (asset, side, institution) compatibility class. The
+    // orchestrator's pair-up decision is gated on the TEE
+    // `evaluate-pair` function; that function uses both handles
+    // AND the original compatibility tokens to decide whether
+    // the pair is matchable, so a different `compatibility_token`
+    // must produce a different handle (within SHA-256 collision
+    // probability) — otherwise the pair attestation would be
+    // spoofable by replaying a handle with a swapped token.
+    //
+    // Pipe-delimited concatenation with a leading tag, then
+    // hex-truncated SHA-256 via `hex_handle` (32 hex chars).
     let mut hasher_input: Vec<u8> = Vec::with_capacity(
         parsed.institution_id.len()
             + parsed.agent_did.len()
@@ -189,8 +214,9 @@ pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             + parsed.policy_hash.len()
             + parsed.compatibility_token.len()
             + parsed.correlation_ref.len()
-            + 7,
+            + 8,
     );
+    hasher_input.extend_from_slice(b"ticket|");
     hasher_input.extend_from_slice(parsed.institution_id.as_bytes());
     hasher_input.push(b'|');
     hasher_input.extend_from_slice(parsed.agent_did.as_bytes());
@@ -200,6 +226,10 @@ pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     hasher_input.extend_from_slice(parsed.asset_code.as_bytes());
     hasher_input.push(b'|');
     hasher_input.extend_from_slice(parsed.side.as_bytes());
+    hasher_input.push(b'|');
+    hasher_input.extend_from_slice(parsed.policy_hash.as_bytes());
+    hasher_input.push(b'|');
+    hasher_input.extend_from_slice(parsed.compatibility_token.as_bytes());
     hasher_input.push(b'|');
     hasher_input.extend_from_slice(parsed.correlation_ref.as_bytes());
 
@@ -214,6 +244,335 @@ pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     serde_json::to_vec(&output)
         .map_err(|err| format!("seal-ticket: response encode failed: {}", err))
 }
+
+// ─── evaluate-pair ───
+//
+// Pair authority for negotiation tickets. The orchestrator is the
+// executor of the match queue (it owns the in-memory pending set),
+// but the TEE is the authority on whether a CANDIDATE pair is
+// matchable. The orchestrator must call this function with both
+// sides' ticket handles AND their original compatibility tokens
+// before creating a session; the orchestrator pairs only on a
+// `compatible` outcome.
+//
+// The function is intentionally stateless and pure: it does not
+// remember which tickets have been sealed, so it trusts the
+// orchestrator to have obtained both handles from a real
+// `seal-ticket` call. What it DOES verify is structural: the
+// handles are well-formed, the compatibility tokens parse to a
+// real (asset, side, institution) tuple, and the two sides are
+// compatible on the structural axes a malicious or buggy
+// orchestrator could otherwise violate (same institution, wrong
+// asset, same side, swapped asset). A swap of any structural
+// field is a `incompatible` outcome with a precise reason the
+// orchestrator can log and the agent can surface.
+//
+// This is the load-bearing match decision for the pair-up. The
+// per-round price cross still goes through `evaluate-match` and
+// the inline negotiation evaluator; this function is only about
+// the initial pair.
+
+pub fn evaluate_pair(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let body = unwrap_body(envelope_bytes)?;
+    let parsed: crate::EvaluatePairInput = serde_json::from_slice(&body)
+        .map_err(|err| format!("evaluate-pair: invalid JSON input: {}", err))?;
+
+    // Required-field check. Every field must be non-empty: an
+    // empty handle or token means the orchestrator is asking the
+    // TEE to validate nothing, which is always a `incompatible`
+    // outcome with a precise reason.
+    if parsed.buy_ticket_handle.trim().is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "buy_ticket_handle is required",
+            "missing_buy_ticket_handle",
+        );
+    }
+    if parsed.sell_ticket_handle.trim().is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "sell_ticket_handle is required",
+            "missing_sell_ticket_handle",
+        );
+    }
+    if parsed.buy_compatibility_token.trim().is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "buy_compatibility_token is required",
+            "missing_buy_compatibility_token",
+        );
+    }
+    if parsed.sell_compatibility_token.trim().is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "sell_compatibility_token is required",
+            "missing_sell_compatibility_token",
+        );
+    }
+    if parsed.asset_code.trim().is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "asset_code is required",
+            "missing_asset_code",
+        );
+    }
+    if parsed.correlation_ref.trim().is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "correlation_ref is required",
+            "missing_correlation_ref",
+        );
+    }
+
+    // Handle well-formedness: a real `seal-ticket` handle is
+    // `ticket_<32-lowercase-hex>`. We accept exactly that shape
+    // and refuse anything else. This stops a forged handle from
+    // sneaking into the pair attestation.
+    if !is_well_formed_ticket_handle(&parsed.buy_ticket_handle) {
+        return incompatible_pair(
+            &parsed,
+            "buy_ticket_handle is not a well-formed ticket handle",
+            "malformed_buy_ticket_handle",
+        );
+    }
+    if !is_well_formed_ticket_handle(&parsed.sell_ticket_handle) {
+        return incompatible_pair(
+            &parsed,
+            "sell_ticket_handle is not a well-formed ticket handle",
+            "malformed_sell_ticket_handle",
+        );
+    }
+    // Reject self-pairing (same handle both sides). The
+    // orchestrator's `tryPair` loop also excludes this via
+    // institutionId, but the TEE must reject it independently
+    // so a misconfigured orchestrator cannot bypass the gate.
+    if parsed.buy_ticket_handle == parsed.sell_ticket_handle {
+        return incompatible_pair(
+            &parsed,
+            "buy and sell ticket handles are identical",
+            "self_pair",
+        );
+    }
+
+    // Compatibility token parse: the wire form is
+    // `<asset>:<side>:<institution-id>`, e.g. `WBTC:buy:<uuid>`.
+    // The orchestrator builds it deterministically in
+    // `negotiation-loop.ts` and the TEE binds the exact bytes
+    // into the ticket handle, so any structural divergence
+    // (different asset, same side, swapped institution) means
+    // the ticket is not what the TEE originally attested to.
+    let buy_token = match parse_compatibility_token(&parsed.buy_compatibility_token) {
+        Some(value) => value,
+        None => {
+            return incompatible_pair(
+                &parsed,
+                "buy_compatibility_token is not a well-formed <asset>:<side>:<institution> tuple",
+                "malformed_buy_compatibility_token",
+            );
+        }
+    };
+    let sell_token = match parse_compatibility_token(&parsed.sell_compatibility_token) {
+        Some(value) => value,
+        None => {
+            return incompatible_pair(
+                &parsed,
+                "sell_compatibility_token is not a well-formed <asset>:<side>:<institution> tuple",
+                "malformed_sell_compatibility_token",
+            );
+        }
+    };
+
+    // Compatibility axes. Each axis is enforced independently so
+    // the orchestrator can log a precise reason. We deliberately
+    // do NOT cross-check the token's asset against the explicit
+    // `asset_code` field until the side check, because the
+    // orchestrator's `tryPair` already filters on `assetCode`
+    // locally; the TEE re-checks both for defense in depth.
+    if buy_token.side != "buy" {
+        return incompatible_pair(
+            &parsed,
+            "buy_compatibility_token side must be 'buy'",
+            "buy_token_wrong_side",
+        );
+    }
+    if sell_token.side != "sell" {
+        return incompatible_pair(
+            &parsed,
+            "sell_compatibility_token side must be 'sell'",
+            "sell_token_wrong_side",
+        );
+    }
+    if buy_token.asset != parsed.asset_code {
+        return incompatible_pair(
+            &parsed,
+            "buy_compatibility_token asset does not match asset_code",
+            "buy_token_asset_mismatch",
+        );
+    }
+    if sell_token.asset != parsed.asset_code {
+        return incompatible_pair(
+            &parsed,
+            "sell_compatibility_token asset does not match asset_code",
+            "sell_token_asset_mismatch",
+        );
+    }
+    if buy_token.asset != sell_token.asset {
+        return incompatible_pair(
+            &parsed,
+            "buy and sell compatibility tokens reference different assets",
+            "asset_mismatch",
+        );
+    }
+    if buy_token.institution_id == sell_token.institution_id {
+        return incompatible_pair(
+            &parsed,
+            "buy and sell compatibility tokens reference the same institution",
+            "same_institution",
+        );
+    }
+    if buy_token.institution_id.is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "buy_compatibility_token institution_id is empty",
+            "missing_buy_institution",
+        );
+    }
+    if sell_token.institution_id.is_empty() {
+        return incompatible_pair(
+            &parsed,
+            "sell_compatibility_token institution_id is empty",
+            "missing_sell_institution",
+        );
+    }
+
+    // All axes agree: the pair is matchable. Mint a deterministic
+    // `pair_ref` from the sorted handles so the orchestrator can
+    // dedupe accidental re-evaluations, and a fresh execution ref
+    // for the attestation log.
+    let mut sorted = [parsed.buy_ticket_handle.as_str(), parsed.sell_ticket_handle.as_str()];
+    sorted.sort();
+    let pair_ref = crate::hex_handle(
+        "pair",
+        format!("{}|{}|{}", sorted[0], sorted[1], parsed.asset_code).as_bytes(),
+    );
+    let execution_ref = fresh_execution_ref();
+    let expires_at = format_expires_at(PAIR_TTL_SECS);
+
+    let output = crate::EvaluatePairOutput {
+        pair_ref,
+        execution_ref,
+        status: "compatible".to_string(),
+        reason: String::new(),
+        reason_code: String::new(),
+        buy_ticket_handle: parsed.buy_ticket_handle,
+        sell_ticket_handle: parsed.sell_ticket_handle,
+        buy_institution_id: buy_token.institution_id.to_string(),
+        sell_institution_id: sell_token.institution_id.to_string(),
+        asset_code: parsed.asset_code,
+        expires_at,
+    };
+
+    serde_json::to_vec(&output)
+        .map_err(|err| format!("evaluate-pair: response encode failed: {}", err))
+}
+
+/// Build an `incompatible` outcome. The pair_ref is still derived
+/// from the two handles (when both are present) so the orchestrator
+/// can dedupe the negative outcome across retries.
+fn incompatible_pair(
+    parsed: &crate::EvaluatePairInput,
+    reason: &str,
+    reason_code: &str,
+) -> Result<Vec<u8>, String> {
+    let has_handles = !parsed.buy_ticket_handle.trim().is_empty()
+        && !parsed.sell_ticket_handle.trim().is_empty();
+    let pair_ref = if has_handles {
+        let mut sorted = [
+            parsed.buy_ticket_handle.as_str(),
+            parsed.sell_ticket_handle.as_str(),
+        ];
+        sorted.sort();
+        crate::hex_handle(
+            "pair",
+            format!("{}|{}|{}", sorted[0], sorted[1], parsed.asset_code).as_bytes(),
+        )
+    } else {
+        crate::hex_handle("pair", parsed.correlation_ref.as_bytes())
+    };
+    let execution_ref = fresh_execution_ref();
+    let output = crate::EvaluatePairOutput {
+        pair_ref,
+        execution_ref,
+        status: "incompatible".to_string(),
+        reason: reason.to_string(),
+        reason_code: reason_code.to_string(),
+        buy_ticket_handle: parsed.buy_ticket_handle.clone(),
+        sell_ticket_handle: parsed.sell_ticket_handle.clone(),
+        buy_institution_id: String::new(),
+        sell_institution_id: String::new(),
+        asset_code: parsed.asset_code.clone(),
+        expires_at: format_expires_at(PAIR_TTL_SECS),
+    };
+    serde_json::to_vec(&output)
+        .map_err(|err| format!("evaluate-pair: response encode failed: {}", err))
+}
+
+/// Compatibility-token parse: `<asset>:<side>:<institution-id>`.
+/// The asset and side are non-empty ASCII strings with no embedded
+/// `:`. The institution id is the rest of the string (after the
+/// second `:`), allowed to contain colons if the orchestrator ever
+/// introduces a structured id (we keep it permissive on the right
+/// side so the wire form can evolve).
+struct ParsedCompatibilityToken<'a> {
+    asset: &'a str,
+    side: &'a str,
+    institution_id: &'a str,
+}
+
+fn parse_compatibility_token(value: &str) -> Option<ParsedCompatibilityToken<'_>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parts = trimmed.splitn(3, ':');
+    let asset = parts.next()?.trim();
+    let side = parts.next()?.trim();
+    let institution_id = parts.next()?.trim();
+    if asset.is_empty() || side.is_empty() || institution_id.is_empty() {
+        return None;
+    }
+    // Asset and side must not themselves contain `:` (we already
+    // split with `splitn(3, ':')` so the first two segments cannot
+    // contain it; this is a defensive check on the trimming
+    // result).
+    if asset.contains(':') || side.contains(':') {
+        return None;
+    }
+    Some(ParsedCompatibilityToken {
+        asset,
+        side,
+        institution_id,
+    })
+}
+
+fn is_well_formed_ticket_handle(value: &str) -> bool {
+    let trimmed = value.trim();
+    let Some(hex_part) = trimmed.strip_prefix("ticket_") else {
+        return false;
+    };
+    if hex_part.len() != 32 {
+        return false;
+    }
+    hex_part.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+/// Default pair-TTL on the pair attestation, in seconds. The
+/// orchestrator creates the session row immediately after a
+/// `compatible` outcome, so a 5-minute window matches the
+/// per-round match contract's TTL and gives the orchestrator
+/// enough headroom for a transient DB hiccup without re-pairing
+/// a stale pair_ref.
+const PAIR_TTL_SECS: u64 = 300;
 
 /// Unwrap the T3 `generic-input` envelope and return the
 /// inner JSON bytes the contract body lives in. The host

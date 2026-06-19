@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NegotiationOrchestrator } from "../../services/negotiation-orchestrator.js";
 import type { SettlementService } from "../../services/settlement.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import type {
+  NegotiationPairVerificationRequest,
+  NegotiationPairVerificationResult,
   NegotiationTicketClient,
   NegotiationRoundEvaluator,
   NegotiationDisclosureVerifier,
@@ -34,6 +36,11 @@ const stubAuth: AgentAuthorizationFacade = {
   },
 };
 
+/**
+ * Default TEE pair-verifier behavior: returns `compatible` for
+ * any pair. Tests that exercise the rejection path replace
+ * this behavior on a per-test basis via `vi.spyOn`.
+ */
 const ticketClient: NegotiationTicketClient = {
   async sealTicket() {
     return {
@@ -41,6 +48,25 @@ const ticketClient: NegotiationTicketClient = {
       executionRef: "exec-stub",
       sealedAt: new Date().toISOString(),
       state: "ticket_sealed" as const,
+    };
+  },
+  async verifyPair(
+    request: NegotiationPairVerificationRequest,
+  ): Promise<NegotiationPairVerificationResult> {
+    const sorted = [request.buyTicketHandle, request.sellTicketHandle].sort();
+    return {
+      pairRef: `pair_default_${sorted[0]}_${sorted[1]}`,
+      executionRef: "exec-pair-default",
+      status: "compatible",
+      reason: "",
+      reasonCode: "",
+      buyTicketHandle: request.buyTicketHandle,
+      sellTicketHandle: request.sellTicketHandle,
+      buyInstitutionId: "buy-inst",
+      sellInstitutionId: "sell-inst",
+      assetCode: request.assetCode,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      evaluatedAt: new Date().toISOString(),
     };
   },
 };
@@ -848,5 +874,171 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
       price: 70_020,
       quantity: 1,
     });
+  });
+});
+
+describe("NegotiationOrchestrator — TEE pair authority", () => {
+  beforeEach(() => {
+    // Reset the spy on `verifyPair` so each test starts
+    // from a clean call history. The default behavior on the
+    // underlying `ticketClient.verifyPair` is `compatible` (see
+    // the module-level stub), which is what the existing
+    // escalation / disclosure tests rely on.
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("consults the TEE verifyPair before pairing and pairs on a compatible verdict", async () => {
+    const harness = await buildHarness({ approvalMode: "auto_settle" });
+    // Spy on the TEE pair verifier. The default harness uses a
+    // "compatible" stub, so we just record the call shape.
+    const verifyPair = vi.spyOn(ticketClient, "verifyPair");
+    const buyerTicket = await harness.orchestrator.submitTicket({
+      institutionId: BUY_INSTITUTION,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side: "buy",
+      compatibilityToken: `${ASSET}:buy:${BUY_INSTITUTION}`,
+      correlationRef: "test:tee:buyer",
+    });
+    expect(buyerTicket.sessionId).toBeNull();
+    const sellerTicket = await harness.orchestrator.submitTicket({
+      institutionId: SELL_INSTITUTION,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side: "sell",
+      compatibilityToken: `${ASSET}:sell:${SELL_INSTITUTION}`,
+      correlationRef: "test:tee:seller",
+    });
+    expect(sellerTicket.sessionId).not.toBeNull();
+    expect(verifyPair).toHaveBeenCalledTimes(1);
+    const call = verifyPair.mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    expect(call?.buyTicketHandle).toBe(buyerTicket.ticketHandle);
+    expect(call?.sellTicketHandle).toBe(sellerTicket.ticketHandle);
+    expect(call?.buyCompatibilityToken).toBe(`${ASSET}:buy:${BUY_INSTITUTION}`);
+    expect(call?.sellCompatibilityToken).toBe(`${ASSET}:sell:${SELL_INSTITUTION}`);
+    expect(call?.assetCode).toBe(ASSET);
+  });
+
+  it("does not pair when the TEE returns incompatible and keeps both tickets pending", async () => {
+    const harness = await buildHarness({ approvalMode: "auto_settle" });
+    // Override the pair verifier to reject any pair with a
+    // stable reason code. The TEE's reason codes are part of
+    // the public contract surface (see the WIT world.wit), so
+    // we test against one of the documented codes.
+    const verifyPair = vi
+      .spyOn(ticketClient, "verifyPair")
+      .mockResolvedValueOnce({
+        pairRef: "pair_rejected",
+        executionRef: "exec-rejected",
+        status: "incompatible",
+        reason: "buy and sell compatibility tokens reference the same institution",
+        reasonCode: "same_institution",
+        buyTicketHandle: "ticket-buy",
+        sellTicketHandle: "ticket-sell",
+        buyInstitutionId: "",
+        sellInstitutionId: "",
+        assetCode: ASSET,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        evaluatedAt: new Date().toISOString(),
+      });
+    const buyer = await harness.orchestrator.submitTicket({
+      institutionId: BUY_INSTITUTION,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side: "buy",
+      compatibilityToken: `${ASSET}:buy:${BUY_INSTITUTION}`,
+      correlationRef: "test:tee-rej:buyer",
+    });
+    expect(buyer.sessionId).toBeNull();
+    const seller = await harness.orchestrator.submitTicket({
+      institutionId: SELL_INSTITUTION,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side: "sell",
+      compatibilityToken: `${ASSET}:sell:${SELL_INSTITUTION}`,
+      correlationRef: "test:tee-rej:seller",
+    });
+    expect(seller.sessionId).toBeNull();
+    expect(verifyPair).toHaveBeenCalledTimes(1);
+    // The two tickets must remain pending so a later, valid
+    // candidate (e.g. an updated compatibility token) can
+    // retry without re-submission.
+    const sessions = await harness.repository.listSessions(BUY_INSTITUTION);
+    expect(sessions).toHaveLength(0);
+  });
+
+  it("rejects a TEE pair verifier error as a hard gate (does not create a session)", async () => {
+    const harness = await buildHarness({ approvalMode: "auto_settle" });
+    vi.spyOn(ticketClient, "verifyPair").mockRejectedValueOnce(
+      new Error("T3 host unreachable"),
+    );
+    await harness.orchestrator.submitTicket({
+      institutionId: BUY_INSTITUTION,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side: "buy",
+      compatibilityToken: `${ASSET}:buy:${BUY_INSTITUTION}`,
+      correlationRef: "test:tee-err:buyer",
+    });
+    await expect(
+      harness.orchestrator.submitTicket({
+        institutionId: SELL_INSTITUTION,
+        agentId: "00000000-0000-4000-8000-00000000a002",
+        agentDid: SELL_AGENT_DID,
+        authorityRef: "auth-stub",
+        assetCode: ASSET,
+        side: "sell",
+        compatibilityToken: `${ASSET}:sell:${SELL_INSTITUTION}`,
+        correlationRef: "test:tee-err:seller",
+      }),
+    ).rejects.toThrow("T3 host unreachable");
+    const sessions = await harness.repository.listSessions(BUY_INSTITUTION);
+    expect(sessions).toHaveLength(0);
+  });
+
+  it("passes both sides' compatibility tokens verbatim to the TEE verifier", async () => {
+    const harness = await buildHarness({ approvalMode: "auto_settle" });
+    const verifyPair = vi.spyOn(ticketClient, "verifyPair");
+    const buyToken = `${ASSET}:buy:${BUY_INSTITUTION}`;
+    const sellToken = `${ASSET}:sell:${SELL_INSTITUTION}`;
+    await harness.orchestrator.submitTicket({
+      institutionId: BUY_INSTITUTION,
+      agentId: "00000000-0000-4000-8000-00000000a001",
+      agentDid: BUY_AGENT_DID,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side: "buy",
+      compatibilityToken: buyToken,
+      correlationRef: "test:tee-tokens:buyer",
+    });
+    await harness.orchestrator.submitTicket({
+      institutionId: SELL_INSTITUTION,
+      agentId: "00000000-0000-4000-8000-00000000a002",
+      agentDid: SELL_AGENT_DID,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side: "sell",
+      compatibilityToken: sellToken,
+      correlationRef: "test:tee-tokens:seller",
+    });
+    expect(verifyPair).toHaveBeenCalledTimes(1);
+    const call = verifyPair.mock.calls[0]?.[0];
+    expect(call?.buyCompatibilityToken).toBe(buyToken);
+    expect(call?.sellCompatibilityToken).toBe(sellToken);
   });
 });

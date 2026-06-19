@@ -61,6 +61,22 @@ const ticketClient: NegotiationTicketClient = {
       state: "ticket_sealed" as const,
     };
   },
+  async verifyPair(request) {
+    return {
+      pairRef: `pair-demo-${request.assetCode}`,
+      executionRef: "exec-pair-demo",
+      status: "compatible",
+      reason: "",
+      reasonCode: "",
+      buyTicketHandle: request.buyTicketHandle,
+      sellTicketHandle: request.sellTicketHandle,
+      buyInstitutionId: "buy-inst",
+      sellInstitutionId: "sell-inst",
+      assetCode: request.assetCode,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      evaluatedAt: new Date().toISOString(),
+    };
+  },
 };
 
 const harnessState = {

@@ -44,6 +44,15 @@ import {
  * after `createSession` so a later "Regenerate Delegation" re-mint
  * or a transient DB error in the agent-record lookup cannot change
  * which credential the settlement command builder re-verifies.
+ *
+ * `compatibilityToken` is the asset/side/institution attestation
+ * the agent submitted to `sealTicket`. The TEE binds it into the
+ * `ticketHandle` at seal time and re-checks it on `verifyPair`, so
+ * storing it here lets the orchestrator replay the exact bytes the
+ * TEE originally attested to when it asks the TEE to verify a
+ * candidate pair. A mismatch between the stored token and the
+ * token the TEE saw at seal time is a hard `incompatible` from
+ * `verifyPair`, so we MUST keep these two in lockstep.
  */
 interface PendingTicket {
   ticketHandle: string;
@@ -53,6 +62,7 @@ interface PendingTicket {
   authorityRef: string;
   assetCode: string;
   side: "buy" | "sell";
+  compatibilityToken: string;
   mandate: NegotiationMandate;
   profile: NegotiationStrategyProfile | null;
   sealedAt: string;
@@ -366,6 +376,7 @@ export class NegotiationOrchestrator {
       authorityRef: verification.authorityRef,
       assetCode: input.assetCode,
       side: input.side,
+      compatibilityToken: input.compatibilityToken,
       mandate,
       profile: profileFromMandate(mandate),
       sealedAt: sealed.sealedAt,
@@ -392,6 +403,15 @@ export class NegotiationOrchestrator {
    * + overlapping size regime + claim compatibility. Falls back to the
    * legacy asset/side/institution check when one side has no authored
    * profile (compatibility codepath). Buyer takes the first turn.
+   *
+   * Pair authority: the TEE is the structural authority on whether a
+   * candidate pair is matchable. The local (asset, side, institution)
+   * filter is a pre-screen; once a candidate is found we call the
+   * TEE's `verifyPair` and pair ONLY on a `compatible` outcome. A
+   * TEE rejection (e.g. malformed compatibility token, swapped
+   * asset, same institution) leaves both tickets in the queue and
+   * logs a precise `reason_code` so an operator can audit the
+   * failure.
    */
   private async tryPair(
     ticket: PendingTicket,
@@ -427,10 +447,55 @@ export class NegotiationOrchestrator {
     if (!other) {
       return null;
     }
-    this.pendingTickets.splice(bestIndex, 1);
 
     const buyTicket = ticket.side === "buy" ? ticket : other;
     const sellTicket = ticket.side === "sell" ? ticket : other;
+
+    // TEE pair authority. The orchestrator is the executor of
+    // the match queue; the TEE is the authority on whether a
+    // candidate pair is structurally matchable. We pass both
+    // sides' original ticket handles AND their compatibility
+    // tokens (the exact bytes the TEE bound into each handle at
+    // seal time). The TEE returns `compatible` only when every
+    // structural axis agrees: handle well-formedness, asset
+    // agreement, opposite side, different institution.
+    //
+    // On `incompatible` we keep both tickets in the queue, log
+    // the precise reason code, and try the next candidate on
+    // the next `submitTicket` call. We do NOT create a session
+    // for an `incompatible` pair under any circumstances — this
+    // is the load-bearing gate that makes the TEE the matching
+    // authority for the pair-up decision.
+    const pairVerdict = await this.ticketClient.verifyPair({
+      buyTicketHandle: buyTicket.ticketHandle,
+      sellTicketHandle: sellTicket.ticketHandle,
+      buyCompatibilityToken: buyTicket.compatibilityToken,
+      sellCompatibilityToken: sellTicket.compatibilityToken,
+      assetCode: ticket.assetCode,
+      correlationRef: `pair:${ticket.assetCode}:${correlationRef}`,
+    });
+    if (pairVerdict.status !== "compatible") {
+      logger.error(
+        {
+          event: "negotiation.pair.rejected_by_tee",
+          assetCode: ticket.assetCode,
+          buyInstitutionId: buyTicket.institutionId,
+          sellInstitutionId: sellTicket.institutionId,
+          buyAgentDid: buyTicket.agentDid,
+          sellAgentDid: sellTicket.agentDid,
+          buyTicketHandle: pairVerdict.buyTicketHandle,
+          sellTicketHandle: pairVerdict.sellTicketHandle,
+          reason: pairVerdict.reason,
+          reasonCode: pairVerdict.reasonCode,
+          pairRef: pairVerdict.pairRef,
+          executionRef: pairVerdict.executionRef,
+        },
+        "TEE rejected the candidate pair; both tickets remain pending.",
+      );
+      return null;
+    }
+
+    this.pendingTickets.splice(bestIndex, 1);
 
     const deadline = new Date(Date.now() + this.deadlineMs).toISOString();
     const session = await this.repository.createSession({

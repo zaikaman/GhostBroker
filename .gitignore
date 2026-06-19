@@ -7,9 +7,38 @@ build/
 coverage/
 *.tsbuildinfo
 
-# Rust / cargo build outputs (matching-policy TEE contract)
-contracts/**/target/
-Cargo.lock
+# Rust / cargo build outputs (matching-policy TEE contract).
+# The `**/` prefix is required: the contracts live under
+# `backend/contracts/...`, not at the repo root, so the bare
+# `contracts/**/target/` pattern misses them.
+**/contracts/**/target/
+**/contracts/**/out/
+**/contracts/**/cache/
+
+# Foundry (forge) build outputs live next to the relayer
+# source under backend/contracts/relayer/. The deployed ABIs
+# are copied into `backend/src/services/settlement-rails/abi/`
+# at build time and are the only forge artefacts that need
+# to be tracked.
+**/contracts/**/broadcast/
+**/contracts/**/lib/
+
+# `Cargo.lock` is intentionally tracked: the matching-policy
+# contract is a `wasm32-wasip2` library that the TypeScript
+# host consumes via `loadWasmComponent`, so a pinned
+# `Cargo.lock` is the right reproducibility guarantee for
+# the published artifact. The `**/` prefix matches the lock
+# file at any depth (the contract lives under
+# `backend/contracts/matching-policy/`).
+!**/Cargo.lock
+
+# Auto-generated runtime data. `backend/output/` holds the
+# tenant identity (T3N signing key) that the backend mints on
+# first boot, plus any future non-deterministic build output.
+# The T3N SDK regenerates this directory on every fresh boot
+# so it must NEVER be tracked — the file contains a private
+# signing key (see `backend/output/identities/tenant_identity.json`).
+**/output/
 
 # Logs
 *.log
@@ -43,4 +72,8 @@ Thumbs.db
 *.tmp
 *.swp
 
+# Vendored reference implementation cloned into the workspace
+# by the T3 onboarding flow; it carries its own
+# `.git` history and build artefacts that are not part of
+# the GhostBroker source tree.
 ghostbroker-delegation-reference

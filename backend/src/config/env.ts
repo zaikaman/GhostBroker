@@ -58,20 +58,21 @@ const envSchema = z.object({
   T3_MATCH_CONTRACT_ID: z.string().min(1).optional(),
   /**
    * Explicit matching contract version the backend requests from
-   * T3N on every `evaluate-match` call. Defaults to `"0.4.0"` —
-   * the fractional-decimal wire form (`"0.0001"` for quantities,
-   * `"70000"` for prices) that the institutional demo uses end
-   * to end; the older `0.3.0` integer-only build returns
-   * `no_match` on any sub-unit fill. The T3N adapter reads this
-   * off the request body, so changing it here (after a new
-   * publish) repoints the backend without a code change.
+   * T3N on every `evaluate-match`, `seal-ticket`, and
+   * `evaluate-pair` call. Defaults to `"0.6.0"` — the version
+   * that added the `evaluate-pair` export (the TEE pair
+   * authority for negotiation tickets) and corrected the
+   * `seal-ticket` hash so the handle is bound to `policy_hash`
+   * and `compatibility_token`. The T3N adapter reads this off
+   * the request body, so changing it here (after a new publish)
+   * repoints the backend without a code change.
    */
   T3_MATCHING_CONTRACT_VERSION: z
     .string()
     .trim()
     .min(1)
     .max(32)
-    .default("0.4.0"),
+    .default("0.6.0"),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
   SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
   ETHERSCAN_API_KEY: z.string().min(1).optional(),

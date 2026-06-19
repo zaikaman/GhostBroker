@@ -54,8 +54,14 @@ export class InMemoryNegotiationRepository implements NegotiationRepository {
     return Promise.reject(new Error("not used by these tests"));
   }
 
-  public getMandateByAgent(): Promise<NegotiationMandate | null> {
-    return Promise.resolve(null);
+  public getMandateByAgent(
+    institutionId: string,
+    agentId: string,
+  ): Promise<NegotiationMandate | null> {
+    const record = Array.from(this.mandates.values()).find(
+      (m) => m.institution_id === institutionId && m.agent_id === agentId,
+    );
+    return Promise.resolve(record ? negotiationMandateFromRecord(record) : null);
   }
 
   public listMandatesByAgent(): Promise<NegotiationMandate[]> {

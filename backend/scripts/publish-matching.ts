@@ -28,7 +28,8 @@
  * Optional:
  *   - T3N_ENV                            "testnet" (default) or "production"
  *   - T3_NETWORK_URL                     Override the testnet URL
- *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.2.0"
+ *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.6.0" (the
+ *                                        `evaluate-pair`-aware build)
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -95,7 +96,7 @@ async function main(): Promise<void> {
   const configuredTenantDid = env.T3_TENANT_DID;
   const networkEnv = env.T3N_ENV ?? "testnet";
   const networkUrl = env.T3_NETWORK_URL;
-  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.2.0";
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.6.0";
   const tail = "matching";
 
   if (!apiKey) {
@@ -205,7 +206,8 @@ async function main(): Promise<void> {
     console.log();
     console.log("── Next steps ──");
     console.log(`  The orchestrator will now find contracts at`);
-    console.log(`  /contracts/${tail}/blind-intents and /contracts/${tail}/evaluate`);
+    console.log(`  /contracts/${tail}/blind-intents, /contracts/${tail}/evaluate,`);
+    console.log(`  /contracts/negotiation/tickets, and /contracts/negotiation/pairs`);
     console.log(`  and stop returning "matching not registered" on submit.`);
     console.log(
       `  Restart the backend (npm run dev) so the new T3 contract cache takes effect.`,

@@ -1,9 +1,10 @@
 // WIT world for the GhostBroker matching TEE contract.
 //
-// T3N host calls this contract at two routes, both under the
+// T3N host calls this contract at four routes, all under the
 // `matching` tail the GhostBroker orchestrator hits via the
-// `T3BlindIntentClient` and `T3MatchContractClient` in
-// `t3-enclave/src/matching/`. Both functions are pure
+// `T3BlindIntentClient` and `T3NegotiationTicketClient` in
+// `t3-enclave/src/matching/` and
+// `t3-enclave/src/negotiation/`. The functions are pure
 // (no host I/O) and produce deterministic opaque handles the
 // orchestrator threads through its in-memory queue.
 //
@@ -31,12 +32,14 @@ interface contracts {
   // ─── seal-ticket ───
   //
   // Seal a negotiation ticket. The orchestrator dispatches here
-  // from `/contracts/negotiation/tickets`. Creates an opaque handle
-  // from the negotiation ticket fields so the orchestrator can pair
-  // opposite-side tickets in memory. The contract is intentionally
-  // non-validating: the orchestrator already verified the
-  // GhostBroker delegation VC before calling; the TEE's job is to
-  // mint a tamper-evident handle, not re-check policy.
+  // from `/contracts/negotiation/tickets`. Creates an opaque
+  // handle that is bound to EVERY input field — including
+  // `policy_hash` and `compatibility_token` — so a different
+  // token produces a different handle. The contract is
+  // intentionally non-validating beyond structural field
+  // presence: the orchestrator already verified the Ghostbroker
+  // delegation VC before calling; the TEE's job is to mint a
+  // tamper-evident handle, not re-check policy.
   //
   // Input  (JSON): SealTicketInput
   //   {
@@ -59,7 +62,7 @@ interface contracts {
   // Seal an encrypted blind intent. The host returns a fresh
   // opaque handle the orchestrator uses as the in-memory queue
   // key. The contract is intentionally non-validating: the
-  // orchestrator already verified the GhostBroker delegation
+  // orchestrator already verified the Ghostbroker delegation
   // VC before calling; the TEE's job is to mint a tamper-evident
   // handle, not re-check policy.
   //
@@ -113,4 +116,62 @@ interface contracts {
   //     "execution_price":           "<decimal-string>",  // "" on no_match
   //   }
   evaluate-match: func(req: generic-input) -> result<list<u8>, string>;
+
+  // Structural pair authority for negotiation tickets. The
+  // orchestrator owns the in-memory pending queue but must call
+  // this function before creating a session for a candidate
+  // pair; the TEE returns `status: "compatible"` only when
+  // every structural axis agrees. This is the load-bearing pair
+  // decision — without a `compatible` outcome the orchestrator
+  // MUST NOT create a session, regardless of what its local
+  // (asset, side, institution) filter found. The TEE is
+  // stateless: it does not remember which tickets it has sealed
+  // and trusts the orchestrator to pass real handles from a
+  // real `seal-ticket` call. What it DOES verify is the shape
+  // of the attestation — handles are well-formed, compatibility
+  // tokens parse to a real (asset, side, institution) tuple,
+  // and the two sides agree on the structural axes a malicious
+  // or buggy orchestrator could otherwise violate.
+  //
+  // Input  (JSON): EvaluatePairInput
+  //   {
+  //     "buy_ticket_handle":       "ticket_<32-hex>",
+  //     "sell_ticket_handle":      "ticket_<32-hex>",
+  //     "buy_compatibility_token": "WBTC:buy:<institution-id>",
+  //     "sell_compatibility_token":"WBTC:sell:<institution-id>",
+  //     "asset_code":              "WBTC",
+  //     "correlation_ref":         "pair:...",
+  //   }
+  // Output (JSON): EvaluatePairOutput
+  //   {
+  //     "pair_ref":              "pair_<32-hex>",
+  //     "execution_ref":         "t3exec_<uuid>",
+  //     "status":                "compatible" | "incompatible",
+  //     "reason":                "<human-readable>",
+  //     "reason_code":           "<stable-machine-readable>",   // "" on compatible
+  //     "buy_ticket_handle":     "ticket_<32-hex>",            // echo
+  //     "sell_ticket_handle":    "ticket_<32-hex>",            // echo
+  //     "buy_institution_id":    "<uuid>",                     // "" on incompatible
+  //     "sell_institution_id":   "<uuid>",                     // "" on incompatible
+  //     "asset_code":            "WBTC",
+  //     "expires_at":            "<iso8601>",
+  //   }
+  //
+  // Reason codes (all on `status: "incompatible"`):
+  //   * `missing_<field>`                 — required input field is empty
+  //   * `malformed_<side>_ticket_handle`  — handle does not match
+  //                                         ^ticket_[0-9a-f]{32}$
+  //   * `malformed_<side>_compatibility_token`
+  //                                       — token does not parse to
+  //                                         <asset>:<side>:<institution>
+  //   * `<side>_token_wrong_side`         — buy/sell side label mismatch
+  //   * `<side>_token_asset_mismatch`     — explicit asset_code disagrees
+  //                                         with the asset in the token
+  //   * `asset_mismatch`                  — buy and sell tokens disagree
+  //                                         on the asset
+  //   * `same_institution`                — both tokens reference the same
+  //                                         institution (a side is trying
+  //                                         to pair with itself)
+  //   * `self_pair`                       — both ticket handles are equal
+  evaluate-pair: func(req: generic-input) -> result<list<u8>, string>;
 }

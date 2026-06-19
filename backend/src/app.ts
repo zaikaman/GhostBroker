@@ -594,6 +594,16 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     tokenBalanceClient,
     tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
     minimumTokenBalance: 1n,
+    // Pin the seal-ticket / evaluate-pair contract version to
+    // match `T3MatchContractClient` so the negotiation pairing
+    // gate (the TEE's `evaluate-pair`) and the per-round match
+    // authority (the TEE's `evaluate-match`) both run on the
+    // same published version. The T3N adapter
+    // (`readVersionFromBody`) reads this off the body and
+    // routes the execution; without it the tenant falls back
+    // to its default version, which may not yet expose
+    // `evaluate-pair`.
+    contractVersion: env.T3_MATCHING_CONTRACT_VERSION,
   });
   const negotiationRoundEvaluator = new T3NegotiationRoundEvaluator();
   const negotiationDisclosureVerifier = new T3NegotiationDisclosureVerifier();

@@ -336,6 +336,9 @@ function matchContractRoute(
   if (path === "/contracts/negotiation/tickets") {
     return { tail: "matching", functionName: "seal-ticket" };
   }
+  if (path === "/contracts/negotiation/pairs") {
+    return { tail: "matching", functionName: "evaluate-pair" };
+  }
   return null;
 }
 

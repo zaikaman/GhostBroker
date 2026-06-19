@@ -2,14 +2,30 @@
 /**
  * Verify the published `matching` TEE contract responds correctly.
  *
- * Calls `seal-intent` and `evaluate-match` against the live
- * tenant contract and prints the handles / outcome refs the
- * T3N tenant returns. Includes a sub-unit fill probe
- * (`0.0001 WBTC`) that the pre-v0.4.0 contracts silently
- * turned into `no_match` because their wire form was
- * integer-only. If the contract is missing or broken, the call
- * surfaces a T3N error (no more silent 400 from the
- * orchestrator route).
+ * Calls the four contract exports end-to-end against the live
+ * tenant contract and prints the handles / refs the T3N
+ * tenant returns. Covers:
+ *   1. `seal-intent`             — opaque handle for a blind intent
+ *   2. `evaluate-match` (cross)  — matched with a deterministic fill
+ *   3. `evaluate-match` (frac)   — sub-unit fill (0.0001 WBTC) which
+ *                                  the pre-v0.4.0 contract silently
+ *                                  turned into `no_match`
+ *   4. `evaluate-match` (nocross)— no_match with empty fill fields
+ *   5. `seal-ticket`             — opaque handle bound to
+ *                                  `policy_hash` and
+ *                                  `compatibility_token` (the v0.6.0
+ *                                  fix — older contracts reserved
+ *                                  capacity for these fields but
+ *                                  never wrote the bytes)
+ *   6. `evaluate-pair` (compat)  — `status: "compatible"` on a real
+ *                                  two-sided ticket pair
+ *   7. `evaluate-pair` (reject)  — `status: "incompatible"` with a
+ *                                  stable `reason_code` on a pair
+ *                                  that violates the structural axes
+ *                                  (same institution)
+ *
+ * If any call returns `not_found` or `bad_request`, the published
+ * contract is the wrong version or the T3N session is stale.
  *
  * Run from the workspace root:
  *   npm run contract:verify:matching -w @ghostbroker/backend
@@ -65,7 +81,7 @@ async function main(): Promise<void> {
   const apiKey = env.T3N_API_KEY;
   const networkEnv = env.T3N_ENV ?? "testnet";
   const networkUrl = env.T3_NETWORK_URL;
-  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.2.0";
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.6.0";
   if (!apiKey) {
     throw new Error("T3N_API_KEY is missing from backend/.env");
   }
@@ -236,11 +252,165 @@ async function main(): Promise<void> {
     );
   }
 
+  console.log();
+
+  // Call seal-ticket. v0.6.0 binds `policy_hash` and
+  // `compatibility_token` into the handle, so the v0.4.0 build
+  // returns a DIFFERENT handle for the same input. We pass
+  // distinct correlation refs for buy/sell so the handles don't
+  // collide on the v0.4.0 contract (where the correlation_ref
+  // is the only field that distinguishes them).
+  const sealTicketInput = {
+    institution_id: "ec27760a-bec2-4924-b7c3-7e358547bf83",
+    agent_did: "did:t3n:demo-verify-ticket",
+    authority_ref: "ghostbroker-delegation:verify-test",
+    asset_code: "WBTC",
+    side: "buy",
+    policy_hash: "verify-policy-hash-0001",
+    compatibility_token: "WBTC:buy:ec27760a-bec2-4924-b7c3-7e358547bf83",
+    correlation_ref: "verify-ticket-buyer-" + Date.now(),
+  };
+
+  console.log("→ calling seal-ticket...");
+  const sealTicketResult = await tenant.contracts
+    .execute("matching", {
+      version,
+      functionName: "seal-ticket",
+      input: { input: JSON.stringify(sealTicketInput) },
+    })
+    .catch((err: unknown) => {
+      console.error(`✗ seal-ticket FAILED: ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
+  if (sealTicketResult) {
+    console.log(
+      "✓ seal-ticket response:",
+      JSON.stringify(sealTicketResult, null, 2),
+    );
+  }
+
+  console.log();
+
+  // Call evaluate-pair (compatible). Two sealed tickets from
+  // different institutions on opposite sides of the same asset
+  // should return `status: "compatible"`. We use the sealTicket
+  // response above (so the buy handle is the live TEE-issued
+  // handle) and seal a sell ticket below for the counterpart.
+  const sellTicketInput = {
+    institution_id: "11111111-2222-3333-4444-555555555555",
+    agent_did: "did:t3n:demo-verify-ticket-seller",
+    authority_ref: "ghostbroker-delegation:verify-test-seller",
+    asset_code: "WBTC",
+    side: "sell",
+    policy_hash: "verify-policy-hash-0002",
+    compatibility_token: "WBTC:sell:11111111-2222-3333-4444-555555555555",
+    correlation_ref: "verify-ticket-seller-" + Date.now(),
+  };
+
+  console.log("→ calling seal-ticket (sell side)...");
+  const sellTicketResult = await tenant.contracts
+    .execute("matching", {
+      version,
+      functionName: "seal-ticket",
+      input: { input: JSON.stringify(sellTicketInput) },
+    })
+    .catch((err: unknown) => {
+      console.error(
+        `✗ seal-ticket (sell) FAILED: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    });
+  if (sellTicketResult) {
+    console.log(
+      "✓ seal-ticket (sell) response:",
+      JSON.stringify(sellTicketResult, null, 2),
+    );
+  }
+
+  // Build the evaluate-pair (compatible) request from the two
+  // seal responses. The contract doesn't keep state between
+  // calls, so the orchestrator is responsible for handing back
+  // the exact handles the seal calls returned; the TEE then
+  // re-parses the compatibility tokens and validates every
+  // structural axis.
+  const buyTicketHandle = (sealTicketResult as { ticket_handle?: string } | null)
+    ?.ticket_handle;
+  const sellTicketHandle = (sellTicketResult as { ticket_handle?: string } | null)
+    ?.ticket_handle;
+  if (buyTicketHandle && sellTicketHandle) {
+    const pairCompatibleInput = {
+      buy_ticket_handle: buyTicketHandle,
+      sell_ticket_handle: sellTicketHandle,
+      buy_compatibility_token: sealTicketInput.compatibility_token,
+      sell_compatibility_token: sellTicketInput.compatibility_token,
+      asset_code: "WBTC",
+      correlation_ref: "verify-pair-compat-" + Date.now(),
+    };
+
+    console.log("→ calling evaluate-pair (compatible)...");
+    const pairCompatibleResult = await tenant.contracts
+      .execute("matching", {
+        version,
+        functionName: "evaluate-pair",
+        input: { input: JSON.stringify(pairCompatibleInput) },
+      })
+      .catch((err: unknown) => {
+        console.error(
+          `✗ evaluate-pair (compatible) FAILED: ${err instanceof Error ? err.message : err}`,
+        );
+        return null;
+      });
+    if (pairCompatibleResult) {
+      console.log(
+        "✓ evaluate-pair (compatible) response:",
+        JSON.stringify(pairCompatibleResult, null, 2),
+      );
+    }
+
+    // Same handles, but use the BUYER's compatibility token on
+    // BOTH sides — that violates the `same institution` rule
+    // (both tokens reference the same institution id) and the
+    // TEE must return `status: "incompatible"` with
+    // `reason_code: "same_institution"`.
+    const pairRejectInput = {
+      buy_ticket_handle: buyTicketHandle,
+      sell_ticket_handle: sellTicketHandle,
+      buy_compatibility_token: sealTicketInput.compatibility_token,
+      sell_compatibility_token: sealTicketInput.compatibility_token,
+      asset_code: "WBTC",
+      correlation_ref: "verify-pair-reject-" + Date.now(),
+    };
+
+    console.log("→ calling evaluate-pair (incompatible, same institution)...");
+    const pairRejectResult = await tenant.contracts
+      .execute("matching", {
+        version,
+        functionName: "evaluate-pair",
+        input: { input: JSON.stringify(pairRejectInput) },
+      })
+      .catch((err: unknown) => {
+        console.error(
+          `✗ evaluate-pair (incompatible) FAILED: ${err instanceof Error ? err.message : err}`,
+        );
+        return null;
+      });
+    if (pairRejectResult) {
+      console.log(
+        "✓ evaluate-pair (incompatible) response:",
+        JSON.stringify(pairRejectResult, null, 2),
+      );
+    }
+  } else {
+    console.log(
+      "  (skipping evaluate-pair probes — one or both seal-ticket calls did not return a handle)",
+    );
+  }
 
   console.log();
   console.log("── Done ──");
-  console.log("If both calls above returned opaque handles / refs, the");
-  console.log("contract is live and the orchestrator's 404 is gone.");
+  console.log("If all probes above returned opaque handles / refs, the");
+  console.log("v0.6.0 contract is live and the orchestrator's pair gate");
+  console.log("(`evaluate-pair`) is the actual matching authority.");
   console.log("Restart the backend (`npm run dev` in backend/) so the");
   console.log("T3 client picks up the new contract registration.");
 }
