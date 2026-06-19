@@ -1,20 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { GhostbrokerDelegationAgentAuthClient } from "../auth/agent-auth-client.js";
-import type { T3NetworkClient } from "../sandbox/t3n-client.js";
-
-class DelegationClient implements T3NetworkClient {
-  public constructor(
-    private readonly status: number,
-    private readonly body: unknown,
-  ) {}
-
-  public async request<TBody = unknown>(): Promise<{
-    status: number;
-    body: TBody;
-  }> {
-    return { status: this.status, body: this.body as TBody };
-  }
-}
 
 const vc = {
   id: "urn:uuid:ghostbroker-delegation-test",
@@ -48,9 +33,7 @@ const baseRequest = {
 
 describe("T3 agent delegation adapter", () => {
   it("accepts Ghostbroker-style delegation VCs", async () => {
-    const client = new GhostbrokerDelegationAgentAuthClient(
-      new DelegationClient(200, { status: "verified" }),
-    );
+    const client = new GhostbrokerDelegationAgentAuthClient();
 
     await expect(client.verifyDelegation(baseRequest)).resolves.toEqual({
       status: "verified",
@@ -62,9 +45,7 @@ describe("T3 agent delegation adapter", () => {
   });
 
   it("produces a stable sha256 policy hash for the same VC", async () => {
-    const client = new GhostbrokerDelegationAgentAuthClient(
-      new DelegationClient(200, { status: "verified" }),
-    );
+    const client = new GhostbrokerDelegationAgentAuthClient();
 
     const first = await client.verifyDelegation(baseRequest);
     const second = await client.verifyDelegation(baseRequest);
@@ -80,9 +61,7 @@ describe("T3 agent delegation adapter", () => {
   });
 
   it("rejects a stale authorityRef that does not match the VC", async () => {
-    const client = new GhostbrokerDelegationAgentAuthClient(
-      new DelegationClient(200, { status: "verified" }),
-    );
+    const client = new GhostbrokerDelegationAgentAuthClient();
 
     await expect(
       client.verifyDelegation({
@@ -97,9 +76,7 @@ describe("T3 agent delegation adapter", () => {
   });
 
   it("rejects an expired VC", async () => {
-    const client = new GhostbrokerDelegationAgentAuthClient(
-      new DelegationClient(200, { status: "verified" }),
-    );
+    const client = new GhostbrokerDelegationAgentAuthClient();
 
     await expect(
       client.verifyDelegation({

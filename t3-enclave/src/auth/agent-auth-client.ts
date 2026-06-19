@@ -1,4 +1,3 @@
-import type { T3NetworkClient } from "../sandbox/t3n-client.js";
 import { verifyGhostbrokerDelegationCredential } from "./ghostbroker-delegation.js";
 import type {
   GhostbrokerVerificationRequest,
@@ -20,6 +19,15 @@ import type {
  * `id` (e.g. `urn:uuid:ghostbroker-delegation-...`), which the
  * run-loop persists and echoes back on every privileged action
  * (`submitIntent`, `cancelIntent`, `settlement.execute`).
+ *
+ * The verifier runs entirely from the in-memory VC. The legacy
+ * live-network fallback (`POST /agent-delegations/verify`) was
+ * removed in the post-Phase 1 rewrite: the Ghostbroker delegation
+ * verifier is now a pure function over the persisted VC, so the
+ * class no longer accepts or stores a `T3NetworkClient` or a
+ * verification-path argument. The `authorityRef` on the request is
+ * used to confirm the agent is presenting the same credential it
+ * was admitted with (a stale VC is rejected as `over_scoped`).
  */
 
 export type { RequestedAgentAction } from "./ghostbroker-delegation.js";
@@ -67,39 +75,16 @@ export interface AgentDelegationVerifier {
 }
 
 /**
- * Ghostbroker-only agent authorization adapter. The live-network
- * fallback (POST /agent-delegations/verify) is gone — the Ghostbroker delegation
- * verifier runs entirely from the in-memory VC, with the VC's own
- * `id` and `issuer` driving `authorityRef` and `policyHash`.
- *
- * `authorityRef` on the request is used to confirm the agent is
- * presenting the same credential it was admitted with (a stale VC
- * is rejected as `over_scoped`).
- *
- * The constructor still takes a `T3NetworkClient` for compatibility
- * with the composition root in the backend's `app.ts`. The
- * Ghostbroker delegation verifier does not need to make any network calls, so
- * the argument is captured but not used. Tests wire a stub client
- * to satisfy the type.
+ * Ghostbroker-only agent authorization adapter. The verifier runs
+ * entirely from the in-memory VC, with the VC's own `id` and
+ * `issuer` driving `authorityRef` and `policyHash`. The legacy
+ * `POST /agent-delegations/verify` live-network fallback has been
+ * removed in the post-Phase 1 rewrite; this class is now a pure
+ * function over the persisted credential.
  */
 export class GhostbrokerDelegationAgentAuthClient
   implements AgentDelegationVerifier
 {
-  /**
-   * Retained for compatibility with the historical composition root
-   * in the backend's `app.ts`. The Ghostbroker delegation verifier
-   * runs from the in-memory VC and does not need network access, so
-   * these parameters are accepted and intentionally ignored. Tests
-   * wire a stub client to satisfy the type.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-useless-constructor
-  public constructor(
-    _client?: T3NetworkClient,
-    _verificationPath = "/agent-delegations/verify",
-  ) {
-    // Intentionally empty — see class doc.
-  }
-
   public async verifyDelegation(
     request: AgentDelegationVerificationRequest,
   ): Promise<AgentDelegationVerificationResult> {
