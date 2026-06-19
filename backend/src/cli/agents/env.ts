@@ -104,7 +104,6 @@ export const agentEnvSchema = z.object({
   AGENT_IDENTITY_CONFIG_PATH: z.string().min(1).optional(),
   AGENT_IDENTITY_DID: z.string().min(1).optional(),
   DELEGATION_CREDENTIAL_PATH: z.string().min(1).optional(),
-  VC_VERIFY_MODE: z.enum(["sandbox", "live", "structural"]).default("live").optional(),
 
   // ── LLM provider chain (Gemini primary, OpenAI fallback, Groq last) ──
   /**
@@ -160,7 +159,6 @@ export function loadAgentEnv(): AgentEnv {
     AGENT_IDENTITY_CONFIG_PATH: process.env.AGENT_IDENTITY_CONFIG_PATH,
     AGENT_IDENTITY_DID: process.env.AGENT_IDENTITY_DID,
     DELEGATION_CREDENTIAL_PATH: process.env.DELEGATION_CREDENTIAL_PATH,
-    VC_VERIFY_MODE: optionalEnv("VC_VERIFY_MODE", "live"),
     LLM_PROVIDER_CHAIN: process.env.LLM_PROVIDER_CHAIN,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY === "" ? undefined : process.env.GEMINI_API_KEY,
     GEMINI_MODEL: optionalEnv("GEMINI_MODEL", "gemini-3.1-flash-lite"),

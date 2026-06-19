@@ -1,26 +1,26 @@
 # GhostBroker Settlement Rails — Operator Runbook
 
 **Audience:** an operator deploying a GhostBroker institution and
-needing to understand the three settlement profiles, their security
-properties, the operator's responsibilities per profile, and how to
-recover from common failure modes.
+needing to understand the settlement rail, its security
+properties, the operator's responsibilities, and how to recover
+from common failure modes.
 
-**Last updated:** 2026-06-15 (post WS2.5 / WS3 / WS4).
+**Last updated:** post WS2.5 / WS3 / WS4.
 
 ---
 
-## 1. The three profiles in one paragraph
+## 1. The rail in one paragraph
 
-GhostBroker ships three settlement rails. Every institution picks
-exactly one via `institutions.settlement_profile_ref`:
+GhostBroker ships a single settlement rail — `chain:sepolia:erc20` —
+and no fallback. Every institution picks the rail via
+`institutions.settlement_profile_ref`. There is no `wallet:default`
+noop surface; a settlement with any other profile ref fails closed
+with `RailDispatchError` so a typo or stale profile cannot route
+through a non-existent rail.
 
-| Profile | What moves on settlement? | Operator's job |
-|---|---|---|
-| `wallet:default` | Nothing — the DB row is the only artifact. | None. |
-| `chain:sepolia:erc20` | Real ERC-20 `transferFrom` calls on Sepolia, routed through the on-chain `GhostBrokerSettlementRelayer` contract. | Fund the deposit address, pre-approve the relayer for each asset. |
-| `custody:<partner>` | Reserved for future custody partners. Not implemented in v1; passing the profile name throws `RailDispatchError`. | N/A in v1. |
-
-The rail is **the only thing that physically moves assets**. Everything else in the system (the TEE match outcome, the DB `completed_trades` row, the audit receipts, the telemetry) is bookkeeping.
+The rail is **the only thing that physically moves assets**. Everything
+else in the system (the TEE match outcome, the DB `completed_trades`
+row, the audit receipts, the telemetry) is bookkeeping.
 
 ---
 
@@ -64,15 +64,7 @@ source of those — the chain does not duplicate them).
 
 ---
 
-## 3. Per-profile operator responsibilities
-
-### `wallet:default` (noop)
-
-Nothing. The system writes a `completed_trades` row with
-`rail_id = "wallet:default"` and `rail_trade_ref = "noop:<sha256>"`.
-No external transport. Suitable for the demo "Spin up demo agents"
-button and for any test or non-production environment where
-real-asset movement is not desired.
+## 3. Operator responsibilities
 
 ### `chain:sepolia:erc20` (Sepolia)
 
@@ -105,13 +97,6 @@ After this setup, every trade on the chain rail produces:
 - a `completed_trades.rail_trade_ref` that is the on-chain tx
   hash, clickable on Etherscan at
   `https://sepolia.etherscan.io/tx/<rail_trade_ref>`
-
-### `custody:<partner>` (future)
-
-Reserved. The schema accepts the prefix; the rail dispatcher
-returns `RailDispatchError` (which the settlement service maps to
-a 503 `service_unavailable` public error). WS3.5+ work adds the
-first partner; WS5+ is the post-hackathon roadmap.
 
 ---
 
@@ -170,6 +155,8 @@ first partner; WS5+ is the post-hackathon roadmap.
 | Institution changes its deposit address mid-trade. | The rail reads the deposit addresses at `dispatch` time; the trade that was in flight when the address changed will fail with `transferFrom` revert. The orchestrator's existing cancellation path releases the locked balance. |
 | Counterparty deposit address == self deposit address. | The rail throws a typed `Error: buyer and seller deposit addresses are identical`. The trade is not recorded. The operator must fix the institution config and retry. |
 | Allowance not set. | The relayer's `transferFrom` reverts; the rail catches the revert and returns a typed `RailDispatchError`; the settlement service maps to a 503 `service_unavailable`; the trade is not recorded. The operator must approve the relayer from the deposit address. |
+| Backend boots without chain-rail env vars. | Boot fails fast: `app.ts` throws if `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL`, `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`, or `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` is missing. The chain rail is required; there is no fallback. |
+| Settlement with an unknown profile ref. | The dispatcher throws `RailDispatchError` listing the unknown profile; the trade is not recorded. Operators must migrate legacy `settlement-profile:*` refs to `chain:sepolia:erc20`. |
 
 ---
 
@@ -180,11 +167,11 @@ on the operator's websocket:
 
 | Phase | Severity | When |
 |---|---|---|
-| `rail_settled` | info | A rail's `dispatch` returned a successful proof. Carries `railProofRef` (rail id + tx hash) and `latencyMs`. |
+| `rail_settled` | info | The rail's `dispatch` returned a successful proof. Carries `railProofRef` (rail id + tx hash) and `latencyMs`. |
 | `rail_reconciled` | info | The reconciler confirmed the chain state matches the DB row. |
 | `rail_drift_detected` | error | The reconciler found the chain state disagrees with the DB. The DB row is still marked reconciled (so the next sweep does not loop), but the row's `settlement_status` is unchanged. The reverser is the only path that can flip the row's status. |
 | `rail_reconcile_error` | error | The rail's `status(...)` call threw (e.g. RPC unreachable). The row stays unreconciled; the next sweep retries. |
-| `rail_reversed` | info | The admin reverser flipped a row's state via the noop rail's `reverse()` (or the chain rail's on-chain reversal, in production). |
+| `rail_reversed` | info | The admin reverser flipped a row's state via the chain rail's on-chain reversal transaction against the relayer contract. |
 
 The `telemetry.rail.settled` event is the primary SLI for the
 chain rail. Ops should graph:
@@ -195,6 +182,15 @@ chain rail. Ops should graph:
 ---
 
 ## 6. Troubleshooting runbook
+
+### Symptom: Backend refuses to boot: "Settlement rail env vars are required."
+
+The chain rail's three env vars are mandatory. Boot fails
+fast in `app.ts` if any of `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL`,
+`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`, or
+`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` is
+empty. Set all three in `backend/.env` (or the equivalent
+hosting env) and redeploy.
 
 ### Symptom: "Buyer and seller deposit addresses are identical."
 
@@ -220,6 +216,13 @@ institution-create flow.
 Same shape. The institution's `metadata.tokenAddresses` map is
 incomplete. PATCH the institution with the missing token
 addresses.
+
+### Symptom: "Settlement rail 'X' is not registered."
+
+The dispatcher rejects any profile that is not the registered
+`chain:sepolia:erc20`. PATCH the institution's
+`settlement_profile_ref` to `chain:sepolia:erc20` and
+re-submit.
 
 ### Symptom: A trade settled in the DB but the chain says "missing."
 
@@ -279,15 +282,12 @@ that the service mapped to a 503. Inspect the backend logs for
   of every settled `completed_trades` row and surfaces drift
   via telemetry.
 - **Reverse** — the admin-only path that flips a settled row's
-  `settlement_status` to `"reversed"`. The noop rail's
-  `reverse` is a typed "no-op" (the DB row is the only
-  artifact); the chain rail's `reverse` broadcasts a real
-  on-chain reversal transaction against the relayer
-  contract.
+  `settlement_status` to `"reversed"`. The chain rail's
+  `reverse` broadcasts a real on-chain reversal transaction
+  against the relayer contract.
 - **Rail trade ref** — the rail's transport proof stored on
-  `completed_trades.rail_trade_ref`. For the noop rail it is
-  `noop:<sha256>`; for the chain rail it is the on-chain tx
-  hash. Clickable on Etherscan for the chain rail.
+  `completed_trades.rail_trade_ref`. For the chain rail it is
+  the on-chain tx hash. Clickable on Etherscan.
 - **Reconciler** — the system task that verifies the chain
   state. See `backend/src/services/settlement-reconciler.ts`.
 - **Reverser** — the admin endpoint at
@@ -301,7 +301,6 @@ that the service mapped to a 503. Inspect the backend logs for
 | Concern | File |
 |---|---|
 | Rail interface | `backend/src/services/settlement-rails/rail.ts` |
-| Noop rail (default) | `backend/src/services/settlement-rails/noop-custodial-rail.ts` |
 | Chain rail (Sepolia) | `backend/src/services/settlement-rails/chain-sepolia-rail.ts` |
 | Relayer contract (Solidity) | `contracts/relayer/src/contracts/GhostBrokerSettlementRelayer.sol` |
 | Relayer ABI + bytecode | `backend/src/services/settlement-rails/abi/GhostBrokerSettlementRelayer.json` |

@@ -40,10 +40,10 @@ It verifies Ghostbroker-style W3C Verifiable Credentials end-to-end:
 - **Shape + time window + DID binding**: every VC must have an `id`, `issuer`, `credentialSubject.agentDid` (and the `credentialSubject.allowedActions` trading-agent action scope), `issuanceDate`/`expirationDate`, and a `proof` object. The verifier checks all of these.
 - **Agent-binding**: the credential's `credentialSubject.agentDid` must match the agent DID on the request.
 - **Revocation**: the verifier accepts a `revokedAuthorityRefs` set, sourced from `AuthorityRevocationRepository` before every check. Revoked references are rejected as `revoked`.
-- **Cryptographic verification** (live mode only): the verifier calls `@terminal3/verify_vc` at runtime. The verifier **fails closed** on any SDK exception — it never silently downgrades to a non-cryptographic `structural` pass. The legacy `VC_VERIFY_STRICT=true` opt-in is now a no-op alias.
+- **Cryptographic verification**: the verifier cryptographically checks every `EcdsaSecp256k1Signature2019` proof inline (`keccak256(canonicalJson)` → `ethers.verifyMessage` → recovered address matched against the issuer DID's address and the caller's `additionalTrustedSignerAddresses` set). The verifier **fails closed** on any exception — it never silently downgrades to a non-cryptographic pass. There is no `T3_MODE` env var, no `VC_VERIFY_MODE` alias, and no mode parameter on the verifier's public entry point; `live` is the only mode.
 - **Authority reference**: every verification produces a `ghostbroker-delegation:<vc-id>` reference; the agent must echo this back on every privileged action, and the backend re-asserts equality on each call.
 
-The verifier runs in three modes controlled by the server-side `T3_MODE` env var (with `VC_VERIFY_MODE` kept as a backward-compat alias): `sandbox` (shape + time + DID binding, no crypto, the demo surface — and the only mode in which an SDK error is tolerated), `structural` (the same checks recorded with `verificationMode: "structural"`), and `live` (real `EcdsaSecp256k1Signature2019` JWS verification via `@terminal3/verify_vc`, failing closed on any SDK error). The `setup:identity` + `setup:delegation` flow now produces a real signed JWS by default, so `live` is the production target.
+The verifier runs in exactly one mode — `live` — hard-coded at [`t3-enclave/src/auth/ghostbroker-delegation.ts`](../t3-enclave/src/auth/ghostbroker-delegation.ts). There is no `T3_MODE` env var, no `VC_VERIFY_MODE` alias, and no mode parameter on the verifier's public entry point. On every call the verifier parses the VC against `ghostbrokerDelegationSchema`, checks the time window, checks the DID binding, checks revocation, then cryptographically verifies the `EcdsaSecp256k1Signature2019` proof inline (`keccak256(canonicalJson)` → `ethers.verifyMessage` → recovered address matched against the issuer DID's address and the caller's `additionalTrustedSignerAddresses` set). The verifier fails closed on any exception — it never silently downgrades to a non-cryptographic pass. The `setup:identity` + `setup:delegation` flow (and the server-side `tenant-delegation.ts` signer) produce a real signed JWS by default, so the live verifier is the production gate.
 
 The same facade is used by **every** backend service that performs a privileged action. In the post-Phase 1 architecture, the agent no longer sends the VC on every privileged call - the backend owns the persisted VC. The composition root in [`backend/src/app.ts`](../backend/src/app.ts) constructs `T3AgentAuthorizationFacade` from [`backend/src/auth/agent-authz.ts`](../backend/src/auth/agent-authz.ts) with two entry points:
 
@@ -97,16 +97,14 @@ The privacy boundary is enforced at three layers:
 
 ## Settlement rails (WS1 to WS5)
 
-GhostBroker ships a pluggable **settlement rail** layer that
-moves the actual assets when a match settles. The layer is
-defined in `.hermes/plans/settlement-rails.md` and the
-operator-facing runbook lives at
-[`docs/settlement-rails.md`](../docs/settlement-rails.md). The
-rails we shipped:
+GhostBroker ships a single **settlement rail** — the
+[`chain:sepolia:erc20`](../backend/src/services/settlement-rails/chain-sepolia-rail.ts)
+on-chain rail — that moves the actual assets when a match
+settles. The plan is in
+[`.hermes/plans/settlement-rails.md`](../.hermes/plans/settlement-rails.md)
+and the operator-facing runbook lives at
+[`docs/settlement-rails.md`](../docs/settlement-rails.md).
 
-- **`wallet:default`** - the noop rail. The DB row is the
-  only artifact. Default for the demo "Spin up demo agents"
-  flow.
 - **`chain:sepolia:erc20`** - the on-chain rail. A real
   `GhostBrokerSettlementRelayer` Solidity contract
   ([`contracts/relayer/`](../contracts/relayer/)) holds the
@@ -117,6 +115,15 @@ rails we shipped:
   on-chain `Settled` event, and asserts the ERC-20 `Transfer`
   balances round-trip exactly. The integration test is gated
   by `WS2_ANVIL_INTEGRATION=1`.
+
+The previous `wallet:default` noop fallback has been removed.
+The backend refuses to boot without the chain rail env vars
+(`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL`,
+`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`,
+`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS`); a
+settlement with any other profile ref fails closed with
+`RailDispatchError` so a typo cannot silently route through a
+non-existent rail.
 - **Production relayer-in-TEE** - the relayer key is held in
   the backend's env for v1; the T3 tenant TEE swap is the
   one-file production migration tracked in the

@@ -1,12 +1,10 @@
 -- WS1 (settlement-rails): additive columns for rail transport proof.
 -- The rail proof is what makes a `completed_trades` row auditable end-to-end:
 --   - `rail_id` is the SettlementRail implementation that handled the trade
---     (e.g. "wallet:default" for NoopCustodialRail, "chain:sepolia:erc20"
---     for the future ChainRail).
---   - `rail_trade_ref` is the rail-specific transport identifier (a tx hash
---     on chain, a custody transfer ref off chain, a synthetic sha256 for
---     the noop rail). Stored as text, no uniqueness constraint — the
---     `trade_ref` column (the TEE outcome) is the canonical unique key.
+--     ("chain:sepolia:erc20" — GhostBroker exposes a single settlement rail).
+--   - `rail_trade_ref` is the rail-specific transport identifier (an on-chain
+--     tx hash for the chain rail). Stored as text, no uniqueness constraint
+--     — the `trade_ref` column (the TEE outcome) is the canonical unique key.
 --   - `rail_state` mirrors `settlement_status` for symmetry with the
 --     reconciliation/reversal flows planned in WS4.
 --   - `reconciled_at` is set by the WS4 reconciler after a successful

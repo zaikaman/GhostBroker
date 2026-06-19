@@ -2,11 +2,9 @@ import type { SettlementCommand } from "../../enclave/index.js";
 
 /**
  * The settlement rail is the off-TEE transport that actually moves
- * assets when a match settles. WS1 of the settlement-rails workstream
- * (see `.hermes/plans/settlement-rails.md`) introduces this interface
- * and a `NoopCustodialRail` default; later workstreams add
- * `ChainRail` (Sepolia ERC-20) and a `CustodialRail` (Fireblocks-style
- * partner integration).
+ * assets when a match settles. GhostBroker exposes a single rail
+ * — the `chain:sepolia:erc20` Sepolia ERC-20 rail
+ * (`SepoliaErc20Rail`) — registered at boot time in `app.ts`.
  *
  * The rail is invoked from `SettlementService.executeSettlement`
  * between the TEE `SettlementCommandBuilder.build(...)` call and the
@@ -37,8 +35,7 @@ export interface SettlementRail {
    * settlement service looks up at dispatch time: per-institution
    * deposit addresses, per-asset token addresses, the relayer
    * contract address, and similar. The interface leaves the shape
-   * open so each rail declares what it needs; the noop rail reads
-   * none of it.
+   * open so each rail declares what it needs.
    */
   dispatch(
     command: SettlementCommand,
@@ -47,10 +44,9 @@ export interface SettlementRail {
   ): Promise<RailSettlementProof>;
 
   /**
-   * Best-effort reversal of a previously-settled trade. Reserved
-   * for the admin reverser in WS4. The default noop rail returns a
-   * "not_supported" state — only rails with a real transport can
-   * reverse.
+   * Best-effort reversal of a previously-settled trade. Used by
+   * the admin reverser; the chain rail broadcasts a real
+   * on-chain reversal against the relayer contract.
    */
   reverse(
     tradeRef: string,
@@ -122,10 +118,8 @@ export interface RailSettlementProof {
   railId: string;
 
   /**
-   * Rail-specific transport identifier. For `NoopCustodialRail` this
-   * is a deterministic sha256 of the outcome ref. For a chain rail
-   * this is the on-chain tx hash. For a custody rail this is the
-   * custodian's internal transfer ref.
+   * Rail-specific transport identifier. For the chain rail this is
+   * the on-chain tx hash.
    */
   railTradeRef: string;
 
@@ -134,8 +128,7 @@ export interface RailSettlementProof {
    * transaction (the relayer's signer address). For the
    * `SepoliaErc20Rail` this is the T3 tenant identity's
    * address (v1 demo) or a T3-tenant-TEE-held key's
-   * address (production). For the `NoopCustodialRail`
-   * this is `null` (no on-chain transport).
+   * address (production).
    *
    * Surfaced in the proof so the settlement service
    * can emit the `rail_t3_tee_attested` or
@@ -148,10 +141,10 @@ export interface RailSettlementProof {
   railState: "settled" | "failed" | "reversed";
 
   /**
-   * The asset movements the rail executed. Empty for the noop rail
-   * (no external transport). For a chain rail, one entry per
-   * on-chain transfer the relayer broadcast (typically two: payment
-   * leg + asset leg, but ERC-20 batching may combine them).
+   * The asset movements the rail executed. For the chain
+   * rail, one entry per on-chain transfer the relayer broadcast
+   * (typically two: payment leg + asset leg, but ERC-20
+   * batching may combine them).
    *
    * Quantity is a string to preserve precision at the rail
    * boundary — the rail layer may be talking to a chain that

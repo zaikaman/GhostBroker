@@ -94,17 +94,20 @@ describe("DidAuthService deposit-wallet portfolio sync", () => {
     expect(syncService.calls[0]?.walletAddress).toBe(depositAddress);
   });
 
-  it("falls back to connectedWalletAddress for wallet:default institutions", async () => {
-    // Non-chain institutions have no deposit wallet; sync follows the
-    // login wallet, preserving the legacy behaviour.
+  it("falls back to connectedWalletAddress for chain-rail institutions missing a depositAddress", async () => {
+    // GhostBroker exposes a single rail (`chain:sepolia:erc20`).
+    // For chain-rail institutions that have not yet been configured
+    // with a `depositAddress`, portfolio sync falls back to the
+    // connected login wallet so login never breaks on a missing
+    // deposit address.
     const connectedWallet = "0x1111111111111111111111111111111111111111";
     const institution: Institution = {
-      id: "00000000-0000-4000-8000-000000000702",
-      legalName: "Off Chain Co",
-      displayName: "Off Chain Co",
+      id: "00000000-4000-8000-000000000702",
+      legalName: "Chain Rail Unconfigured Co",
+      displayName: "Chain Rail Unconfigured Co",
       status: "active",
       t3TenantDid: CONNECTED_DID,
-      settlementProfileRef: "wallet:default",
+      settlementProfileRef: "chain:sepolia:erc20",
       metadata: { connectedWalletAddress: connectedWallet },
     };
     const syncService = new RecordingSyncService();

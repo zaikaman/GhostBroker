@@ -82,12 +82,12 @@ export function buildAdmitAgentRequest(
         purpose: "test",
       },
       proof: {
-        type: "JsonWebSignature2020",
+        type: "EcdsaSecp256k1Signature2019",
         created: "2026-01-01T00:00:00.000Z",
         proofPurpose: "assertionMethod",
         verificationMethod:
           "did:t3n:0x0000000000000000000000000000000000000099#key-1",
-        jws: "live-demo-unsigned",
+        jws: "0x" + "ab".repeat(64) + "1b",
       },
     },
     ...overrides,

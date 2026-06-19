@@ -37,15 +37,21 @@ describe("SettlementProfileCard (WS3)", () => {
       displayName: "Northstar",
       status: "active",
       t3TenantDid: "did:t3n:tenant:northstar",
-      settlementProfileRef: "wallet:default",
-      metadata: {},
+      settlementProfileRef: "chain:sepolia:erc20",
+      metadata: {
+        depositAddress: "0x90f79bf6eb2c4f870365e785982e1f101e93b906",
+        tokenAddresses: {
+          WBTC: "0x1111111111111111111111111111111111111111",
+          USDC: "0x2222222222222222222222222222222222222222",
+        },
+      },
     });
     mockedGetCompletedTrades.mockResolvedValue({ items: [] });
 
     render(<SettlementProfileCard institutionId={INSTITUTION_ID} />);
 
     await waitFor(() => {
-      expect(screen.getByText("wallet:default")).toBeInTheDocument();
+      expect(screen.getByText("chain:sepolia:erc20")).toBeInTheDocument();
     });
     expect(screen.getByText(/no rail trades yet/i)).toBeInTheDocument();
   });
@@ -88,7 +94,13 @@ describe("SettlementProfileCard (WS3)", () => {
       status: "active",
       t3TenantDid: "did:t3n:tenant:northstar",
       settlementProfileRef: "chain:sepolia:erc20",
-      metadata: {},
+      metadata: {
+        depositAddress: "0x90f79bf6eb2c4f870365e785982e1f101e93b906",
+        tokenAddresses: {
+          WBTC: "0x1111111111111111111111111111111111111111",
+          USDC: "0x2222222222222222222222222222222222222222",
+        },
+      },
     });
     const txHash =
       "0x5eaaeda55b20275d76d7819dfb0a0b84e4423ab33fd0620859e90b0b2d12d186";
@@ -119,44 +131,5 @@ describe("SettlementProfileCard (WS3)", () => {
         `https://sepolia.etherscan.io/tx/${txHash}`,
       );
     });
-  });
-
-  it("renders noop rail refs as plain text (no Etherscan link)", async () => {
-    mockedGetInstitution.mockResolvedValue({
-      id: INSTITUTION_ID,
-      legalName: "Northstar",
-      displayName: "Northstar",
-      status: "active",
-      t3TenantDid: "did:t3n:tenant:northstar",
-      settlementProfileRef: "wallet:default",
-      metadata: {},
-    });
-    const noopRef = "noop:0".padEnd(72, "0");
-    mockedGetCompletedTrades.mockResolvedValue({
-      items: [
-        {
-          id: "trade-1",
-          tradeRef: "match_outcome_noop_1",
-          assetCodeCiphertext: "t3cipher.asset",
-          quantityCiphertext: "t3cipher.quantity",
-          executionPriceCiphertext: "t3cipher.execution",
-          settledAt: "2026-06-12T00:00:00.000Z",
-          settlementStatus: "settled",
-          receiptIds: [],
-          railId: "wallet:default",
-          railTradeRef: noopRef,
-          railState: "settled",
-        },
-      ],
-    });
-
-    render(<SettlementProfileCard institutionId={INSTITUTION_ID} />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/noop:0000/)).toBeInTheDocument();
-    });
-    expect(
-      screen.queryByText(/sepolia\.etherscan\.io/),
-    ).not.toBeInTheDocument();
   });
 });

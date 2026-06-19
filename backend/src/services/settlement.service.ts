@@ -80,15 +80,12 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 
 /**
  * Per-side settlement profile. The settlement service routes
- * through the dispatcher keyed by this string. Default is
- * `"wallet:default"`, which resolves to `NoopCustodialRail`. WS3
- * will plumb the actual institution's `settlement_profile_ref`
- * through to this field via the orchestrator's settlement request.
- *
- * Today the field is hard-coded to `"wallet:default"` to preserve
- * the existing behaviour exactly. The default is set in the
- * `executeSettlement` body so it is observable in unit tests
- * without any caller change.
+ * through the dispatcher keyed by this string. GhostBroker
+ * exposes a single settlement rail — `chain:sepolia:erc20` —
+ * so the only meaningful value is the institution's
+ * `settlement_profile_ref` (which must be `chain:sepolia:erc20`
+ * per the institution model validation). The dispatcher fails
+ * closed with `RailDispatchError` for any other value.
  */
 export type SettlementProfileRef = string;
 
@@ -177,11 +174,11 @@ export interface SettlementExecutionRequest {
   /**
    * WS2: per-side settlement profile. The settlement service
    * looks up the rail via the dispatcher keyed by the buyer's
-   * profile (both sides must be on the same profile for WS2;
-   * asymmetric routing is a WS3+ concern). If the request does
-   * not carry profile refs (e.g. legacy callers), the service
-   * falls back to `"wallet:default"` (the noop rail) which
-   * preserves the pre-WS2 behaviour exactly.
+   * profile. Both sides must be on the same profile for WS2;
+   * asymmetric routing is a future concern. GhostBroker exposes
+   * a single rail (`chain:sepolia:erc20`), so the resolver
+   * returns the buyer's profile or throws if either side has
+   * no resolvable profile.
    */
   buyerSettlementProfileRef?: string | undefined;
   sellerSettlementProfileRef?: string | undefined;
@@ -411,14 +408,13 @@ export class SettlementService {
           request.sellerSettlementProfileRef,
           request.matchOutcome.buyerInstitutionId,
           request.matchOutcome.sellerInstitutionId,
-        )) ?? "wallet:default";
+        )) ?? "chain:sepolia:erc20";
       const plaintext: SettlementRailPlaintext = {
         assetCode: request.assetCode,
         quantity: request.quantity,
         executionPrice: request.executionPrice,
       };
       const railContext = await this.buildRailContext(
-        settlementProfileRef,
         request.matchOutcome.buyerInstitutionId,
         request.matchOutcome.sellerInstitutionId,
         request.assetCode,
@@ -653,21 +649,18 @@ export class SettlementService {
   }
 
   /**
-   * WS2: build the rail dispatch context for a given
-   * settlement profile. Reads the per-institution deposit
-   * addresses and the per-asset token addresses from the
-   * institution metadata. Returns `undefined` for the noop
-   * rail (the noop rail ignores context).
+   * WS2: build the rail dispatch context. Reads the
+   * per-institution deposit addresses and the per-asset token
+   * addresses from the institution metadata. Returns
+   * `undefined` if either institution cannot be resolved
+   * (the chain rail will then fail at dispatch time with a
+   * typed error).
    */
   private async buildRailContext(
-    settlementProfileRef: string,
     buyerInstitutionId: string,
     sellerInstitutionId: string,
     assetCode: string,
   ): Promise<SettlementRailContext | undefined> {
-    if (settlementProfileRef === "wallet:default") {
-      return undefined;
-    }
     if (!this.institutionConfigResolver) {
       return undefined;
     }

@@ -8,11 +8,16 @@ import { loadOrCreateTenantIdentity } from "../sandbox/tenant-identity-store.js"
 
 /**
  * Round-trip: the server-side `mintTenantDelegation` must
- * produce a VC the existing `@terminal3/verify_vc`-backed
- * verifier accepts. The byte layout, the canonical-JSON
- * shape, the EIP-191 prefix, the secp256k1 65-byte JWS, and
- * the `EcdsaSecp256k1Signature2019` proof type are all
+ * produce a VC the live ECDSA verifier accepts. The byte
+ * layout, the canonical-JSON shape, the EIP-191 prefix,
+ * the secp256k1 65-byte JWS, and the
+ * `EcdsaSecp256k1Signature2019` proof type are all
  * unchanged from the legacy CLI / browser-mint paths.
+ *
+ * The verifier runs in `live` mode exclusively — there is
+ * no longer a `structural` opt-in to fall through to. Tests
+ * that previously used the explicit `structural` mode have
+ * been re-targeted at the live verifier.
  */
 describe("tenant-delegation signer", () => {
   let tmp: string;
@@ -60,25 +65,18 @@ describe("tenant-delegation signer", () => {
         institutionId: "00000000-0000-4000-8000-000000000101",
         agentDid: "did:t3n:0xagent",
         requestedAction: "agent.admit",
+        additionalTrustedSignerAddresses: new Set([
+          identity.address.toLowerCase(),
+        ]),
       },
-      "structural",
     );
     expect(result.status).toBe("verified");
     if (result.status !== "verified") {
       throw new Error("unreachable: expected verified status");
     }
-    // The verifier is allowed to round-trip the freshly
-    // signed VC in `structural` mode here (the test sets
-    // the mode explicitly). In `live` mode the verifier
-    // will reach `@terminal3/verify_vc` and accept the
-    // VC on a reachable T3N registry, or fail closed
-    // (`rejected` / `unverified`) on a transient SDK
-    // error. The load-bearing contract is: the verifier
-    // must ACCEPT a VC we just signed. In production with
-    // a reachable T3N registry, the mode is `live`; the
-    // `structural` mode is the explicitly-opted-in
-    // structural pass the test exercises here.
-    expect(["live", "structural"]).toContain(result.verificationMode);
+    // The verifier is `live` mode exclusively; the literal
+    // union has collapsed to one value.
+    expect(result.verificationMode).toBe("live");
     expect(result.authorityRef).toBe(
       `ghostbroker-delegation:${credential.id}`,
     );
@@ -104,6 +102,9 @@ describe("tenant-delegation signer", () => {
       institutionId: "00000000-0000-4000-8000-000000000101",
       agentDid: "did:t3n:0xattacker",
       requestedAction: "agent.admit",
+      additionalTrustedSignerAddresses: new Set([
+        identity.address.toLowerCase(),
+      ]),
     });
     expect(result.status).toBe("rejected");
     if (result.status !== "rejected") {
@@ -174,7 +175,6 @@ describe("tenant-delegation signer", () => {
           identity.address.toLowerCase(),
         ]),
       },
-      "live",
     );
 
     expect(result.status).toBe("verified");
@@ -221,7 +221,6 @@ describe("tenant-delegation signer", () => {
         agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
         requestedAction: "agent.admit",
       },
-      "live",
     );
 
     expect(result.status).toBe("rejected");

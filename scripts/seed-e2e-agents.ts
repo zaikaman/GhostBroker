@@ -68,7 +68,7 @@ async function main() {
       display_name: "Institution Buyer",
       status: "active",
       t3_tenant_did: "did:t3:buyer-institution-test",
-      settlement_profile_ref: "wallet:default",
+      settlement_profile_ref: "chain:sepolia:erc20",
       metadata: { type: "e2e_test_agent" }
     },
     {
@@ -77,7 +77,7 @@ async function main() {
       display_name: "Institution Seller",
       status: "active",
       t3_tenant_did: "did:t3:seller-institution-test",
-      settlement_profile_ref: "wallet:default",
+      settlement_profile_ref: "chain:sepolia:erc20",
       metadata: { type: "e2e_test_agent" }
     }
   ];

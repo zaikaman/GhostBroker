@@ -4,7 +4,6 @@ import { TelemetryBus } from "../../services/telemetry-bus.js";
 import {
   MapSettlementRailDispatcher,
 } from "../../services/settlement-rails/dispatcher.js";
-import { NoopCustodialRail } from "../../services/settlement-rails/noop-custodial-rail.js";
 import type {
   ReconcilerDb,
   ReconcilerTradeRow,
@@ -25,6 +24,10 @@ import type { TelemetryEvent } from "../../websocket/telemetry-event.js";
  *
  * Tests use a fake rail (with a `status` method) and
  * a fake DB. They do not exercise Anvil.
+ *
+ * GhostBroker exposes a single settlement rail
+ * (`chain:sepolia:erc20`); the reconciler only exercises
+ * the chain rail.
  */
 
 function makeDb(rows: ReconcilerTradeRow[], reconciled: string[] = []): ReconcilerDb & {
@@ -51,9 +54,9 @@ function makeDb(rows: ReconcilerTradeRow[], reconciled: string[] = []): Reconcil
 function makeTradeRow(overrides: Partial<ReconcilerTradeRow> = {}): ReconcilerTradeRow {
   return {
     tradeRef: "match_outcome_recon_1",
-    railId: "wallet:default",
-    railTradeRef: "noop:abc",
-    settlementProfileRef: "wallet:default",
+    railId: "chain:sepolia:erc20",
+    railTradeRef: "0xabc",
+    settlementProfileRef: "chain:sepolia:erc20",
     buyerInstitutionId: "00000000-0000-4000-8000-000000000e01",
     sellerInstitutionId: "00000000-0000-4000-8000-000000000e02",
     ...overrides,
@@ -61,38 +64,11 @@ function makeTradeRow(overrides: Partial<ReconcilerTradeRow> = {}): ReconcilerTr
 }
 
 describe("SettlementReconciler (WS4)", () => {
-  it("marks a noop-rail row as reconciled and emits rail_reconciled", async () => {
-    const telemetryBus = new TelemetryBus();
-    const events: TelemetryEvent[] = [];
-    telemetryBus.subscribe((e) => events.push(e));
-
-    // The noop rail does not expose `status`; the
-    // reconciler treats it as a noop (mark reconciled
-    // without checking).
-    const railDispatcher = new MapSettlementRailDispatcher(
-      new Map([["wallet:default", new NoopCustodialRail()]]),
-    );
-    const db = makeDb([makeTradeRow()]);
-    const reconciler = new SettlementReconciler(db, railDispatcher, telemetryBus);
-
-    const processed = await reconciler.runOnce();
-    expect(processed).toBe(1);
-    expect(db.markCalls).toHaveLength(1);
-    expect(db.markCalls[0]?.tradeRef).toBe("match_outcome_recon_1");
-    // No drift event for the noop rail; the row is
-    // marked reconciled without an external state check.
-    expect(events.some((e) => e.phase === "rail_drift_detected")).toBe(false);
-  });
-
   it("marks a chain-rail row as reconciled and emits rail_reconciled when status is 'settled'", async () => {
     const telemetryBus = new TelemetryBus();
     const events: TelemetryEvent[] = [];
     telemetryBus.subscribe((e) => events.push(e));
 
-    // A fake rail that returns 'settled' on every status
-    // call. The reconciler should mark the row as
-    // reconciled and emit a single rail_reconciled
-    // event.
     const settledRail = {
       id: "chain:sepolia:erc20",
       dispatch: vi.fn(),
@@ -107,18 +83,13 @@ describe("SettlementReconciler (WS4)", () => {
         ["chain:sepolia:erc20", settledRail as never],
       ]),
     );
-    const db = makeDb([
-      makeTradeRow({
-        railId: "chain:sepolia:erc20",
-        railTradeRef: "0xdeadbeef",
-        settlementProfileRef: "chain:sepolia:erc20",
-      }),
-    ]);
+    const db = makeDb([makeTradeRow({ railTradeRef: "0xdeadbeef" })]);
     const reconciler = new SettlementReconciler(db, railDispatcher, telemetryBus);
 
     const processed = await reconciler.runOnce();
     expect(processed).toBe(1);
     expect(db.markCalls).toHaveLength(1);
+    expect(db.markCalls[0]?.tradeRef).toBe("match_outcome_recon_1");
     expect(settledRail.status).toHaveBeenCalledWith("0xdeadbeef");
     const reconEvents = events.filter((e) => e.phase === "rail_reconciled");
     expect(reconEvents).toHaveLength(1);
@@ -144,11 +115,7 @@ describe("SettlementReconciler (WS4)", () => {
       ]),
     );
     const db = makeDb([
-      makeTradeRow({
-        railId: "chain:sepolia:erc20",
-        railTradeRef: "0xmissing",
-        settlementProfileRef: "chain:sepolia:erc20",
-      }),
+      makeTradeRow({ railTradeRef: "0xmissing" }),
     ]);
     const reconciler = new SettlementReconciler(db, railDispatcher, telemetryBus);
 
@@ -180,11 +147,7 @@ describe("SettlementReconciler (WS4)", () => {
       ]),
     );
     const db = makeDb([
-      makeTradeRow({
-        railId: "chain:sepolia:erc20",
-        railTradeRef: "0xfailing",
-        settlementProfileRef: "chain:sepolia:erc20",
-      }),
+      makeTradeRow({ railTradeRef: "0xfailing" }),
     ]);
     const reconciler = new SettlementReconciler(db, railDispatcher, telemetryBus);
 
@@ -205,8 +168,19 @@ describe("SettlementReconciler (WS4)", () => {
 
   it("processes up to batchSize rows per sweep", async () => {
     const telemetryBus = new TelemetryBus();
+    const settledRail = {
+      id: "chain:sepolia:erc20",
+      dispatch: vi.fn(),
+      reverse: vi.fn(),
+      status: vi.fn().mockResolvedValue({
+        railState: "settled",
+        observedAt: "2026-06-12T00:00:00.000Z",
+      }),
+    };
     const railDispatcher = new MapSettlementRailDispatcher(
-      new Map([["wallet:default", new NoopCustodialRail()]]),
+      new Map<string, never>([
+        ["chain:sepolia:erc20", settledRail as never],
+      ]),
     );
     const db = makeDb([
       makeTradeRow({ tradeRef: "t1" }),

@@ -54,7 +54,6 @@ T3_TENANT_DID=
 T3_SANDBOX_TOKEN_ACCOUNT=<sandbox-token-account-or-did>
 T3_MINIMUM_TOKEN_BALANCE=1
 |T3_ADK_ENV=testnet
-|T3_MODE=live
 |T3_PRIVATE_MAP_PREFIX=ghostbroker-dev
 SETTLEMENT_ASSET_CODE=USDC
 PORTFOLIO_SYNC_TOKEN=<internal-sync-token>

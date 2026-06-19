@@ -14,9 +14,10 @@ import {
  * Each test exercises one observable: parsing of each var,
  * defaults, strict-mode failure, warning-mode behaviour, and
  * the report formatter. The config no longer models a
- * "dashboard delegation" mode — T3 has no dashboard surface,
- * so the flag was meaningless. The runtime gate is now the
- * verifier's own `T3_MODE` value (sandbox / live / structural).
+ * `T3_MODE` flag — the verifier runs in `live` mode
+ * exclusively, so a configurable mode has nothing to flip.
+ * The runtime authority gate is the verifier itself; the
+ * startup check is a structural sanity sweep.
  */
 
 function envWith(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {
@@ -28,7 +29,6 @@ describe("readT3EnclaveConfig", () => {
     const config = readT3EnclaveConfig(envWith({}));
     expect(config).toEqual({
       adkEnv: "sandbox",
-      mode: "sandbox",
     });
   });
 
@@ -44,37 +44,25 @@ describe("readT3EnclaveConfig", () => {
     expect(config.adkEnv).toBe("testnet");
   });
 
-  it("parses T3_MODE live value", () => {
-    const config = readT3EnclaveConfig(envWith({ T3_MODE: "live" }));
-    expect(config.mode).toBe("live");
-  });
-
-  it("parses T3_MODE structural value", () => {
+  it("ignores the legacy T3_MODE env var (verifier is live-only)", () => {
+    // The verifier's verification mode is hard-coded to `live`;
+    // the startup config deliberately does not parse T3_MODE.
+    // A T3_MODE value must not affect the parsed config shape.
     const config = readT3EnclaveConfig(envWith({ T3_MODE: "structural" }));
-    expect(config.mode).toBe("structural");
+    expect(config).toEqual({ adkEnv: "sandbox" });
   });
 
-  it("falls back to VC_VERIFY_MODE when T3_MODE is unset", () => {
+  it("ignores the legacy VC_VERIFY_MODE env var (verifier is live-only)", () => {
+    // Same rationale as the T3_MODE test above: the
+    // VC_VERIFY_MODE alias was the historical CLI-side mirror
+    // of T3_MODE; both are now unread.
     const config = readT3EnclaveConfig(envWith({ VC_VERIFY_MODE: "live" }));
-    expect(config.mode).toBe("live");
-  });
-
-  it("prefers T3_MODE over VC_VERIFY_MODE when both are set", () => {
-    const config = readT3EnclaveConfig(
-      envWith({ T3_MODE: "sandbox", VC_VERIFY_MODE: "live" }),
-    );
-    expect(config.mode).toBe("sandbox");
+    expect(config).toEqual({ adkEnv: "sandbox" });
   });
 
   it("rejects an unknown T3_ADK_ENV value", () => {
     expect(() =>
       readT3EnclaveConfig(envWith({ T3_ADK_ENV: "staging" })),
-    ).toThrow(T3EnclaveConfigError);
-  });
-
-  it("rejects an unknown T3_MODE value", () => {
-    expect(() =>
-      readT3EnclaveConfig(envWith({ T3_MODE: "magic" })),
     ).toThrow(T3EnclaveConfigError);
   });
 
@@ -84,7 +72,6 @@ describe("readT3EnclaveConfig", () => {
       readT3EnclaveConfig(
         envWith({
           T3_ADK_ENV: "staging",
-          T3_MODE: "magic",
         }),
       );
     } catch (error) {
@@ -92,17 +79,15 @@ describe("readT3EnclaveConfig", () => {
     }
     expect(caught).toBeInstanceOf(T3EnclaveConfigError);
     expect(caught?.issues.join(" | ")).toMatch(/T3_ADK_ENV/);
-    expect(caught?.issues.join(" | ")).toMatch(/T3_MODE/);
   });
 });
 
-describe("assertStartupConfig — mode warning path", () => {
+describe("assertStartupConfig — adk env billing warning", () => {
   const sandboxConfig: T3EnclaveConfig = {
     adkEnv: "sandbox",
-    mode: "sandbox",
   };
 
-  it("passes in production with sandbox mode and no warnings", () => {
+  it("passes in production with sandbox adk env and no warnings", () => {
     const result = assertStartupConfig(sandboxConfig, {
       nodeEnv: "production",
     });
@@ -111,42 +96,28 @@ describe("assertStartupConfig — mode warning path", () => {
     expect(result.warnings).toEqual([]);
   });
 
-  it("emits a warning in any env when T3_MODE=live", () => {
-    const result = assertStartupConfig(
-      { adkEnv: "sandbox", mode: "live" },
-      { nodeEnv: "production" },
-    );
-    expect(result.ok).toBe(true);
-    expect(result.warnings.some((w) => /T3_MODE=live/.test(w))).toBe(true);
+  it("does not warn about T3_MODE (the flag is gone)", () => {
+    const result = assertStartupConfig(sandboxConfig, {
+      nodeEnv: "production",
+    });
+    expect(
+      result.warnings.some((w) => /T3_MODE/.test(w)),
+    ).toBe(false);
   });
-});
 
-describe("assertStartupConfig — auth-sdk-env wiring (removed)", () => {
-  it("does not warn about a T3_AUTH_SDK_ENV value (flag removed)", () => {
-    // The legacy `T3_AUTH_SDK_ENV` flag is no longer parsed by the
-    // enclave config. The verifier's own `T3_MODE` setting is the
-    // single source of truth for the verification surface.
-    const result = assertStartupConfig(
-      {
-        adkEnv: "sandbox",
-        mode: "live",
-      },
-      { nodeEnv: "production" },
-    );
-    // Only the live-mode warning should be present; no separate
-    // auth-sdk-env warning is generated.
+  it("does not warn about T3_AUTH_SDK_ENV (flag was removed earlier)", () => {
+    const result = assertStartupConfig(sandboxConfig, {
+      nodeEnv: "production",
+    });
     expect(
       result.warnings.some((w) => /T3_AUTH_SDK_ENV/.test(w)),
     ).toBe(false);
   });
-});
 
-describe("assertStartupConfig — adk env billing warning", () => {
   it("warns when T3_ADK_ENV is production", () => {
     const result = assertStartupConfig(
       {
         adkEnv: "production",
-        mode: "sandbox",
       },
       {
         nodeEnv: "production",
@@ -163,7 +134,6 @@ describe("runStartupCheck", () => {
     const result = runStartupCheck(
       {
         adkEnv: "sandbox",
-        mode: "sandbox",
       },
       {
         nodeEnv: "production",
@@ -180,7 +150,6 @@ describe("runStartupCheck", () => {
     const result = runStartupCheck(
       {
         adkEnv: "sandbox",
-        mode: "sandbox",
       },
       { nodeEnv: "test" },
     );
@@ -189,10 +158,9 @@ describe("runStartupCheck", () => {
 });
 
 describe("formatStartupReport", () => {
-  it("emits a stable text block including adk env and mode", () => {
+  it("emits a stable text block including adk env", () => {
     const config: T3EnclaveConfig = {
       adkEnv: "testnet",
-      mode: "sandbox",
     };
     const report = formatStartupReport(config, {
       ok: true,
@@ -200,7 +168,6 @@ describe("formatStartupReport", () => {
       errors: [],
     });
     expect(report).toContain("adk_env: testnet");
-    expect(report).toContain("mode: sandbox");
     expect(report.trim().endsWith("ok")).toBe(true);
   });
 
@@ -208,7 +175,6 @@ describe("formatStartupReport", () => {
     const report = formatStartupReport(
       {
         adkEnv: "sandbox",
-        mode: "sandbox",
       },
       { ok: false, warnings: [], errors: ["boom"] },
     );
@@ -219,16 +185,15 @@ describe("formatStartupReport", () => {
   it("lists warnings when present", () => {
     const report = formatStartupReport(
       {
-        adkEnv: "sandbox",
-        mode: "live",
+        adkEnv: "production",
       },
       {
         ok: true,
-        warnings: ["T3_MODE=live is a warning."],
+        warnings: ["T3_ADK_ENV=production is a warning."],
         errors: [],
       },
     );
     expect(report).toContain("warnings:");
-    expect(report).toContain("- T3_MODE=live is a warning.");
+    expect(report).toContain("- T3_ADK_ENV=production is a warning.");
   });
 });

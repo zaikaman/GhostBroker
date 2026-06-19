@@ -62,14 +62,20 @@ describe("DepositWalletOverviewCard", () => {
     expect(screen.getByText(/Relayer approved/i)).toBeInTheDocument();
   });
 
-  it("renders the non-chain-rail empty state", async () => {
+  it("renders the legacy settlement-profile:* fallback for unconfigured institutions", async () => {
+    // Institutions created before the chain rail was the
+    // only supported profile carry a legacy
+    // `settlement-profile:*` ref. The deposit-wallet card
+    // shows the empty state for any profile that is not
+    // the chain rail so the operator can see the institution
+    // is not yet wired up for on-chain settlement.
     mockedGetInstitution.mockResolvedValue({
-      id: "00000000-0000-4000-8000-000000000101",
-      legalName: "Northstar Capital LLC",
-      displayName: "Northstar Capital",
+      id: "00000000-4000-8000-000000000101",
+      legalName: "Legacy Co",
+      displayName: "Legacy Co",
       status: "active",
       t3TenantDid: "did:t3:0x1111111111111111111111111111111111111111",
-      settlementProfileRef: "wallet:default",
+      settlementProfileRef: "settlement-profile:legacy",
       metadata: {},
     });
 

@@ -53,8 +53,9 @@ export interface InstitutionRepository {
   /**
    * Update the institution's `settlement_profile_ref` column
    * in-place. Used by the WS3 PATCH endpoint when the operator
-   * switches the institution between rails (e.g. `wallet:default`
-   * to `chain:sepolia:erc20` after on-chain deposit setup).
+   * switches the institution between rail profiles
+   * (`settlement-profile:*` legacy → `chain:sepolia:erc20`,
+   * which is the only supported production profile).
    */
   updateProfile?(id: string, settlementProfileRef: string): Promise<Institution>;
 }

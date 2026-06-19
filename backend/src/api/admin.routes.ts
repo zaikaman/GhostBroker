@@ -89,15 +89,13 @@ export function createAdminRouter(
         }
 
         // Resolve the rail via the trade's
-        // `settlement_profile_ref`. For WS4 v1 the trade
-        // record does not carry the profile ref
-        // directly; the trade-history service maps
-        // `rail_id` to the canonical profile ref via
-        // the rail registry's resolve map. (For the
-        // demo, every `wallet:default` rail maps to
-        // the noop rail; the chain rail maps to
-        // `chain:sepolia:erc20`.)
-        const settlementProfileRef = trade.railId ?? "wallet:default";
+        // `rail_id` (the rail id and the settlement
+        // profile ref are 1:1 — GhostBroker exposes a
+        // single rail, `chain:sepolia:erc20`). The
+        // dispatcher fails closed with
+        // `RailDispatchError` if the rail id is
+        // unknown.
+        const settlementProfileRef = trade.railId ?? "chain:sepolia:erc20";
 
         let proof;
         try {

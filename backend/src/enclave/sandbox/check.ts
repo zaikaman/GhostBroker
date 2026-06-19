@@ -154,7 +154,6 @@ async function main(): Promise<void> {
         tokenBalanceMinimum: balance.minimumRequired.toString(),
         startupCheck: {
           adkEnv: startupConfig.adkEnv,
-          mode: startupConfig.mode,
           ok: startupResult.ok,
           warnings: startupResult.warnings,
           errors: startupResult.errors,

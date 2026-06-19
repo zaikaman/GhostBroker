@@ -6,15 +6,16 @@ import {
 
 /**
  * WS3 backend validation tests. Covers:
- *   1. `createInstitutionRequestSchema` accepts the noop
- *      rail profile with empty metadata.
- *   2. Same schema accepts the chain-rail profile when the
- *      metadata carries `depositAddress` and
- *      `tokenAddresses`.
- *   3. Same schema rejects the chain-rail profile when
+ *   1. `createInstitutionRequestSchema` accepts the
+ *      chain-rail profile when the metadata carries
+ *      `depositAddress` and `tokenAddresses`.
+ *   2. Same schema rejects the chain-rail profile when
  *      metadata is missing either field.
- *   4. Same schema rejects unsupported profile refs.
- *   5. `updateInstitutionRequestSchema` mirrors the same
+ *   3. Same schema rejects unsupported profile refs
+ *      (including the legacy `wallet:default` noop
+ *      profile and `custody:*` profiles, which have
+ *      been removed).
+ *   4. `updateInstitutionRequestSchema` mirrors the same
  *      validation; allows metadata-only updates without a
  *      profile change.
  */
@@ -23,14 +24,6 @@ describe("createInstitutionRequestSchema (WS3 chain-rail validation)", () => {
     legalName: "Northstar Capital Markets LLC",
     displayName: "Northstar Capital",
   };
-
-  it("accepts the noop rail profile with empty metadata", () => {
-    const parsed = createInstitutionRequestSchema.safeParse({
-      ...base,
-      settlementProfileRef: "wallet:default",
-    });
-    expect(parsed.success).toBe(true);
-  });
 
   it("accepts the chain rail profile with depositAddress and tokenAddresses", () => {
     const parsed = createInstitutionRequestSchema.safeParse({
@@ -83,12 +76,18 @@ describe("createInstitutionRequestSchema (WS3 chain-rail validation)", () => {
     expect(parsed.success).toBe(false);
   });
 
-  it("rejects unsupported profile refs", () => {
-    const parsed = createInstitutionRequestSchema.safeParse({
-      ...base,
-      settlementProfileRef: "bogus:profile",
-    });
-    expect(parsed.success).toBe(false);
+  it("rejects unsupported profile refs (including the legacy noop rail)", () => {
+    // GhostBroker exposes a single settlement rail
+    // (`chain:sepolia:erc20`). The legacy `wallet:default`
+    // noop profile and `custody:*` profiles are no longer
+    // accepted.
+    for (const profile of ["wallet:default", "custody:fireblocks", "bogus:profile"]) {
+      const parsed = createInstitutionRequestSchema.safeParse({
+        ...base,
+        settlementProfileRef: profile,
+      });
+      expect(parsed.success).toBe(false);
+    }
   });
 
   it("accepts the legacy settlement-profile:* format for backwards compatibility", () => {

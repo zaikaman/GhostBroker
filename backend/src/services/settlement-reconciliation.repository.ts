@@ -40,11 +40,15 @@ export class SupabaseSettlementReconciliationRepository
     // looked up by the orchestrator from the
     // `institutions` table at dispatch time, so the
     // reconciler only needs the row's own rail_id.
+    // GhostBroker exposes a single settlement rail
+    // (`chain:sepolia:erc20`); legacy rows with no
+    // `rail_id` are pre-migration data and fail closed
+    // at the dispatcher.
     return (data ?? []).map((row) => ({
       tradeRef: row.trade_ref,
-      railId: row.rail_id ?? "wallet:default",
+      railId: row.rail_id ?? "chain:sepolia:erc20",
       railTradeRef: row.rail_trade_ref ?? "",
-      settlementProfileRef: row.rail_id ?? "wallet:default",
+      settlementProfileRef: row.rail_id ?? "chain:sepolia:erc20",
       buyerInstitutionId: row.buy_institution_id,
       sellerInstitutionId: row.sell_institution_id,
     }));

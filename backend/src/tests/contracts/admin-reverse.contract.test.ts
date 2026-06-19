@@ -15,7 +15,7 @@ import type { InstitutionManagementService } from "../../services/institution.se
  * WS4.2: admin reverser contract tests. The reverser
  * route is operator-scoped; the body must include a
  * `reason`; the trade must belong to the operator's
- * institution. The noop rail's `reverse` returns a
+ * institution. The chain rail's `reverse` returns a
  * `reversed` state which we map to a 200 response.
  *
  * Tests bypass the auth middleware by stubbing the
@@ -28,7 +28,7 @@ const OTHER_INSTITUTION_ID = "00000000-0000-4000-8000-000000000a99";
 
 function makeTrade(overrides: Partial<CompletedTrade> = {}): CompletedTrade {
   return {
-    id: "00000000-0000-4000-8000-000000000af1",
+    id: "00000000-4000-8000-000000000af1",
     tradeRef: TRADE_REF,
     assetCodeCiphertext: "t3cipher.asset.admin",
     quantityCiphertext: "t3cipher.quantity.admin",
@@ -36,8 +36,8 @@ function makeTrade(overrides: Partial<CompletedTrade> = {}): CompletedTrade {
     settledAt: "2026-06-12T00:00:00.000Z",
     settlementStatus: "settled",
     receiptIds: [],
-    railId: "wallet:default",
-    railTradeRef: "noop:abc",
+    railId: "chain:sepolia:erc20",
+    railTradeRef: "0xabc",
     railState: "settled",
     ...overrides,
   };
@@ -56,16 +56,16 @@ function buildServices(
   const railDispatcher = new MapSettlementRailDispatcher(
     new Map<string, never>([
       [
-        "wallet:default",
+        "chain:sepolia:erc20",
         {
-          id: "wallet:default",
+          id: "chain:sepolia:erc20",
           reverse: async () => {
             if (options.reverseShouldThrow) {
               throw new Error("rail failed");
             }
             return {
-              railId: "wallet:default",
-              railTradeRef: "noop:abc",
+              railId: "chain:sepolia:erc20",
+              railTradeRef: "0xabc",
               railState: "reversed",
               assetMovements: [],
               observedAt: "2026-06-12T00:00:01.000Z",
@@ -148,7 +148,7 @@ function buildAppWithOperatorAuth(
 }
 
 describe("POST /api/admin/trades/:tradeRef/reverse contract (WS4.2)", () => {
-  it("reverses a noop-rail trade and returns 200", async () => {
+  it("reverses a chain-rail trade and returns 200", async () => {
     const { services } = buildServices(makeTrade());
     const app = buildAppWithOperatorAuth(services, INSTITUTION_ID);
 

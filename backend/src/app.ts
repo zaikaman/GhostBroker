@@ -62,7 +62,6 @@ import {
   MapSettlementRailDispatcher,
   type SettlementRailDispatcher,
 } from "./services/settlement-rails/dispatcher.js";
-import { NoopCustodialRail } from "./services/settlement-rails/noop-custodial-rail.js";
 import { SepoliaErc20Rail } from "./services/settlement-rails/chain-sepolia-rail.js";
 import type { SettlementRail } from "./services/settlement-rails/rail.js";
 import { TeeAttestedRelayerSigner } from "./services/settlement-rails/relayer-signer.js";
@@ -335,110 +334,116 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         })
       : undefined;
 
-  // WS2: build the rail registry. The noop rail is always
-  // registered (universal fallback). The chain rail is
-  // registered only when all three of its env vars are set;
-  // otherwise every `chain:sepolia:erc20` profile falls through
-  // to the noop rail. This is the documented opt-in path: a
-  // missing or empty env value disables the rail without
-  // breaking existing flows.
-  const railRegistry = new Map<string, SettlementRail>([
-    ["wallet:default", new NoopCustodialRail()],
-  ]);
+  // WS2: build the rail registry. GhostBroker exposes a single
+  // settlement rail — `chain:sepolia:erc20`. The chain rail's
+  // env vars are mandatory: a backend boot without them has no
+  // rail to dispatch through, and any settlement would fail
+  // closed with `service_unavailable`. The previous noop fallback
+  // (`wallet:default`) has been removed.
   if (
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL &&
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY &&
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS
+    !env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL ||
+    !env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY ||
+    !env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS
   ) {
-    // WS2.5: the relayer signer is a deliberate seam.
-    // v1 demo path: a `ViemWalletRelayerSigner` that
-    // signs the broadcast with the
-    // `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`
-    // env var. The on-chain `from` is the address
-    // derived from this key.
-    //
-    // Production-swap path: a `TeeAttestedRelayerSigner`
-    // whose `tenantPrivateKey` is the T3 tenant identity
-    // loaded via `t3-enclave`'s
-    // `loadOrCreateTenantIdentity(...)`. The
-    // production tenant key is held inside the T3
-    // tenant TEE; the v1 demo's tenant key is the
-    // file-backed keypair the matching-policy contract
-    // also uses. The on-chain `from` is the tenant
-    // identity's address either way; in production
-    // the key's extraction is attestation-anchored.
-    //
-    // The decision: when
-    // `SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF` is
-    // set (a T3 secret-ref, e.g. `t3_secret:abc123`),
-    // the wiring resolves it through the `t3-enclave`'s
-    // secret store and builds a TEE-attested signer.
-    // Otherwise the v1 viem path runs (the env var is
-    // empty in the demo).
-    const useTeeSigner = Boolean(
-      process.env["SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF"],
+    throw new Error(
+      "Settlement rail env vars are required: " +
+        "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL, " +
+        "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY, and " +
+        "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS must all be set. " +
+        "GhostBroker ships a single settlement rail (`chain:sepolia:erc20`) " +
+        "and cannot boot without it.",
     );
-    let tenantPrivateKeyForRail: `0x${string}` | undefined;
-    if (useTeeSigner) {
-      // Production: the relayer's tenant key is the T3
-      // tenant identity. `loadOrCreateTenantIdentity`
-      // reads the file-backed keypair that
-      // `t3-enclave` already produces; in the
-      // production T3-tenant-TEE the same call returns
-      // a TEE-held key.
-      const { loadOrCreateTenantIdentity } = await import(
-        "./enclave/index.js"
-      );
-      const tenantIdentity = loadOrCreateTenantIdentity({
-        tenantDid:
-          env.T3_TENANT_DID ?? "did:t3n:tenant:default-relayer",
-      });
-      tenantPrivateKeyForRail = tenantIdentity.privateKey as `0x${string}`;
-    }
+  }
+  // WS2.5: the relayer signer is a deliberate seam.
+  // v1 demo path: a `ViemWalletRelayerSigner` that
+  // signs the broadcast with the
+  // `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`
+  // env var. The on-chain `from` is the address
+  // derived from this key.
+  //
+  // Production-swap path: a `TeeAttestedRelayerSigner`
+  // whose `tenantPrivateKey` is the T3 tenant identity
+  // loaded via `t3-enclave`'s
+  // `loadOrCreateTenantIdentity(...)`. The
+  // production tenant key is held inside the T3
+  // tenant TEE; the v1 demo's tenant key is the
+  // file-backed keypair the matching-policy contract
+  // also uses. The on-chain `from` is the tenant
+  // identity's address either way; in production
+  // the key's extraction is attestation-anchored.
+  //
+  // The decision: when
+  // `SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF` is
+  // set (a T3 secret-ref, e.g. `t3_secret:abc123`),
+  // the wiring resolves it through the `t3-enclave`'s
+  // secret store and builds a TEE-attested signer.
+  // Otherwise the v1 viem path runs (the env var is
+  // empty in the demo).
+  const useTeeSigner = Boolean(
+    process.env["SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF"],
+  );
+  let tenantPrivateKeyForRail: `0x${string}` | undefined;
+  if (useTeeSigner) {
+    // Production: the relayer's tenant key is the T3
+    // tenant identity. `loadOrCreateTenantIdentity`
+    // reads the file-backed keypair that
+    // `t3-enclave` already produces; in the
+    // production T3-tenant-TEE the same call returns
+    // a TEE-held key.
+    const { loadOrCreateTenantIdentity } = await import(
+      "./enclave/index.js"
+    );
+    const tenantIdentity = loadOrCreateTenantIdentity({
+      tenantDid:
+        env.T3_TENANT_DID ?? "did:t3n:tenant:default-relayer",
+    });
+    tenantPrivateKeyForRail = tenantIdentity.privateKey as `0x${string}`;
+  }
 
-    const relayerSigner = useTeeSigner
-      ? new TeeAttestedRelayerSigner({
-          // The `walletClient` is still used for the
-          // EIP-1559 broadcast; the v1 demo's T3N does
-          // not expose a TEE-attested relayer
-          // primitive yet (T3-ONB-011). Production:
-          // this `walletClient` is replaced with a
-          // TEE-attested client whose key is held
-          // inside the tenant TEE.
-          walletClient: createWalletClient({
-            account: privateKeyToAccount(
-              env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
-            ),
-            chain: defineChain({
-              id: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111,
-              name:
-                (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111) ===
-                11155111
-                  ? "Sepolia"
-                  : "anvil-test",
-              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-              rpcUrls: {
-                default: { http: [env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL] },
-              },
-            }),
-            transport: http(env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL),
+  const relayerSigner = useTeeSigner
+    ? new TeeAttestedRelayerSigner({
+        // The `walletClient` is still used for the
+        // EIP-1559 broadcast; the v1 demo's T3N does
+        // not expose a TEE-attested relayer
+        // primitive yet (T3-ONB-011). Production:
+        // this `walletClient` is replaced with a
+        // TEE-attested client whose key is held
+        // inside the tenant TEE.
+        walletClient: createWalletClient({
+          account: privateKeyToAccount(
+            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
+          ),
+          chain: defineChain({
+            id: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111,
+            name:
+              (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111) ===
+              11155111
+                ? "Sepolia"
+                : "anvil-test",
+            nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+            rpcUrls: {
+              default: { http: [env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL] },
+            },
           }),
-          // The T3 tenant identity's private key. In
-          // v1 demo this is the file-backed keypair;
-          // in production this is the TEE-held key
-          // (T3-ONB-011).
-          tenantPrivateKey:
-            (tenantPrivateKeyForRail ??
-              env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY) as `0x${string}`,
-          // `false` for the v1 demo (the key is
-          // file-backed, not TEE-held). Production
-          // sets this to `true` once T3N exposes the
-          // tenant-TEE key store.
-          isTeeAttested: false,
-        })
-      : undefined;
+          transport: http(env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL),
+        }),
+        // The T3 tenant identity's private key. In
+        // v1 demo this is the file-backed keypair;
+        // in production this is the TEE-held key
+        // (T3-ONB-011).
+        tenantPrivateKey:
+          (tenantPrivateKeyForRail ??
+            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY) as `0x${string}`,
+        // `false` for the v1 demo (the key is
+        // file-backed, not TEE-held). Production
+        // sets this to `true` once T3N exposes the
+        // tenant-TEE key store.
+        isTeeAttested: false,
+      })
+    : undefined;
 
-    railRegistry.set(
+  const railRegistry = new Map<string, SettlementRail>([
+    [
       "chain:sepolia:erc20",
       new SepoliaErc20Rail(
         {
@@ -459,8 +464,8 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
             }
           : {},
       ),
-    );
-  }
+    ],
+  ]);
   const railDispatcher = new MapSettlementRailDispatcher(railRegistry);
 
   let institutionApprovalService: InstitutionApprovalService | undefined;

@@ -21,13 +21,15 @@ export interface CompletedTrade {
    * The settlement rail that transported this trade. `null` for
    * pre-WS1 rows (no rail proof existed). For trades settled after
    * WS1, this is the `SettlementRail.id` of the rail that handled
-   * the dispatch (e.g. `"wallet:default"` for NoopCustodialRail).
+   * the dispatch (e.g. `"chain:sepolia:erc20"` for the Sepolia
+   * ERC-20 relayer).
    */
   railId: string | null;
   /**
-   * Rail-specific transport proof. A chain tx hash, a custody
-   * transfer ref, or a `noop:<sha256>` for the noop rail. `null`
-   * for pre-WS1 rows.
+   * Rail-specific transport proof. A chain tx hash or a
+   * `noop:<sha256>` for the legacy noop rail. `null` for pre-WS1
+   * rows. GhostBroker exposes only the chain rail; the noop rail
+   * has been removed.
    */
   railTradeRef: string | null;
   /**

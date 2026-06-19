@@ -39,13 +39,12 @@ import type {
  *
  *   - `verifyGhostbrokerDelegationCredential` runs the W3C VC
  *     shape + time-window + DID-binding + revocation checks,
- *     and (in `live` mode) the `EcdsaSecp256k1Signature2019`
- *     crypto verification via `@terminal3/verify_vc`.
- *   - In `live` and `structural` modes, the verifier fails
- *     closed on any SDK error — it never silently downgrades
- *     to a non-cryptographic pass. In `sandbox` mode the
- *     historical "verified on SDK error" semantic is kept for
- *     the demo surface.
+ *     then the `EcdsaSecp256k1Signature2019` crypto verification
+ *     inline (the verifier's single `live` mode). The verifier
+ *     fails closed on any SDK or runtime exception — it never
+ *     silently downgrades to a non-cryptographic pass. There is
+ *     no longer a `sandbox` or `structural` mode to fall back
+ *     to.
  *   - The request's `authorityRef` is compared against the
  *     verifier's `authorityRef`. A mismatch is the
  *     `over_scoped` rejection: the agent is presenting a
@@ -89,8 +88,7 @@ export type AgentDelegationRejectionReason =
   | "over_scoped"
   | "unverified"
   | "agent_mismatch"
-  | "malformed"
-  | "demo_proof_in_live_mode";
+  | "malformed";
 
 export interface VerifiedAgentDelegation {
   status: "verified";

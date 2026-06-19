@@ -25,53 +25,44 @@ export type RequestedAgentAction =
  * This is the project's own W3C JSON-LD VC verifier for the
  * delegation a buyer institution issues to its agent. The
  * verifier accepts a VC with `issuer`, `credentialSubject`, and
- * `proof.jws`, and runs in one of three modes:
+ * `proof.jws`, and runs in exactly one mode:
  *
- *   - "sandbox":    structural checks only; sandbox proof markers pass.
- *                   SDK errors are accepted (the verifier returns
- *                   `verified` with `verificationMode: "sandbox"`),
- *                   because the demo surface is the only place this
- *                   mode is intended to run.
- *   - "live":       real cryptographic verification via
- *                   `@terminal3/verify_vc` (`verifyEcdsaVc` for
- *                   `EcdsaSecp256k1Signature2019` proofs). The
- *                   verifier **fails closed** if the SDK throws:
- *                   the returned `reason` is `"unverified"` and the
- *                   agent is rejected. The verifier never silently
- *                   downgrades to a non-cryptographic "structural"
- *                   pass on an SDK error in this mode.
- *   - "structural": real shape + time-window + DID-binding checks
- *                   with no crypto. This is the mode the project
- *                   ships as its "sandbox/demo" production gate
- *                   when the live SDK is unavailable. Like `live`,
- *                   an SDK throw here fails closed.
+ *   - "live": real cryptographic verification via
+ *             `@terminal3/verify_vc` (`verifyEcdsaVc` for
+ *             `EcdsaSecp256k1Signature2019` proofs). The
+ *             verifier **fails closed** if the SDK throws:
+ *             the returned `reason` is `"unverified"` and the
+ *             agent is rejected. The verifier never silently
+ *             downgrades to a non-cryptographic pass on an
+ *             SDK error.
  *
- * Why the verifier fails closed on SDK error in every non-sandbox
- * mode: a security-critical verifier that returns `verified` when
- * it could not cryptographically verify is an attack surface for
- * any adversarial T3 SDK version bump. The legacy "fall back to
- * structural" behaviour was an opt-in safety net controlled by
- * `VC_VERIFY_STRICT=true`; the production-grade default is the
- * inverse — fail closed unless the operator has explicitly opted
- * into `sandbox` mode. The `VC_VERIFY_STRICT` flag is retained as
- * a no-op alias for backwards compatibility; the verifier always
- * fails closed on SDK error outside `sandbox` mode.
+ * Why the verifier fails closed on SDK error: a
+ * security-critical verifier that returns `verified` when it
+ * could not cryptographically verify is an attack surface for
+ * any adversarial T3 SDK version bump or transient SDK outage.
+ * The legacy "fall back to structural" behaviour was an opt-in
+ * safety net controlled by `VC_VERIFY_STRICT=true`; the
+ * production-grade default is the inverse — fail closed unless
+ * the operator has explicitly opted into a non-cryptographic
+ * mode. That opt-in no longer exists: `live` is the only mode.
  *
- * The `setup:identity` + `setup:delegation` flow now produces
- * a real `EcdsaSecp256k1Signature2019` JWS by default, so the
- * `live` mode is the production target.
+ * The `setup:identity` + `setup:delegation` flow (and the
+ * server-side `tenant-delegation.ts` signer) produce a real
+ * `EcdsaSecp256k1Signature2019` JWS by default, so `live` is
+ * the production target and the only mode the verifier
+ * supports.
  *
- * This module produces a `VerifiedDelegationProof` shape identical
- * to the original JCS verifier, so the rest of the per-action
- * authorization pipeline is untouched. The verifier is the only
- * adapter the production backend runs against the Ghostbroker W3C
- * VC. Three modes (sandbox / structural / live) are controlled
- * by the server-side `T3_MODE` env var (with `VC_VERIFY_MODE`
- * kept as a backward-compat alias).
+ * This module produces a `VerifiedDelegationProof` shape
+ * identical to the original JCS verifier, so the rest of the
+ * per-action authorization pipeline is untouched. The verifier
+ * is the only adapter the production backend runs against the
+ * Ghostbroker W3C VC. The single mode (`live`) is hard-coded —
+ * there is no `T3_MODE` env var, no `VC_VERIFY_MODE` alias,
+ * and no `mode` parameter on the public entry point.
  *
  * The `authorityRef` returned to the agent is the credential's
- * `id` (e.g. `urn:uuid:ghostbroker-delegation-...`), which is the
- * same opaque-reference shape the original path produced.
+ * `id` (e.g. `urn:uuid:ghostbroker-delegation-...`), which is
+ * the same opaque-reference shape the original path produced.
  */
 
 /**
@@ -160,7 +151,22 @@ export const ghostbrokerDelegationSchema = z.object({
 
 export type GhostbrokerDelegationCredential = z.infer<typeof ghostbrokerDelegationSchema>;
 
-export type GhostbrokerVerificationMode = "sandbox" | "live" | "structural";
+/**
+ * The verifier's single verification mode. The legacy
+ * `sandbox` / `structural` / `live` trio has collapsed to
+ * just `live`: the `setup:identity` + `setup:delegation` flow
+ * (and the server-side `tenant-delegation.ts` signer) produce
+ * a real `EcdsaSecp256k1Signature2019` JWS by default, and the
+ * verifier does the cryptographic check on every call.
+ *
+ * The literal union is retained (rather than collapsed to a
+ * bare string) so downstream code that branches on
+ * `verificationMode === "live"` keeps a clear name to refer
+ * to. The other two former modes are deliberately not part of
+ * the union — they no longer exist as values the verifier can
+ * emit.
+ */
+export type GhostbrokerVerificationMode = "live";
 
 export interface GhostbrokerVerificationRequest {
   credential: unknown;
@@ -210,58 +216,12 @@ export interface RejectedGhostbrokerDelegation {
     | "revoked"
     | "unverified"
     | "agent_mismatch"
-    | "malformed"
-    | "demo_proof_in_live_mode";
+    | "malformed";
 }
 
 export type GhostbrokerVerificationResult =
   | VerifiedGhostbrokerDelegation
   | RejectedGhostbrokerDelegation;
-
-/**
- * Markers that identify a non-cryptographically-signed (demo/test)
- * Ghostbroker delegation VC. The verifier checks the JWS for any of
- * these substrings and routes the credential through the
- * mode-appropriate path:
- *
- *   - `sandbox` mode: structural checks only; demo markers pass.
- *   - `live` mode:    demo markers are rejected with
- *                      `demo_proof_in_live_mode`; the verifier refuses
- *                      to admit an agent presenting an unsigned VC
- *                      when production crypto verification is on.
- *   - `structural` mode: shape + time-window + DID-binding checks;
- *                        demo markers pass with the verifier recording
- *                        `verificationMode: "structural"`.
- *
- * The markers are explicit strings rather than a missing `proof.jws`
- * so production logs can grep for them and so a VC without a marker
- * in live mode is treated as a real (cryptographically signed) VC and
- * passed to `@terminal3/verify_vc`. They are NOT placeholders for
- * missing functionality — they are a deliberate discriminator in a
- * three-mode verifier (sandbox / structural / live).
- *
- * The verifier fails closed on any `@terminal3/verify_vc` exception
- * outside `sandbox` mode, so a demo marker reaching the live crypto
- * path is a no-op (the demo branch above short-circuits before
- * `tryLiveVerify` runs).
- */
-const SANDBOX_PROOF_MARKERS = [
-  "sandbox-proof-placeholder",
-  "placeholder",
-] as const;
-
-function getModeFromEnv(): GhostbrokerVerificationMode {
-  // Read VC_VERIFY_MODE first (legacy), fall back to T3_MODE
-  // (canonical), then default to "live" for production safety.
-  const raw = (
-    process.env.VC_VERIFY_MODE ||
-    process.env.T3_MODE ||
-    "live"
-  ).trim().toLowerCase();
-  if (raw === "live" || raw === "structural") return raw;
-  if (raw === "sandbox") return "sandbox";
-  return "live";
-}
 
 function isDelegationActive(
   credential: GhostbrokerDelegationCredential,
@@ -273,11 +233,6 @@ function isDelegationActive(
     return false;
   }
   return now >= issued && now <= expires;
-}
-
-function hasSandboxProof(credential: GhostbrokerDelegationCredential): boolean {
-  const proofValue = credential.proof?.jws ?? "";
-  return SANDBOX_PROOF_MARKERS.some((marker) => proofValue.includes(marker));
 }
 
 function canonicalize(value: unknown): string {
@@ -325,10 +280,15 @@ function authorityRefFor(credential: GhostbrokerDelegationCredential): string {
  * Verify a Ghostbroker-style W3C VC. Returns a discriminated union
  * shaped to match `verifySignedDelegationProof`'s output so the
  * facade can consume either verifier's result interchangeably.
+ *
+ * The verifier runs in `live` mode (the only mode it supports):
+ * shape + time-window + DID-binding + revocation checks, then
+ * cryptographic verification of the `EcdsaSecp256k1Signature2019`
+ * proof via the inline ECDSA flow documented below. Any SDK or
+ * runtime exception fails closed with `reason: "unverified"`.
  */
 export async function verifyGhostbrokerDelegationCredential(
   request: GhostbrokerVerificationRequest,
-  mode: GhostbrokerVerificationMode = getModeFromEnv(),
 ): Promise<GhostbrokerVerificationResult> {
   const {
     credential,
@@ -368,53 +328,12 @@ export async function verifyGhostbrokerDelegationCredential(
     return { status: "rejected", agentDid, reason: "revoked" };
   }
 
-  // Mode dispatch.
-  if (mode === "sandbox") {
-    return {
-      status: "verified",
-      agentDid,
-      authorityRef: authorityRefFor(safe),
-      policyHash: policyHashFor(safe),
-      verificationMode: "sandbox",
-    };
-  }
-
-  if (hasSandboxProof(safe)) {
-    if (mode === "live") {
-      return {
-        status: "rejected",
-        agentDid,
-        reason: "demo_proof_in_live_mode",
-      };
-    }
-    return {
-      status: "verified",
-      agentDid,
-      authorityRef: authorityRefFor(safe),
-      policyHash: policyHashFor(safe),
-      verificationMode: "structural",
-    };
-  }
-
-  if (mode === "structural") {
-    return {
-      status: "verified",
-      agentDid,
-      authorityRef: authorityRefFor(safe),
-      policyHash: policyHashFor(safe),
-      verificationMode: "structural",
-    };
-  }
-
-  // Live + signed: verify cryptographically via
-  // `@terminal3/verify_vc`. The verifier fails closed if the
-  // SDK throws — a security-critical verifier that returns
-  // `verified` when it could not cryptographically verify is
-  // an attack surface for any adversarial T3 SDK version bump
-  // or transient SDK outage. The only mode in which the
-  // verifier accepts a VC on an SDK error is `sandbox`, which
-  // is the demo / dev surface and is not the production gate.
-  return tryLiveVerify(safe, agentDid, mode, additionalTrustedSignerAddresses);
+  // Live crypto verification. The verifier fails closed if any
+  // step throws — a security-critical verifier that returns
+  // `verified` when it could not cryptographically verify is an
+  // attack surface for any adversarial T3 SDK version bump or
+  // transient SDK outage.
+  return tryLiveVerify(safe, agentDid, additionalTrustedSignerAddresses);
 }
 
 /**
@@ -435,15 +354,14 @@ function walletAddressFromDid(did: string): string | null {
 async function tryLiveVerify(
   safe: GhostbrokerDelegationCredential,
   agentDid: string,
-  mode: GhostbrokerVerificationMode,
   additionalTrustedSignerAddresses?: ReadonlySet<string>,
 ): Promise<GhostbrokerVerificationResult> {
   try {
-    // Re-implement ECDSA verification inline instead of delegating to
-    // @terminal3/verify_vc → @terminal3/ecdsa_vc, because the latter's
-    // `getWalletAddress` only supports `did:ethr:` DIDs and throws on
-    // our `did:t3n:0x<address>` format. The verification logic is
-    // straightforward:
+    // Inline ECDSA verification (the original
+    // `@terminal3/verify_vc` → `@terminal3/ecdsa_vc` path only
+    // supports `did:ethr:` DIDs and throws on our
+    // `did:t3n:0x<address>` format, so we re-implement the
+    // standard flow inline):
     //
     //   1. Strip proof from the VC
     //   2. JSON.stringify the proof-stripped body (insertion order)
@@ -475,18 +393,6 @@ async function tryLiveVerify(
     // Step 2-3: serialize and hash.
     const json = JSON.stringify(payload);
     const hash = keccak_256(new TextEncoder().encode(json));
-
-    // Log the JSON being hashed so we can compare with what the signer produced.
-    console.log(
-      "[VERIFY] payload JSON:",
-      json,
-    );
-    console.log(
-      "[VERIFY] payload JSON length:",
-      json.length,
-      "hash hex:",
-      Buffer.from(hash).toString("hex"),
-    );
 
     // Step 4: recover the signer's address from the ECDSA signature.
     // `ethers.verifyMessage` applies the EIP-191 personal_sign prefix
@@ -520,10 +426,6 @@ async function tryLiveVerify(
     }
 
     if (trustedAddresses.size === 0) {
-      console.warn(
-        "[VERIFY] Could not extract wallet address from issuer DID and no additional trusted signers provided:",
-        safe.issuer,
-      );
       return { status: "rejected", agentDid, reason: "unverified" };
     }
 
@@ -541,16 +443,6 @@ async function tryLiveVerify(
       .includes(recoveredLower);
 
     if (!addrMatch || !vmMatch) {
-      console.warn(
-        "[VERIFY] ECDSA signature mismatch",
-        JSON.stringify({
-          recoveredAddress,
-          trustedAddresses: [...trustedAddresses],
-          addrMatch,
-          vmMatch,
-          verificationMethod: safe.proof.verificationMethod,
-        }),
-      );
       return { status: "rejected", agentDid, reason: "unverified" };
     }
 
@@ -561,22 +453,7 @@ async function tryLiveVerify(
       policyHash: policyHashFor(safe),
       verificationMode: "live",
     };
-  } catch (err) {
-    console.warn(
-      "[VERIFY] tryLiveVerify caught exception:",
-      err instanceof Error ? err.message : String(err),
-      err instanceof Error ? err.stack : undefined,
-    );
-    if (mode === "sandbox") {
-      return {
-        status: "verified",
-        agentDid,
-        authorityRef: authorityRefFor(safe),
-        policyHash: policyHashFor(safe),
-        verificationMode: "sandbox",
-      };
-    }
+  } catch {
     return { status: "rejected", agentDid, reason: "unverified" };
   }
 }
-

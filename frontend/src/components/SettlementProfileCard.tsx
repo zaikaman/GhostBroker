@@ -739,7 +739,7 @@ export function SettlementProfileCard({
                 fontSize: '0.72rem'
               }}>
                 <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}>
-                  {trade.railId ?? "wallet:default"}
+                  {trade.railId ?? "chain:sepolia:erc20"}
                 </code>
                 {isChainRailTxHash(trade.railTradeRef) ? (
                   <a
@@ -799,10 +799,11 @@ function ApprovalTxLinks({
 }
 
 /**
- * Heuristic: a chain rail's `railTradeRef` is a 32-byte hex
- * string starting with `0x`. The noop rail's proof starts
- * with `noop:...`. We only render the Etherscan link when
- * the rail ref looks like a real tx hash.
+ * Heuristic: the chain rail's `railTradeRef` is a 32-byte hex
+ * string starting with `0x`. We only render the Etherscan link
+ * when the rail ref looks like a real tx hash. (GhostBroker
+ * exposes only the chain rail — the legacy noop-rail refs have
+ * been retired.)
  */
 function isChainRailTxHash(railTradeRef: string | null | undefined): boolean {
   return (

@@ -1,1422 +1,1221 @@
 # GhostBroker
 
-### The Attested Enclave for Institutional Dark Pools
+**Institutional Dark Pool with Verifiable Agent Authority**
 
-GhostBroker is an institutional-grade dark pool built on the Terminal 3
-network where autonomous trading agents submit buy and sell intents that
-are matched and settled **without any counterparty ever seeing another
-counterparty's parameters**. Active order data - assets, sides,
-quantities, prices, counterparties, queue position, match score -
-never leaves the Terminal 3 TEE. The dashboard, the REST API, the
-WebSocket telemetry stream, and the Supabase database see only opaque
-handles, sanitized state labels, and post-settlement encrypted records.
+GhostBroker is a production-grade institutional dark pool platform where autonomous
+trading agents submit buy and sell intents that are matched and settled without any
+counterparty ever seeing another counterparty's parameters. Active order data lives
+exclusively inside the Terminal 3 Trusted Execution Environment; the dashboard, the
+API, the database, and the WebSocket telemetry stream see only opaque handles,
+sanitized state labels, and completed trade records. Agents are admitted and
+authorized via Ghostbroker-style W3C Verifiable Credentials, re-verified on every
+privileged action. Humans operate a read-only Observatory Console to monitor
+connectivity and review completed history with encrypted audit receipts.
 
-The headline integration is a server-side W3C Verifiable Credential
-verifier for the Ghostbroker-style agent-delegation VC that the
-Terminal 3 Agent Auth surface mints. Every privileged backend action
-re-verifies that credential against institution policy, so no agent
-can submit an intent, cancel a pending intent, settle a match, or
-move a negotiation outside the authority its institution granted.
-
-This is the production code, the tests, the deployment topology, the
-runbooks, and the SDK that backs the bounty submission. Everything
-in this repository is real code that runs locally and is wired to a
-live Terminal 3 sandbox.
+Built for the **Terminal 3 Agent Dev Kit Bounty** (June 9--22, 2026).
 
 ---
 
-## Table of contents
+## Table of Contents
 
-- [Why GhostBroker exists](#why-ghostbroker-exists)
-- [What GhostBroker does](#what-ghostbroker-does)
-- [The privacy promise](#the-privacy-promise)
-- [The Terminal 3 Agent Auth SDK integration](#the-terminal-3-agent-auth-sdk-integration)
-- [Two-tier authorization model](#two-tier-authorization-model)
-- [Architecture](#architecture)
-- [Workspace layout](#workspace-layout)
-- [Technology stack](#technology-stack)
-- [Test coverage and quality bars](#test-coverage-and-quality-bars)
-- [Local development setup](#local-development-setup)
-- [Environment variables](#environment-variables)
-- [Quick start: end to end](#quick-start-end-to-end)
-- [REST API tour](#rest-api-tour)
-- [WebSocket telemetry tour](#websocket-telemetry-tour)
-- [Agent developer tour](#agent-developer-tour)
-- [The negotiation loop](#the-negotiation-loop)
-- [The LLM provider chain](#the-llm-provider-chain)
-- [Privacy enforcement layers](#privacy-enforcement-layers)
-- [Settlement rails](#settlement-rails)
-- [Database schema](#database-schema)
-- [Design system](#design-system)
-- [Operational playbooks](#operational-playbooks)
-- [Deployment topology](#deployment-topology)
-- [Security](#security)
-- [Documentation gaps filed against T3](#documentation-gaps-filed-against-t3)
-- [Reference workspace](#reference-workspace)
-- [Contributing](#contributing)
-- [License](#license)
+1.  [Architecture Overview](#architecture-overview)
+2.  [Repository Structure](#repository-structure)
+3.  [Technology Stack](#technology-stack)
+4.  [Terminal 3 Agent Auth SDK Integration](#terminal-3-agent-auth-sdk-integration)
+5.  [Two-Tier Authentication Architecture](#two-tier-authentication-architecture)
+6.  [Privacy Boundary](#privacy-boundary)
+7.  [Negotiation Engine](#negotiation-engine)
+8.  [Settlement Rails](#settlement-rails)
+9.  [TEE Smart Contracts](#tee-smart-contracts)
+10. [Agent Client SDK](#agent-client-sdk)
+11. [Hosted LLM Agents](#hosted-llm-agents)
+12. [Observatory Console (Frontend)](#observatory-console-frontend)
+13. [Database Schema](#database-schema)
+14. [API Reference](#api-reference)
+15. [Getting Started](#getting-started)
+16. [Environment Configuration](#environment-configuration)
+17. [Running the Platform](#running-the-platform)
+18. [Testing](#testing)
+19. [Deployment](#deployment)
+20. [Documentation Inventory](#documentation-inventory)
+21. [Terminal 3 ADK Onboarding Gaps Filed](#terminal-3-adk-onboarding-gaps-filed)
+22. [License](#license)
 
 ---
 
-## Why GhostBroker exists
+## Architecture Overview
 
-Institutional dark pools sit in a strange place in modern finance. The
-operator who runs the venue has to know enough about the order flow to
-match it, but must never know enough to leak it. The agents that submit
-orders have to prove they are authorized to act, but cannot be trusted
-with their counterparties' parameters. The human operator who watches
-the system has to be able to prove it ran correctly, but cannot be
-allowed to see what it ran on.
+GhostBroker is organized as an npm workspaces monorepo with two primary workspaces
+and several internal modules that together form a six-layer architecture:
 
-Most existing implementations solve this with operational discipline:
-vaults, NDAs, segregation of duties, four-eyes reviews. GhostBroker
-solves it with an attested execution boundary. Active order parameters
-never reach a process that could leak them. The Terminal 3 TEE is the
-only place where matching and settlement see plaintext, and even there
-the TEE contract is the only program that touches them. The
-surrounding surfaces - dashboard, REST API, WebSocket, database - see
-only the references the TEE chooses to reveal.
+```
+                                  Observatory Console
+                                   (React + Vite)
+                                        |
+                                        | REST + WebSocket
+                                        v
+                              +--------------------+
+                              |   Express Backend   |
+                              |   (Heroku target)   |
+                              +--------------------+
+                             /    |       |        \
+                            /     |       |         \
+                     +------+ +--------+ +-------+ +----------+
+                     | Auth | | Negot. | | Match | | Settlem. |
+                     | Gate | | Orch.  | | Orch. | | Service  |
+                     +------+ +--------+ +-------+ +----------+
+                        |         |          |           |
+                        v         v          v           v
+                  +------------------------------------------+
+                  |         T3 Enclave Boundary               |
+                  |  (DID Registry, VC Verifier, Blind Intent |
+                  |   Client, Match Contract, Negotiation     |
+                  |   Ticket, Settlement Command Builder)     |
+                  +------------------------------------------+
+                                     |
+                              +------+------+
+                              |  Supabase   |
+                              | (Postgres)  |
+                              +-------------+
+```
 
-The result is a system where a curious operator cannot reconstruct an
-order book from telemetry, a leaked database snapshot cannot reconstruct
-a position, and a compromised backend process still cannot forge an
-intent, because the intent never reaches the backend in the first
-place. Every privileged action is gated by the same W3C Verifiable
-Credential verifier, and the verifier only sees credentials the
-dashboard minted on behalf of the institution.
-
----
-
-## What GhostBroker does
-
-Concretely, GhostBroker is six cooperating packages plus two reference
-packages:
-
-| Package | What it owns | Deployment target |
-|---|---|---|
-| `frontend/` | Operator observatory: connection status, agent grid, encrypted receipt drawer, completed-trade table, deployment guide | Vercel |
-| `backend/` | REST API, WebSocket telemetry, Supabase access, privacy redaction, settlement service, agent service | Heroku |
-| `database/` | Supabase PostgreSQL migrations, RLS policies, dev seed | Supabase managed |
-| `t3-enclave/` | Terminal 3 ADK boundary: sessions, DID registry, Ghostbroker delegation VC verifier, blind-intent client, match-contract client, settlement command builder | npm package, used by backend |
-| `agent-client/` | Published TypeScript SDK for external agents (`@ghostbroker/agent-client`) and the hosted negotiator | npm |
-| `agents/` | Hosted multi-provider LLM negotiator agents (Gemini + OpenAI + Groq chain) | Hosted Node.js |
-| `negotiation-core/` | Shared strategy / turn-context / decision-validation math consumed by the backend orchestrator and the hosted runtime | npm package |
-| `ghostbroker-delegation-reference/` | Reference procurement-agent BUIDL that demonstrates a Terminal 3 delegated-agent pattern end to end | Reference / docs |
-
-The boundary between these packages is also the deployment boundary.
-The frontend never imports from `t3-enclave/` and never sees a
-plaintext active-order field. The backend owns the Supabase access
-and the orchestrator, but calls the T3 enclave through typed services
-that return opaque handles. The agents package never imports the T3
-ADK directly - the backend mints the delegation VC, persists it
-server-side, and re-verifies it on every privileged call.
+The architecture enforces a hard privacy boundary: active hidden intent parameters
+(asset, side, quantity, price, counterparty, queue rank, match score) never cross
+the enclave boundary into REST responses, WebSocket events, database rows, or
+server logs.
 
 ---
 
-## The privacy promise
+## Repository Structure
 
-GhostBroker's central technical claim is enforceable, not aspirational.
-Active hidden intent parameters - the asset, the side, the quantity,
-the price, the counterparty, the queue rank, the match score - never
-appear in any of these surfaces:
+```
+ghostbroker/
+|
+|-- frontend/                          Vite + React Observatory Console
+|   |-- src/
+|   |   |-- app/                       App shell, routing, main layout
+|   |   |-- components/                25 production UI components
+|   |   |-- hooks/                     Real-time telemetry and data hooks
+|   |   |-- services/                  API client, telemetry, wallet auth
+|   |   |-- styles/                    Design system CSS (theme, dashboard, landing)
+|   |   +-- test/                      17 frontend test files (72 tests)
+|   |-- public/                        Static assets
+|   +-- package.json                   @ghostbroker/frontend workspace
+|
+|-- backend/                           Express + WebSocket API
+|   |-- src/
+|   |   |-- api/                       13 route modules (REST endpoints)
+|   |   |-- auth/                      Agent authorization facade, operator auth,
+|   |   |                              API key auth, session tokens
+|   |   |-- cli/                       Agent CLIs (buyer, seller, hosted, identity,
+|   |   |                              delegation, LLM providers, negotiation loop)
+|   |   |-- config/                    Environment loader and validation
+|   |   |-- enclave/                   Terminal 3 ADK boundary layer
+|   |   |   |-- auth/                  Ghostbroker delegation VC verifier,
+|   |   |   |                          agent identity, DID registry, authority claims
+|   |   |   |-- keys/                  Key generation, rotation, sealed secret maps
+|   |   |   |-- matching/              Blind intent client, match contract client,
+|   |   |   |                          settlement command builder
+|   |   |   |-- negotiation/           Ticket client, round evaluator,
+|   |   |   |                          disclosure verifier
+|   |   |   |-- runner/                Enclave agent loop runner and lifecycle
+|   |   |   |-- sandbox/               T3N client, config, token balance,
+|   |   |   |                          tenant identity store
+|   |   |   +-- settlement/            Settlement execution via enclave
+|   |   |-- errors/                    Typed public error system
+|   |   |-- logging/                   Pino logger with forbidden-field redaction
+|   |   |-- middleware/                Correlation ID injection
+|   |   |-- models/                    TypeScript domain models
+|   |   |-- negotiation-core/          Shared strategy math, turn context,
+|   |   |                              decision validation (27 tests)
+|   |   |-- privacy/                   Forbidden-field scanner and assertions
+|   |   |-- sdk/
+|   |   |   +-- agent-client/          Published Node.js SDK for external agents
+|   |   |                              (21 files, 56 tests)
+|   |   |-- services/                  29 service modules + settlement-rails/
+|   |   |-- tests/                     57 backend test files (194 tests)
+|   |   |-- validation/               Zod request schemas
+|   |   +-- websocket/                 Telemetry server, event types, redaction
+|   |-- contracts/
+|   |   |-- matching-policy/           Rust WASI P2 TEE contract (seal + match)
+|   |   +-- relayer/                   Solidity settlement relayer (Foundry)
+|   +-- package.json                   @ghostbroker/backend workspace
+|
+|-- database/
+|   |-- schema.sql                     Supabase schema (11 tables, RLS)
+|   |-- migrations/                    Incremental Supabase migrations
+|   |-- policies/                      Row-level security policies
+|   |-- functions/                     Database functions
+|   +-- seed/                          Development seed data
+|
+|-- docs/
+|   |-- agent-integration/             8-file agent developer documentation
+|   |   |-- OVERVIEW.md
+|   |   |-- AUTHENTICATION.md
+|   |   |-- DEPLOY_YOUR_AGENT.md
+|   |   |-- API_REFERENCE.md
+|   |   |-- INTENT_SUBMISSION.md
+|   |   |-- SETTLEMENT_AND_RECEIPTS.md
+|   |   |-- WEBSOCKET_TELEMETRY.md
+|   |   +-- ERROR_REFERENCE.md
+|   |-- settlement-rails.md            Settlement rail operator runbook
+|   |-- terminal3-adk-onboarding-doc-gaps.md
+|   +-- infrastructure-gaps.md
+|
+|-- tests/                             Playwright E2E test configuration
+|-- scripts/                           Build, publish, and verification scripts
+|-- DESIGN.md                          Design system specification
+|-- PRODUCT.md                         Product brief and brand personality
++-- package.json                       Root workspace orchestrator
+```
 
-- REST responses to the dashboard or to an agent
-- WebSocket telemetry events (enforced by an allowlist in
-  `backend/src/websocket/redact-event.ts`)
-- Supabase rows (the schema stores only institution metadata, encrypted
-  receipt payloads, encrypted intent-lock references, and non-sensitive
-  operational references)
-- Server logs (the `redact-event` test fixtures assert this for every
-  field on the deny list)
-- Frontend screenshots, Playwright traces, and test fixtures
+---
 
-The privacy boundary is enforced at four layers:
+## Technology Stack
 
-1. **Zod schema at the intent edge.** `POST /api/agents/intents`
-   rejects any plaintext `asset`, `side`, `quantity`, or `price` field
-   with `validation_failed` before the request reaches the orchestrator.
-   The contract test
-   `backend/src/tests/contracts/agents-intents-privacy.contract.test.ts`
-   exercises every forbidden field.
-2. **WebSocket allowlist.** Every event the backend emits is run
-   through `redact-event.ts`, which strips any field on the deny list
-   and drops the event if it would otherwise leak a forbidden value.
-3. **Database schema.** Active trade columns are stored as ciphertext:
-   `asset_code_ciphertext`, `quantity_ciphertext`,
-   `execution_price_ciphertext`. The corresponding plaintext never
-   crosses the Supabase boundary.
-4. **Dashboard tests.** The frontend has a dedicated
-   `privacy-redaction.test.tsx` that searches every rendered string
-   for forbidden field names and rejects any match. Playwright's
-   `dashboard-privacy.spec.ts` does the same at the browser level.
+### Backend
 
-What the operator does see:
+| Layer              | Technology                                      |
+| ------------------ | ----------------------------------------------- |
+| Runtime            | Node.js >= 20.19, TypeScript 6.0                |
+| HTTP Framework     | Express 5.2                                     |
+| WebSocket          | ws 8.21                                         |
+| Database           | Supabase (PostgreSQL) via @supabase/supabase-js  |
+| Terminal 3 SDK     | @terminal3/t3n-sdk 3.5, @terminal3/verify_vc 0.0.38 |
+| Cryptography       | @noble/curves 2.2, @noble/hashes 1.5, ethers    |
+| Blockchain         | viem 2.52 (Sepolia ERC-20 settlement)           |
+| Validation         | Zod 4.4                                         |
+| Logging            | Pino 10.3                                       |
+| Security           | Helmet 8.2, CORS                                |
+| Smart Contracts    | Rust (WASI P2, wit-bindgen), Solidity (Foundry)  |
+| Testing            | Vitest 4.1, Supertest 7.2                       |
+
+### Frontend
+
+| Layer              | Technology                                      |
+| ------------------ | ----------------------------------------------- |
+| Framework          | React 19.2, Vite 8.0                            |
+| 3D Rendering       | Three.js 0.184 (SecureCore3D enclave viz)       |
+| Video Streaming    | hls.js 1.6 (attested enclave canvas)            |
+| Icons              | hugeicons-react 0.4, lucide-react 1.18          |
+| Testing            | Vitest 4.1, Testing Library, Playwright 1.60    |
+| Typography         | Cinzel (display), Plus Jakarta Sans (body),     |
+|                    | Share Tech Mono (crypto data), Instrument Serif |
+
+### Infrastructure
+
+| Concern            | Provider                                        |
+| ------------------ | ----------------------------------------------- |
+| Frontend Hosting   | Vercel                                          |
+| Backend Hosting    | Heroku                                          |
+| Database           | Supabase (managed PostgreSQL + RLS)             |
+| TEE                | Terminal 3 Network (hardware-secured enclaves)  |
+| Settlement Chain   | Ethereum Sepolia (ERC-20 atomic settlement)     |
+| LLM Providers      | Gemini, OpenAI, Groq (multi-provider fallback)  |
+
+---
+
+## Terminal 3 Agent Auth SDK Integration
+
+The Terminal 3 Agent Auth SDK is load-bearing infrastructure in GhostBroker, not
+a cosmetic wrapper. Every privileged backend action passes through the same
+`T3AgentAuthorizationFacade`, which delegates to the Ghostbroker-style W3C
+Verifiable Credential verifier at
+`backend/src/enclave/auth/ghostbroker-delegation.ts`.
+
+### Verification Pipeline
+
+The verifier performs the following checks on every credential, in order:
+
+1. **Shape validation** -- Zod schema parse (`ghostbrokerDelegationSchema`)
+   enforces `id`, `issuer`, `credentialSubject.agentDid`,
+   `credentialSubject.allowedActions`, `issuanceDate`, `expirationDate`, and
+   `proof` object presence.
+
+2. **Time-window enforcement** -- The credential's `issuanceDate` and
+   `expirationDate` are validated against the current server time. Expired
+   credentials are rejected with reason `expired`.
+
+3. **DID binding** -- The credential's `credentialSubject.agentDid` must
+   exactly match the agent DID on the incoming request. A mismatch yields
+   `agent_mismatch`.
+
+4. **Revocation check** -- The verifier accepts a `revokedAuthorityRefs` set
+   sourced from `AuthorityRevocationRepository` before every check. Revoked
+   references are rejected with reason `revoked`. Revocation reasons include
+   `operator_revoked`, `policy_replaced`, `credential_compromised`, and
+   `terminal3_revoked`.
+
+5. **Cryptographic verification** (live mode) -- The verifier implements
+   inline ECDSA verification: strip the proof from the VC, `keccak256` the
+   JSON payload, recover the signer address via `ethers.verifyMessage`, and
+   assert the recovered address matches one of the trusted signer addresses
+   (issuer DID address or additional trusted addresses from the composition
+   root). The verifier fails closed on any exception -- it never silently
+   downgrades to a non-cryptographic pass.
+
+6. **Authority reference** -- Every successful verification produces a
+   `ghostbroker-delegation:<vc-id>` reference. The agent must echo this on
+   every privileged action, and the backend re-asserts equality on each call.
+
+7. **Policy hash** -- A stable SHA-256 hex fingerprint derived from the
+   canonicalized credential, suitable for equality checks, database indexing,
+   and UI display.
+
+### Verification Mode
+
+The verifier runs in exactly one mode — `live` — hard-coded at
+`backend/src/enclave/auth/ghostbroker-delegation.ts`. On every call the verifier:
+
+1. parses the VC against `ghostbrokerDelegationSchema`,
+2. checks the time window (`issuanceDate` ≤ now ≤ `expirationDate`),
+3. checks the DID binding (`credentialSubject.agentDid` matches the
+   requesting agent),
+4. checks revocation (`authorityRef` not in `revokedAuthorityRefs`),
+5. cryptographically verifies the `EcdsaSecp256k1Signature2019` proof
+   inline (`keccak256(canonicalJson)` → `ethers.verifyMessage` →
+   recovered address matched against the issuer DID's address and the
+   caller's `additionalTrustedSignerAddresses` set),
+6. fails closed on any exception — never silently downgrades to a
+   non-cryptographic pass.
+
+The `setup:identity` + `setup:delegation` flow (and the server-side
+`tenant-delegation.ts` signer) produce a real signed JWS by default,
+so the verifier's `live` mode is the production gate on every
+privileged action (`agent.admit`, `intent.submit`, `settlement.execute`,
+`negotiation.*`).
+
+### Privileged Actions Protected
+
+The following actions require a verified delegation credential on every call:
+
+- `agent.admit` -- Initial agent admission (inline VC)
+- `intent.submit` -- Hidden intent submission to the matching engine
+- `intent.cancel` -- Intent cancellation
+- `settlement.execute` -- Trade settlement execution
+- `negotiation.open` -- Negotiation ticket sealing
+- `negotiation.move` -- Negotiation round moves (propose, counter, accept, hold, walkaway)
+- `negotiation.disclose` -- Selective claim disclosure
+- `negotiation.settle` -- Negotiation-based settlement
+
+### Server-Side VC Persistence
+
+In the post-Phase 1 architecture, agents do not send the VC on every call.
+The backend owns the persisted credential:
+
+1. At admission, the dashboard mints and signs the VC via the
+   `BackendTenantDelegationSigner`.
+2. The VC is persisted on the `agents` database row.
+3. On every subsequent privileged call, the `T3AgentAuthorizationFacade`
+   calls `loadAndVerify`, which looks up the persisted VC from the agent
+   record and runs the full verification pipeline.
+4. The same `verifyGhostbrokerDelegationCredential` function is the only
+   verifier behind both the admit-time and per-action paths.
+
+---
+
+## Two-Tier Authentication Architecture
+
+GhostBroker implements a layered authentication model that matches the Terminal 3
+Agent Auth SDK's design intent:
+
+| Layer         | Credential                              | Consumer                        | Purpose                                    |
+| ------------- | --------------------------------------- | ------------------------------- | ------------------------------------------ |
+| **Session**   | `gbk_...` persistent API key exchanged for an 8-hour JWT | External agent SDK + hosted negotiator | Authenticate the agent to the backend across reconnects and restarts |
+| **Authority** | Ghostbroker delegation W3C Verifiable Credential | Every privileged action via `loadAndVerify` | Authorize this specific action against institution policy |
+
+### Session Layer
+
+- API keys are minted per institution via `POST /api/api-keys` and stored as
+  `bcrypt` hashes in the `api_keys` table.
+- Agents exchange the key at `POST /api/auth/api-key` for an 8-hour JWT.
+- The JWT identifies the institution; the backend looks up the agent and its
+  persisted VC from there.
+- Revocation is immediate: revoking the API key invalidates all sessions.
+
+### Authority Layer
+
+- The delegation VC answers: "Is this agent authorized to do this right now,
+  for this action, against this policy?"
+- The VC carries `allowedActions` (the same `RequestedAgentAction` enum the
+  orchestrator enforces), `maxSpendUsd`, `agentDid`, and time bounds.
+- Authority revocation is tracked in `agent_authority_revocations` with four
+  typed reasons and an optional `unrevoked_at` for reinstatement.
+
+### Operator Authentication
+
+For human operators, the dashboard uses a Terminal 3 DID challenge-response
+flow:
+
+1. `GET /api/auth/challenge` -- Backend issues a nonce-bound challenge.
+2. The operator signs the challenge with their wallet (secp256k1).
+3. `POST /api/auth/verify` -- Backend verifies the signature via
+   `T3AgentIdentityVerifier` and issues a session JWT.
+
+---
+
+## Privacy Boundary
+
+Active hidden intent parameters never appear in any external surface. The privacy
+boundary is enforced at three independent layers:
+
+### Layer 1: API Schema Enforcement
+
+The Zod schema at `POST /api/agents/intents` rejects any request containing
+plaintext `asset`, `side`, `quantity`, or `price` fields with
+`validation_failed` before the request reaches the orchestrator. Intent
+submission accepts only opaque encrypted payloads.
+
+### Layer 2: WebSocket Telemetry Redaction
+
+The `redact-event.ts` module enforces an explicit allowlist of fields that may
+appear on WebSocket telemetry events:
+
+- `eventId`, `institutionId`, `type`, `phase`, `severity`, `timestamp`
+- `correlationRef`, `agentId`, `receiptRef`, `railProofRef`, `latencyMs`
+
+Any event payload carrying forbidden fields (asset, side, quantity, price,
+counterparty, queue rank, match score) is caught by `scanForbiddenFields`
+and rejected. The redaction layer is unit-tested against every field on the
+deny list.
+
+### Layer 3: Database Schema
+
+The `completed_trades` table stores settlement data exclusively as ciphertext:
+
+- `asset_code_ciphertext` -- Encrypted asset identifier
+- `quantity_ciphertext` -- Encrypted trade quantity
+- `execution_price_ciphertext` -- Encrypted execution price
+
+All three columns have `CHECK (column <> '')` constraints. The corresponding
+plaintext values never cross the Supabase boundary. What an operator sees in
+the Observatory Console:
 
 - Connection status (backend, WebSocket, Supabase, T3 sandbox, per-agent)
 - Sanitized state transitions: `agent_verified`, `intent_sealed`,
   `encrypted_evaluation`, `settlement_finalized`, `receipt_available`
-- Completed trade records (post-settlement only, with encrypted fields)
+- Completed trade records (post-settlement only, encrypted fields)
 - Audit receipt metadata (hash, key version, attestation reference)
-- Encrypted receipt payloads that only the institution can decrypt with
-  its own receipt key (held inside the T3 tenant private map)
 
 ---
 
-## The Terminal 3 Agent Auth SDK integration
+## Negotiation Engine
 
-The headline integration is the per-action authority verifier in
-[`t3-enclave/src/auth/ghostbroker-delegation.ts`](t3-enclave/src/auth/ghostbroker-delegation.ts).
-It verifies Ghostbroker-style W3C Verifiable Credentials
-end-to-end. The verifier runs in three modes controlled by the
-server-side `T3_MODE` env var (with `VC_VERIFY_MODE` kept as a
-backward-compat alias):
+GhostBroker ships a turn-based bilateral negotiation engine where LLM-powered
+agents negotiate within verifiable authority rails. The negotiation is not
+free-form LLM-vs-LLM chat; the orchestrator owns the structural constraints
+while the LLM owns the strategy.
 
-- **`sandbox`** - shape + time window + DID binding. No crypto. This
-  is the default and the mode the demo "Spin up demo agents" button
-  uses. Unsigned demo credentials pass. The `sandbox` mode is also
-  the only mode in which an SDK error is tolerated (the demo surface
-  keeps the historical "verified on SDK error" behaviour).
-- **`structural`** - the same checks, recorded with
-  `verificationMode: "structural"`. Used in CI and integration tests.
-- **`live`** - real `EcdsaSecp256k1Signature2019` JWS verification
-  via `@terminal3/verify_vc`. The verifier **fails closed** on any
-  SDK exception: it never silently downgrades to a non-cryptographic
-  `structural` pass. Demo markers are rejected as
-  `demo_proof_in_live_mode`. The legacy `VC_VERIFY_STRICT=true` opt-in
-  is now a no-op (the verifier always fails closed outside `sandbox`).
-
-The verifier checks every VC for:
-
-- **Shape + time window + DID binding.** Every VC must have an `id`,
-  `issuer`, `credentialSubject.agentDid` (plus the
-  `credentialSubject.allowedActions` trading-agent action scope),
-  `issuanceDate`/`expirationDate`, and a `proof` object. The
-  verifier checks all of these against the request's `agentDid` and
-  `now`.
-- **Agent-binding.** The credential's `credentialSubject.agentDid` must
-  match the agent DID on the request.
-- **Revocation.** The verifier accepts a `revokedAuthorityRefs` set,
-  sourced from `AuthorityRevocationRepository` before every check.
-  Revoked references are rejected as `revoked`.
-- **Cryptographic verification (live mode).** The verifier calls
-  `@terminal3/verify_vc` at runtime when the mode is `live`. The
-  verifier fails closed on any SDK error — see
-  `t3-enclave/src/auth/ghostbroker-delegation.ts`'s `tryLiveVerify`
-  for the production-grade contract.
-- **Authority reference.** Every verification produces a
-  `ghostbroker-delegation:<vc-id>` reference. The agent must echo this
-  back on every privileged action, and the backend re-asserts equality
-  on each call.
-
-The post-Phase 1 architecture removes the agent-side re-send of the
-VC on every call. The backend mints and persists the VC at admit time
-and re-verifies it on every subsequent privileged action. The
-adapter lives in
-[`t3-enclave/src/auth/agent-auth-client.ts`](t3-enclave/src/auth/agent-auth-client.ts);
-the facade lives in
-[`backend/src/auth/agent-authz.ts`](backend/src/auth/agent-authz.ts)
-and exposes two entry points:
-
-- `verifyAgentAuthority(request)` - the admit-time path. Called once
-  on the very first admission when the agent sends the VC inline.
-  Persists the VC on the `agents` row.
-- `loadAndVerify(input)` - the post-Phase 1 server-side path. The
-  orchestrator looks up the persisted VC for `(agentId, institutionId)`
-  and runs the same verifier against it on every subsequent
-  privileged action (`submitIntent`, `cancelIntent`,
-  `settlement.execute`, `negotiation.move`, `negotiation.disclose`,
-  `negotiation.settle`).
-
-Both entry points funnel into the same `verifyGhostbrokerDelegationCredential`
-function. The verifier is the single source of truth for agent
-authority.
-
-The verifier has its own test file at
-[`t3-enclave/src/tests/auth-agent-client.test.ts`](t3-enclave/src/tests/auth-agent-client.test.ts):
-valid VC, stable sha256 `policyHash`, stale `authorityRef` rejected
-as `over_scoped`, expired credential rejected as `expired`. The
-orchestrator's load-and-verify path is exercised by the
-`negotiation-orchestrator` and `hosted-demo-settlement` integration
-suites.
-
----
-
-## Two-tier authorization model
-
-The auth model is layered to match the Agent Auth SDK's design intent:
-
-| Layer | Credential | Consumer | Purpose |
-|---|---|---|---|
-| **Session** | `gbk_...` persistent API key exchanged for an 8-hour JWT | External agent SDK + hosted negotiator | Authenticate the agent to the backend across reconnects, restarts, and long-running deploys |
-| **Authority** | Ghostbroker delegation W3C Verifiable Credential (`ghostbroker-delegation:<vc-id>`) | Every privileged action via `loadAndVerify` on the backend | Authorize this specific action against institution policy, with shape, time-window, DID-binding, and revocation checks |
-
-The two are complementary, not alternatives. The API key answers
-*"which institution does this agent belong to?"*; the delegation VC
-answers *"is this agent authorized to do this right now, for this
-action, against this policy?"* This is the same separation the
-Terminal 3 docs use for the [seed API key
-pattern](https://docs.terminal3.io/developers/adk/tips/seed-api-key),
-applied to the agent side of the boundary. Agents exchange the key
-at `POST /api/auth/api-key`, then the backend loads and verifies the
-persisted VC on every privileged call.
-
-For the human operator, the dashboard uses a Terminal 3 DID
-challenge-response flow (`/api/auth/challenge` + `/api/auth/verify`)
-backed by `T3AgentIdentityVerifier`. The SDK is the agent path; the
-wallet is the operator path. They solve different problems and live in
-different surfaces.
-
----
-
-## Architecture
+### State Machine
 
 ```
-                 +-------------------------------+
-                 |  Operator Browser (Vercel)    |
-                 |  React + Vite dashboard       |
-                 +---------------+---------------+
-                                 |
-                          wss:// | REST (filtered)
-                                 |
-        +------------------------+---------------------------+
-        |                                                    |
-        |            GhostBroker Backend (Heroku)            |
-        |  Express + ws + Zod + privacy redaction            |
-        |                                                    |
-        |  +---------------+    +-------------------------+ |
-        |  | Auth facade   |    | Orchestrator (settlement||
-        |  | (loadAndVerify|--- | negotiation, intents)   ||
-        |  |  on every     |    +------------+------------+ |
-        |  |  action)      |                 |              |
-        |  +-------+-------+                 |              |
-        |          |                         v              |
-        |          |              +----------+-----------+  |
-        |          |              |  Supabase PostgreSQL |  |
-        |          |              |  encrypted receipts  |  |
-        |          |              |  institution meta    |  |
-        |          |              +----------------------+  |
-        |          v                                         |
-        |  +-------+-------------------------------------+ |
-        |  | t3-enclave (the ADK boundary)               | |
-        |  |  +-----------+   +------------+   +-------+ | |
-        |  |  | Ghostbroker|  | Match      |   | T3N   | | |
-        |  |  | delegation |  | contract   |   | SDK   | | |
-        |  |  | verifier   |  | client     |   |       | | |
-        |  |  +-----------+   +------------+   +-------+ | |
-        |  +---------------------------------------------+ |
-        +------------------------+---------------------------+
-                                 |
-                                 v
-                  +--------------+--------------+
-                  |  Terminal 3 TEE Cluster      |
-                  |  Encrypted execution,        |
-                  |  private tenant KV,          |
-                  |  attestations                |
-                  +-----------------------------+
-
-  External agents (npm install @ghostbroker/agent-client)
-   |                            ^
-   | POST /api/auth/api-key     | wss telemetry
-   | POST /api/agents/admit     | (sanitized events)
-   | POST /api/agents/intents   |
-   | GET  /api/trades/completed |
-   v
-  GhostBroker Backend (above)
+pairing --> active --> converged --> settling --> settled
+                  \--> walked_away
+                  \--> expired
+                  \--> awaiting_approval (escalation gate)
 ```
 
-The terminal-3 boundary is enforced at compile time. `frontend/` never
-imports `@ghostbroker/t3-enclave`; `agents/` never imports the T3
-ADK directly. The only place the SDK is called from is
-`t3-enclave/src/sandbox/t3n-client.ts`, which is the only module that
-talks to the Terminal 3 network.
+### Orchestrator Architecture
+
+The `NegotiationOrchestrator` (1,911 lines) manages the full session lifecycle:
+
+1. **Ticket Sealing** -- Each agent seals a negotiation ticket through the
+   TEE (`T3NegotiationTicketClient`). The TEE binds the agent's DID,
+   institution, asset, side, and compatibility token into an opaque handle.
+
+2. **Compatibility-Aware Pairing** -- The orchestrator finds compatible
+   waiting tickets using policy-aware matching: same asset, opposite side,
+   different institution, overlapping size regime, and claim compatibility.
+   The TEE is the structural authority on pair validity via `verifyPair`.
+
+3. **Turn-Based Moves** -- Each round, the active agent submits a bounded
+   move. Move types include:
+   - `propose` / `counter` -- Price and quantity proposals
+   - `reveal` -- Selective claim disclosure (TEE-verified)
+   - `request_disclosure` -- Request counterparty claims
+   - `accept` -- Accept current terms
+   - `hold` -- Pass without advancing
+   - `walkaway` -- Terminate the negotiation
+
+4. **Price Validation** -- Every priced move is validated against the
+   `negotiation-core` shared strategy math: price within the mandate's
+   derived price band, quantity within target bounds, notional under ceiling.
+   The same validator runs on both the backend (authoritative) and the agent
+   runtime (pre-clamp to avoid burning rounds).
+
+5. **Disclosure Gate** -- Convergence requires the disclosure gate to be
+   satisfied in addition to a price cross. The gate tracks which claims
+   each side has disclosed and whether reciprocity requirements are met.
+
+6. **Escalation** -- Agents can request operator approval when the
+   negotiation reaches terms outside their autonomous authority. The session
+   enters `awaiting_approval` and a timer auto-expires it at the deadline.
+
+7. **Settlement** -- On convergence, the orchestrator calls the settlement
+   service with the agreed terms, the TEE-snapshotted delegation
+   credentials, and the enclave's settlement command.
+
+### Mandate Configuration
+
+Each agent operates under a negotiation mandate that defines its authority
+envelope. The mandate carries both operator-authored policy and derived
+numeric rails:
+
+- **Objective** -- Free-text negotiation goal
+- **Execution style** -- `patient`, `balanced`, `aggressive`,
+  `relationship_first`, or `trust_first`
+- **Valuation policy** -- Anchor value, source, and operator notes
+- **Concession policy** -- Pace and max concession in basis points
+- **Disclosure policy** -- Allowed claim ladder and reciprocity requirements
+- **Approval policy** -- `auto_settle` or `require_operator_approval`
+- **Counterparty requirements** -- Required claims, disallowed traits,
+  reputation tier
+- **Size policy** -- Target quantity, minimum quantity, partial execution
+- **Time window** -- Deadline and preferred trading window
+
+The `negotiation-core` module (41,729 bytes, 27 tests) provides the shared
+strategy math consumed by both the backend orchestrator and the hosted agent
+runtime: `normalizeStrategy`, `buildTurnContext`, `derivedPriceBandFor`,
+`disclosureGateSatisfied`, `preferredEnvelopeFor`, `validateAgentDecision`,
+and `pairingCompatibility`.
 
 ---
 
-## Workspace layout
+## Settlement Rails
+
+GhostBroker ships a pluggable settlement rail layer that moves assets when a
+match settles. The layer is defined in `backend/src/services/settlement-rails/`
+and documented in `docs/settlement-rails.md`.
+
+### Rail Registry
+
+| Rail ID                | Type    | Description                           |
+| ---------------------- | ------- | ------------------------------------- |
+| `chain:sepolia:erc20`  | On-chain | Real `GhostBrokerSettlementRelayer` Solidity contract. Atomic ERC-20 settlement on Ethereum Sepolia. GhostBroker's only settlement rail — required at boot time. |
+
+### Settlement Flow
+
+1. The `SettlementService` receives a settlement execution request from either
+   the matching orchestrator or the negotiation orchestrator.
+2. The `SettlementCommandBuilder` (in the enclave boundary) re-verifies the
+   agent's delegation VC for `settlement.execute`.
+3. The `MapSettlementRailDispatcher` selects the rail based on the
+   institution's `settlement_profile_ref`. GhostBroker exposes a single rail
+   (`chain:sepolia:erc20`); any other profile fails closed with
+   `RailDispatchError`.
+4. The selected rail executes the atomic settlement by broadcasting
+   `settle(...)` on the relayer contract, waiting for confirmation,
+   decoding the `Settled` event, and writing the row with the chain tx hash.
+5. Portfolio balances are updated atomically via `PortfolioService`.
+6. Audit receipts are generated with encrypted payloads and T3 attestation
+   references.
+7. Telemetry events are published for operator visibility.
+
+### On-Chain Settlement Details
+
+The `SepoliaErc20Rail` uses the `GhostBrokerSettlementRelayer` Solidity contract
+deployed via Foundry. The contract holds per-institution pre-approved ERC-20
+allowances and broadcasts the atomic `settle(...)` call:
 
 ```
-ghostbroker/
-|-- package.json                   # npm workspaces root
-|-- README.md                      # this file
-|-- SUBMISSION.md                  # bounty submission document
-|-- DESIGN.md                      # design system: colors, typography, components
-|-- PRODUCT.md                     # product positioning, audience, anti-references
-|-- terminal3docs.md               # offline reference of Terminal 3 docs
-|-- database/                      # Supabase PostgreSQL
-|   |-- schema.sql                 # canonical schema (context only)
-|   |-- migrations/                # numbered SQL migrations
-|   |-- policies/                  # row-level security policies
-|   `-- seed/                      # dev seed data
-|-- frontend/                      # Vite + React dashboard
-|   |-- src/
-|   |   |-- app/                   # routes + App
-|   |   |-- components/            # observatory surfaces
-|   |   |-- hooks/                 # telemetry + trade history hooks
-|   |   |-- services/              # api-client + telemetry-client
-|   |   |-- styles/                # theme.css + dashboard.css
-|   |   `-- test/                  # Vitest + RTL
-|   `-- tests/                     # Playwright dashboard + privacy specs
-|-- backend/                       # Express REST + WebSocket + Supabase
-|   |-- src/
-|   |   |-- api/                   # institutions, agents, trades, receipts, portfolios
-|   |   |-- auth/                  # operator-auth, agent-authz, api-key-auth, session-token
-|   |   |-- services/              # agent, hidden-intent, settlement, portfolio, telemetry
-|   |   |-- websocket/             # redact-event + telemetry-server
-|   |   |-- privacy/               # forbidden-fields allowlist
-|   |   |-- validation/            # zod schemas (encrypted-intent etc.)
-|   |   `-- tests/                 # unit + integration + contracts
-|   `-- Procfile                   # Heroku process definitions
-|-- t3-enclave/                    # Terminal 3 ADK boundary
-|   |-- src/
-|   |   |-- auth/                  # Ghostbroker delegation VC verifier + agent authz
-|   |   |-- keys/                  # key-generation + key-rotation + sealed-secret-maps
-|   |   |-- matching/              # blind-intent + match-contract + settlement-command
-|   |   |-- negotiation/           # negotiation ticket + disclosure verifier + evaluate-round
-|   |   |-- runner/                # ADK runner creation + lifecycle + agent loop
-|   |   |-- sandbox/               # T3N client + tenant identity store + token balance
-|   |   `-- tests/
-|-- agent-client/                  # @ghostbroker/agent-client (published SDK)
-|   |-- src/
-|   |   |-- auth-client.ts
-|   |   |-- delegation-signer.ts
-|   |   |-- ghostbroker-client.ts
-|   |   |-- intent-client.ts
-|   |   |-- negotiation-client.ts
-|   |   |-- portfolio-client.ts
-|   |   |-- receipt-client.ts
-|   |   |-- trades-client.ts
-|   |   |-- websocket-client.ts
-|   |   `-- errors.ts
-|-- agents/                        # hosted LLM negotiator
-|   |-- src/
-|   |   |-- buyer-agent.ts
-|   |   |-- seller-agent.ts
-|   |   |-- hosted-agent.ts
-|   |   |-- env.ts
-|   |   |-- identity.ts
-|   |   |-- delegation.ts          # W3C VC schema + load helpers
-|   |   |-- vc-verifier.ts
-|   |   |-- sealed-envelope.ts
-|   |   |-- llm-decision.ts
-|   |   |-- negotiation-decision.ts
-|   |   |-- run-loop.ts            # shared per-tick loop (buyer/seller)
-|   |   |-- negotiation-loop.ts    # shared per-tick loop (hosted)
-|   |   `-- llm/                  # Gemini + OpenAI + Groq fallback chain
-|-- negotiation-core/              # shared strategy math
-|   `-- src/
-|       |-- negotiation-strategy.ts
-|       `-- index.ts
-|-- ghostbroker-delegation-reference/  # reference procurement-agent BUIDL
-|   |-- src/
-|   |   |-- agent/
-|   |   |-- auth/                  # policy-engine + vc-verifier
-|   |   |-- audit/
-|   |   |-- catalog/
-|   |   |-- scripts/
-|   |   `-- t3/                    # adk-client + identity + plugin-bridge + setup-maps
-|-- contracts/                     # on-chain settlement rail
-|   `-- relayer/
-|       |-- foundry.toml
-|       |-- src/contracts/
-|       |   |-- GhostBrokerSettlementRelayer.sol
-|       |   `-- MinimalERC20.sol
-|       `-- deploy.mjs
-|-- docs/                          # operator + developer documentation
-|   |-- agent-integration/         # agent developer guide (6 files)
-|   |-- deployment/
-|   |-- designs/
-|   |-- privacy/
-|   |-- qa/
-|   |-- infrastructure-gaps.md
-|   |-- settlement-rails.md
-|   `-- terminal3-adk-onboarding-doc-gaps.md
-|-- scripts/                       # repo-level scripts
-|-- tests/                         # root Playwright specs
-`-- .hermes/plans/                 # internal planning documents
+settle(bytes32 tradeRef, bytes32 executionRef,
+       address buyDeposit, address sellDeposit,
+       address buyToken, address sellToken,
+       uint256 buyAmount, uint256 sellAmount)
 ```
 
----
+The chain rail preserves the dark-pool privacy claim end-to-end: a public chain
+observer sees the institution deposit addresses and amounts but not the
+TEE-decrypted quantity-times-price semantics.
 
-## Technology stack
+### Relayer Signer Architecture
 
-| Layer | Choice | Rationale |
-|---|---|---|
-| Language | TypeScript 5.x, strict mode, no `any` | Single language across the repo, contract-level type safety at the T3 boundary |
-| Runtime | Node.js 20 LTS | Stable, supports `fetch` + `WebSocket` natively |
-| Frontend | React 18 + Vite | Fast HMR, simple production build, small bundle |
-| Backend | Express + ws (raw WebSocket) + Zod | Minimal, predictable, Zod gives us typed boundary validation |
-| Database | Supabase PostgreSQL | Managed, with RLS for institution isolation |
-| Confidential execution | Terminal 3 ADK + T3N TEE | The only place active order parameters are decrypted |
-| Crypto verification | `@terminal3/verify_vc` | The live mode verifier for `EcdsaSecp256k1Signature2019` JWS |
-| LLM providers | Gemini + OpenAI + Groq with a fallback chain | Provider resilience without lock-in |
-| Blockchain (settlement) | Solidity 0.8.x via Foundry, viem for client | Audited, well-known tooling; viem is the modern client |
-| Test runner | Vitest | Native ESM, fast, plays well with Vite + TypeScript |
-| Browser tests | Playwright | Multi-browser, supports the dashboard privacy scan |
-| React tests | React Testing Library | Standard RTL behavior + accessibility assertions |
-| Linting | ESLint flat config + Prettier | Enforced repo-wide via root scripts |
-| Build | `tsc` for libraries, `vite build` for the frontend | Simple, deterministic, no bundler magic in the enclave |
+The relayer signer is a deliberate seam for the TEE production swap:
 
----
+- **v1 demo**: A `ViemWalletRelayerSigner` signs with the environment
+  variable private key.
+- **Production**: A `TeeAttestedRelayerSigner` whose tenant private key is
+  held inside the T3 tenant TEE. The on-chain `from` is the tenant
+  identity's address; in production the key extraction is
+  attestation-anchored.
 
-## Test coverage and quality bars
+### Settlement Reconciler
 
-GhostBroker ships with a comprehensive automated test suite. The
-headline numbers are:
-
-- **554 tests passing across 104 test files**, with `tsc --noEmit`
-  clean on every workspace.
-- 1 test file is skipped by default (8 tests) and gated behind
-  `WS2_ANVIL_INTEGRATION=1` so it only runs when a local Anvil node
-  is up. Set the env var to add 8 on-chain tests that deploy the
-  relayer and assert real `Settled` event decoding.
-
-Per-workspace breakdown:
-
-| Workspace | Test files | Tests passing | Tests skipped |
-|---|---|---|---|
-| `negotiation-core` | 1 | 27 | 0 |
-| `t3-enclave` | 12 | 79 | 0 |
-| `backend` | 57 | 194 | 8 (chain-sepolia, gated) |
-| `frontend` | 17 | 72 | 0 |
-| `agent-client` | 9 | 56 | 0 |
-| `agents` | 8 | 126 | 0 |
-| **Total** | **104** | **554** | **8** |
-
-The suite covers four broad categories:
-
-1. **Privacy regression.** The redact-event allowlist is tested for
-   every forbidden field. The frontend privacy test renders every
-   dashboard surface and asserts no plaintext trading field appears.
-   Playwright's `dashboard-privacy.spec.ts` does the same in a real
-   browser. The contract test for `POST /api/agents/intents` confirms
-   plaintext `asset`/`side`/`quantity`/`price` is rejected.
-2. **Authority verification.** The Ghostbroker delegation verifier is
-   tested for valid VC, stable `policyHash`, stale `authorityRef`,
-   and expired credentials. The orchestrator's `loadAndVerify` path
-   is tested through `negotiation-orchestrator` and
-   `hosted-demo-settlement` suites.
-3. **Settlement rails.** Both the noop rail and the Sepolia chain
-   rail are tested end-to-end. The Anvil integration test deploys
-   the relayer + 2 minimal ERC-20s, funds them, approves the
-   relayer, dispatches a real trade, and asserts `Settled` event
-   decoding and `Transfer` balance round-trip.
-4. **Negotiation protocol.** The orchestrator's disclosure gate,
-   escalation gate, and reveal/counter choreography are tested
-   end-to-end through the `negotiation-orchestrator` suite.
-
-The full agent developer experience - claim an API key, deploy an
-agent, submit intents, watch settlements - is documented in
-[`docs/agent-integration/`](docs/agent-integration/) and walked through
-end-to-end in the
-[`AgentDeploymentGuide`](frontend/src/components/AgentDeploymentGuide.tsx)
-component of the dashboard itself.
+The `SettlementReconciler` is a system task that periodically polls
+`completed_trades` for unreconciled rows and verifies the chain state via
+`rail.status(railTradeRef)`. Drift is surfaced via a `rail_drift_detected`
+telemetry event. The admin reverser endpoint
+(`POST /api/admin/trades/:tradeRef/reverse`) is the only path that can flip
+a settled row's `settlement_status`.
 
 ---
 
-## Local development setup
+## TEE Smart Contracts
+
+GhostBroker deploys two categories of smart contracts that run inside the
+Terminal 3 enclave surface:
+
+### Matching Policy Contract (Rust / WASI P2)
+
+Located at `backend/contracts/matching-policy/`, this Rust crate compiles to
+a WASI Preview 2 component and runs inside the T3N TEE. It exposes two
+operations:
+
+**`seal-intent`** -- Mints:
+- `intent_handle` -- `intent_<32 hex>` = SHA-256 of
+  `institution_id|agent_did|encrypted_intent|authority_ref|correlation_ref`.
+  Deterministic, so the orchestrator can deduplicate accidental re-seals.
+- `execution_ref` -- `t3exec_<32 hex>` from a fresh monotonic counter.
+
+**`evaluate-match`** -- Mints:
+- `outcome_ref` -- `outcome_<32 hex>` = SHA-256 of
+  `buy_intent_handle|sell_intent_handle|correlation_ref`.
+- `encrypted_trade_fields_ref` -- `t3fields_<32 hex>` = SHA-256 of
+  `buy_intent_handle:sell_intent_handle`.
+- `status` -- `"matched"` when `buy_price >= sell_price` and all fields are
+  valid positive integers; `"no_match"` otherwise.
+- `matched_quantity` -- `min(buy_quantity, sell_quantity)` (decimal string).
+- `execution_price` -- Deterministic midpoint `(buy_price + sell_price) / 2`
+  rounded half-up (decimal string).
+
+The backend orchestrator is a verifier around the enclave outcome: it filters
+obvious non-candidates locally, then trusts the enclave's decision and the
+returned `matched_quantity` / `execution_price` for settlement. It never
+recomputes the crossing locally.
+
+### Settlement Relayer Contract (Solidity / Foundry)
+
+Located at `backend/contracts/relayer/`, this Foundry project contains the
+`GhostBrokerSettlementRelayer.sol` contract and `MinimalERC20.sol` for
+testing. The relayer is deployed to Ethereum Sepolia and handles the atomic
+ERC-20 token transfers that finalize a matched trade.
+
+---
+
+## Agent Client SDK
+
+The `@ghostbroker/agent-client` SDK (21 files, 56 tests) at
+`backend/src/sdk/agent-client/` is the published Node.js TypeScript SDK
+consumed by external agents and the hosted negotiator. It provides a
+complete client for every GhostBroker API surface:
+
+### SDK Modules
+
+| Module                  | Purpose                                         |
+| ----------------------- | ----------------------------------------------- |
+| `GhostBrokerClient`     | Top-level facade orchestrating all sub-clients  |
+| `DelegationSigner`      | Signs Ghostbroker delegation W3C VCs with EcdsaSecp256k1Signature2019 |
+| `AuthClient`            | API key exchange, JWT management, session refresh |
+| `IntentClient`          | Hidden intent submission and cancellation        |
+| `NegotiationClient`     | Mandate creation, ticket submission, move submission |
+| `PortfolioClient`       | Portfolio balance queries and history            |
+| `TradesClient`          | Completed trade history retrieval                |
+| `ReceiptClient`         | Encrypted audit receipt access                   |
+| `WebSocketClient`       | Real-time telemetry stream subscription          |
+
+### Type System
+
+The SDK exports a comprehensive type system in `types.ts` (8,296 bytes)
+covering all request/response shapes, telemetry events, negotiation moves,
+settlement status enums, and error codes.
+
+---
+
+## Hosted LLM Agents
+
+GhostBroker includes a hosted multi-provider LLM agent system at
+`backend/src/cli/agents/` that demonstrates the full agent lifecycle
+within the mandate rail:
+
+### Multi-Provider LLM Chain
+
+The agent runtime uses a priority-ordered fallback chain across three LLM
+providers:
+
+| Priority | Provider | Model (configurable)      |
+| -------- | -------- | ------------------------- |
+| 1        | Gemini   | gemini-3.1-flash-lite     |
+| 2        | OpenAI   | gpt-5-nano                |
+| 3        | Groq     | qwen/qwen3-32b           |
+
+Each provider client (`gemini-client.ts`, `openai-client.ts`,
+`groq-client.ts`) implements a common interface. The `fallback-chain.ts`
+module tries each provider in order, falling back on HTTP errors or
+malformed responses.
+
+### Agent Lifecycle
+
+1. **Identity Setup** -- `identity.ts` loads or creates a secp256k1 keypair
+   and derives a `did:t3n:0x<address>` agent DID.
+2. **Delegation Claim** -- `claim-credential.ts` requests a signed
+   delegation VC from the backend.
+3. **Admission** -- The agent presents its VC to `POST /api/agents/admit`.
+4. **Settlement Pre-Clear** -- `assertSettlementReady()` verifies the
+   institution's deposit balance before the negotiation loop starts.
+5. **Negotiation Loop** -- `negotiation-loop.ts` (29,480 bytes) runs the
+   turn-based negotiation. Each turn:
+   - Builds a `TurnContext` from the session state and mandate
+   - Calls the LLM with the context and strategy profile
+   - Validates the LLM's decision against the mandate rails
+   - Submits the bounded move to the backend
+6. **Settlement** -- On convergence, the orchestrator settles automatically.
+
+### LLM Decision Validation
+
+The `negotiation-decision.ts` module (30,798 bytes, tested by 23,854 bytes
+of tests) validates every LLM decision before submission:
+
+- Price must be within the derived price band
+- Quantity must not exceed the mandate target
+- Notional (price times quantity) must not exceed the ceiling
+- The decision must include reasoning and confidence
+- Strategic intent must be a recognized enum value
+
+---
+
+## Observatory Console (Frontend)
+
+The frontend is a Vite + React 19 Observatory Console deployed to Vercel. It
+provides a read-only institutional monitoring interface designed around the
+principle of Zero Visibility Integrity: operators can observe system state
+and audit completed transactions, but active trading data remains hidden
+behind the TEE boundary.
+
+### Design System
+
+The interface follows the "Attested Enclave" design language documented in
+`DESIGN.md`:
+
+- **Color palette**: Deep black-tint (`#070b0a`) background with Enclave
+  Emerald (`#5ed29c`) accents restricted to cryptographic attestation
+  status. The Rarity Rule: emerald never exceeds 10% of visible surface.
+- **Typography**: Cinzel (display), Plus Jakarta Sans (body), Share Tech
+  Mono (cryptographic data), Instrument Serif (highlights).
+- **Components**: Glassmorphic cards with `backdrop-filter: blur(12px)`,
+  double-mask composited borders, pill-shaped buttons.
+
+### Component Inventory (25 components)
+
+| Component                    | Purpose                                    |
+| ---------------------------- | ------------------------------------------ |
+| `LandingPage`                | HUD-style entry with SecureCore3D enclave visualization |
+| `AuthGateway`                | DID challenge-response wallet authentication |
+| `AgentsPanel`                | Agent status monitoring and management      |
+| `AgentConnectionGrid`        | Per-agent connectivity status grid          |
+| `AgentDeploymentGuide`       | Interactive 8-step agent deployment walkthrough |
+| `AgentProvisioningForm`      | Agent creation and configuration            |
+| `AgentLogEntry`              | Individual agent activity log entries       |
+| `MandateConfigForm`          | Negotiation mandate policy editor           |
+| `NegotiationRoomPanel`       | Live negotiation session monitoring         |
+| `TeeNegotiationVisualizer`   | Real-time TEE negotiation pipeline visualization |
+| `LiveAgentActivityStream`    | Streaming agent activity timeline           |
+| `CompletedTradesTable`       | Settlement history with encrypted fields    |
+| `EncryptedReceiptDrawer`     | Audit receipt viewer with decryption        |
+| `PortfolioCard`              | Per-institution portfolio balances          |
+| `PortfolioHistory`           | Historical balance changes and movements    |
+| `SettlementProfileCard`      | Settlement rail configuration display       |
+| `DepositWalletOverviewCard`  | Chain deposit wallet status and balances    |
+| `EnclaveHealthMonitor`       | TEE health and connectivity dashboard       |
+| `ProcessingStatusRail`       | Multi-phase processing status indicator     |
+| `SecureCore3D`               | Three.js 3D enclave visualization           |
+| `SecureMetric`               | Single secure metric display                |
+| `SettingsPanel`              | Operator settings and configuration         |
+| `DisclosureTimeline`         | Negotiation disclosure history timeline     |
+| `Pagination`                 | Paginated data navigation                   |
+| `Skeleton`                   | Consistent skeleton loading states          |
+
+### Frontend Services
+
+| Service               | Purpose                                         |
+| --------------------- | ----------------------------------------------- |
+| `api-client.ts`       | Full REST API client (27,213 bytes)              |
+| `telemetry-client.ts` | WebSocket telemetry stream consumer              |
+| `telemetry-labels.ts` | Human-readable telemetry phase labels            |
+| `wallet-auth.ts`      | Wallet-based DID authentication                  |
+| `wallet-deposit.ts`   | Chain deposit wallet utilities                   |
+| `agent-identity.ts`   | Agent DID and keypair management                 |
+| `agent-events.ts`     | Agent event type definitions                     |
+
+### Real-Time Hooks
+
+| Hook                         | Purpose                                    |
+| ---------------------------- | ------------------------------------------ |
+| `useConnectionTelemetry`     | WebSocket connection state and event stream |
+| `usePortfolioTelemetry`      | Real-time portfolio balance updates         |
+| `useReceipt`                 | Encrypted receipt fetching and decryption   |
+| `useTradeHistory`            | Paginated trade history with polling        |
+
+---
+
+## Database Schema
+
+GhostBroker uses Supabase (managed PostgreSQL) with Row-Level Security. The
+schema consists of 11 tables:
+
+### Core Tables
+
+**`institutions`** -- Institutional trading entities.
+- `t3_tenant_did` (unique) -- Terminal 3 tenant DID
+- `settlement_profile_ref` -- Settlement rail selection
+- `status` -- `pending`, `active`, `suspended`, `closed`
+
+**`agents`** -- Admitted trading agents.
+- `agent_did` -- Terminal 3 agent DID
+- `authority_ref` -- Current delegation VC authority reference
+- `instrument_scope` -- Allowed trading instruments
+- `direction_scope` -- Allowed trading directions (buy/sell)
+- `max_notional` -- Maximum notional value per trade
+- `policy_hash` -- SHA-256 fingerprint of the delegation VC
+
+**`api_keys`** -- Per-institution API keys for agent authentication.
+- `key_hash` (unique) -- bcrypt hash of the full key
+- `prefix` -- Display prefix for identification
+- `scopes` -- Permission scopes (default: `agent:operate`)
+
+### Trading Tables
+
+**`negotiation_mandates`** -- Agent negotiation authority envelopes.
+- 30+ columns covering operator-authored policy and derived numeric rails
+- Valuation, concession, disclosure, approval, and counterparty policies
+- `policy_hash` -- Links back to the delegation VC
+
+**`negotiation_sessions`** -- Active and completed negotiation sessions.
+- `status` -- 8-state enum (pairing through settled)
+- `delegation_credentials` -- Snapshotted per-side delegation VCs
+- `escalation_status` -- Operator approval gate state
+
+**`negotiation_rounds`** -- Individual negotiation moves.
+- `move_type` -- 7-type enum (propose, counter, reveal, request_disclosure,
+  accept, hold, walkaway)
+- `proposal_ciphertext` -- Encrypted price/quantity
+- `strategic_intent`, `confidence` -- LLM decision metadata
+
+**`negotiation_disclosures`** -- Selective claim disclosures.
+- `claim_assertion_ciphertext` -- Encrypted claim data
+- `t3_attestation_ref` -- TEE attestation reference
+
+**`intent_locks`** -- Portfolio reservation locks for active intents.
+- `intent_handle` -- TEE-sealed intent handle (primary key)
+- `amount` -- Locked portfolio amount
+
+### Settlement Tables
+
+**`completed_trades`** -- Settled trade records.
+- All trading data stored as ciphertext columns
+- `rail_id`, `rail_trade_ref`, `rail_state` -- Settlement rail tracking
+- `reconciled_at` -- Reconciler verification timestamp
+- `negotiation_session_id` -- Links to the originating session
+
+**`audit_receipts`** -- Encrypted audit receipts per institution per trade.
+- `receipt_ciphertext` -- Encrypted receipt payload
+- `receipt_hash` -- SHA-256 of the receipt
+- `access_scope` -- `buyer`, `seller`, or `regulatory_export`
+
+### Governance Tables
+
+**`agent_authority_revocations`** -- Authority revocation records.
+- `reason` -- `operator_revoked`, `policy_replaced`,
+  `credential_compromised`, `terminal3_revoked`
+- `unrevoked_at` -- Optional reinstatement timestamp
+
+**`portfolios`** / **`portfolio_history`** -- Asset balances and change history.
+- `balance` -- Current balance (check >= 0)
+- `locked` -- Amount locked by active intents
+- `change_type` -- `settlement_buy`, `settlement_sell`, `adjustment`, `import`
+
+---
+
+## API Reference
+
+The backend exposes 13 route modules. Complete documentation is at
+`docs/agent-integration/API_REFERENCE.md`.
+
+### Authentication Routes (`/api/auth`)
+
+| Method | Endpoint                | Purpose                              |
+| ------ | ----------------------- | ------------------------------------ |
+| GET    | `/api/auth/challenge`   | Request DID authentication challenge |
+| POST   | `/api/auth/verify`      | Verify wallet signature, issue JWT   |
+| POST   | `/api/auth/api-key`     | Exchange API key for session JWT     |
+
+### Institution Routes (`/api/institutions`)
+
+| Method | Endpoint                          | Purpose                       |
+| ------ | --------------------------------- | ----------------------------- |
+| GET    | `/api/institutions`               | List institutions              |
+| GET    | `/api/institutions/:id`           | Get institution details        |
+| POST   | `/api/institutions`               | Create institution             |
+| PATCH  | `/api/institutions/:id`           | Update institution settings    |
+| POST   | `/api/institutions/:id/approve`   | Approve chain rail allowances  |
+| POST   | `/api/institutions/:id/withdraw`  | Withdraw from deposit wallet   |
+
+### Agent Routes (`/api/agents`)
+
+| Method | Endpoint                              | Purpose                     |
+| ------ | ------------------------------------- | --------------------------- |
+| POST   | `/api/agents/admit`                   | Admit agent with delegation VC |
+| GET    | `/api/agents`                         | List admitted agents         |
+| POST   | `/api/agents/:id/intents`             | Submit hidden intent         |
+| GET    | `/api/agents/:id/intents`             | List agent intents           |
+| DELETE | `/api/agents/:id/intents/:handle`     | Cancel intent                |
+| POST   | `/api/agents/:id/mandate`             | Create negotiation mandate   |
+
+### Negotiation Routes (`/api/negotiations`)
+
+| Method | Endpoint                                    | Purpose                |
+| ------ | ------------------------------------------- | ---------------------- |
+| GET    | `/api/negotiations/sessions`                | List negotiation sessions |
+| GET    | `/api/negotiations/sessions/:id`            | Get session details     |
+| POST   | `/api/negotiations/sessions/:id/move`       | Submit negotiation move |
+| POST   | `/api/negotiations/sessions/:id/approve`    | Approve escalation      |
+| POST   | `/api/negotiations/sessions/:id/decline`    | Decline escalation      |
+
+### Additional Routes
+
+| Method | Endpoint                              | Purpose                     |
+| ------ | ------------------------------------- | --------------------------- |
+| GET    | `/api/health`                         | Health check and T3 status  |
+| GET    | `/api/portfolios/:id`                 | Portfolio balances           |
+| GET    | `/api/portfolios/:id/history`         | Portfolio change history     |
+| GET    | `/api/trades`                         | Completed trade history      |
+| GET    | `/api/receipts/:id`                   | Audit receipt access         |
+| POST   | `/api/api-keys`                       | Create API key               |
+| POST   | `/api/hosted-agents/start`            | Start hosted agent process   |
+| POST   | `/api/hosted-agents/stop`             | Stop hosted agent process    |
+| POST   | `/api/admin/trades/:ref/reverse`      | Reverse settled trade (admin)|
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
-- Node.js 20.19 or newer
-- npm 10+
-- A Terminal 3 sandbox API key (`T3N_API_KEY`). The backend needs
-  this to provision the tenant private maps and to publish the
-  matching contract. See [T3 docs](https://docs.terminal3.io/).
-- A Supabase project URL + service-role key (for the backend) and an
-  anon key (for the frontend).
-- (Optional) For the Sepolia settlement rail: a Sepolia RPC URL, a
-  funded relayer private key, and a deployed `GhostBrokerSettlementRelayer`
-  contract address.
+- Node.js >= 20.19.0
+- npm >= 10.0.0
+- A Terminal 3 developer key (claim at https://www.terminal3.io/claim-page)
+- A Supabase project (free tier is sufficient for development)
+- At least one LLM provider API key (Gemini, OpenAI, or Groq)
 
-### Bootstrap
+### Installation
 
-```powershell
-# 1. From the repo root, install all workspace deps
+```sh
+# Clone the repository
+git clone https://github.com/zaikaman/GhostBroker.git
+cd GhostBroker
+
+# Install all workspace dependencies
 npm install
-
-# 2. Copy the env templates
-Copy-Item backend/.env.example backend/.env
-Copy-Item frontend/.env.example frontend/.env
-Copy-Item t3-enclave/.env.example t3-enclave/.env
-
-# 3. Fill in the secrets (see "Environment variables" below)
-
-# 4. Build the libraries
-npm run build
-
-# 5. Run typecheck + lint + tests
-npm run typecheck
-npm run lint
-npm test
-
-# 6. (Optional) Add the on-chain integration tests
-$env:WS2_ANVIL_INTEGRATION = "1"
-npm test
 ```
 
-### Day-to-day commands
+This single `npm install` sets up both the `frontend` and `backend`
+workspaces plus all shared dependencies.
 
-```powershell
-# Run the backend (port 3001 by default)
+### Quick Start
+
+```sh
+# 1. Copy environment templates
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+
+# 2. Fill in backend/.env with your credentials (see Environment Configuration)
+
+# 3. Start the backend API server
+npm run dev:backend
+
+# 4. In a separate terminal, start the frontend dev server
+npm run dev:frontend
+
+# 5. Open http://localhost:5173 in your browser
+```
+
+---
+
+## Environment Configuration
+
+The backend requires a `.env` file at `backend/.env`. Copy from
+`backend/.env.example` and configure the following groups:
+
+### Required Variables
+
+| Variable                | Description                                   |
+| ----------------------- | --------------------------------------------- |
+| `PORT`                  | HTTP server port (default: `3001`)            |
+| `AUTH_SESSION_SECRET`   | 32+ char hex secret for JWT signing           |
+| `SUPABASE_URL`          | Supabase project URL                          |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key                 |
+| `T3N_API_KEY`           | Terminal 3 developer key                      |
+| `T3N_ENV`               | T3 environment: `testnet` or `production`     |
+| `T3_ADK_ENV`            | T3 ADK environment: `sandbox`, `testnet`, or `production` (default: `sandbox`) |
+| `SETTLEMENT_ASSET_CODE` | Settlement denomination (default: `USDC`)     |
+
+### LLM Provider Keys (for hosted agents)
+
+| Variable         | Description                                      |
+| ---------------- | ------------------------------------------------ |
+| `GEMINI_API_KEY`  | Google Gemini API key                            |
+| `GEMINI_MODEL`    | Gemini model (default: `gemini-3.1-flash-lite`)  |
+| `OPENAI_API_KEY`  | OpenAI API key                                   |
+| `OPENAI_MODEL`    | OpenAI model (default: `gpt-5-nano`)             |
+| `GROQ_API_KEY`    | Groq API key                                     |
+| `GROQ_MODEL`      | Groq model (default: `qwen/qwen3-32b`)          |
+
+### Chain Rail Variables (opt-in)
+
+| Variable                                             | Description           |
+| ---------------------------------------------------- | --------------------- |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL`              | Sepolia RPC endpoint  |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`   | Relayer signing key   |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` | Deployed relayer   |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED`  | HMAC deposit seed     |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID`             | Chain ID (default: 11155111) |
+
+The chain rail is fully opt-in: omitting any of the first three variables
+disables on-chain settlement without breaking existing flows.
+
+---
+
+## Running the Platform
+
+### Development
+
+```sh
+# Backend (Express + WebSocket on port 3001)
+npm run dev:backend
+
+# Frontend (Vite dev server on port 5173)
+npm run dev:frontend
+
+# Both in separate terminals, or use the workspace commands:
 npm run dev --workspace @ghostbroker/backend
-
-# Run the dashboard (port 5173 by default)
 npm run dev --workspace @ghostbroker/frontend
-
-# Probe the live Terminal 3 sandbox
-npm run sandbox:check --workspace @ghostbroker/t3-enclave
-
-# Run the hosted buyer / seller / negotiator
-npm run buyer --workspace @ghostbroker/backend
-npm run seller --workspace @ghostbroker/backend
-npm run hosted --workspace @ghostbroker/backend
 ```
 
-### Recommended local test order
+### Agent CLIs
 
-The backend's contract tests spin up the full Express app in-process
-and exercise the entire privacy boundary. They run fastest when run
-on their own:
+```sh
+# Run the hosted agent (multi-provider LLM negotiator)
+npm run hosted
 
-```powershell
-npm test --workspace @ghostbroker/backend
+# Run standalone buyer agent
+npm run buyer
+
+# Run standalone seller agent
+npm run seller
+
+# Check Terminal 3 sandbox status
+npm run sandbox:check
 ```
 
-The frontend's React Testing Library tests cover component behavior
-and accessibility:
+### Contract Operations
 
-```powershell
-npm test --workspace @ghostbroker/frontend
+```sh
+# Build the matching policy contract (Rust -> WASM)
+npm run contract:build:matching --workspace @ghostbroker/backend
+
+# Publish the matching contract to T3N
+npx tsx scripts/publish-matching.ts
+
+# Verify the published contract
+npx tsx scripts/verify-matching-contract.ts
+
+# Build the settlement relayer contract (Solidity)
+npm run contract:build:relayer --workspace @ghostbroker/backend
 ```
 
-The T3 enclave's verifier tests cover the W3C VC verifier in all
-three modes:
+### Type Checking
 
-```powershell
-npm test --workspace @ghostbroker/t3-enclave
-```
-
-The `agent-client` tests cover the published SDK; the `agents`
-tests cover the hosted negotiator:
-
-```powershell
-npm test --workspace @ghostbroker/agent-client
-npm test --workspace @ghostbroker/agents
+```sh
+# Type-check all workspaces
+npm run typecheck
 ```
 
 ---
 
-## Environment variables
+## Testing
 
-The full `.env.example` files live in each workspace. The fields
-that matter most:
+GhostBroker ships with a comprehensive test suite: **554 tests passing
+across 104 test files**.
 
-### `backend/.env`
+### Running Tests
 
-| Variable | Required | Description |
-|---|---|---|
-| `PORT` | no | Defaults to `3001` |
-| `SUPABASE_URL` | yes | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase service-role key (kept server-side only) |
-| `T3N_API_KEY` | yes | Terminal 3 sandbox API key |
-| `T3_TENANT_DID` | yes | The institution's Terminal 3 DID |
-| `T3_MODE` | no | `sandbox` (default), `structural`, or `live` |
-| `VC_VERIFY_MODE` | no | Backward-compat alias for `T3_MODE` |
-| `VC_VERIFY_STRICT` | no | No-op alias retained for backwards compatibility. The verifier always fails closed on any `@terminal3/verify_vc` exception outside `sandbox` mode; `sandbox` is the only mode in which the historical "verified on SDK error" behaviour is preserved. |
-| `OPERATOR_CHALLENGE_TTL_SECONDS` | no | DID challenge-response TTL, defaults to `300` |
-| `OPERATOR_SESSION_TTL_SECONDS` | no | Operator JWT TTL, defaults to `28800` (8h) |
-| `AGENT_SESSION_TTL_SECONDS` | no | Agent JWT TTL, defaults to `28800` (8h) |
-| `SETTLEMENT_ASSET_CODE` | yes | Asset code for the institution's settlement token |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL` | no | Enables the chain rail when set |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY` | no | Required if the RPC URL is set |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` | no | Required if the RPC URL is set |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID` | no | Defaults to `11155111` (Sepolia) |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF` | no | When set, switches the relayer signer to the T3 tenant TEE |
-| `ETHERSCAN_API_KEY` | no | Enables Sepolia portfolio sync |
-| `SEPOLIA_WBTC_CONTRACT_ADDRESS` | no | Required if Etherscan sync is enabled |
-| `SEPOLIA_USDC_CONTRACT_ADDRESS` | no | Required if Etherscan sync is enabled |
-| `WS2_ANVIL_INTEGRATION` | no | Set to `1` to run the Anvil integration tests |
+```sh
+# Run all workspace tests
+npm test
 
-### `frontend/.env`
+# Run with on-chain integration tests (requires Anvil)
+WS2_ANVIL_INTEGRATION=1 npm test
 
-| Variable | Required | Description |
-|---|---|---|
-| `VITE_API_BASE_URL` | yes | Backend REST URL (default `http://localhost:3001`) |
-| `VITE_WS_BASE_URL` | yes | Backend WebSocket URL |
-| `VITE_SUPABASE_URL` | yes | Supabase project URL (anon) |
-| `VITE_SUPABASE_ANON_KEY` | yes | Supabase anon key |
-| `VITE_OPERATOR_DID_CHALLENGE_URL` | yes | The `/api/auth/challenge` endpoint |
-| `VITE_OPERATOR_DID_VERIFY_URL` | yes | The `/api/auth/verify` endpoint |
+# Watch mode
+npm run test:watch
 
-### `t3-enclave/.env`
-
-| Variable | Required | Description |
-|---|---|---|
-| `T3N_API_KEY` | yes | Mirrored from the backend for sandbox probing |
-| `T3_TENANT_DID` | yes | The institution's Terminal 3 DID |
-
-### `agents/.env`
-
-| Variable | Required | Description |
-|---|---|---|
-| `GHOSTBROKER_URL` | yes | Backend URL (default `http://localhost:3001`) |
-| `GHOSTBROKER_API_KEY` | yes | The `gbk_...` key from the dashboard's API Keys panel |
-| `AGENT_DID` | no | If set, the agent uses this DID instead of generating one |
-| `GEMINI_API_KEY` | yes (one of) | Primary LLM provider |
-| `OPENAI_API_KEY` | optional | Fallback #1 |
-| `GROQ_API_KEY` | optional | Fallback #2 |
-| `LLM_PROVIDER_CHAIN` | no | Comma-separated provider ids to override the chain order |
-| `TICK_INTERVAL_MS` | no | Decision cadence, defaults to `15000` |
-| `DRY_RUN` | no | Set to `1` to disable submission |
-
----
-
-## Quick start: end to end
-
-This is the fastest path from a clean checkout to a settled trade:
-
-1. **Start the backend.** Fill in `backend/.env`, then
-   `npm run dev --workspace @ghostbroker/backend`. The backend
-   initializes the T3 enclave, provisions tenant private maps
-   (`secrets`, `authority-claims`, `match-config`,
-   `settlement-config`), publishes the matching contract, and
-   exposes `/healthz` for liveness probes.
-
-2. **Start the dashboard.** Fill in `frontend/.env`, then
-   `npm run dev --workspace @ghostbroker/frontend`. Sign in with
-   your Terminal 3 wallet. The Observatory Console shows the
-   institution DID, the backend connection, the WebSocket, the
-   Supabase status, and the T3 sandbox status.
-
-3. **Provision an API key.** In the dashboard's Developer Keys
-   panel, generate a `gbk_...` API key. The key is shown once and
-   persisted hashed in Supabase. The hash is what the backend
-   compares against on `POST /api/auth/api-key`.
-
-4. **Deploy an agent.** Use the Agent Deployment Guide in the
-   dashboard, or run `npm run hosted --workspace @ghostbroker/backend`
-   after copying `backend/.env.example` to `backend/.env` and filling
-   in the API key + at least one LLM provider.
-
-5. **Watch it settle.** The hosted agent mints its DID, admits
-   itself through `POST /api/agents/admit`, fetches its mandate,
-   starts the negotiation loop, and submits moves through
-   `POST /api/negotiations/:id/move`. The dashboard's
-   `LiveAgentActivityStream` and `TeeNegotiationVisualizer` light
-   up as the orchestrator evaluates each move. On a crossed price
-   band, the orchestrator gates settlement on the disclosure
-   handshake, then dispatches the settlement rail. The completed
-   trade appears in the `CompletedTradesTable` within seconds.
-
----
-
-## REST API tour
-
-The backend exposes a typed REST API. The full contract is enforced
-by Zod schemas on the wire side and zod-parsed test fixtures in the
-contract tests.
-
-### Public surface
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/healthz` | Liveness probe |
-| `GET` | `/api/health` | Detailed subsystem health (backend, websocket, supabase, T3 sandbox) |
-| `POST` | `/api/auth/challenge` | Start an operator DID challenge-response |
-| `POST` | `/api/auth/verify` | Complete the operator challenge, return operator JWT |
-| `POST` | `/api/auth/api-key` | Exchange an agent's `gbk_...` API key for an 8-hour agent JWT |
-| `POST` | `/api/agents/admit` | Admit an agent; persists the Ghostbroker delegation VC server-side |
-| `PATCH` | `/api/agents/:agentId/configure` | Update label, instrument scope, direction scope, max notional, policy hash |
-| `PATCH` | `/api/agents/:agentId/label` | Update label only |
-| `POST` | `/api/agents/:agentId/revoke` | Revoke the agent; writes to `agent_authority_revocations` |
-| `GET` | `/api/agents` | List admitted agents for the institution |
-| `POST` | `/api/agents/intents` | Submit an encrypted intent envelope |
-| `POST` | `/api/agents/intents/:handle/cancel` | Cancel a pending intent |
-| `GET` | `/api/agents/intents` | List pending intents for the institution |
-| `GET` | `/api/trades/completed` | List completed trades (encrypted fields) |
-| `GET` | `/api/receipts/:id` | Fetch an audit receipt by id |
-| `GET` | `/api/portfolios/:institutionId` | Read the institution's portfolio |
-| `GET` | `/api/portfolios/:institutionId/agent` | Read a single agent's portfolio |
-| `POST` | `/api/negotiations` | Open a negotiation session |
-| `POST` | `/api/negotiations/:id/move` | Submit a move (propose, counter, reveal, request_disclosure, accept, hold, walkaway) |
-| `POST` | `/api/negotiations/:id/disclose` | Submit a reciprocal disclosure claim |
-| `POST` | `/api/negotiations/:id/approve` | Operator approval of an escalated cross |
-| `POST` | `/api/negotiations/:id/decline` | Operator decline of an escalated cross |
-| `POST` | `/api/negotiations/:id/settle` | Force-settle after operator approval |
-| `GET` | `/api/negotiations/:id` | Read session state (current turn, round, escalation status) |
-| `POST` | `/api/admin/trades/:tradeRef/reverse` | Reverse a settled trade (operator only) |
-| `GET` | `/api/institutions` | List institutions the operator owns |
-| `POST` | `/api/institutions` | Create a new institution |
-| `PATCH` | `/api/institutions/:id` | Update institution metadata |
-
-The error responses are stable across SDK versions: every non-2xx
-returns a JSON body of shape `{ "code": "<string>", "message": "<string>", "status": <number> }`. The `code` is one of:
-
-- `authorization_failed` (401/403) - re-authenticate and retry
-- `validation_failed` (400) - request body did not parse; do not retry
-- `not_found` (404) - resource does not exist
-- `service_unavailable` (503) - sandbox not reachable; back off and retry
-- `request_failed` (500) - unexpected upstream; back off and retry
-
-See [`docs/agent-integration/ERROR_REFERENCE.md`](docs/agent-integration/ERROR_REFERENCE.md)
-for the full per-endpoint error catalog.
-
----
-
-## WebSocket telemetry tour
-
-The backend runs a typed telemetry WebSocket at `/ws/telemetry`. The
-frontend connects after operator authentication, and the backend
-filters events to the operator's institution only.
-
-### Event shape
-
-Every event has the shape:
-
-```typescript
-{
-  event_id: string;
-  institution_id: string;
-  agent_id?: string;
-  status: string;            // sanitized state label
-  phase: string;              // phase transition
-  severity: "info" | "warn" | "error";
-  timestamp: string;          // ISO 8601
-  correlation_ref?: string;
-  receipt_ref?: string;
-  // ...additional allowlisted fields, no plaintext
-}
+# E2E tests (Playwright)
+npm run test:e2e
 ```
 
-The allowlist is enforced by `backend/src/websocket/redact-event.ts`,
-which strips any field on the deny list and drops the event if it
-would otherwise leak a forbidden value.
+### Test Breakdown by Workspace
 
-### Allowed phases
+| Workspace          | Test Files | Tests Passing | Tests Skipped |
+| ------------------ | ---------- | ------------- | ------------- |
+| `negotiation-core` | 1          | 27            | 0             |
+| `t3-enclave`       | 12         | 79            | 0             |
+| `backend`          | 57         | 194           | 8 (chain-sepolia, gated) |
+| `frontend`         | 17         | 72            | 0             |
+| `agent-client`     | 9          | 56            | 0             |
+| `agents`           | 8          | 126           | 0             |
+| **Total**          | **104**    | **554**       | **8**         |
 
-```
-backend_connected
-websocket_connected
-supabase_connected
-t3_sandbox_connected
-agent_connected
-agent_disconnected
-agent_verifying
-agent_verified
-agent_rejected
-authority_revoked
-intent_received
-intent_sealed
-encrypted_evaluation
-settlement_pending
-settlement_finalized
-receipt_available
-authorization_failed
-token_metering_failed
-settlement_failed
-service_unavailable
-```
+### Test Categories
 
-### Forbidden payload fields
+**Contract tests** (16 files) -- HTTP-level API contract tests via Supertest:
+agent admission, intent submission/cancellation/privacy, authentication,
+institution CRUD, portfolio management, trade history, receipts, WebSocket
+events, and admin operations.
 
-```
-asset
-side
-quantity
-bid
-ask
-price
-execution_price_plaintext
-counterparty
-queue_depth
-queue_rank
-match_score
-raw_payload
-plaintext
-contract_args
-secret
-private_key
-```
+**Integration tests** (24 files) -- Service-level integration tests:
+settlement atomicity, matching orchestrator fills and reservations, intent
+lock lifecycle, settlement rail dispatch (chain-sepolia, compensation),
+hosted agent management, and telemetry redaction.
 
-The frontend client is
-[`frontend/src/services/telemetry-client.ts`](frontend/src/services/telemetry-client.ts).
-It implements exponential-backoff reconnect (1s, 2s, 4s, ..., capped
-at 30s) and exposes convenience handlers for `onSettled`,
-`onError`, `onMessage`, and `onStatusChange`.
+**Unit tests** (18 files) -- Isolated unit tests: public error handling,
+deposit wallet service, operator auth sessions, portfolio service, privacy
+redaction, settlement reconciler, and negotiation orchestrator.
 
-The SDK equivalent is in
-[`agent-client/src/websocket-client.ts`](agent-client/src/websocket-client.ts)
-and exposes the same handlers.
+**Frontend tests** (17 files) -- React component and service tests via
+Testing Library: agent panels, deployment guide, completed trades, deposit
+wallet, encrypted receipts, live activity stream, processing status,
+settlement profile, accessibility, and privacy redaction.
+
+**Agent SDK tests** (9 files) -- SDK client tests: auth client, delegation
+signer, ghostbroker client, intent client, portfolio client, receipt client,
+trades client, and WebSocket client.
+
+**Agent runtime tests** (8 files) -- LLM decision validation, negotiation
+decision, negotiation loop, sealed envelope, VC verifier, and delegation
+tests (126 passing tests).
+
+### On-Chain Integration Tests
+
+The 8 skipped tests are gated behind `WS2_ANVIL_INTEGRATION=1` and require a
+local Anvil node. They deploy a `GhostBrokerSettlementRelayer` contract plus
+2 minimal ERC-20s, fund and approve the relayer, dispatch a real trade,
+decode the on-chain `Settled` event, and assert `Transfer` balance
+round-trips.
 
 ---
 
-## Agent developer tour
-
-The hosted agents are built on the same `@ghostbroker/agent-client`
-SDK that external developers use. The SDK is the published TypeScript
-package; nothing in the agent runtime uses internal APIs the SDK does
-not expose.
-
-```typescript
-import { GhostBrokerClient } from "@ghostbroker/agent-client";
-
-const client = new GhostBrokerClient({
-  baseUrl: process.env.GHOSTBROKER_URL!,
-});
-
-// 1. Exchange the API key for an 8-hour session
-const session = await client.authenticateWithApiKey(
-  process.env.GHOSTBROKER_API_KEY!,
-);
-
-// 2. Admit the agent. The backend loads and verifies the persisted
-//    delegation VC; the agent process never sends the VC.
-const admission = await client.admitAgent({
-  institutionId: session.institution.id,
-  agentDid: process.env.AGENT_DID!,
-});
-
-// 3. Submit encrypted intents
-const intent = await client.submitIntent({
-  institutionId: session.institution.id,
-  agentDid: process.env.AGENT_DID!,
-  encryptedIntentEnvelope: enclaveSealedEnvelope,
-  authorityRef: admission.authorityRef,
-});
-
-// 4. Listen for the settlement event
-client.telemetry.onSettled((correlationRef) => {
-  console.log("Settlement finalized:", correlationRef);
-});
-client.telemetry.connect();
-```
-
-The SDK surfaces every endpoint through typed methods and every
-non-2xx as a `GhostBrokerApiError` with a stable `code`. See
-[`agent-client/README.md`](agent-client/README.md) for the full
-method catalog and
-[`docs/agent-integration/`](docs/agent-integration/) for the
-end-to-end integration walkthrough.
-
-The seven-doc integration series covers:
-
-- [`OVERVIEW.md`](docs/agent-integration/OVERVIEW.md) - the agent
-  developer journey at a glance
-- [`AUTHENTICATION.md`](docs/agent-integration/AUTHENTICATION.md) -
-  API key vs. session token vs. challenge-response
-- [`DEPLOY_YOUR_AGENT.md`](docs/agent-integration/DEPLOY_YOUR_AGENT.md) -
-  the deployment checklist
-- [`INTENT_SUBMISSION.md`](docs/agent-integration/INTENT_SUBMISSION.md) -
-  sealing envelopes and submitting intents
-- [`SETTLEMENT_AND_RECEIPTS.md`](docs/agent-integration/SETTLEMENT_AND_RECEIPTS.md) -
-  reading completed trades and audit receipts
-- [`WEBSOCKET_TELEMETRY.md`](docs/agent-integration/WEBSOCKET_TELEMETRY.md) -
-  telemetry events, phases, reconnect strategy
-- [`API_REFERENCE.md`](docs/agent-integration/API_REFERENCE.md) -
-  the full REST + WebSocket reference
-
----
-
-## The negotiation loop
-
-The hosted negotiator runs a per-tick loop that drives a
-verifiable-authority negotiation protocol, not a free-form
-LLM-vs-LLM chat:
-
-1. The agent fetches its mandate at admit. The mandate is an
-   author-authored policy surface (objective, execution style,
-   valuation policy, concession policy, disclosure policy,
-   approval policy, counterparty requirements, size policy,
-   time window) plus derived numeric rails (anchor value,
-   walkaway min/max, concession budget in bps, notional ceiling).
-2. On each tick, the agent sends a structured prompt through the
-   LLM fallback chain. The system message forces JSON output
-   (`{action, price, quantity, reasoning, confidence}`).
-3. The decision is parsed and re-validated with zod, then
-   **clamped** to the mandate's bands: price inside the price band,
-   quantity inside the size policy, walkaway within the
-   concession budget.
-4. On `propose` / `counter` / `reveal` / `accept`, the agent
-   submits a move. The orchestrator evaluates it, advances the
-   turn, and emits telemetry.
-5. On a crossed price band, the orchestrator gates settlement on
-   the disclosure handshake. The default requires only the
-   `accredited_institution` claim from each side; reciprocal
-   `settlement_capacity` is supported as an optional tighter gate.
-6. If the buyer's price exits the preferred envelope, the
-   orchestrator marks the session `escalation_status: "pending"`
-   and refuses to settle until the operator approves or declines
-   via `POST /api/negotiations/:id/approve` or
-   `POST /api/negotiations/:id/decline`.
-7. On settlement, the orchestrator calls the settlement rail
-   (`wallet:default` for the demo, `chain:sepolia:erc20` when
-   configured), persists the `completed_trades` row with
-   ciphertext asset / quantity / price fields, generates the
-   audit receipt, and emits `settlement_finalized` + the
-   `receipt_available` phase.
-
----
-
-## The LLM provider chain
-
-Every LLM call in the agent loop runs through a fallback chain:
-
-```
-Gemini (gemini-3.1-flash-lite) -> OpenAI (gpt-5-nano) -> Groq (qwen/qwen3-32b)
-```
-
-A failure is treated as **transient** (and the chain falls back to
-the next provider) when it is:
-
-- A 5xx server error from the provider
-- A 408 / 429 rate-limit error
-- A network error (timeout, DNS, TLS)
-- An empty completion
-- A malformed JSON body
-
-A failure is treated as **fatal** (no fallback) when it is a 401 / 403
-auth error or a 400 / 404 bad-request error - the same prompt is
-unlikely to succeed on a different provider, so we surface the error
-to the agent loop immediately. When every provider has failed with a
-transient error, the chain throws an `AggregateLlmError` whose
-`.errors` array carries each provider's `LlmProviderError`.
-
-Override the order with `LLM_PROVIDER_CHAIN=groq,openai` to prefer
-Groq. The chain is implemented in
-[`agents/src/llm/fallback-chain.ts`](agents/src/llm/fallback-chain.ts).
-
----
-
-## Privacy enforcement layers
-
-The privacy boundary is enforced at four independent layers so a
-single regression cannot silently leak a forbidden field.
-
-### Layer 1: Zod schema at the intent edge
-
-`backend/src/validation/encrypted-intent.schema.ts` is the canonical
-parser for `POST /api/agents/intents`. Any plaintext `asset`,
-`side`, `quantity`, or `price` field triggers
-`Plaintext trading field is not accepted at $<field>` and the
-request returns `400 validation_failed` before it ever reaches the
-orchestrator.
-
-The contract test
-[`backend/src/tests/contracts/agents-intents-privacy.contract.test.ts`](backend/src/tests/contracts/agents-intents-privacy.contract.test.ts)
-exercises every forbidden field individually and confirms the error
-message includes the offending path.
-
-### Layer 2: WebSocket allowlist
-
-`backend/src/websocket/redact-event.ts` is the gate every telemetry
-event crosses before it leaves the backend. The implementation is an
-allowlist: only `event_id`, `institution_id`, `agent_id`, `status`,
-`phase`, `severity`, `timestamp`, `correlation_ref`, `receipt_ref`,
-plus a small set of derived fields (count, instance, etc.) survive
-the strip. Everything else is dropped.
-
-If an event payload would leak a forbidden field, the redaction
-guard logs a `[TelemetryClient] Security Violations Detected` warning
-and drops the entire event. The unit test
-[`frontend/src/test/telemetry-client.test.ts`](frontend/src/test/telemetry-client.test.ts)
-asserts this behavior on the client side.
-
-### Layer 3: Database schema
-
-Active trade columns are stored as ciphertext:
-`asset_code_ciphertext`, `quantity_ciphertext`,
-`execution_price_ciphertext`. The corresponding plaintext never
-crosses the Supabase boundary. RLS policies in
-[`database/policies/row-level-security.sql`](database/policies/row-level-security.sql)
-restrict reads to the participating institution, so a leaked
-service-role key still does not reveal another institution's data.
-
-### Layer 4: Frontend tests
-
-[`frontend/src/test/privacy-redaction.test.tsx`](frontend/src/test/privacy-redaction.test.tsx)
-renders every dashboard surface (dashboard, agents panel,
-completed history, encrypted receipt drawer, processing status,
-mandate editor, agent deployment guide) and asserts that no rendered
-string contains a forbidden field name. Playwright's
-[`tests/dashboard-privacy.spec.ts`](tests/dashboard-privacy.spec.ts)
-does the same at the browser level against the running dashboard.
-
----
-
-## Settlement rails
-
-GhostBroker ships three settlement profiles. Every institution picks
-exactly one via `institutions.settlement_profile_ref`. The rail is
-the only thing that physically moves assets; everything else is
-bookkeeping.
-
-### `wallet:default` (noop)
-
-Nothing moves. The system writes a `completed_trades` row with
-`rail_id = "wallet:default"` and `rail_trade_ref = "noop:<sha256>"`.
-No external transport. Suitable for the demo "Spin up demo agents"
-button and for any test or non-production environment where
-real-asset movement is not desired.
-
-### `chain:sepolia:erc20` (Sepolia)
-
-Real ERC-20 `transferFrom` calls on Sepolia, routed through the
-on-chain [`GhostBrokerSettlementRelayer`](contracts/relayer/src/contracts/GhostBrokerSettlementRelayer.sol)
-contract. The relayer holds the pre-approved ERC-20 allowances from
-each institution's deposit address. The relayer's `settle(...)` is a
-single transaction that:
-
-1. Pulls the asset (e.g. WBTC) from the buyer's deposit address to
-   the seller's deposit address.
-2. Pulls the payment (e.g. USDC) from the seller's deposit address
-   to the buyer's deposit address.
-3. Emits a `Settled` event whose `outcomeRef` matches the TEE's
-   opaque match outcome.
-
-The on-chain calldata is the relayer's `settle(bytes32, bytes32,
-address, address, address, address, uint256, uint256)` ABI. A
-public chain observer sees the institution's deposit addresses and
-the asset/payment amounts but **not** the TEE-decrypted
-`quantity * price` semantics - the relayer is the canonical source
-of those, not the chain.
-
-The Anvil integration test (gated by `WS2_ANVIL_INTEGRATION=1`)
-deploys the relayer + 2 minimal ERC-20s, funds them, approves the
-relayer, dispatches a real trade, and asserts real `Settled` event
-decoding and `Transfer` balance round-trip.
-
-### `custody:<partner>`
-
-Reserved for future custody partners. Not implemented in v1;
-passing the profile name throws `RailDispatchError`.
-
-The relayer signer is a deliberate seam. The v1 demo path is a
-`ViemWalletRelayerSigner` that signs the broadcast with the
-`SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY` env var. The
-production swap is a `TeeAttestedRelayerSigner` whose
-`tenantPrivateKey` is the T3 tenant identity loaded via
-`t3-enclave`'s `loadOrCreateTenantIdentity(...)`. When
-`SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF` is set (a T3
-secret-ref), the wiring resolves it through the enclave's secret
-store and builds the TEE-attested signer. The production tenant
-key is held inside the T3 tenant TEE; the v1 demo's tenant key is
-the file-backed keypair the matching-policy contract also uses.
-The on-chain `from` is the tenant identity's address either way;
-in production the key's extraction is attestation-anchored.
-
-The reverser endpoint
-(`POST /api/admin/trades/:tradeRef/reverse`) is the only path that
-can flip a settled row's `settlement_status`. The reconciler
-(system task) is read-only and surfaces drift via a high-severity
-`rail_drift_detected` telemetry event.
-
-The operator-facing runbook is at
-[`docs/settlement-rails.md`](docs/settlement-rails.md).
-
----
-
-## Database schema
-
-The canonical schema lives at [`database/schema.sql`](database/schema.sql)
-(context only - not meant to be run). Migrations are numbered SQL
-files under [`database/migrations/`](database/migrations/) with RLS
-policies under [`database/policies/`](database/policies/) and dev
-seed data under [`database/seed/`](database/seed/).
-
-The schema enforces the privacy boundary at the column level:
-
-| Table | Sensitive columns | Storage |
-|---|---|---|
-| `completed_trades` | `asset_code_ciphertext`, `quantity_ciphertext`, `execution_price_ciphertext` | ciphertext |
-| `intent_locks` | `asset_code`, `amount`, `correlation_ref` | identifier-only, encrypted handles |
-| `audit_receipts` | `receipt_ciphertext`, `receipt_hash`, `key_version`, `t3_attestation_ref` | ciphertext + non-sensitive references |
-| `negotiation_mandates` | `objective`, `execution_style`, `valuation_policy`, `concession_policy`, `disclosure_policy`, `approval_policy`, `counterparty_requirements`, `size_policy`, `time_window` | structured JSON policy surface |
-| `negotiation_rounds` | `proposal_ciphertext`, `disclosed_claim_refs`, `opaque_signal` | ciphertext + non-sensitive references |
-| `negotiation_disclosures` | `claim_assertion_ciphertext`, `t3_attestation_ref` | ciphertext + non-sensitive references |
-
-RLS policies restrict all reads to the participating institution;
-a leaked service-role key still does not reveal another institution's
-data. The audit receipt drawer relies on the institution's own
-receipt key (held inside the T3 tenant private map) for decryption.
-
-The migration history includes:
-
-- 001 - `institutions` (initial institution metadata)
-- 002 - `completed_trades` (post-settlement ciphertext records)
-- 003 - `audit_receipts` (encrypted receipt payloads + references)
-- ...through the current migration set, which includes `agents`,
-  `intent_locks`, `portfolios`, `portfolio_history`, `api_keys`,
-  `agent_authority_revocations`, and the `negotiation_*` family
-  used by the hosted negotiator.
-
----
-
-## Design system
-
-The design is named **"The Attested Enclave"** and rejects typical
-neon-slop consumer crypto widgets, SaaS-blue layouts, and
-multi-colored grid cards. The canonical reference is
-[`DESIGN.md`](DESIGN.md) and [`PRODUCT.md`](PRODUCT.md).
-
-### Visual drivers
-
-- Dark, monochromatic foundations with a single emerald accent
-  (`#5ed29c`) used strictly for successful cryptographic
-  attestation or key CTA states. The **Rarity Rule** caps
-  emerald at 10% of any visible screen surface.
-- Double-mask composited glassmorphic border elements providing
-  depth without traditional drop shadows (the **Flat-By-Default
-  Rule**).
-- Clear typographic separation: Cinzel for display, Plus Jakarta
-  Sans for body, Share Tech Mono for cryptographic data, and
-  Instrument Serif (italic) for occasional highlights.
-
-### Component conventions
-
-- Buttons: pill-shaped (9999px radius). Primary is emerald on
-  black-tint. Hover translates -2px with a subtle outer glow.
-- Cards: 24px outer radius, 12px nested radius, glassmorphic
-  background (`rgba(255, 255, 255, 0.01)`) with a 12px backdrop
-  blur and a 1.2px double-mask gradient border.
-- Inputs: 8px radius, focus state turns the border to emerald
-  with a subtle glow.
-- Telemetry: monospace Share Tech Mono for all cryptographic
-  data (DIDs, hashes, attestation refs, ciphertext previews).
-
-### Operator-only disclaimers
-
-The dashboard surfaces a permanent "Zero Human Access" TEE secure
-enclave disclaimer in compliance boundaries. The encrypted receipt
-drawer renders the receipt hash and T3 attestation reference in
-monospace to reinforce the cryptographic authority. The completed
-trade table never shows asset codes or quantities - only the
-trade ref, settlement status, timestamp, and a link to the
-receipt.
-
----
-
-## Operational playbooks
-
-### Backend restart safety
-
-The intent-lock repository is the source of truth for in-flight
-intents. On backend restart, the orchestrator reconciles active
-locks against the matching contract's pending queue and either
-re-queues the intent (if the contract still has it) or marks it
-expired. The behavior is covered by
-[`backend/src/tests/integration/intent-lock-restart-safety.test.ts`](backend/src/tests/integration/intent-lock-restart-safety.test.ts).
-
-### Settlement rail drift
-
-The settlement reconciler runs as a system task and compares the
-backend's `completed_trades` rows against the chain rail's
-on-chain receipts. Any drift surfaces as a high-severity
-`rail_drift_detected` telemetry event and is logged to the audit
-table. The reconciler is read-only - it never moves assets. The
-operator-facing reverser endpoint is the only path that can flip
-a settled row's status.
-
-### Revocation propagation
-
-Revoking an agent writes a row to `agent_authority_revocations`.
-The verifier reads the table before every privileged action and
-includes the revoked set in the `revokedAuthorityRefs` parameter.
-A revoked `authorityRef` is rejected on the next privileged call
-within seconds of revocation. The integration test
-[`backend/src/tests/integration/agent-admission.test.ts`](backend/src/tests/integration/agent-admission.test.ts)
-exercises revocation rejection end-to-end.
-
-### Token exhaustion
-
-T3N tokens meter execution and storage. The backend checks the
-tenant token balance before metered operations and applies bounded
-retries for non-committed write conflicts. Token exhaustion is
-treated as a redacted operational failure (`token_metering_failed`)
-and is not retried indefinitely. The integration test
-[`backend/src/tests/integration/settlement-token-exhaustion.test.ts`](backend/src/tests/integration/settlement-token-exhaustion.test.ts)
-covers the failure path.
-
-### Escalation flow
-
-When a buyer's price exits the preferred envelope, the
-orchestrator marks the session `escalation_status: "pending"`
-and the orchestrator refuses to settle priced crosses until the
-operator approves or declines via `POST /api/negotiations/:id/approve`
-or `POST /api/negotiations/:id/decline`. The negotiation tests
-cover all four sub-cases: auto-settle on a clean cross,
-blocks-settlement on envelope exit, forces-the-gate-open on a
-wider counter, operator-approval re-evaluates, operator-decline
-expires the session.
-
----
-
-## Deployment topology
+## Deployment
 
 ### Frontend (Vercel)
 
-The Vite build outputs to `frontend/dist`. Vercel picks up the
-workspace via the root `package.json` workspaces config. The
-build command is `npm run build --workspace @ghostbroker/frontend`,
-the output directory is `frontend/dist`, and the env template is
-[`docs/deployment/vercel-frontend.md`](docs/deployment/vercel-frontend.md).
-The dashboard is a static SPA; there is no server runtime.
+The frontend is a standard Vite build deployable to Vercel:
+
+```sh
+cd frontend
+npm run build    # tsc --noEmit && vite build
+```
+
+Set `VITE_API_URL` to the backend URL in Vercel environment variables.
 
 ### Backend (Heroku)
 
-The Procfile at [`backend/Procfile`](backend/Procfile) declares
-the web process and any one-off tasks (the settlement reconciler
-runs as a worker). The build is `npm run build --workspace
-@ghostbroker/backend` followed by `tsc` against the workspace
-manifest. The release phase runs `npm run typecheck --workspace
-@ghostbroker/backend`.
+The backend includes a `Procfile` for Heroku deployment:
 
-### Database (Supabase)
-
-Migrations are applied in numeric order from `database/migrations/`.
-RLS policies in `database/policies/` are applied once and are
-idempotent. Seed data in `database/seed/` is for development only;
-never apply it to production.
-
-### Confidential execution (Terminal 3 TEE)
-
-The tenant identity is loaded from `t3-enclave`'s file-backed
-identity store, with the production swap being the T3 tenant TEE.
-The matching contract and the receipt key live inside the tenant
-TEE and are never written to disk in plaintext.
-
-### Optional: Sepolia settlement rail
-
-When the rail is enabled (the three env vars are set), the
-relayer signer is wired with either the v1 viem path (env-var
-key) or the production TEE-attested path (T3 secret-ref). The
-on-chain `from` is the tenant identity's address either way; in
-production the key's extraction is attestation-anchored.
-
----
-
-## Security
-
-### Treat secrets as secrets
-
-- **API keys** (`gbk_...`) are persistent and authorize every
-  action the agent can take until revoked. Store them in a
-  secrets manager (AWS Secrets Manager, HashiCorp Vault,
-  environment-injected secret). Never commit them. Never log them.
-- **Session tokens** are short-lived (8 hours) and lower-privilege
-  than the API key. If a session token leaks, rotate the API key
-  to invalidate all active sessions.
-- **Relayer private keys** are held by the v1 demo path in env
-  vars; the production swap is the T3 tenant TEE.
-- **Receipt decryption keys** are held inside the T3 tenant
-  private map. The matching contract reads them inside the
-  enclave; they never cross the boundary in plaintext.
-- **Webhook secrets / Supabase service-role keys** are server-side
-  only. The frontend gets the anon key, which is bound by RLS.
-
-### Defense in depth
-
-- TypeScript strict mode everywhere; no `any` in production code.
-- Zod schemas at every wire boundary.
-- Allowlist-based telemetry redaction at the WebSocket gate.
-- Row-level security on every Supabase table.
-- Rarity Rule on the emerald accent in the design system -
-  treats any green UI element as a hard "this is attested"
-  signal.
-
-### Reporting
-
-Please file security issues privately. Do not file public GitHub
-issues for vulnerabilities.
-
----
-
-## Documentation gaps filed against T3
-
-Per the bounty criteria, we filed
-[`docs/terminal3-adk-onboarding-doc-gaps.md`](docs/terminal3-adk-onboarding-doc-gaps.md)
-capturing onboarding bugs, contradictions, and documentation gaps
-we hit. The largest classes:
-
-- **Programmatic AI agent delegation is undocumented.** The T3N
-  Dashboard delegation flow is documented; the SDK/API surface
-  for the same operation is not. The post-Phase 1 architecture
-  works around this by making the backend own the persisted VC.
-- **`agent-auth` Host API is marked coming soon.** We built
-  against the assumption it is *not* available to app contracts
-  and used the documented Dashboard delegation path.
-- **Typed error handling is missing.** The ADK returns
-  human-readable detail strings; we substring-match in an
-  adapter to map to internal categories. Filed for a future
-  typed-SDK release.
-
-The full addendum also covers program-matic capability matrix
-availability, map ACL defaults, token metering failure semantics,
-attestation verification workflow, and contract lifecycle
-playbooks.
-
----
-
-## Reference workspace
-
-[`ghostbroker-delegation-reference/`](ghostbroker-delegation-reference/)
-is a worked example of a Terminal 3 delegated-agent pattern
-implemented as a separate npm package. It ships a procurement
-agent that demonstrates the same delegation, policy engine, and
-audit log patterns GhostBroker uses, scoped to a single
-enterprise use case. It is not on the production path of the
-dark pool; it is reference material for integrators who want to
-build their own delegated-agent product on Terminal 3.
-
-It has its own test suite (2 files, 8 tests) and is published
-under its own `package.json` (`t3-procurement-agent`). The
-relevant Terminal 3 docs pages are linked from its README.
-
----
-
-## Contributing
-
-We welcome bug reports, feature requests, and pull requests on the
-GitHub repo. The repo follows a few conventions worth knowing:
-
-- The repo ships as npm workspaces. Run `npm install` at the root
-  to set up everything.
-- Every workspace has `typecheck`, `lint`, `build`, and `test`
-  scripts. The root scripts (`npm run typecheck`, `npm test`,
-  etc.) run them in the right order.
-- The privacy boundary is enforced by tests. Any change to a
-  privacy-sensitive surface (intent schema, telemetry event
-  shape, database column, dashboard text) should add or update a
-  test that asserts the boundary is still intact.
-- The terminal-3 boundary is enforced at the import-graph level.
-  Code in `frontend/`, `agents/`, or `agent-client/` should not
-  import from `t3-enclave/` or the T3 ADK directly.
-- We do not accept PRs that add new `any`, remove the
-  redact-event allowlist, or store plaintext active-order
-  fields in Supabase.
-
-Run the full suite before submitting a PR:
-
-```powershell
-npm run typecheck
-npm run lint
-npm test
 ```
+web: npm start
+```
+
+```sh
+cd backend
+npm run build    # tsc -p tsconfig.json
+npm start        # node dist/server.js
+```
+
+Configure all environment variables from `backend/.env.example` in the
+Heroku dashboard.
+
+---
+
+## Documentation Inventory
+
+| Document                                     | Description                         |
+| -------------------------------------------- | ----------------------------------- |
+| `docs/agent-integration/OVERVIEW.md`         | Agent developer getting started     |
+| `docs/agent-integration/AUTHENTICATION.md`   | Auth flow for agents                |
+| `docs/agent-integration/DEPLOY_YOUR_AGENT.md`| Step-by-step agent deployment       |
+| `docs/agent-integration/API_REFERENCE.md`    | Complete REST API reference         |
+| `docs/agent-integration/INTENT_SUBMISSION.md`| Hidden intent submission guide      |
+| `docs/agent-integration/SETTLEMENT_AND_RECEIPTS.md` | Settlement and receipt flow  |
+| `docs/agent-integration/WEBSOCKET_TELEMETRY.md` | WebSocket event reference        |
+| `docs/agent-integration/ERROR_REFERENCE.md`  | Error code reference                |
+| `docs/settlement-rails.md`                   | Settlement rail operator runbook    |
+| `docs/terminal3-adk-onboarding-doc-gaps.md`  | T3 ADK documentation gaps filed     |
+| `docs/infrastructure-gaps.md`                | Infrastructure gap analysis         |
+| `backend/contracts/README.md`                | TEE contract build and publish guide|
+| `DESIGN.md`                                  | Design system specification         |
+| `PRODUCT.md`                                 | Product brief and brand personality |
+| `SUBMISSION.md`                              | Hackathon submission narrative       |
+
+---
+
+## Terminal 3 ADK Onboarding Gaps Filed
+
+Per the bounty criteria, the Terminal 3 ADK documentation gaps and onboarding
+friction points encountered during development are comprehensively tracked in
+`docs/terminal3-adk-onboarding-doc-gaps.md` (62,166 bytes). The largest
+classes of friction:
+
+1. **Programmatic AI agent delegation is undocumented.** The T3N Dashboard
+   delegation flow is documented; the SDK/API surface for the same operation
+   is not. GhostBroker works around this by making the backend own the
+   persisted VC: the dashboard mints and signs the VC at agent configuration
+   time, persists it on the `agents` row, and re-verifies it on every
+   privileged call via `loadAndVerify`.
+
+2. **`agent-auth` Host API is marked "coming soon."** The Host API table in
+   the ADK documentation marks `agent-auth` as not yet available to app
+   contracts. GhostBroker built against the assumption it is not available
+   and used the documented Dashboard delegation path.
+
+3. **Typed error handling is missing.** The ADK returns human-readable
+   detail strings; GhostBroker performs substring matching in an adapter to
+   map to internal categories (`authority_denied`, `map_acl_denied`,
+   `token_metering_failed`, etc.).
+
+---
+
+## Why This Submission Fits the Bounty
+
+- **Agent Auth SDK integration is load-bearing, not cosmetic.** Every
+  privileged backend action goes through `T3AgentAuthorizationFacade`.
+  The admit-time path calls `verifyAgentAuthority` on the inline VC;
+  every subsequent privileged action calls `loadAndVerify` on the
+  persisted VC; both paths run the same
+  `verifyGhostbrokerDelegationCredential` function with the same shape,
+  time-window, DID-binding, and revocation checks.
+
+- **The architecture matches the SDK's design intent.** The two-tier model
+  (session credential + per-action authority) is the one the Terminal 3
+  docs describe for the seed-API-key pattern, applied to the agent
+  boundary.
+
+- **The privacy story is enforceable, not aspirational.** Active order
+  parameters never enter any external surface; the `redact-event` layer
+  is unit-tested against an explicit deny list; the schema and API
+  response shapes are built around the boundary.
+
+- **The code is production-ready and tested.** 554 tests passing across
+  104 test files; `tsc --noEmit` clean on every workspace; the verifier
+  has its own test file with positive and negative cases; the session
+  and authority layers are independently exercised.
+
+- **The solution is complete.** The repository ships a full-stack platform
+  with frontend Observatory Console, backend API, WebSocket telemetry,
+  TEE smart contracts (Rust + Solidity), an external agent SDK, hosted
+  LLM agents, on-chain ERC-20 settlement, comprehensive documentation,
+  and a complete test suite.
 
 ---
 
 ## License
 
-MIT - see the LICENSE file in each package. The Solidity relayer
-in [`contracts/relayer/`](contracts/relayer/) is also MIT.
-
-The Terminal 3 ADK and T3N SDKs are governed by Terminal 3's own
-licensing terms; see [https://docs.terminal3.io/](https://docs.terminal3.io/)
-for the current terms.
-
----
-
-This is the production code, the tests, the deployment topology,
-the runbooks, and the SDK. Everything in this repository is real
-code that runs locally and is wired to a live Terminal 3 sandbox.
-The bounty submission narrative lives in
-[`SUBMISSION.md`](SUBMISSION.md).
+This project was built for the Terminal 3 Agent Dev Kit Bounty (June 2026).

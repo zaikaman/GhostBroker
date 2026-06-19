@@ -3,10 +3,42 @@ import type { SettlementCommand } from "../../enclave/index.js";
 import { SettlementService } from "../../services/settlement.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
 import {
+  MapSettlementRailDispatcher,
+} from "../../services/settlement-rails/dispatcher.js";
+import type { SettlementRail } from "../../services/settlement-rails/rail.js";
+import {
   buildAuditReceiptRecord,
   buildCompletedTradeRecord,
   buildSettlementExecutionRequest,
 } from "../data/us3-settlement-builders.js";
+
+/**
+ * WS3 settlement-success integration test. GhostBroker
+ * exposes a single settlement rail (`chain:sepolia:erc20`);
+ * this test stubs the rail so it can exercise the
+ * persistence boundary without spinning up an Anvil chain.
+ */
+function chainRailStub(): SettlementRail {
+  return {
+    id: "chain:sepolia:erc20",
+    dispatch: async () => ({
+      railId: "chain:sepolia:erc20",
+      railTradeRef: "0x" + "a".repeat(64),
+      railSignerAddress: "0x" + "b".repeat(20),
+      railState: "settled",
+      assetMovements: [],
+      observedAt: new Date().toISOString(),
+    }),
+    reverse: async (tradeRef) => ({
+      railId: "chain:sepolia:erc20",
+      railTradeRef: tradeRef,
+      railSignerAddress: "0x" + "b".repeat(20),
+      railState: "reversed",
+      assetMovements: [],
+      observedAt: new Date().toISOString(),
+    }),
+  };
+}
 
 describe("settlement success", () => {
   it("persists completed trade and receipts after command construction", async () => {
@@ -26,7 +58,11 @@ describe("settlement success", () => {
       } as never,
       {
         persistCompletedSettlement: async () => ({
-          completedTrade: buildCompletedTradeRecord(),
+          completedTrade: buildCompletedTradeRecord({
+            rail_id: "chain:sepolia:erc20",
+            rail_trade_ref: "0x" + "a".repeat(64),
+            rail_state: "settled",
+          }),
           receipts: [
             buildAuditReceiptRecord(),
             buildAuditReceiptRecord({
@@ -39,6 +75,11 @@ describe("settlement success", () => {
         }),
       },
       new TelemetryBus(),
+      undefined,
+      undefined,
+      new MapSettlementRailDispatcher(
+        new Map([["chain:sepolia:erc20", chainRailStub()]]),
+      ),
     );
 
     await expect(
@@ -51,13 +92,12 @@ describe("settlement success", () => {
       executionPriceCiphertext: "t3cipher.execution.us3",
       settledAt: "2026-06-12T00:00:00.000Z",
       settlementStatus: "settled",
-      // WS1: rail proof fields. The fake repository used by this
-      // test does not return rail fields, so they default to null.
-      // The rail call is verified separately in
-      // `settlement-rail-noop.test.ts`.
-      railId: null,
-      railTradeRef: null,
-      railState: null,
+      // WS1: rail proof fields. The chain-rail stub returns the
+      // same rail id + tx hash the fake repository echoed in
+      // `completedTrade`.
+      railId: "chain:sepolia:erc20",
+      railTradeRef: "0x" + "a".repeat(64),
+      railState: "settled",
       receiptIds: [
         "00000000-0000-4000-8000-000000000331",
         "00000000-0000-4000-8000-000000000332",

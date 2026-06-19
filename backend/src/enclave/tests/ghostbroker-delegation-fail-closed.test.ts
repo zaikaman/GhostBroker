@@ -4,21 +4,21 @@
  * The verifier is the single source of truth for agent
  * authority — every privileged backend action
  * (`submitIntent`, `cancelIntent`, `settlement.execute`,
- * `negotiation.*`) re-runs it on the persisted VC. The
- * pre-fix behaviour silently downgraded to a non-crypto
- * `verified` on any `@terminal3/verify_vc` exception unless
- * the operator had set `VC_VERIFY_STRICT=true`. A
+ * `negotiation.*`) re-runs it on the persisted VC. A
  * security-critical verifier that defaults to "verified on
  * SDK error" is an attack surface for any adversarial T3
- * SDK version bump or transient SDK outage. The post-fix
- * behaviour fails closed in every mode except `sandbox`,
- * which is the demo surface and is not the production gate.
+ * SDK version bump or transient SDK outage. The verifier
+ * fails closed on any `@terminal3/verify_vc` exception.
+ *
+ * The verifier runs in `live` mode exclusively — there is
+ * no longer a `sandbox` demo surface to tolerate SDK
+ * errors in, and no `structural` mode to silently downgrade
+ * to on a crypto failure.
  *
  * The tests in this file mock `@terminal3/verify_vc` at the
  * module level (hoisted `vi.mock`) so the SDK throws
  * deterministically. The verifier is required to return
- * `rejected` / `unverified` (never a silent `verified` with
- * `verificationMode: "structural"`).
+ * `rejected` / `unverified` (never a silent `verified`).
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -40,7 +40,7 @@ const baseRequest = {
 
 // A well-formed (but cryptographically meaningless) 65-byte
 // EIP-191 JWS. The verifier will reach the crypto path
-// because the JWS has no demo marker.
+// because the JWS is structurally valid.
 const signedVc = {
   id: "urn:uuid:ghostbroker-delegation-test",
   type: ["VerifiableCredential", "GhostBrokerDelegation"],
@@ -64,40 +64,34 @@ const signedVc = {
 };
 
 describe("verifyGhostbrokerDelegationCredential fail-closed semantics", () => {
-  it("fails closed in `live` mode when @terminal3/verify_vc throws (no silent structural downgrade)", async () => {
-    const result = await verifyGhostbrokerDelegationCredential(
-      {
-        ...baseRequest,
-        credential: signedVc,
-      },
-      "live",
-    );
+  it("fails closed when @terminal3/verify_vc throws (no silent structural downgrade)", async () => {
+    const result = await verifyGhostbrokerDelegationCredential({
+      ...baseRequest,
+      credential: signedVc,
+    });
 
     expect(result.status).toBe("rejected");
     if (result.status === "verified") {
       throw new Error(
-        "unreachable: a `live` verifier must never report `verified` on an SDK error",
+        "unreachable: the live verifier must never report `verified` on an SDK error",
       );
     }
     expect(result.reason).toBe("unverified");
   });
 
-  it("does NOT silently downgrade to `verified` with `verificationMode: 'structural'` on an SDK error", async () => {
-    // The pre-fix behaviour returned
-    // `{ status: "verified", verificationMode: "structural" }`
-    // on an SDK throw outside `VC_VERIFY_STRICT=true`. Pin
-    // the new contract: structural-mode is its own mode, not
-    // a fallback from a failed live verify.
-    const result = await verifyGhostbrokerDelegationCredential(
-      {
-        ...baseRequest,
-        credential: signedVc,
-      },
-      "live",
-    );
+  it("never reports `verified` with a non-live mode on an SDK error", async () => {
+    // Pin the post-fix contract: with the three-mode design
+    // gone, the verifier no longer emits a
+    // `verificationMode: "structural"` value on an SDK throw.
+    // The only emitted `verificationMode` is `"live"`, and
+    // it is only emitted on a successful verification.
+    const result = await verifyGhostbrokerDelegationCredential({
+      ...baseRequest,
+      credential: signedVc,
+    });
     if (result.status === "verified") {
       throw new Error(
-        "unreachable: silent structural downgrade is the bug we're fixing",
+        "unreachable: SDK error must never produce a verified result",
       );
     }
     expect(result).toEqual({

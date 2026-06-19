@@ -240,9 +240,9 @@ export class DidAuthService implements AuthSessionService {
     // pays out of `metadata.depositAddress`. Portfolio sync must
     // therefore follow the deposit address when it exists, so the
     // DB portfolio mirrors the wallet the rail actually moves
-    // funds from. For `wallet:default` (or a chain-rail
-    // institution missing a deposit address), we fall back to the
-    // connected login wallet, preserving the legacy behaviour.
+    // funds from. For a chain-rail institution missing a deposit
+    // address, we fall back to the connected login wallet,
+    // preserving the legacy behaviour.
     const depositAddress = readDepositAddress(institution);
     const chainRailDepositAddress =
       institution.settlementProfileRef === "chain:sepolia:erc20"

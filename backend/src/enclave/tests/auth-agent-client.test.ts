@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,21 +7,30 @@ import { mintTenantDelegation } from "../auth/tenant-delegation.js";
 import { loadOrCreateTenantIdentity } from "../sandbox/tenant-identity-store.js";
 
 /**
- * The sandbox marker lets the verifier short-circuit the
- * cryptographic check and accept the VC on shape + time-window +
- * DID-binding grounds only. Used for tests that don't exercise
- * the live signature path.
+ * The verifier runs in `live` mode exclusively: it
+ * cryptographically verifies every VC with the inline
+ * ECDSA flow. There is no `sandbox` demo surface and no
+ * `T3_MODE` env var to opt into a structural-only check.
+ *
+ * Tests that exercise the happy-path verifier therefore
+ * mint a fresh signed VC from the production
+ * `tenant-delegation` signer, then pass the signer
+ * address in via `additionalTrustedSignerAddresses` so
+ * the verifier accepts it. Tests that exercise a
+ * pre-crypto rejection (malformed / expired) use a
+ * placeholder JWS — those rejections happen before the
+ * cryptographic check, so a fake signature is fine.
  */
-const SANDBOX_PROOF_JWS = "sandbox-proof-placeholder";
+const PLACEHOLDER_PROOF_JWS = "0x" + "ab".repeat(64) + "1b";
 
 /**
- * A well-formed sandbox-marker VC. The verifier accepts this
- * on shape + time-window + DID-binding grounds; no live crypto
- * is exercised. Tests that need to exercise the crypto path
- * build their own freshly-minted VCs (see the round-trip tests
- * in `tenant-delegation.test.ts`).
+ * A well-formed (but not cryptographically signed) VC. The
+ * verifier accepts the shape, but a placeholder JWS is
+ * rejected on the crypto path. Tests that need a real
+ * signature build a freshly-minted VC via
+ * `mintTenantDelegation`.
  */
-const sandboxVc = {
+const unsignedVc = {
   id: "urn:uuid:ghostbroker-delegation-test",
   type: ["VerifiableCredential", "GhostBrokerDelegation"],
   issuer: "did:t3n:0x0000000000000000000000000000000000000099",
@@ -35,11 +44,11 @@ const sandboxVc = {
     purpose: "test",
   },
   proof: {
-    type: "JsonWebSignature2020",
+    type: "EcdsaSecp256k1Signature2019",
     created: "2026-01-01T00:00:00.000Z",
     proofPurpose: "assertionMethod",
     verificationMethod: "did:t3n:0x0000000000000000000000000000000000000099#key-1",
-    jws: SANDBOX_PROOF_JWS,
+    jws: PLACEHOLDER_PROOF_JWS,
   },
 };
 
@@ -48,64 +57,22 @@ const baseRequest = {
   agentDid: "did:t3n:agent:us1-authorized",
   authorityRef: "ghostbroker-delegation:urn:uuid:ghostbroker-delegation-test",
   requestedAction: "agent.admit" as const,
-  delegationCredential: sandboxVc,
+  delegationCredential: unsignedVc,
 };
 
 describe("T3 agent delegation adapter", () => {
-  beforeEach(() => {
-    // Sandbox-marker VCs are only accepted when the verifier
-    // runs in sandbox mode. The default mode is `live`, which
-    // rejects demo proofs to fail-closed against adversarial
-    // T3 SDK version bumps.
-    vi.stubEnv("T3_MODE", "sandbox");
-  });
-
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("accepts Ghostbroker-style delegation VCs", async () => {
+  it("rejects an unsigned VC with `unverified` (verifier is live-only)", async () => {
     const client = new GhostbrokerDelegationAgentAuthClient();
-
-    await expect(client.verifyDelegation(baseRequest)).resolves.toEqual({
-      status: "verified",
-      agentDid: baseRequest.agentDid,
-      authorityRef: baseRequest.authorityRef,
-      policyHash:
-        "ce3b08cb992446501f996876ef99c9b1df7bff343186555495966dbf3a3725ec",
-      delegationCredential: sandboxVc,
-    });
-  });
-
-  it("produces a stable sha256 policy hash for the same VC", async () => {
-    const client = new GhostbrokerDelegationAgentAuthClient();
-
-    const first = await client.verifyDelegation(baseRequest);
-    const second = await client.verifyDelegation(baseRequest);
-    const hex64 = /^[0-9a-f]{64}$/u;
-
-    expect(first.status).toBe("verified");
-    expect(second.status).toBe("verified");
-    if (first.status !== "verified" || second.status !== "verified") {
-      throw new Error("unreachable: expected verified status");
+    const result = await client.verifyDelegation(baseRequest);
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") {
+      throw new Error("unreachable: expected rejected status");
     }
-    expect(first.policyHash).toBe(second.policyHash);
-    expect(first.policyHash).toMatch(hex64);
-  });
-
-  it("rejects a stale authorityRef that does not match the VC", async () => {
-    const client = new GhostbrokerDelegationAgentAuthClient();
-
-    await expect(
-      client.verifyDelegation({
-        ...baseRequest,
-        authorityRef: "ghostbroker-delegation:urn:uuid:different-credential",
-      }),
-    ).resolves.toEqual({
-      status: "rejected",
-      agentDid: baseRequest.agentDid,
-      reason: "over_scoped",
-    });
+    expect(result.reason).toBe("unverified");
   });
 
   it("rejects an expired VC", async () => {
@@ -115,7 +82,7 @@ describe("T3 agent delegation adapter", () => {
       client.verifyDelegation({
         ...baseRequest,
         delegationCredential: {
-          ...sandboxVc,
+          ...unsignedVc,
           expirationDate: "2024-01-01T00:00:00.000Z",
         },
       }),
@@ -141,10 +108,10 @@ describe("T3 agent delegation adapter", () => {
     // `DelegationActionScope` enum, so the absence of
     // `allowedActions` fails the schema parse.
     const { allowedActions: _omit, ...legacySubject } =
-      sandboxVc.credentialSubject;
+      unsignedVc.credentialSubject;
     void _omit;
     const procurementVc = {
-      ...sandboxVc,
+      ...unsignedVc,
       credentialSubject: {
         ...legacySubject,
         allowedCategories: ["software", "travel"],
@@ -165,13 +132,6 @@ describe("T3 agent delegation adapter", () => {
 });
 
 describe("T3 agent delegation adapter (live crypto round-trip)", () => {
-  beforeEach(() => {
-    // The round-trip tests exercise the production live
-    // crypto verification path. `T3_MODE=live` is the
-    // production default — set explicitly to be explicit.
-    vi.stubEnv("T3_MODE", "live");
-  });
-
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -179,15 +139,6 @@ describe("T3 agent delegation adapter (live crypto round-trip)", () => {
   it("accepts a freshly-minted VC end-to-end when the signer address matches the DID's address", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "ghostbroker-live-roundtrip-match-"));
     try {
-      // The DID's last 40 hex chars are `0x0000...0099`; the
-      // identity store derives a fresh keypair whose address
-      // will NOT match (random). To get a match, generate the
-      // identity from a deterministic private key whose
-      // address equals the DID's embedded `0099...` address.
-      //
-      // We can't directly invert secp256k1, so we accept that
-      // the test exercises the additionalTrustedSignerAddresses
-      // path: pass the random keypair's address in.
       const tenantDid = "did:t3n:0x0000000000000000000000000000000000000099";
       const identity = loadOrCreateTenantIdentity({
         tenantDid,
@@ -217,6 +168,108 @@ describe("T3 agent delegation adapter (live crypto round-trip)", () => {
         ]),
       });
       expect(result.status).toBe("verified");
+      if (result.status !== "verified") {
+        throw new Error(
+          `expected verified, got ${JSON.stringify(result)}`,
+        );
+      }
+      // Stable sha256 policy hash on the verified result.
+      expect(result.policyHash).toMatch(/^[0-9a-f]{64}$/u);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("produces a stable sha256 policy hash for the same VC across calls", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ghostbroker-live-roundtrip-hash-"));
+    try {
+      const tenantDid = "did:t3n:0x0000000000000000000000000000000000000099";
+      const identity = loadOrCreateTenantIdentity({
+        tenantDid,
+        path: join(tmp, "tenant.json"),
+      });
+      const { credential } = mintTenantDelegation(
+        {
+          agentDid: "did:t3n:agent:us1-authorized",
+          institutionId: "00000000-0000-4000-8000-000000000101",
+          maxSpendUsd: 1000,
+          allowedActions: ["agent.admit"],
+          purpose: "test",
+          validityMonths: 12,
+        },
+        identity,
+      );
+
+      const client = new GhostbrokerDelegationAgentAuthClient();
+      const first = await client.verifyDelegation({
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        agentDid: "did:t3n:agent:us1-authorized",
+        authorityRef: `ghostbroker-delegation:${credential.id}`,
+        requestedAction: "agent.admit",
+        delegationCredential: credential,
+        additionalTrustedSignerAddresses: new Set([
+          identity.address.toLowerCase(),
+        ]),
+      });
+      const second = await client.verifyDelegation({
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        agentDid: "did:t3n:agent:us1-authorized",
+        authorityRef: `ghostbroker-delegation:${credential.id}`,
+        requestedAction: "agent.admit",
+        delegationCredential: credential,
+        additionalTrustedSignerAddresses: new Set([
+          identity.address.toLowerCase(),
+        ]),
+      });
+
+      expect(first.status).toBe("verified");
+      expect(second.status).toBe("verified");
+      if (first.status !== "verified" || second.status !== "verified") {
+        throw new Error("unreachable: expected verified status");
+      }
+      expect(first.policyHash).toBe(second.policyHash);
+      expect(first.policyHash).toMatch(/^[0-9a-f]{64}$/u);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a freshly-minted VC when the caller presents a stale authorityRef", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ghostbroker-live-roundtrip-overscope-"));
+    try {
+      const tenantDid = "did:t3n:0x0000000000000000000000000000000000000099";
+      const identity = loadOrCreateTenantIdentity({
+        tenantDid,
+        path: join(tmp, "tenant.json"),
+      });
+      const { credential } = mintTenantDelegation(
+        {
+          agentDid: "did:t3n:agent:us1-authorized",
+          institutionId: "00000000-0000-4000-8000-000000000101",
+          maxSpendUsd: 1000,
+          allowedActions: ["agent.admit"],
+          purpose: "test",
+          validityMonths: 12,
+        },
+        identity,
+      );
+
+      const client = new GhostbrokerDelegationAgentAuthClient();
+      const result = await client.verifyDelegation({
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        agentDid: "did:t3n:agent:us1-authorized",
+        authorityRef: "ghostbroker-delegation:urn:uuid:different-credential",
+        requestedAction: "agent.admit",
+        delegationCredential: credential,
+        additionalTrustedSignerAddresses: new Set([
+          identity.address.toLowerCase(),
+        ]),
+      });
+      expect(result.status).toBe("rejected");
+      if (result.status !== "rejected") {
+        throw new Error("unreachable: expected rejected status");
+      }
+      expect(result.reason).toBe("over_scoped");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

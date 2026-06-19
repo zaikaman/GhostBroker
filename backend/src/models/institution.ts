@@ -11,14 +11,8 @@ export type InstitutionStatus = z.infer<typeof institutionStatusSchema>;
 
 /**
  * WS3: settlement profile refs the system understands.
- *   - `wallet:default`     — noop rail; the system default
- *   - `chain:sepolia:erc20` — Sepolia ERC-20 chain rail
- *   - `custody:<partner>`   — future custody rail (e.g.
- *                             `custody:fireblocks`). The
- *                             service validates the
- *                             ref's prefix; the actual rail
- *                             registration is a separate
- *                             concern (see `app.ts`).
+ *   - `chain:sepolia:erc20` — Sepolia ERC-20 chain rail.
+ *                             GhostBroker's only settlement rail.
  *
  * The chain rail's metadata must include `tokenAddresses`
  * (a `Record<assetCode, erc20Address>` map). The
@@ -27,13 +21,16 @@ export type InstitutionStatus = z.infer<typeof institutionStatusSchema>;
  * wallet automatically when the server-owned wallet mode
  * is enabled. When supplied, it must still be a valid
  * Ethereum address.
+ *
+ * The legacy `wallet:default` noop profile has been removed:
+ * there is no longer a noop fallback, and every settlement
+ * must round-trip through the chain rail.
  */
 export const SUPPORTED_SETTLEMENT_PROFILE_REFS = [
-  "wallet:default",
   "chain:sepolia:erc20",
 ] as const;
 
-export const SUPPORTED_SETTLEMENT_PROFILE_REFS_REGEX = /^(wallet:default|chain:sepolia:erc20|custody:[a-z0-9_-]+|settlement-profile:[a-z0-9_:-]+)$/u;
+export const SUPPORTED_SETTLEMENT_PROFILE_REFS_REGEX = /^(chain:sepolia:erc20|settlement-profile:[a-z0-9_:-]+)$/u;
 
 const ethereumAddressSchema = z
   .string()

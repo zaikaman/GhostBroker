@@ -1,4 +1,3 @@
-import { NoopCustodialRail } from "./noop-custodial-rail.js";
 import { RailDispatchError } from "./rail-dispatch-error.js";
 import type {
   SettlementRail,
@@ -9,24 +8,29 @@ import type { SettlementCommand } from "../../enclave/index.js";
 
 /**
  * Routes an institution's `settlementProfileRef` to a concrete
- * `SettlementRail` instance. The noop rail is the universal
- * fallback — every unknown profile is served by it, so a typo in a
- * profile string can never block settlement. The institution's
- * profile is still surfaced in the error so the operator can see
- * what they asked for.
+ * `SettlementRail` instance.
+ *
+ * GhostBroker exposes a single settlement rail — `chain:sepolia:erc20`
+ * — registered at boot time in `app.ts`. The dispatcher is a thin
+ * `Map<profileRef, rail>` lookup: the profile ref is the rail's `id`
+ * 1:1, so the rail registry has exactly one entry. Any profile ref
+ * that is not registered produces a `RailDispatchError` so a typo
+ * or stale profile cannot silently fall through to a non-existent
+ * rail. The institution's profile is surfaced in the error so the
+ * operator can see what they asked for.
  *
  * The dispatcher is built at boot time and held by the
- * `SettlementService`. Future WS2/WS3 work will register the chain
- * rail and the custody rail here. The interface is intentionally
- * stable: `SettlementService` only depends on
+ * `SettlementService`. The interface is intentionally stable:
+ * `SettlementService` only depends on
  * `dispatch(settlementProfileRef, command, plaintext, context)`.
  */
 export interface SettlementRailDispatcher {
   /**
-   * Resolve the rail for a given `settlementProfileRef`. Returns
-   * the noop rail for unknown profiles (and emits no warning — the
-   * profile is part of the audit trail via the returned rail's
-   * `id`).
+   * Resolve the rail for a given `settlementProfileRef`. Throws
+   * `RailDispatchError` if the profile is not registered; the rail
+   * registry has exactly one entry (`chain:sepolia:erc20`) so the
+   * only "unknown" profiles are typos or pre-migration legacy
+   * values.
    */
   resolve(settlementProfileRef: string): SettlementRail;
 
@@ -36,9 +40,9 @@ export interface SettlementRailDispatcher {
    * wrapped in `{ settlementProfileRef, proof }` so the caller
    * has both the original selection string and the rail's view.
    *
-   * Throws `RailDispatchError` if the rail throws. Network,
-   * signing, and balance errors from the rail all flow through
-   * this error type.
+   * Throws `RailDispatchError` if the rail throws or the profile
+   * is not registered. Network, signing, and balance errors from
+   * the rail all flow through this error type.
    */
   dispatch(
     settlementProfileRef: string,
@@ -56,30 +60,30 @@ export interface SettlementRailDispatcher {
  * copied defensively; the caller cannot mutate the dispatcher's
  * registry after construction.
  *
- * Missing profile → noop rail (the documented fallback). The
- * `noopCustodialRail` instance passed in is also used as the
- * fallback so we do not allocate a second copy.
+ * Missing profile → `RailDispatchError`. There is no fallback
+ * rail: the system exposes exactly one settlement rail
+ * (`chain:sepolia:erc20`) and a settlement with an unknown
+ * profile must fail loudly.
  */
 export class MapSettlementRailDispatcher implements SettlementRailDispatcher {
   private readonly rails: ReadonlyMap<string, SettlementRail>;
-  private readonly noopRail: SettlementRail;
 
-  public constructor(
-    rails: ReadonlyMap<string, SettlementRail>,
-    noopRail: SettlementRail = new NoopCustodialRail(),
-  ) {
-    // Defensive copy + add the noop rail as a guaranteed fallback
-    // for any profile not explicitly registered.
-    const map = new Map<string, SettlementRail>(rails);
-    if (!map.has(noopRail.id)) {
-      map.set(noopRail.id, noopRail);
-    }
-    this.rails = map;
-    this.noopRail = noopRail;
+  public constructor(rails: ReadonlyMap<string, SettlementRail>) {
+    this.rails = new Map(rails);
   }
 
   public resolve(settlementProfileRef: string): SettlementRail {
-    return this.rails.get(settlementProfileRef) ?? this.noopRail;
+    const rail = this.rails.get(settlementProfileRef);
+    if (!rail) {
+      throw new RailDispatchError({
+        settlementProfileRef,
+        railId: settlementProfileRef,
+        message:
+          `Settlement rail '${settlementProfileRef}' is not registered. ` +
+          `GhostBroker exposes a single rail, 'chain:sepolia:erc20'.`,
+      });
+    }
+    return rail;
   }
 
   public async dispatch(
@@ -91,7 +95,22 @@ export class MapSettlementRailDispatcher implements SettlementRailDispatcher {
     settlementProfileRef: string;
     proof: Awaited<ReturnType<SettlementRail["dispatch"]>>;
   }> {
-    const rail = this.resolve(settlementProfileRef);
+    let rail: SettlementRail;
+    try {
+      rail = this.resolve(settlementProfileRef);
+    } catch (error) {
+      if (error instanceof RailDispatchError) {
+        throw error;
+      }
+      throw new RailDispatchError({
+        settlementProfileRef,
+        railId: settlementProfileRef,
+        message: `Settlement rail '${settlementProfileRef}' could not be resolved: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        cause: error,
+      });
+    }
     try {
       const proof = await rail.dispatch(command, plaintext, context);
       return { settlementProfileRef, proof };

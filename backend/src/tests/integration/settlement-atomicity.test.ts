@@ -3,7 +3,39 @@ import type { SettlementCommand } from "../../enclave/index.js";
 import { PublicError } from "../../errors/public-error.js";
 import { SettlementService } from "../../services/settlement.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
+import {
+  MapSettlementRailDispatcher,
+} from "../../services/settlement-rails/dispatcher.js";
+import type { SettlementRail } from "../../services/settlement-rails/rail.js";
 import { buildSettlementExecutionRequest } from "../data/us3-settlement-builders.js";
+
+/**
+ * WS1+ / WS2 settlement tests. GhostBroker exposes a single
+ * settlement rail (`chain:sepolia:erc20`); the tests stub
+ * the rail so they exercise the persistence boundary
+ * without spinning up an Anvil chain.
+ */
+function chainRailStub(): SettlementRail {
+  return {
+    id: "chain:sepolia:erc20",
+    dispatch: async () => ({
+      railId: "chain:sepolia:erc20",
+      railTradeRef: "0x" + "a".repeat(64),
+      railSignerAddress: "0x" + "b".repeat(20),
+      railState: "settled",
+      assetMovements: [],
+      observedAt: new Date().toISOString(),
+    }),
+    reverse: async (tradeRef) => ({
+      railId: "chain:sepolia:erc20",
+      railTradeRef: tradeRef,
+      railSignerAddress: "0x" + "b".repeat(20),
+      railState: "reversed",
+      assetMovements: [],
+      observedAt: new Date().toISOString(),
+    }),
+  };
+}
 
 describe("settlement atomicity", () => {
   it("surfaces repository failure without returning a completed trade", async () => {
@@ -27,6 +59,11 @@ describe("settlement atomicity", () => {
         },
       },
       new TelemetryBus(),
+      undefined,
+      undefined,
+      new MapSettlementRailDispatcher(
+        new Map([["chain:sepolia:erc20", chainRailStub()]]),
+      ),
     );
 
     await expect(
@@ -79,12 +116,20 @@ describe("settlement atomicity", () => {
               settlement_status: "settled",
               settled_at: "2026-06-12T00:00:00.000Z",
               t3_execution_ref: "t3exec_us3",
+              rail_id: "chain:sepolia:erc20",
+              rail_trade_ref: "0x" + "a".repeat(64),
+              rail_state: "settled",
             },
             receipts: [],
           };
         },
       },
       new TelemetryBus(),
+      undefined,
+      undefined,
+      new MapSettlementRailDispatcher(
+        new Map([["chain:sepolia:erc20", chainRailStub()]]),
+      ),
     );
 
     await service.executeSettlement(request, "corr_us3");

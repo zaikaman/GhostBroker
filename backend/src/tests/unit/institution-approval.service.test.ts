@@ -160,14 +160,18 @@ describe("InstitutionApprovalService", () => {
     expect(clients.calls.filter((c) => c.fn === "approve")).toHaveLength(0);
   });
 
-  it("rejects an institution that is not on the chain rail", async () => {
+  it("rejects an institution with a non-chain-rail settlement profile", async () => {
+    // GhostBroker exposes a single settlement rail
+    // (`chain:sepolia:erc20`); the approval service rejects
+    // any other profile since relayer approvals only make
+    // sense for the on-chain rail.
     const clients = makeClients({
       balances: { eth: 0n, wbtc: 0n, usdc: 0n },
       allowances: { wbtc: 0n, usdc: 0n },
       decimals: { wbtc: 8, usdc: 6 },
     });
     const service = makeService(
-      makeRepository(chainInstitution({ settlementProfileRef: "wallet:default" })),
+      makeRepository(chainInstitution({ settlementProfileRef: "settlement-profile:legacy" })),
       clients,
     );
 

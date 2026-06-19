@@ -778,8 +778,7 @@ delegation as a **W3C Verifiable Credential JSON-LD** with `issuer` /
 allowlist. The agent's identity is a derived `did:t3n:0x<eth-address>`
 from a real `T3nClient.handshake()` + `client.authenticate()`
 round-trip, and the only T3 secret needed is `T3N_API_KEY`. The
-credential is signed locally (with a demo `jws` marker in
-sandbox/structural mode) and persisted to disk.
+credential is signed locally and persisted to disk.
 
 ### Original (now-resolved) JCS path
 
@@ -831,9 +830,10 @@ from Terminal 3"** with:
   is the `T3N_API_KEY` from the claim page.
 - A diagram of the Ghostbroker delegation flow: claim key → T3N handshake → DID →
   W3C VC → bound to DID → agent authenticates → submits intents.
-- The wire format of the W3C VC (with a JSON example), the demo `jws`
-  marker, and the three verifier modes (`sandbox` / `structural` /
-  `live`).
+- The wire format of the W3C VC (with a JSON example) and the single
+  verifier mode (`live` — full `EcdsaSecp256k1Signature2019` JWS
+  verification, fail-closed on any SDK exception; no `sandbox` /
+  `structural` off-ramp).
 - A note that the Smart VC / JCS-prove shape is a future
   programmatic-issuer mode; the Ghostbroker delegation shape is what works
   today.

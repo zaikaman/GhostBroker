@@ -130,10 +130,16 @@ describe("InstitutionWithdrawalService", () => {
     ).rejects.toMatchObject({ statusCode: 422 });
   });
 
-  it("rejects an institution that is not on the chain rail", async () => {
+  it("rejects an institution with a non-chain-rail settlement profile", async () => {
+    // GhostBroker exposes a single settlement rail
+    // (`chain:sepolia:erc20`); legacy `settlement-profile:*`
+    // refs are accepted by the schema but the withdrawal
+    // service rejects them since the chain rail is the only
+    // one that has an on-chain deposit wallet to fund a
+    // withdrawal.
     const clients = makeClients({ ethBalance: 10n ** 18n, tokenBalance: 0n, decimals: 8 });
     const service = makeService(
-      makeRepository(chainInstitution({ settlementProfileRef: "wallet:default" })),
+      makeRepository(chainInstitution({ settlementProfileRef: "settlement-profile:legacy" })),
       clients,
     );
 
