@@ -85,7 +85,7 @@ export interface Agent {
 
 export interface ProvisionAgentPolicy {
   maxSpendUsd: number;
-  allowedCategories: ('office-supplies' | 'software' | 'hardware' | 'services' | 'travel')[];
+  allowedActions: ('agent.admit' | 'intent.submit' | 'settlement.execute' | 'negotiation.open' | 'negotiation.move' | 'negotiation.disclose' | 'negotiation.settle')[];
   approverEmail?: string;
   purpose?: string;
   validityMonths?: number;
@@ -691,7 +691,7 @@ export const apiClient = {
     id: string,
     policy?: {
       maxSpendUsd: number;
-      allowedCategories: string[];
+      allowedActions: string[];
       approverEmail?: string;
       purpose?: string;
       validityMonths?: number;

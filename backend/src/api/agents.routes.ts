@@ -89,6 +89,14 @@ export function createAgentsRouter(
 
       const parsed = configureAgentRequestSchema.safeParse(request.body);
       if (!parsed.success) {
+        logger.error(
+          {
+            event: "agents.configure.validation_failed",
+            err: parsed.error.issues,
+            body: request.body,
+          },
+          "Configure agent request validation failed.",
+        );
         throw new PublicError("validation_failed", 400, parsed.error);
       }
 

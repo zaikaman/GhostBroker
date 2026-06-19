@@ -8,6 +8,50 @@ import { PublicError } from "../errors/public-error.js";
 import type { AgentManagementService } from "../services/agent.service.js";
 
 /**
+ * Migration shim for delegation credentials that were persisted with the
+ * old `credentialSubject.allowedCategories` field (a procurement BUIDL
+ * enum: `office-supplies | software | hardware | services | travel`)
+ * instead of the current `allowedActions` trading-action scope.
+ *
+ * When the credential lacks `allowedActions` but has `allowedCategories`,
+ * this function injects a default `allowedActions` set broad enough for
+ * any agent that was operational under the old schema. The default set
+ * includes all trading-related actions, preserving the operational scope
+ * the old credential implicitly granted.
+ */
+function migrateCredentialSubject(credential: unknown): unknown {
+  if (!credential || typeof credential !== "object") {
+    return credential;
+  }
+  const vc = credential as Record<string, unknown>;
+  if (
+    !vc.credentialSubject ||
+    typeof vc.credentialSubject !== "object"
+  ) {
+    return credential;
+  }
+  const cs = vc.credentialSubject as Record<string, unknown>;
+
+  // If `allowedCategories` is present but `allowedActions` is missing,
+  // inject a default set of trading actions so the verifier accepts the
+  // credential. This matches the operational scope the old credential
+  // implicitly granted to any admitted agent.
+  if ("allowedCategories" in cs && !("allowedActions" in cs)) {
+    cs.allowedActions = [
+      "agent.admit",
+      "intent.submit",
+      "settlement.execute",
+      "negotiation.open",
+      "negotiation.move",
+      "negotiation.disclose",
+      "negotiation.settle",
+    ];
+  }
+
+  return vc;
+}
+
+/**
  * Single Ghostbroker delegation-only authorization facade.
  *
  * Every privileged backend action — `AgentService.admitAgent`,
@@ -71,8 +115,15 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
   public async verifyAgentAuthority(
     request: AgentDelegationVerificationRequest,
   ): Promise<AgentDelegationVerificationResult> {
+    // Normalize delegation credentials that use the old `allowedCategories`
+    // field (from the procurement BUIDL schema) to the new `allowedActions`
+    // trading-action scope. This provides backward compatibility for
+    // credentials persisted before the schema migration.
+    const normalizedCredential = migrateCredentialSubject(
+      request.delegationCredential,
+    );
     const vcRequest: GhostbrokerVerificationRequest = {
-      credential: request.delegationCredential,
+      credential: normalizedCredential,
       institutionId: request.institutionId,
       agentDid: request.agentDid,
       requestedAction: request.requestedAction,

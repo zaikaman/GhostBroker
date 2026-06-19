@@ -122,24 +122,13 @@ export class AgentService implements AgentManagementService {
 
   public async admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission> {
     console.log("[ADMIT.SERVICE] admitAgent called, delegationCredential:", request.delegationCredential === undefined ? "absent" : "present");
+    console.log("[ADMIT.SERVICE] institutionId:", request.institutionId, "agentDid:", request.agentDid);
     const revokedAuthorityRefs =
       await this.revocations.listRevokedAuthorityRefs(
         request.institutionId,
         request.agentDid,
       );
 
-    // Ghostbroker-only path. The JCS Smart-VC verifier is gone —
-    // the live T3N onboarding surface only issues Ghostbroker-style
-    // W3C credentials. The credential is persisted on the agent
-    // record so submit / cancel / settlement can re-verify it.
-    //
-    // Post-Phase 1: the agent process no longer sends the
-    // delegation VC inline (the backend owns it). When the
-    // request does not carry a VC, we look up the agent record
-    // by DID and load the persisted credential. This supports
-    // both the dashboard's "Configure Agent" → "Admit" flow
-    // and the Phase 2.5 demo orchestrator (which configures
-    // agents before spawning the child processes).
     let delegationCredential = request.delegationCredential;
     if (!delegationCredential) {
       const existingAgent = await this.repository.findByAgentDid(
@@ -147,26 +136,23 @@ export class AgentService implements AgentManagementService {
         request.agentDid,
       );
       if (existingAgent) {
+        console.log("[ADMIT.SERVICE] found existing agent by DID:", existingAgent.id, "status:", existingAgent.status, "has delegation_credential:", "delegation_credential" in (existingAgent.metadata as Record<string, unknown>));
         const persistedVc = (
           existingAgent.metadata as Record<string, unknown> | null
         )?.delegation_credential;
         if (persistedVc) {
+          console.log("[ADMIT.SERVICE] loaded persisted delegation VC from agent metadata");
           delegationCredential = persistedVc;
+        } else {
+          console.log("[ADMIT.SERVICE] existing agent has no delegation_credential in metadata");
         }
+      } else {
+        console.log("[ADMIT.SERVICE] no existing agent found by DID");
       }
     }
 
-    // A delegation credential is the production contract. Whether
-    // the request carries it inline or the agent record has it
-    // persisted, the backend MUST have a Ghostbroker-style W3C VC
-    // before admitting the agent. There is no sandbox admit
-    // shortcut: synthetic authority refs and demo DID placeholders
-    // were removed because they bypassed the live cryptographic
-    // verification gate that the verifier runs on every privileged
-    // call. Every code path (dashboard Configure Agent, hosted
-    // agent spawn, E2E test) flows through the dashboard's
-    // configure-agent endpoint, which always signs a real VC.
     if (!delegationCredential) {
+      console.log("[ADMIT.SERVICE] delegation credential not available — throwing authorization_failed");
       throw new PublicError(
         "authorization_failed",
         403,
@@ -174,6 +160,7 @@ export class AgentService implements AgentManagementService {
       );
     }
 
+    console.log("[ADMIT.SERVICE] verifying delegation credential via authorization facade...");
     const verification = await this.authorization.verifyAgentAuthority({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
@@ -183,19 +170,17 @@ export class AgentService implements AgentManagementService {
       revokedAuthorityRefs,
     });
 
+    console.log("[ADMIT.SERVICE] verification result:", verification.status);
     if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }
 
-    // Check if the agent record already exists (loaded from the
-    // VC lookup above). If so, return the existing admission
-    // rather than attempting a duplicate insert — the agents
-    // table has a unique constraint on (institution_id, agent_did).
     const alreadyAdmitted = await this.repository.findByAgentDid(
       request.institutionId,
       request.agentDid,
     );
     if (alreadyAdmitted) {
+      console.log("[ADMIT.SERVICE] agent already admitted, returning existing admission");
       return {
         id: alreadyAdmitted.id,
         agentDid: alreadyAdmitted.agentDid,
@@ -204,6 +189,7 @@ export class AgentService implements AgentManagementService {
       };
     }
 
+    console.log("[ADMIT.SERVICE] persisting new admitted agent...");
     return this.persistAdmittedAgent({
       request,
       authorityRef: verification.authorityRef,

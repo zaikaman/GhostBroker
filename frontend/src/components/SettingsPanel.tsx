@@ -147,10 +147,10 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     try {
       const policy: {
         maxSpendUsd: number;
-        allowedCategories: string[];
+        allowedActions: string[];
       } = {
         maxSpendUsd,
-        allowedCategories: ['services'],
+        allowedActions: ['agent.admit', 'intent.submit', 'negotiation.open', 'negotiation.move', 'negotiation.disclose', 'negotiation.settle'],
       };
       await apiClient.mintDelegation(editingAgent.id, policy);
       setEditingAgent(null);
