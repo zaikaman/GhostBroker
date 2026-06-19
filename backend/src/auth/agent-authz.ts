@@ -81,17 +81,37 @@ export interface AgentAuthorizationFacade {
    * Server-side: load the persisted VC for the agent and
    * verify it. This is the post-Phase 1 default. The agent
    * process never sends the VC; the backend owns it.
+   *
+   * `additionalTrustedSignerAddresses` is the set of extra
+   * addresses the verifier accepts in addition to the address
+   * derived from the issuer DID. The production signer uses
+   * the institution's T3 SDK API key as its `privateKey` —
+   * the SDK authenticates with that key's derived address
+   * but the T3 server returns a tenant DID whose embedded
+   * address is different, so the API key's derived address
+   * must be passed in.
    */
   loadAndVerify(input: {
     institutionId: string;
     agentId: string;
     agentDid: string;
     requestedAction: AgentDelegationVerificationRequest["requestedAction"];
+    additionalTrustedSignerAddresses?: ReadonlySet<string>;
   }): Promise<AgentDelegationVerificationResult>;
 }
 
 export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
   private agentService: AgentManagementService | undefined;
+  /**
+   * Optional trusted-signer addresses that the facade passes
+   * to the verifier on every call. Populated at backend boot
+   * with the institution's T3 SDK API key's derived address
+   * (the address the SDK authenticates with — see the file
+   * docstring on the verifier and the signer for the full
+   * rationale). Production code sets this exactly once, in
+   * the composition root in `app.ts`.
+   */
+  private trustedSignerAddresses: ReadonlySet<string> | undefined;
 
   public constructor(
     agentService?: AgentManagementService,
@@ -112,6 +132,16 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
     this.agentService = service;
   }
 
+  /**
+   * Set the trusted-signer addresses the facade passes to
+   * the verifier on every `loadAndVerify` call. Used by the
+   * composition root to inject the institution's T3 SDK
+   * API key's derived address at backend boot.
+   */
+  public setTrustedSignerAddresses(addresses: ReadonlySet<string>): void {
+    this.trustedSignerAddresses = addresses;
+  }
+
   public async verifyAgentAuthority(
     request: AgentDelegationVerificationRequest,
   ): Promise<AgentDelegationVerificationResult> {
@@ -122,6 +152,15 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
     const normalizedCredential = migrateCredentialSubject(
       request.delegationCredential,
     );
+    // Auto-merge the facade-level trusted-signer addresses
+    // (populated at backend boot with the institution's T3 SDK
+    // API key's derived address) so callers don't have to
+    // remember to plumb them on every privileged call. See
+    // `setTrustedSignerAddresses` for the boot-time wiring.
+    const mergedTrustedSigners = mergeTrustedSignerAddresses(
+      this.trustedSignerAddresses,
+      request.additionalTrustedSignerAddresses,
+    );
     const vcRequest: GhostbrokerVerificationRequest = {
       credential: normalizedCredential,
       institutionId: request.institutionId,
@@ -129,6 +168,11 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
       requestedAction: request.requestedAction,
       ...(request.revokedAuthorityRefs !== undefined
         ? { revokedAuthorityRefs: request.revokedAuthorityRefs }
+        : {}),
+      ...(mergedTrustedSigners !== undefined
+        ? {
+            additionalTrustedSignerAddresses: mergedTrustedSigners,
+          }
         : {}),
     };
 
@@ -164,6 +208,7 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
     agentId: string;
     agentDid: string;
     requestedAction: AgentDelegationVerificationRequest["requestedAction"];
+    additionalTrustedSignerAddresses?: ReadonlySet<string>;
   }): Promise<AgentDelegationVerificationResult> {
     if (!this.agentService) {
       // No service wired: the facade is being used in
@@ -179,12 +224,38 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
     if (!vc) {
       throw new PublicError("authorization_failed", 403);
     }
+    // Merge caller-supplied addresses with the facade-level
+    // trusted-signer set. The facade-level set is populated at
+    // backend boot with the institution's T3 SDK API key's
+    // derived address; callers may add their own (rare).
+    const mergedTrustedSigners = mergeTrustedSignerAddresses(
+      this.trustedSignerAddresses,
+      input.additionalTrustedSignerAddresses,
+    );
     return this.verifyAgentAuthority({
       institutionId: input.institutionId,
       agentDid: input.agentDid,
       authorityRef: "",
       delegationCredential: vc,
       requestedAction: input.requestedAction,
+      ...(mergedTrustedSigners !== undefined
+        ? { additionalTrustedSignerAddresses: mergedTrustedSigners }
+        : {}),
     });
   }
+}
+
+function mergeTrustedSignerAddresses(
+  facadeSet: ReadonlySet<string> | undefined,
+  callerSet: ReadonlySet<string> | undefined,
+): ReadonlySet<string> | undefined {
+  if (!facadeSet && !callerSet) return undefined;
+  const merged = new Set<string>();
+  if (facadeSet) {
+    for (const addr of facadeSet) merged.add(addr);
+  }
+  if (callerSet) {
+    for (const addr of callerSet) merged.add(addr);
+  }
+  return merged;
 }

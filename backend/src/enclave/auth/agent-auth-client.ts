@@ -64,6 +64,23 @@ export interface AgentDelegationVerificationRequest {
   revokedAuthorityRefs?: ReadonlySet<string>;
   /** Ghostbroker delegation W3C VC persisted at admit time. */
   delegationCredential: unknown;
+  /**
+   * Additional Ethereum addresses the verifier should accept
+   * as a valid signer of `delegationCredential`, in addition
+   * to the address derived from `delegationCredential.issuer`.
+   *
+   * The production signer uses the institution's T3 SDK API
+   * key as its `privateKey`. The T3 SDK authenticates with
+   * the API key's derived address and the server returns a
+   * `did:t3n:0x<addr>` whose embedded address does NOT match
+   * the API key's derived address. The signature still has
+   * to be cryptographically valid — `recoveredAddress` must
+   * equal the API key's derived address — but the verifier
+   * cannot derive that address from the issuer DID alone.
+   * Callers that own the API key pass its derived address
+   * here.
+   */
+  additionalTrustedSignerAddresses?: ReadonlySet<string>;
 }
 
 export type AgentDelegationRejectionReason =
@@ -133,6 +150,12 @@ export class GhostbrokerDelegationAgentAuthClient
       requestedAction: request.requestedAction,
       ...(request.revokedAuthorityRefs !== undefined
         ? { revokedAuthorityRefs: request.revokedAuthorityRefs }
+        : {}),
+      ...(request.additionalTrustedSignerAddresses !== undefined
+        ? {
+            additionalTrustedSignerAddresses:
+              request.additionalTrustedSignerAddresses,
+          }
         : {}),
     };
 

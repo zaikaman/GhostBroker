@@ -359,6 +359,22 @@ export interface SignDelegationCredentialOptions {
   publicKey: string;
   /** The issuer's `did:t3n:0x...` identifier. */
   issuerDid: string;
+  /**
+   * Optional additional signer reference. When the signing
+   * keypair's address does NOT match the `issuerDid`'s
+   * embedded address (e.g. when the institution uses a T3
+   * SDK API key whose derived address differs from the T3
+   * tenant DID's address), the verifier needs the additional
+   * signer reference to find the recovered address inside
+   * the `verificationMethod` field.
+   *
+   * Format: any DID-like string that embeds the signer's
+   * Ethereum address (e.g. `did:ethr:0x<addr>#controller`).
+   * The verifier extracts the 40-hex address and accepts a
+   * recovered signature that matches either the issuer DID
+   * address or this additional signer address.
+   */
+  additionalSignerVerificationMethod?: string;
 }
 
 /**
@@ -391,13 +407,18 @@ export function signDelegationCredential(
     options.publicKey,
   );
 
+  const primaryMethod = `${options.issuerDid}#key-1`;
+  const verificationMethod = options.additionalSignerVerificationMethod
+    ? `${primaryMethod} ${options.additionalSignerVerificationMethod}`
+    : primaryMethod;
+
   return {
     ...credential,
     proof: {
       type: "EcdsaSecp256k1Signature2019",
       created: credential.issuanceDate,
       proofPurpose: "assertionMethod",
-      verificationMethod: `${options.issuerDid}#key-1`,
+      verificationMethod,
       jws: proofValue,
     },
   };

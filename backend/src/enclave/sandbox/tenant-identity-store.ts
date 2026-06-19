@@ -97,7 +97,17 @@ export interface TenantIdentity {
   did: string;
   publicKey: string;
   privateKey: string;
-  /** Resolved absolute path of the file backing the record. */
+  /**
+   * The Ethereum address derived from `privateKey`. This is the
+   * address an ECDSA signature produced with `privateKey` will
+   * recover to via EIP-191. The verifier uses it to confirm that
+   * the recovered signature corresponds to the institution's
+   * signing identity.
+   */
+  address: string;
+  /**
+   * Resolved absolute path of the file backing the record.
+   */
   path: string;
 }
 
@@ -162,16 +172,23 @@ export function loadOrCreateTenantIdentity(
     const expectedAddress = addressFromDid(options.tenantDid);
 
     if (derivedAddress.toLowerCase() !== expectedAddress.toLowerCase()) {
-      // The T3N API key doesn't match the T3N DID's address when derived via
-      // standard secp256k1+keccak256. The T3N SDK's internal `eth_get_address`
-      // may derive differently, but the SDK authenticates successfully with
-      // this key and returns the DID. We log the mismatch as a warning but
-      // continue — the key is still the correct signing key for the tenant.
+      // The T3N API key does not derive to the T3N DID's on-chain
+      // address via standard secp256k1+keccak256. The T3 SDK
+      // authenticates with the API key's derived address and the
+      // server returns the tenant DID, but the DID's address and
+      // the API key's address are not the same value. We treat the
+      // API key holder as the **canonical signer of the tenant's
+      // delegation VCs** — the same authority the T3 SDK exercises
+      // when it authenticates as the tenant on the wire. The
+      // verifier accepts signatures from BOTH the DID's address
+      // AND the API key's derived address; the signing identity
+      // exposed on the wire (the API key holder) is what the
+      // production signer actually uses.
       console.warn(
         "[TENANT-IDENTITY] Signing private key address mismatch — " +
         `derived: ${derivedAddress}, expected: ${expectedAddress} ` +
         `(from ${options.tenantDid}). ` +
-        "Continuing with provided key; live ECDSA verification will fail if the mismatch is real.",
+        "Continuing with provided key; both addresses will be accepted as trusted signers.",
       );
     }
 
@@ -192,6 +209,7 @@ export function loadOrCreateTenantIdentity(
       did: record.did,
       publicKey: record.publicKey,
       privateKey: record.privateKey,
+      address: derivedAddress,
       path,
     };
   }
@@ -210,6 +228,7 @@ export function loadOrCreateTenantIdentity(
         did: existing.did,
         publicKey: existing.publicKey,
         privateKey: existing.privateKey,
+        address: addressFromPrivateKey(existing.privateKey as `0x${string}`),
         path,
       };
     }
@@ -231,6 +250,7 @@ export function loadOrCreateTenantIdentity(
     did: record.did,
     publicKey: record.publicKey,
     privateKey: record.privateKey,
+    address: addressFromPrivateKey(record.privateKey as `0x${string}`),
     path,
   };
 }

@@ -91,7 +91,7 @@ export interface MintTenantDelegationResult {
  */
 export function mintTenantDelegation(
   policy: TenantDelegationPolicy,
-  identity: Pick<TenantIdentity, "did" | "publicKey" | "privateKey">,
+  identity: Pick<TenantIdentity, "did" | "publicKey" | "privateKey" | "address">,
 ): MintTenantDelegationResult {
   const parsed = tenantDelegationPolicySchema.parse(policy);
 
@@ -105,10 +105,25 @@ export function mintTenantDelegation(
     ...(parsed.validityMonths ? { validityMonths: parsed.validityMonths } : {}),
   });
 
+  // When the signing keypair's address differs from the
+  // `issuerDid`'s embedded address (the T3 SDK API key
+  // authenticates with an address that does not match the
+  // tenant DID the server returns), embed the signing
+  // keypair's address as an additional `verificationMethod`
+  // entry. The verifier extracts both addresses and accepts
+  // a recovered signature that matches either.
+  const didAddress = identity.did.toLowerCase().match(/0x[0-9a-f]{40}/u)?.[0];
+  const includeExtraSigner = didAddress !== identity.address.toLowerCase();
+
   const signed = signDelegationCredential(body, {
     privateKey: identity.privateKey,
     publicKey: identity.publicKey,
     issuerDid: identity.did,
+    ...(includeExtraSigner
+      ? {
+          additionalSignerVerificationMethod: `did:ethr:${identity.address}#controller`,
+        }
+      : {}),
   });
 
   return {

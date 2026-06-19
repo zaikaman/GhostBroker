@@ -137,7 +137,22 @@ function createCorsMiddleware(env: BackendEnv): RequestHandler {
 
 const publicErrorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
   void _next;
-  const publicError = toPublicError(error);
+  const publicError = toPublicError(error);    // Log 5xx server errors to the console so operators can see the
+    // actual failure without scraping the network response. 4xx client
+    // errors are also logged at warn level because the cause of a
+    // validation failure is often the most actionable signal during
+    // development.
+  if (publicError.statusCode >= 500) {
+    console.error(
+      `[ERROR] ${_request.method} ${_request.path}: ${publicError.code} (${publicError.statusCode}) — ${publicError.message}`,
+      error instanceof Error ? { stack: error.stack, cause: error.cause } : error,
+    );
+  } else if (publicError.statusCode >= 400) {
+    console.warn(
+      `[WARN] ${_request.method} ${_request.path}: ${publicError.code} (${publicError.statusCode}) — ${publicError.message}`,
+      error instanceof Error ? error.message : error,
+    );
+  }
   response.status(publicError.statusCode).json(publicError.toResponse());
 };
 
@@ -293,6 +308,16 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // up the persisted VC; the agent service needs the
   // facade for `verifyAgentAuthority` at admit time).
   const authorizationFacade = new T3AgentAuthorizationFacade();
+  // The production signer (`tenant-delegation.ts`) signs with
+  // the institution's T3 SDK API key. The T3 SDK authenticates
+  // with the API key's derived address and the server returns
+  // a tenant DID whose embedded address is different. Pass
+  // the API key's derived address to the verifier as an
+  // additional trusted signer so the cryptographic check
+  // (`recoveredAddress === trustedSigner`) passes.
+  authorizationFacade.setTrustedSignerAddresses(
+    new Set([tenantIdentity.address.toLowerCase()]),
+  );
   const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
   const portfolioService = new PortfolioService(
     supabase as never,
@@ -621,7 +646,11 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     ...(institutionApprovalService ? { institutionApprovalService } : {}),
     ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),
     hostedAgentService: new ChildProcessHostedAgentService({
-      agentsDir: env.AGENTS_WORKSPACE_DIR ?? "../agents",
+      // Default to the backend's own directory (where package.json
+      // with the "agent:hosted" script lives). On Heroku the app
+      // is deployed from a single directory, so "." works there too.
+      // Override via AGENTS_WORKSPACE_DIR env var if needed.
+      agentsDir: env.AGENTS_WORKSPACE_DIR ?? ".",
       backendUrl: `http://localhost:${env.PORT}`,
       authSessionSecret: env.AUTH_SESSION_SECRET,
       agentService,

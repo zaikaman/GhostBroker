@@ -121,5 +121,115 @@ describe("tenant-delegation signer", () => {
     });
     expect(second.publicKey).toBe(first.publicKey);
     expect(second.privateKey).toBe(first.privateKey);
+    expect(second.address).toBe(first.address);
+  });
+
+  it("accepts a freshly-minted VC in live mode when the API-key signer's address is passed as an additional trusted signer", async () => {
+    // This is the production case: the tenant DID's address
+    // differs from the API key's derived address. The signer
+    // signs with the API key; the verifier checks the recovered
+    // signature against the API key's address.
+    const apiKeyLikePrivateKey =
+      "0x96bfcbce2e97420b356695ebd8987b6d9a5658d7221ed9bed9e3b7da6b7d45f6";
+    const tenantDid =
+      "did:t3n:a07f5f528c01e22dfd229a027c4b4afa4514e952";
+
+    const identity = loadOrCreateTenantIdentity({
+      tenantDid,
+      path: join(tmp, "tenant-mismatch.json"),
+      signingPrivateKey: apiKeyLikePrivateKey,
+    });
+    // The signing keypair's address should differ from the DID's
+    // embedded address (this is the production case).
+    expect(identity.address.toLowerCase()).not.toBe(
+      "0xa07f5f528c01e22dfd229a027c4b4afa4514e952",
+    );
+
+    const { credential } = mintTenantDelegation(
+      {
+        agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        maxSpendUsd: 50_000,
+        allowedActions: [
+          "agent.admit",
+          "intent.submit",
+          "negotiation.open",
+          "negotiation.move",
+          "negotiation.disclose",
+          "negotiation.settle",
+        ],
+      },
+      identity,
+    );
+
+    // Round-trip: the verifier must accept the VC when the API
+    // key's derived address is in the trusted-signer set.
+    const result = await verifyGhostbrokerDelegationCredential(
+      {
+        credential,
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
+        requestedAction: "agent.admit",
+        additionalTrustedSignerAddresses: new Set([
+          identity.address.toLowerCase(),
+        ]),
+      },
+      "live",
+    );
+
+    expect(result.status).toBe("verified");
+    if (result.status !== "verified") {
+      throw new Error(
+        `expected verified, got ${JSON.stringify(result)}`,
+      );
+    }
+    expect(result.authorityRef).toBe(
+      `ghostbroker-delegation:${credential.id}`,
+    );
+  });
+
+  it("rejects a freshly-minted VC in live mode when the API-key signer's address is NOT passed as an additional trusted signer", async () => {
+    // Same as the previous test but WITHOUT the additional
+    // trusted signer. The verifier should reject because the
+    // recovered signature is the API key's address, which
+    // differs from the issuer DID's address.
+    const apiKeyLikePrivateKey =
+      "0x96bfcbce2e97420b356695ebd8987b6d9a5658d7221ed9bed9e3b7da6b7d45f6";
+    const tenantDid =
+      "did:t3n:a07f5f528c01e22dfd229a027c4b4afa4514e952";
+
+    const identity = loadOrCreateTenantIdentity({
+      tenantDid,
+      path: join(tmp, "tenant-mismatch-no-trust.json"),
+      signingPrivateKey: apiKeyLikePrivateKey,
+    });
+
+    const { credential } = mintTenantDelegation(
+      {
+        agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        maxSpendUsd: 50_000,
+        allowedActions: ["agent.admit", "intent.submit"],
+      },
+      identity,
+    );
+
+    const result = await verifyGhostbrokerDelegationCredential(
+      {
+        credential,
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
+        requestedAction: "agent.admit",
+      },
+      "live",
+    );
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") {
+      throw new Error(
+        `expected rejected, got ${JSON.stringify(result)}`,
+      );
+    }
+    expect(result.reason).toBe("unverified");
   });
 });

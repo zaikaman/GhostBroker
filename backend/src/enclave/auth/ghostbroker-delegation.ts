@@ -176,6 +176,22 @@ export interface GhostbrokerVerificationRequest {
   requestedAction: RequestedAgentAction;
   revokedAuthorityRefs?: ReadonlySet<string>;
   now?: Date;
+  /**
+   * Additional Ethereum addresses (lowercased, with `0x` prefix)
+   * the verifier accepts as a valid signer of the credential,
+   * in addition to the address derived from `credential.issuer`.
+   *
+   * Why this exists: the production signer (`tenant-delegation.ts`)
+   * uses the institution's T3 SDK API key as its `privateKey`.
+   * The T3 SDK authenticates with that key and the server returns
+   * a `did:t3n:0x<addr>` whose embedded address does NOT match
+   * the API key's derived address (the SDK WASM does a non-
+   * standard derivation). The signature still has to be
+   * cryptographically valid — `recoveredAddress` must equal the
+   * API key's derived address — but the verifier cannot derive
+   * that address from the issuer DID alone. We pass it in.
+   */
+  additionalTrustedSignerAddresses?: ReadonlySet<string>;
 }
 
 export interface VerifiedGhostbrokerDelegation {
@@ -314,7 +330,13 @@ export async function verifyGhostbrokerDelegationCredential(
   request: GhostbrokerVerificationRequest,
   mode: GhostbrokerVerificationMode = getModeFromEnv(),
 ): Promise<GhostbrokerVerificationResult> {
-  const { credential, agentDid, revokedAuthorityRefs, now = new Date() } = request;
+  const {
+    credential,
+    agentDid,
+    revokedAuthorityRefs,
+    now = new Date(),
+    additionalTrustedSignerAddresses,
+  } = request;
 
   // Shape check (defensive — caller should have parsed already).
   const parsed = ghostbrokerDelegationSchema.safeParse(credential);
@@ -392,7 +414,7 @@ export async function verifyGhostbrokerDelegationCredential(
   // or transient SDK outage. The only mode in which the
   // verifier accepts a VC on an SDK error is `sandbox`, which
   // is the demo / dev surface and is not the production gate.
-  return tryLiveVerify(safe, agentDid, mode);
+  return tryLiveVerify(safe, agentDid, mode, additionalTrustedSignerAddresses);
 }
 
 /**
@@ -414,6 +436,7 @@ async function tryLiveVerify(
   safe: GhostbrokerDelegationCredential,
   agentDid: string,
   mode: GhostbrokerVerificationMode,
+  additionalTrustedSignerAddresses?: ReadonlySet<string>,
 ): Promise<GhostbrokerVerificationResult> {
   try {
     // Re-implement ECDSA verification inline instead of delegating to
@@ -428,7 +451,9 @@ async function tryLiveVerify(
     //   4. ethers.verifyMessage(digest, proofValue)  →  recovered address
     //      (applies EIP-191 personal_sign prefix internally)
     //   5. Extract wallet address from the issuer DID
-    //   6. Assert recovered address matches the expected wallet address
+    //   6. Assert recovered address matches one of the trusted
+    //      signer addresses (issuer DID address OR any address
+    //      in `additionalTrustedSignerAddresses`)
     //      AND is present in proof.verificationMethod
 
     if (!safe.proof?.jws) {
@@ -471,32 +496,56 @@ async function tryLiveVerify(
       safe.proof.jws as string,
     );
 
-    // Step 5: extract wallet address from the issuer DID.
-    const expectedAddress = walletAddressFromDid(safe.issuer);
-    if (!expectedAddress) {
+    // Step 5: build the set of trusted signer addresses.
+    //
+    // The primary trusted address is the one embedded in the issuer
+    // DID — this is the standard W3C VC semantic that the issuer
+    // claims the credential and signs it.
+    //
+    // Additional trusted addresses (e.g. the T3 SDK API key's derived
+    // address) are passed by the caller. This is the production case:
+    // the T3 SDK authenticates with the API key's address and the
+    // server returns a tenant DID whose embedded address differs.
+    // The signing identity on the wire is the API key holder; we
+    // accept their signatures as authoritative for the tenant.
+    const trustedAddresses = new Set<string>();
+    const issuerAddress = walletAddressFromDid(safe.issuer);
+    if (issuerAddress) {
+      trustedAddresses.add(issuerAddress.toLowerCase());
+    }
+    if (additionalTrustedSignerAddresses) {
+      for (const addr of additionalTrustedSignerAddresses) {
+        trustedAddresses.add(addr.toLowerCase());
+      }
+    }
+
+    if (trustedAddresses.size === 0) {
       console.warn(
-        "[VERIFY] Could not extract wallet address from issuer DID:",
+        "[VERIFY] Could not extract wallet address from issuer DID and no additional trusted signers provided:",
         safe.issuer,
       );
       return { status: "rejected", agentDid, reason: "unverified" };
     }
 
-    // Step 6: verify the recovered address matches.
-    const addrMatch =
-      recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
+    // Step 6: verify the recovered address matches one of the trusted addresses.
+    const recoveredLower = recoveredAddress.toLowerCase();
+    const addrMatch = trustedAddresses.has(recoveredLower);
 
     // Also verify the recovered address appears in the verificationMethod
-    // for defense-in-depth.
+    // for defense-in-depth. The signer embeds the additional trusted
+    // signer's address (e.g. `did:ethr:0x<api-key-addr>#controller`) into
+    // the verificationMethod alongside the issuer DID, so the
+    // `includes()` check matches both cases.
     const vmMatch = safe.proof.verificationMethod
       .toLowerCase()
-      .includes(recoveredAddress.toLowerCase());
+      .includes(recoveredLower);
 
     if (!addrMatch || !vmMatch) {
       console.warn(
         "[VERIFY] ECDSA signature mismatch",
         JSON.stringify({
           recoveredAddress,
-          expectedAddress,
+          trustedAddresses: [...trustedAddresses],
           addrMatch,
           vmMatch,
           verificationMethod: safe.proof.verificationMethod,
