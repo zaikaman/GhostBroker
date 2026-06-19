@@ -126,7 +126,7 @@ high-severity `rail_drift_detected` telemetry event.
 
 - `npm install` at the repo root sets up all four workspaces.
 - `npm run typecheck` runs `tsc` against every workspace.
-- `npm test` runs the Vitest suite for every workspace: **363 tests, 49 test files, all passing**.
+- `npm test` runs the Vitest suite for every workspace: **554 tests passing across 104 test files** (8 additional on-chain Anvil tests are skipped by default and gated behind `WS2_ANVIL_INTEGRATION=1` — see the next bullet).
 - `WS2_ANVIL_INTEGRATION=1 npm test` adds **7 real on-chain
   tests** that deploy a `GhostBrokerSettlementRelayer`
   contract + 2 ERC-20s to a local Anvil node and assert
@@ -163,4 +163,4 @@ The largest classes of friction we hit:
 - **Agent Auth SDK integration is load-bearing, not cosmetic.** Every privileged backend action goes through the same `T3AgentAuthorizationFacade`, which calls the local `verifySignedDelegationProof` first and falls back to the live T3N endpoint. There is no "we wrote a wrapper but only call it once" pattern.
 - **The architecture matches the SDK's design intent.** The two-tier model (session credential + per-action authority) is the one the Terminal 3 docs describe for the seed-API-key pattern, applied to the agent boundary.
 - **The privacy story is enforceable, not aspirational.** Active order parameters never enter the surface; the `redact-event` layer is unit-tested against an explicit deny list; the schema and the API response shapes are all built around the boundary.
-- **The code is production-ready and tested.** 201 tests across 65 files; `tsc --noEmit` clean on every workspace; the verifier has its own test file with positive and negative cases; the session and authority layers are independently exercised by `agent-client` and the backend contract tests.
+- **The code is production-ready and tested.** 554 tests passing across 104 test files; `tsc --noEmit` clean on every workspace; the verifier has its own test file with positive and negative cases; the session and authority layers are independently exercised by `agent-client` and the backend contract tests.
