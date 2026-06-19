@@ -373,8 +373,18 @@ export function signDelegationCredential(
   options: SignDelegationCredentialOptions,
 ): DelegationCredential {
   const body = buildDelegationSigningBody(credential);
-  const canonicalJson = canonicalizeDelegationJson(body);
-  const keccakOfJson = keccak_256(new TextEncoder().encode(canonicalJson));
+  // IMPORTANT: use standard JSON.stringify (insertion order) NOT
+  // canonicalizeDelegationJson (sorted keys). The verifier —
+  // @terminal3/verify_vc → @terminal3/ecdsa_vc → verifyEcdsaVcSig —
+  // uses JSON.stringify to serialize the proof-stripped VC before
+  // hashing. If the signer used a different serialization (sorted
+  // keys via canonicalizeDelegationJson) the byte-level JSON would
+  // differ, the keccak256 hashes would differ, and the ECDSA
+  // signature verification in T3_MODE=live would fail with
+  // "unverified". The two serializations must produce byte-identical
+  // output for the same logical payload.
+  const serializedJson = JSON.stringify(body);
+  const keccakOfJson = keccak_256(new TextEncoder().encode(serializedJson));
   const proofValue = eip191SignDelegation(
     keccakOfJson,
     options.privateKey,

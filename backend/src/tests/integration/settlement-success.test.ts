@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SettlementCommand } from "@ghostbroker/t3-enclave";
+import type { SettlementCommand } from "../../enclave/index.js";
 import { SettlementService } from "../../services/settlement.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
 import {

@@ -127,9 +127,9 @@ export interface NegotiationMove {
     | "accept"
     | "hold"
     | "walkaway";
-  price?: number;
-  quantity?: number;
-  claimType?: string;
+  price?: number | undefined;
+  quantity?: number | undefined;
+  claimType?: string | undefined;
   strategicIntent?:
     | "open_patiently"
     | "test_patience"
@@ -139,10 +139,11 @@ export interface NegotiationMove {
     | "request_proof"
     | "accelerate_for_deadline"
     | "accept"
-    | "walkaway";
-  confidence?: number;
-  escalationRequested?: boolean;
-  settlementReadiness?: "not_ready" | "near" | "ready";
+    | "walkaway"
+    | undefined;
+  confidence?: number | undefined;
+  escalationRequested?: boolean | undefined;
+  settlementReadiness?: "not_ready" | "near" | "ready" | undefined;
   reasoning: string;
 }
 

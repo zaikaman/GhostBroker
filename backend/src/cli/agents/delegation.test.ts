@@ -6,13 +6,12 @@ import {
 import {
   mintDelegationCredentialBody,
   mintAndSignDelegationCredential,
-} from "@ghostbroker/agent-client";
+} from "../../sdk/agent-client/index.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import type { _DelegationCredential } from "@ghostbroker/agent-client";
 
 /**
  * Tests for the agents workspace delegation helpers.
@@ -28,7 +27,7 @@ import type { _DelegationCredential } from "@ghostbroker/agent-client";
  * Post-Phase 1: the disk-writing wrappers (`mintDelegationCredential`,
  * `mintAndSignDelegationCredential`) were removed from `delegation.ts`.
  * Tests that need an on-disk VC now use the canonical functions from
- * `@ghostbroker/agent-client` directly.
+ * the agent-client SDK (`backend/src/sdk/agent-client/`) directly.
  */
 
 describe("delegation credential loading / validation", () => {
@@ -93,7 +92,7 @@ describe("delegation credential loading / validation", () => {
   });
 });
 
-describe("signed VC round-trip via @ghostbroker/agent-client", () => {
+describe("signed VC round-trip via the agent-client SDK", () => {
   const tmp = mkdtempSync(join(tmpdir(), "ghostbroker-sign-test-"));
 
   it("writes a real signed VC to disk that round-trips through the schema", () => {

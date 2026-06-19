@@ -16,8 +16,8 @@ import type { TenantDelegationSigner } from "./tenant-delegation-signer.js";
 import type {
   NegotiationRepository,
 } from "./negotiation-repository.js";
-import type { DelegationCredential } from "@ghostbroker/agent-client";
-import type { DelegationActionScope } from "@ghostbroker/t3-enclave";
+import type { DelegationCredential } from "../sdk/agent-client/index.js";
+import type { DelegationActionScope } from "../enclave/index.js";
 import {
   normalizeStrategy,
   type AuthoredMandatePolicy,

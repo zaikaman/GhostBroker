@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   InsufficientT3TokenBalanceError,
   type TokenBalance,
-} from "@ghostbroker/t3-enclave";
+} from "../../enclave/index.js";
 import { SettlementService } from "../../services/settlement.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
 import { buildSettlementExecutionRequest } from "../data/us3-settlement-builders.js";

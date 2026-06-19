@@ -1,7 +1,7 @@
 import type {
   BlindIntentClient,
   AgentDelegationVerificationRequest,
-} from "@ghostbroker/t3-enclave";
+} from "../enclave/index.js";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
 import { logger, redactForbiddenOrderFields } from "../logging/logger.js";

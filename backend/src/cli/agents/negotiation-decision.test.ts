@@ -8,7 +8,7 @@ import {
   deriveExecutionRails,
   normalizeStrategy,
   type AuthoredMandatePolicy,
-} from "@ghostbroker/negotiation-core";
+} from "../../negotiation-core/index.js";
 import { clampNegotiationDecision } from "./negotiation-decision.js";
 import type { NegotiationContext } from "./negotiation-decision.js";
 

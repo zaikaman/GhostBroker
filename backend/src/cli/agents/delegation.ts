@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { z } from "zod";
-import type { DelegationCredential } from "@ghostbroker/agent-client";
+import type { DelegationCredential } from "../../sdk/agent-client/index.js";
 
 /**
  * W3C Verifiable Credential — Node-side schema + helpers.
@@ -13,7 +13,7 @@ import type { DelegationCredential } from "@ghostbroker/agent-client";
  *   2. Time-window checks.
  *   3. Human-readable summaries.
  *
- * The canonical signer lives in `@ghostbroker/agent-client/src/delegation-signer.ts`.
+ * The canonical signer lives in `backend/src/sdk/agent-client/delegation-signer.ts`.
  *
  * The `credentialSubject.allowedActions` enum is the
  * trading-agent action scope (the same `RequestedAgentAction`

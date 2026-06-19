@@ -19,22 +19,22 @@ import {
  * max notional) are DERIVED from this by the backend strategy
  * normalizer, never typed directly in this primary surface.
  */
-function buildDefaultMandate(deadlineOffsetMs = 60 * 60 * 1000): AuthoredMandatePolicy {
+function buildDefaultMandate(deadlineOffsetMs = 7 * 24 * 60 * 60 * 1000): AuthoredMandatePolicy {
   return {
     objective:
       'Acquire strategic block exposure quietly through a confidential counterparty, prioritising execution quality and discretion over speed.',
     assetCode: 'WBTC',
     side: 'buy',
     sizePolicy: {
-      targetQuantity: 1,
-      minimumQuantity: 0.5,
+      targetQuantity: 0.0001,
+      minimumQuantity: 0.0001,
       partialExecutionAllowed: true,
     },
     urgency: 'normal',
     executionStyle: 'trust_first',
     valuationPolicy: {
       source: 'operator_note',
-      anchorValue: 70000,
+      anchorValue: 10000,
       note: 'Anchor on our internal treasury fair value for this asset.',
     },
     concessionPolicy: {
@@ -166,7 +166,7 @@ export function MandateConfigForm({
   // computed at component creation time (the lint rule rejects
   // `Date.now()` calls inside the render body).
   const [deadlineLocal, setDeadlineLocal] = useState(() =>
-    new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
+    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);

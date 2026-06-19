@@ -52,6 +52,16 @@ export function AgentProvisioningForm({
       // stays in memory; only the public DID crosses the wire.
       const identity = generateAgentIdentity();
 
+      console.log(
+        `[PROVISION] Sending request to /api/agents/configure`,
+        JSON.stringify({
+          institutionId,
+          agentDid: identity.agentDid.slice(0, 24) + '…', // partial for privacy
+          label: form.label.trim(),
+          policy: { maxSpendUsd: Number(form.maxSpendUsd), actionCount: 6 },
+        }),
+      );
+
       const result = await apiClient.provisionAgent({
         institutionId,
         agentDid: identity.agentDid,

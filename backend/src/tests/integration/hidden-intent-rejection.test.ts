@@ -3,7 +3,7 @@ import type {
   AgentDelegationVerificationRequest,
   AgentDelegationVerificationResult,
   BlindIntentClient,
-} from "@ghostbroker/t3-enclave";
+} from "../../enclave/index.js";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { PublicError } from "../../errors/public-error.js";
 import { HiddenIntentService } from "../../services/hidden-intent.service.js";

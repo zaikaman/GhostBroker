@@ -3,7 +3,7 @@ import {
   validateAgentDecision,
   type AgentDecisionMove,
   type NegotiationTurnContext,
-} from "@ghostbroker/negotiation-core";
+} from "../../negotiation-core/index.js";
 import { extractJsonObject } from "./llm-decision.js";
 import {
   AggregateLlmError,

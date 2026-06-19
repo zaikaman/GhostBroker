@@ -5,7 +5,7 @@ import type {
   SettlementRailContext,
   SettlementRailPlaintext,
 } from "./rail.js";
-import type { SettlementCommand } from "@ghostbroker/t3-enclave";
+import type { SettlementCommand } from "../../enclave/index.js";
 
 /**
  * Routes an institution's `settlementProfileRef` to a concrete

@@ -159,7 +159,7 @@ export function SettlementProfileCard({
     return (
       <div className="card settlement-profile-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
         {/* Header Skeleton */}
-        <div style={{ display: 'flex', alignItems: 'center', justifySpace: 'between', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--spacing-sm)', marginBottom: 'var(--spacing-xs)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--spacing-sm)', marginBottom: 'var(--spacing-xs)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '60%' }}>
             <Skeleton variant="circle" width={18} height={18} />
             <Skeleton variant="title" width="60%" style={{ margin: 0 }} />

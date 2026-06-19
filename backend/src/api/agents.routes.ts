@@ -19,7 +19,7 @@ import type { AgentManagementService } from "../services/agent.service.js";
 import type { HiddenIntentSubmissionService } from "../services/hidden-intent.service.js";
 import { InsufficientBalanceError } from "../services/portfolio.service.js";
 import type { TenantDelegationSigner } from "../services/tenant-delegation-signer.js";
-import { BlindIntentSealFailureError } from "@ghostbroker/t3-enclave";
+import { BlindIntentSealFailureError } from "../enclave/index.js";
 
 const listIntentsQuerySchema = z.object({
   agentDid: agentDidSchema.optional(),
@@ -101,6 +101,22 @@ export function createAgentsRouter(
       }
 
       const operatorAuth = requireOperatorAuth(response);
+
+      // Log institution IDs before scope check to diagnose 403 errors.
+      // The backend returns 403 from assertInstitutionScope when the
+      // session's institution ID does not match the one in the request
+      // body — this log surfaces which side has the wrong value.
+      logger.warn(
+        {
+          event: "agents.configure.scope_check",
+          sessionInstitutionId: operatorAuth.institutionId,
+          requestInstitutionId: parsed.data.institutionId,
+          operatorId: operatorAuth.operatorId,
+          agentDid: parsed.data.agentDid,
+        },
+        "Checking institution scope for configure agent request.",
+      );
+
       assertInstitutionScope(operatorAuth, parsed.data.institutionId);
 
       const provisionPolicy = {

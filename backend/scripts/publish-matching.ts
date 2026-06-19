@@ -2,10 +2,10 @@
 /**
  * Publish the GhostBroker matching TEE contract to T3N.
  *
- * Reads `contracts/matching-policy/target/wasm32-wasip2/release/
+ * Reads `backend/contracts/matching-policy/target/wasm32-wasip2/release/
  * matching_policy.wasm` (produced by
  * `cargo build --target wasm32-wasip2 --release` from inside
- * `contracts/matching-policy/`) and publishes it under the
+ * `backend/contracts/matching-policy/`) and publishes it under the
  * tail `matching` — the canonical name the GhostBroker
  * orchestrator hits at `/contracts/matching/blind-intents`
  * and `/contracts/matching/evaluate`.
@@ -17,7 +17,10 @@
  * T3_MATCHING_CONTRACT_VERSION to push a new version.
  *
  * Run from the workspace root:
- *   npx tsx scripts/publish-matching.ts
+ *   npm run contract:publish:matching -w @ghostbroker/backend
+ *
+ * Or directly:
+ *   npx tsx backend/scripts/publish-matching.ts
  *
  * Required (read from backend/.env):
  *   - T3N_API_KEY      T3N API key for your tenant
@@ -43,11 +46,11 @@ import {
 } from "@terminal3/t3n-sdk";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "..");
+const REPO_ROOT = resolve(__dirname, "..", "..");
 const BACKEND_ENV_PATH = resolve(REPO_ROOT, "backend/.env");
 const WASM_PATH = resolve(
   REPO_ROOT,
-  "contracts/matching-policy/target/wasm32-wasip2/release/matching_policy.wasm",
+  "backend/contracts/matching-policy/target/wasm32-wasip2/release/matching_policy.wasm",
 );
 
 function loadBackendEnv(path: string): Record<string, string> {
@@ -105,7 +108,7 @@ async function main(): Promise<void> {
   if (!existsSync(WASM_PATH)) {
     console.error(`✗ WASM artifact not found at ${WASM_PATH}`);
     console.error("  Build it first:");
-    console.error("    cd contracts/matching-policy");
+    console.error("    cd backend/contracts/matching-policy");
     console.error("    cargo build --target wasm32-wasip2 --release");
     process.exit(1);
   }

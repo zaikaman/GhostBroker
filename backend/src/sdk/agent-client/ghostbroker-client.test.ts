@@ -79,9 +79,10 @@ describe("GhostBrokerClient", () => {
 
       client.telemetry.connect();
       expect(WebSocketMock).toHaveBeenCalledTimes(1);
-      const wsCall = WebSocketMock.mock.calls[0];
+      const wsCall = WebSocketMock.mock.calls[0] as unknown as readonly unknown[] | undefined;
       expect(wsCall).toBeDefined();
-      const wsUrl = (wsCall ?? [])[0] as string;
+      const wsUrl = wsCall?.[0];
+      if (typeof wsUrl !== "string") throw new Error("WebSocket mock was not called with a URL");
       expect(wsUrl).toContain(`/ws/telemetry?institutionId=${encodeURIComponent(SAMPLE_SESSION.institution.id)}`);
     });
 

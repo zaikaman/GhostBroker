@@ -104,7 +104,7 @@ export const agentEnvSchema = z.object({
   AGENT_IDENTITY_CONFIG_PATH: z.string().min(1).optional(),
   AGENT_IDENTITY_DID: z.string().min(1).optional(),
   DELEGATION_CREDENTIAL_PATH: z.string().min(1).optional(),
-  VC_VERIFY_MODE: z.enum(["sandbox", "live", "structural"]).default("sandbox").optional(),
+  VC_VERIFY_MODE: z.enum(["sandbox", "live", "structural"]).default("live").optional(),
 
   // ── LLM provider chain (Gemini primary, OpenAI fallback, Groq last) ──
   /**
@@ -132,7 +132,7 @@ export const agentEnvSchema = z.object({
   GROQ_MODEL: z.string().trim().min(1).default("qwen/qwen3-32b"),
   GROQ_BASE_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)).optional(),
 
-  POLL_INTERVAL_MS: z.number().positive().default(1_000),
+  POLL_INTERVAL_MS: z.number().positive().default(5_000),
   AGENT_QUOTE_ASSET_CODE: z.string().trim().min(1).max(32).default("USDC"),
   MAX_TICKS: z.number().positive().default(40),
   DRY_RUN: z.boolean().default(false),
@@ -160,7 +160,7 @@ export function loadAgentEnv(): AgentEnv {
     AGENT_IDENTITY_CONFIG_PATH: process.env.AGENT_IDENTITY_CONFIG_PATH,
     AGENT_IDENTITY_DID: process.env.AGENT_IDENTITY_DID,
     DELEGATION_CREDENTIAL_PATH: process.env.DELEGATION_CREDENTIAL_PATH,
-    VC_VERIFY_MODE: optionalEnv("VC_VERIFY_MODE", "sandbox"),
+    VC_VERIFY_MODE: optionalEnv("VC_VERIFY_MODE", "live"),
     LLM_PROVIDER_CHAIN: process.env.LLM_PROVIDER_CHAIN,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY === "" ? undefined : process.env.GEMINI_API_KEY,
     GEMINI_MODEL: optionalEnv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
@@ -171,7 +171,7 @@ export function loadAgentEnv(): AgentEnv {
     GROQ_API_KEY: process.env.GROQ_API_KEY === "" ? undefined : process.env.GROQ_API_KEY,
     GROQ_MODEL: optionalEnv("GROQ_MODEL", "qwen/qwen3-32b"),
     GROQ_BASE_URL: process.env.GROQ_BASE_URL,
-    POLL_INTERVAL_MS: numberEnv("POLL_INTERVAL_MS", 1_000),
+    POLL_INTERVAL_MS: numberEnv("POLL_INTERVAL_MS", 5_000),
     AGENT_QUOTE_ASSET_CODE: optionalEnv("AGENT_QUOTE_ASSET_CODE", "USDC"),
     MAX_TICKS: numberEnv("MAX_TICKS", 40),
     DRY_RUN: booleanEnv("DRY_RUN", false),

@@ -12,7 +12,10 @@
  * orchestrator route).
  *
  * Run from the workspace root:
- *   npx tsx scripts/verify-matching-contract.ts
+ *   npm run contract:verify:matching -w @ghostbroker/backend
+ *
+ * Or directly:
+ *   npx tsx backend/scripts/verify-matching-contract.ts
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -30,7 +33,7 @@ import {
 } from "@terminal3/t3n-sdk";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "..");
+const REPO_ROOT = resolve(__dirname, "..", "..");
 const BACKEND_ENV_PATH = resolve(REPO_ROOT, "backend/.env");
 
 function loadBackendEnv(path: string): Record<string, string> {
@@ -124,7 +127,7 @@ async function main(): Promise<void> {
   // matched_quantity = min(10, 4) = 4 and execution_price = midpoint
   // = 50000. Prices and quantities travel as fractional decimal
   // strings at the contract's implicit 1e18 scale (see
-  // `WIRE_SCALE` in contracts/matching-policy/src/matching.rs);
+  // `WIRE_SCALE` in backend/contracts/matching-policy/src/matching.rs);
   // the orchestrator's `decimalString` keeps the wire form
   // human-readable (`"0.0001"`, `"70000"`) so the settlement rail
   // can consume it directly via `parseUnits(qty.toString(), 8)`.

@@ -6,7 +6,7 @@ import {
   type AuthSession,
   type CompletedTrade,
   type TelemetryEvent,
-} from "@ghostbroker/agent-client";
+} from "../../sdk/agent-client/index.js";
 import type { AgentEnv } from "./env.js";
 import type { Decision, DecisionContext, LlmClient } from "./llm-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
@@ -25,7 +25,7 @@ function legacyNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-const LEGACY_REFERENCE_PRICE = legacyNumber("AGENT_REFERENCE_PRICE", legacyNumber("REFERENCE_PRICE", 70_000));
+const LEGACY_REFERENCE_PRICE = legacyNumber("AGENT_REFERENCE_PRICE", legacyNumber("REFERENCE_PRICE", 10_000));
 const LEGACY_PRICE_BAND_BPS = legacyNumber("PRICE_BAND_BPS", 200);
 // The matching contract now (v0.4.0+) accepts fractional decimals
 // on the wire (`"0.0001"` etc.), so the legacy buyer/seller scripts
@@ -34,7 +34,7 @@ const LEGACY_PRICE_BAND_BPS = legacyNumber("PRICE_BAND_BPS", 200);
 // plenty on either side at any sane price.
 const LEGACY_QUANTITY_MIN = legacyNumber("AGENT_QUANTITY_MIN", legacyNumber("QUANTITY_MIN", 0.0001));
 const LEGACY_QUANTITY_MAX = legacyNumber("AGENT_QUANTITY_MAX", legacyNumber("QUANTITY_MAX", 0.0001));
-const LEGACY_TICK_INTERVAL_MS = legacyNumber("TICK_INTERVAL_MS", 15_000);
+const LEGACY_TICK_INTERVAL_MS = legacyNumber("TICK_INTERVAL_MS", 5_000);
 const LEGACY_OPERATOR_PROMPT = process.env.AGENT_OPERATOR_PROMPT ?? undefined;
 
 export interface AgentRunOptions {

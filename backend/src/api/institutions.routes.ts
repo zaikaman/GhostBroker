@@ -129,75 +129,96 @@ export function createInstitutionsRouter(
   });
 
   const approvalService = deps?.approvalService;
-  if (approvalService) {
-    // Read the deposit wallet's current balances + relayer
-    // approval status. The institution funds this address
-    // itself (Deposit flow); this route lets the dashboard
-    // show whether funds arrived and whether the relayer is
-    // approved.
-    router.get("/institutions/:id/deposit-status", authMiddleware, async (request, response, next) => {
-      try {
-        const operatorAuth = requireOperatorAuth(response);
-        const id = request.params.id as string;
-        assertInstitutionScope(operatorAuth, id);
 
-        const result = await approvalService.getDepositStatus(id);
-        response.status(200).json(result);
-      } catch (error) {
-        next(error);
+  // Read the deposit wallet's current balances + relayer
+  // approval status. Registered unconditionally so the frontend
+  // gets a meaningful 503 rather than a 404 when the service is
+  // not configured (missing env vars).
+  router.get("/institutions/:id/deposit-status", authMiddleware, async (request, response, next) => {
+    try {
+      const operatorAuth = requireOperatorAuth(response);
+      const id = request.params.id as string;
+      assertInstitutionScope(operatorAuth, id);
+
+      if (!approvalService) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          "Deposit-status service is not configured. Set SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED and related env vars.",
+        );
       }
-    });
 
-    // Sign the deposit wallet's ERC-20 `approve(relayer)`
-    // calls. Only the backend can do this because it holds the
-    // derived deposit wallet key. Without the approval,
-    // on-chain settlement reverts.
-    router.post("/institutions/:id/approve-relayer", authMiddleware, async (request, response, next) => {
-      try {
-        const operatorAuth = requireOperatorAuth(response);
-        const id = request.params.id as string;
-        assertInstitutionScope(operatorAuth, id);
+      const result = await approvalService.getDepositStatus(id);
+      response.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
 
-        const result = await approvalService.approveRelayer(id);
-        response.status(200).json(result);
-      } catch (error) {
-        next(error);
+  // Sign the deposit wallet's ERC-20 `approve(relayer)`
+  // calls. Only the backend can do this because it holds the
+  // derived deposit wallet key. Without the approval,
+  // on-chain settlement reverts.
+  router.post("/institutions/:id/approve-relayer", authMiddleware, async (request, response, next) => {
+    try {
+      const operatorAuth = requireOperatorAuth(response);
+      const id = request.params.id as string;
+      assertInstitutionScope(operatorAuth, id);
+
+      if (!approvalService) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          "Relayer-approval service is not configured. Set SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED and related env vars.",
+        );
       }
-    });
-  }
+
+      const result = await approvalService.approveRelayer(id);
+      response.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   const withdrawalService = deps?.withdrawalService;
-  if (withdrawalService) {
-    router.post("/institutions/:id/withdrawals", authMiddleware, async (request, response, next) => {
-      try {
-        const operatorAuth = requireOperatorAuth(response);
-        const id = request.params.id as string;
-        assertInstitutionScope(operatorAuth, id);
 
-        const body = (request.body ?? {}) as Partial<InstitutionWithdrawalRequest>;
-        if (
-          (body.asset !== "ETH" && body.asset !== "WBTC" && body.asset !== "USDC") ||
-          typeof body.amount !== "string" ||
-          typeof body.toAddress !== "string"
-        ) {
-          throw new PublicError(
-            "validation_failed",
-            400,
-            "Withdrawal body requires { asset: 'ETH' | 'WBTC' | 'USDC', amount: string, toAddress: address }.",
-          );
-        }
+  router.post("/institutions/:id/withdrawals", authMiddleware, async (request, response, next) => {
+    try {
+      const operatorAuth = requireOperatorAuth(response);
+      const id = request.params.id as string;
+      assertInstitutionScope(operatorAuth, id);
 
-        const result = await withdrawalService.withdraw(id, {
-          asset: body.asset,
-          amount: body.amount,
-          toAddress: body.toAddress as `0x${string}`,
-        });
-        response.status(200).json(result);
-      } catch (error) {
-        next(error);
+      if (!withdrawalService) {
+        throw new PublicError(
+          "service_unavailable",
+          503,
+          "Withdrawal service is not configured. Set SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED and related env vars.",
+        );
       }
-    });
-  }
+
+      const body = (request.body ?? {}) as Partial<InstitutionWithdrawalRequest>;
+      if (
+        (body.asset !== "ETH" && body.asset !== "WBTC" && body.asset !== "USDC") ||
+        typeof body.amount !== "string" ||
+        typeof body.toAddress !== "string"
+      ) {
+        throw new PublicError(
+          "validation_failed",
+          400,
+          "Withdrawal body requires { asset: 'ETH' | 'WBTC' | 'USDC', amount: string, toAddress: address }.",
+        );
+      }
+
+      const result = await withdrawalService.withdraw(id, {
+        asset: body.asset,
+        amount: body.amount,
+        toAddress: body.toAddress as `0x${string}`,
+      });
+      response.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   return router;
 }

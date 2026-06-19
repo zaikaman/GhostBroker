@@ -31,8 +31,8 @@ export interface DecisionContext {
   completedTradeCount: number;
   tickNumber: number;
   maxTicks: number;
-  lastOutcome?: string;
-  operatorPrompt?: string;
+  lastOutcome?: string | undefined;
+  operatorPrompt?: string | undefined;
 }
 
 const SYSTEM_PROMPT = `You are a hosted GhostBroker institutional trading agent.
@@ -93,7 +93,7 @@ function roundQty(quantity: number): number {
 export function extractJsonObject(raw: string): unknown {
   const trimmed = raw.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/u);
-  const candidate = fenced ? fenced[1] : trimmed;
+  const candidate = fenced?.[1] ?? trimmed;
 
   try {
     return JSON.parse(candidate);

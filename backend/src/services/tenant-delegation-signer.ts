@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 import {
   mintTenantDelegation,
   type TenantDelegationPolicy,
-} from "@ghostbroker/t3-enclave";
-import type { DelegationCredential } from "@ghostbroker/agent-client";
+} from "../enclave/index.js";
+import type { DelegationCredential } from "../sdk/agent-client/index.js";
 import { PublicError } from "../errors/public-error.js";
-import type { TenantIdentity } from "@ghostbroker/t3-enclave";
+import type { TenantIdentity } from "../enclave/index.js";
 import type { NegotiationMandateInput } from "../models/negotiation.js";
 
 /**

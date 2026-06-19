@@ -15,7 +15,7 @@ import {
   type WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import type { SettlementCommand } from "@ghostbroker/t3-enclave";
+import type { SettlementCommand } from "../../enclave/index.js";
 import { SepoliaErc20Rail } from "../../services/settlement-rails/chain-sepolia-rail.js";
 import {
   MinimalErc20Abi,

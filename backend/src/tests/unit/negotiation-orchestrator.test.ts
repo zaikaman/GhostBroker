@@ -7,7 +7,7 @@ import type {
   NegotiationTicketClient,
   NegotiationRoundEvaluator,
   NegotiationDisclosureVerifier,
-} from "@ghostbroker/t3-enclave";
+} from "../../enclave/index.js";
 import { InMemoryNegotiationRepository } from "../data/in-memory-negotiation-repository.js";
 import type { NegotiationMandateRecord } from "../../models/negotiation.js";
 

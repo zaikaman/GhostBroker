@@ -87,14 +87,16 @@ describe("delegation-signer", () => {
 
     // Reproduce the byte-level flow that
     // `@terminal3/verify_vc`'s `verifyEcdsaVc` runs:
-    //   1. canonicalize body
-    //   2. keccak256(utf-8 bytes)  →  32-byte digest
-    //   3. ethers.verifyMessage(digest, sig)  →  recovered address
+    //   1. JSON.stringify body (insertion order, same as the
+    //      signer now uses — NOT canonicalizeDelegationJson which
+    //      sorts keys alphabetically)
+    //   2. solidityPackedKeccak256(['string'], [json])  →  32-byte
+    //   3. ethers.verifyMessage(hash, sig)  →  recovered address
     // The address must equal the wallet address derived from
     // the signing key.
     const body = buildDelegationSigningBody(credential);
-    const canonical = canonicalizeDelegationJson(body);
-    const hash = keccak_256(new TextEncoder().encode(canonical));
+    const serialized = JSON.stringify(body);
+    const hash = keccak_256(new TextEncoder().encode(serialized));
     const sig = signed.proof?.jws as `0x${string}`;
 
     const wallet = new Wallet(FIXED_PRIVATE_KEY);

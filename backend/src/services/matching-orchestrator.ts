@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { MatchContractClient } from "@ghostbroker/t3-enclave";
+import type { MatchContractClient } from "../enclave/index.js";
 import type {
   InstitutionSettlementConfigResolver,
   SettlementExecutionRequest,

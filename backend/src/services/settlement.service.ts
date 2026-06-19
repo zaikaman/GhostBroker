@@ -5,7 +5,7 @@ import {
   type OpaqueMatchOutcome,
   type SettlementCommand,
   type SettlementCommandBuilder,
-} from "@ghostbroker/t3-enclave";
+} from "../enclave/index.js";
 import { PublicError } from "../errors/public-error.js";
 import type { AuditReceiptRecord } from "../models/audit-receipt.js";
 import {

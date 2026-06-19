@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   AgentDelegationVerificationRequest,
   AgentDelegationVerificationResult,
-} from "@ghostbroker/t3-enclave";
+} from "../../enclave/index.js";
 import { PublicError } from "../../errors/public-error.js";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { AgentService } from "../../services/agent.service.js";

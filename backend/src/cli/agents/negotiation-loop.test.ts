@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RedactedNegotiationSessionView } from "@ghostbroker/agent-client";
+import type { RedactedNegotiationSessionView } from "../../sdk/agent-client/index.js";
 import {
   isActionableSessionStatus,
   pickLiveSession,
@@ -13,9 +13,7 @@ function buildSession(
   },
 ): RedactedNegotiationSessionView {
   return {
-    id: overrides.id,
     assetCode: "WBTC",
-    status: overrides.status,
     currentTurn: "buy",
     roundNumber: 0,
     maxRounds: 12,
@@ -62,13 +60,20 @@ function pls(input: {
   side?: "buy" | "sell";
   sessionCreatedAfter?: number;
 }): RedactedNegotiationSessionView | null {
-  return pickLiveSession({
+  const args: {
+    sessions: readonly RedactedNegotiationSessionView[];
+    sessionId: string | undefined;
+    now: number;
+    side?: "buy" | "sell";
+    sessionCreatedAfter?: number;
+  } = {
     sessions: input.sessions,
     sessionId: input.sessionId,
     now: input.now ?? Date.now(),
-    side: input.side,
-    sessionCreatedAfter: input.sessionCreatedAfter,
-  });
+  };
+  if (input.side !== undefined) args.side = input.side;
+  if (input.sessionCreatedAfter !== undefined) args.sessionCreatedAfter = input.sessionCreatedAfter;
+  return pickLiveSession(args);
 }
 
 describe("pickLiveSession", () => {

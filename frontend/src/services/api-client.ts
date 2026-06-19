@@ -333,6 +333,29 @@ async function requestWithOperatorFallback(input: string, init: RequestInit = {}
     apiClient.clearAuthSession();
     response = await performFetch();
   }
+  // Log 403 responses with request details to help debug authorization failures.
+  if (response.status === 403) {
+    const institutionId = localStorage.getItem('x-operator-institution-id');
+    const sessionRaw = localStorage.getItem('ghostbroker-auth-session');
+    let sessionInstitutionId: string | undefined;
+    try {
+      if (sessionRaw) {
+        sessionInstitutionId = JSON.parse(sessionRaw).institution?.id;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    console.warn(
+      `[AUTH] 403 on ${input}`,
+      JSON.stringify({
+        method: init.method ?? 'GET',
+        bodyPreview: init.body ? String(init.body).slice(0, 200) : undefined,
+        hasToken: Boolean(localStorage.getItem(AUTH_TOKEN_KEY)),
+        localStorageInstitutionId: institutionId,
+        sessionInstitutionId,
+      }),
+    );
+  }
   return response;
 }
 

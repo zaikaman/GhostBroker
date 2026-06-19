@@ -14,7 +14,7 @@ export class IntentClient {
    * The wire format is the TEE-sealed envelope plus an opaque handle.
    * The agent is REQUIRED to seal `assetCode` / `side` / `quantity` /
    * `price` into the envelope before calling this method (see
-   * `buildSealedEnvelope` in `@ghostbroker/agents` for a reference
+   * `buildSealedEnvelope` in `backend/src/cli/agents/sealed-envelope.ts` for a reference
    * implementation, or the T3 runner for the production path). The
    * orchestrator never receives plaintext trading parameters; the
    * T3 enclave is the single authority on those values and returns

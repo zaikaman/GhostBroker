@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TenantDidRegistry } from "@ghostbroker/t3-enclave";
+import type { TenantDidRegistry } from "../../enclave/index.js";
 import {
   InstitutionService,
   type InstitutionRepository,

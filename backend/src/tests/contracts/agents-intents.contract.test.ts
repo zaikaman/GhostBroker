@@ -1,6 +1,6 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { BlindIntentSealFailureError } from "@ghostbroker/t3-enclave";
+import { BlindIntentSealFailureError } from "../../enclave/index.js";
 import { createApp, type BackendServices } from "../../app.js";
 import { issueOperatorSessionToken } from "../../auth/session-token.js";
 import type { AgentManagementService } from "../../services/agent.service.js";

@@ -6,7 +6,7 @@ import {
   type DelegationActionScope,
   type DelegationCredential,
   type DelegationSigningBody,
-} from "@ghostbroker/agent-client";
+} from "../../sdk/agent-client/index.js";
 import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
 
 /**
@@ -32,7 +32,7 @@ import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
  *     `/api/agents/intents/cancel`, settlement).
  *
  *   - The signer re-uses the canonical browser-safe signer
- *     from `@ghostbroker/agent-client/src/delegation-signer.ts`,
+ *     from `backend/src/sdk/agent-client/delegation-signer.ts`,
  *     so the JWS it produces is byte-identical to the JWS
  *     the legacy CLI produced and the legacy browser-mint UI
  *     produced — `@terminal3/verify_vc`'s `verifyEcdsaVc`

@@ -1,9 +1,9 @@
-import { verifyGhostbrokerDelegationCredential } from "@ghostbroker/t3-enclave";
+import { verifyGhostbrokerDelegationCredential } from "../enclave/index.js";
 import type {
   AgentDelegationVerificationRequest,
   AgentDelegationVerificationResult,
   GhostbrokerVerificationRequest,
-} from "@ghostbroker/t3-enclave";
+} from "../enclave/index.js";
 import { PublicError } from "../errors/public-error.js";
 import type { AgentManagementService } from "../services/agent.service.js";
 
@@ -135,6 +135,11 @@ export class T3AgentAuthorizationFacade implements AgentAuthorizationFacade {
     const result = await verifyGhostbrokerDelegationCredential(vcRequest);
 
     if (result.status !== "verified") {
+      console.warn(
+        `[AUTHZ] Delegation verification rejected — reason: ${result.reason}, ` +
+        `agentDid: ${result.agentDid}, ` +
+        `action: ${request.requestedAction}`,
+      );
       throw new PublicError("authorization_failed", 403);
     }
 

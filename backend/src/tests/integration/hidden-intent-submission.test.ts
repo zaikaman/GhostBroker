@@ -5,7 +5,7 @@ import type {
   BlindIntentClient,
   BlindIntentRequest,
   BlindIntentResult,
-} from "@ghostbroker/t3-enclave";
+} from "../../enclave/index.js";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { HiddenIntentService } from "../../services/hidden-intent.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";

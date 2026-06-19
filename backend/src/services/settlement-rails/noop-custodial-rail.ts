@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SettlementCommand } from "@ghostbroker/t3-enclave";
+import type { SettlementCommand } from "../../enclave/index.js";
 import type {
   RailSettlementProof,
   SettlementRail,

@@ -1,4 +1,4 @@
-import type { AgentIdentityVerifier } from "@ghostbroker/t3-enclave";
+import type { AgentIdentityVerifier } from "../../enclave/index.js";
 import { describe, expect, it } from "vitest";
 import type { ApiKeyManagementService } from "../../services/api-key.service.js";
 import type { AuthInstitutionRepository } from "../../services/auth.service.js";

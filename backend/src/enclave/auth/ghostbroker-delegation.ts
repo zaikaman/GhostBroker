@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { verifyVc } from "@terminal3/verify_vc";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { ethers } from "ethers";
 
 /**
  * The action an agent is attempting on the backend. Used as the
@@ -234,9 +235,16 @@ const SANDBOX_PROOF_MARKERS = [
 ] as const;
 
 function getModeFromEnv(): GhostbrokerVerificationMode {
-  const raw = process.env.VC_VERIFY_MODE?.trim().toLowerCase();
+  // Read VC_VERIFY_MODE first (legacy), fall back to T3_MODE
+  // (canonical), then default to "live" for production safety.
+  const raw = (
+    process.env.VC_VERIFY_MODE ||
+    process.env.T3_MODE ||
+    "live"
+  ).trim().toLowerCase();
   if (raw === "live" || raw === "structural") return raw;
-  return "sandbox";
+  if (raw === "sandbox") return "sandbox";
+  return "live";
 }
 
 function isDelegationActive(
@@ -387,42 +395,116 @@ export async function verifyGhostbrokerDelegationCredential(
   return tryLiveVerify(safe, agentDid, mode);
 }
 
+/**
+ * Extract an Ethereum address from a DID that embeds one.
+ * Supports `did:ethr:0x...`, `did:t3n:0x...`, and `did:t3n:<hex>...`
+ * formats (with or without `0x` prefix, with optional `#key-1` fragment).
+ */
+function walletAddressFromDid(did: string): string | null {
+  // Match the 40-hex-char address segment, with or without `0x` prefix,
+  // optionally preceded by a DID prefix and optionally followed by a fragment.
+  const match = /^(?:did:[a-z0-9]+:)?((?:0x)?[0-9a-fA-F]{40})(?:#[^#]*)?$/u.exec(did);
+  if (!match?.[1]) return null;
+  let addr = match[1].toLowerCase();
+  if (!addr.startsWith("0x")) addr = `0x${addr}`;
+  return addr;
+}
+
 async function tryLiveVerify(
   safe: GhostbrokerDelegationCredential,
   agentDid: string,
   mode: GhostbrokerVerificationMode,
 ): Promise<GhostbrokerVerificationResult> {
   try {
-    // Shape matches the `SignedCredential` contract that
-    // `@terminal3/verify_vc` accepts. We keep the cast local
-    // to this call site so we don't take a hard dependency on
-    // `@terminal3/vc_core` for the type alone — the verifier
-    // only cares about the structural shape.
-    const signed = {
+    // Re-implement ECDSA verification inline instead of delegating to
+    // @terminal3/verify_vc → @terminal3/ecdsa_vc, because the latter's
+    // `getWalletAddress` only supports `did:ethr:` DIDs and throws on
+    // our `did:t3n:0x<address>` format. The verification logic is
+    // straightforward:
+    //
+    //   1. Strip proof from the VC
+    //   2. JSON.stringify the proof-stripped body (insertion order)
+    //   3. keccak256(utf8 bytes of JSON)  →  32-byte digest
+    //   4. ethers.verifyMessage(digest, proofValue)  →  recovered address
+    //      (applies EIP-191 personal_sign prefix internally)
+    //   5. Extract wallet address from the issuer DID
+    //   6. Assert recovered address matches the expected wallet address
+    //      AND is present in proof.verificationMethod
+
+    if (!safe.proof?.jws) {
+      return { status: "rejected", agentDid, reason: "unverified" };
+    }
+
+    // Step 1: build the proof-stripped payload (same shape as what the
+    // signer's `buildDelegationSigningBody` produces).
+    const payload = {
       "@context": ["https://www.w3.org/2018/credentials/v1"],
       id: safe.id,
       type: safe.type,
       issuer: safe.issuer,
       validFrom: safe.issuanceDate,
       validUntil: safe.expirationDate,
-      credentialSubject: {
-        ...safe.credentialSubject,
-        id: safe.credentialSubject.id,
-      },
-      proof: {
-        type: safe.proof?.type ?? "",
-        proofPurpose: safe.proof?.proofPurpose ?? "",
-        verificationMethod: safe.proof?.verificationMethod ?? "",
-        created: safe.proof?.created ?? "",
-        proofValue: safe.proof?.jws ?? "",
-      },
-    } as Parameters<typeof verifyVc>[0];
-    const result = await verifyVc(signed, {
-      debug: process.env.VC_VERIFY_DEBUG === "true",
-    });
-    if (!result.isValid) {
+      credentialSubject: { ...safe.credentialSubject },
+    };
+
+    // Step 2-3: serialize and hash.
+    const json = JSON.stringify(payload);
+    const hash = keccak_256(new TextEncoder().encode(json));
+
+    // Log the JSON being hashed so we can compare with what the signer produced.
+    console.log(
+      "[VERIFY] payload JSON:",
+      json,
+    );
+    console.log(
+      "[VERIFY] payload JSON length:",
+      json.length,
+      "hash hex:",
+      Buffer.from(hash).toString("hex"),
+    );
+
+    // Step 4: recover the signer's address from the ECDSA signature.
+    // `ethers.verifyMessage` applies the EIP-191 personal_sign prefix
+    // internally and returns the recovered address.
+    const recoveredAddress = ethers.verifyMessage(
+      hash,
+      safe.proof.jws as string,
+    );
+
+    // Step 5: extract wallet address from the issuer DID.
+    const expectedAddress = walletAddressFromDid(safe.issuer);
+    if (!expectedAddress) {
+      console.warn(
+        "[VERIFY] Could not extract wallet address from issuer DID:",
+        safe.issuer,
+      );
       return { status: "rejected", agentDid, reason: "unverified" };
     }
+
+    // Step 6: verify the recovered address matches.
+    const addrMatch =
+      recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
+
+    // Also verify the recovered address appears in the verificationMethod
+    // for defense-in-depth.
+    const vmMatch = safe.proof.verificationMethod
+      .toLowerCase()
+      .includes(recoveredAddress.toLowerCase());
+
+    if (!addrMatch || !vmMatch) {
+      console.warn(
+        "[VERIFY] ECDSA signature mismatch",
+        JSON.stringify({
+          recoveredAddress,
+          expectedAddress,
+          addrMatch,
+          vmMatch,
+          verificationMethod: safe.proof.verificationMethod,
+        }),
+      );
+      return { status: "rejected", agentDid, reason: "unverified" };
+    }
+
     return {
       status: "verified",
       agentDid,
@@ -430,15 +512,12 @@ async function tryLiveVerify(
       policyHash: policyHashFor(safe),
       verificationMode: "live",
     };
-  } catch {
-    // Production-grade default: fail closed on any SDK
-    // exception in `live` or `structural` mode. The legacy
-    // `VC_VERIFY_STRICT=true` opt-in is now a no-op — the
-    // verifier always fails closed outside `sandbox` mode,
-    // and `sandbox` is the only mode the operator should use
-    // if they want the historical "verified on SDK error"
-    // behaviour. The flag is retained so existing operator
-    // scripts that set it keep working.
+  } catch (err) {
+    console.warn(
+      "[VERIFY] tryLiveVerify caught exception:",
+      err instanceof Error ? err.message : String(err),
+      err instanceof Error ? err.stack : undefined,
+    );
     if (mode === "sandbox") {
       return {
         status: "verified",

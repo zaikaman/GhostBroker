@@ -68,7 +68,6 @@ export class GhostBrokerClient {
   public readonly negotiations: NegotiationClient;
   public readonly telemetry: TelemetryClient;
   public token: string | undefined;
-  private institutionId: string | undefined;
   private readonly baseUrl: string;
 
   public constructor(config: GhostBrokerClientConfig) {
@@ -81,7 +80,6 @@ export class GhostBrokerClient {
     this.negotiations = new NegotiationClient(this.baseUrl);
     this.telemetry = new TelemetryClient(this.baseUrl, config.institutionId ?? "");
     this.token = config.token;
-    this.institutionId = config.institutionId;
   }
 
   /**
@@ -98,7 +96,6 @@ export class GhostBrokerClient {
 
   private applySession(session: AuthSession): void {
     this.token = session.token;
-    this.institutionId = session.institution.id;
     this.telemetry.setInstitutionId(session.institution.id);
   }
 

@@ -17,15 +17,18 @@
  * beyond the handshake + me() round-trip.
  *
  * Run from the workspace root:
- *   npx tsx scripts/verify-t3n-tenant.ts
+ *   npm run verify:t3n-tenant -w @ghostbroker/backend
+ *
+ * Or directly:
+ *   npx tsx backend/scripts/verify-t3n-tenant.ts
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAuthenticatedT3NetworkClient } from "@ghostbroker/t3-enclave";
+import { createAuthenticatedT3NetworkClient } from "../src/enclave/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "..");
+const REPO_ROOT = resolve(__dirname, "..", "..");
 const BACKEND_ENV_PATH = resolve(REPO_ROOT, "backend/.env");
 
 function loadBackendEnv(path: string): Record<string, string> {

@@ -1,5 +1,5 @@
-﻿import { randomBytes, createHash } from "node:crypto";
-import type { AgentIdentityVerifier } from "@ghostbroker/t3-enclave";
+import { randomBytes, createHash } from "node:crypto";
+import type { AgentIdentityVerifier } from "../enclave/index.js";
 import { logger } from "../logging/logger.js";
 import { PublicError } from "../errors/public-error.js";
 import type {
@@ -62,7 +62,7 @@ function extractWalletAddressFromDid(did: string): string | undefined {
  * `chain-sepolia-rail`), so it is the balance source of truth
  * for chain-rail institutions. Returns `undefined` when the
  * metadata has no `depositAddress` or it is not a valid 0x
- * address — callers must treat that as "no chain balance
+ * address � callers must treat that as "no chain balance
  * source available" and fall back to stored DB balances.
  */
 function readDepositAddress(institution: Institution): string | undefined {
@@ -126,18 +126,23 @@ export class DidAuthService implements AuthSessionService {
       }
 
       // Default new wallet-auth institutions onto the Sepolia
-      // chain rail so assets actually move on-chain. The chain
-      // rail needs a server-managed deposit wallet; when that
-      // service is configured we derive the deposit address and
-      // attach the canonical token addresses. If the chain rail
-      // is not configured (no deposit-wallet service), fall back
-      // to the off-chain default so login never breaks.
-      let settlementProfileRef = "wallet:default";
+      // chain rail so assets actually move on-chain. The deposit
+      // address is derived when a server-managed deposit wallet
+      // service is configured; token addresses are attached when
+      // the canonical token addresses are known. When neither is
+      // available the institution is still on the chain rail path
+      // so the dashboard shows the correct rail status — the
+      // missing values must be set later through the Settings
+      // panel or by wiring the env vars.
+      const settlementProfileRef = "chain:sepolia:erc20";
       if (this.depositWalletService) {
-        settlementProfileRef = "chain:sepolia:erc20";
         metadata.depositAddress =
           this.depositWalletService.deriveDepositAddress(did);
-        metadata.tokenAddresses = { ...(this.defaultChainTokenAddresses ?? {}) };
+      }
+      if (this.defaultChainTokenAddresses) {
+        metadata.tokenAddresses = { ...this.defaultChainTokenAddresses };
+      } else {
+        metadata.tokenAddresses = {};
       }
 
       const institution = await this.institutions.createInstitution({

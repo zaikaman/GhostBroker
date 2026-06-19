@@ -78,8 +78,8 @@ interface ConnectivityResult {
   baseUrl: string;
   apiKeyPrefix: string;
   reachable: boolean;
-  status?: number;
-  error?: string;
+  status?: number | undefined;
+  error?: string | undefined;
 }
 
 async function testProviderConnectivity(
@@ -104,18 +104,18 @@ async function testProviderConnectivity(
       reachable: true,
       error: `response.text="${(response.text ?? "").slice(0, 50)}"`,
     };
-  } catch (err) {
+} catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
-    const status =
-      "status" in error ? (error as { status?: number }).status : undefined;
+    const statusRaw = "status" in error ? (error as { status?: number }).status : undefined;
+    const status = typeof statusRaw === "number" ? statusRaw : undefined;
     return {
       provider: label,
       model,
       baseUrl,
       apiKeyPrefix: apiKeyPreview,
       reachable: false,
-      status,
-      error: error.message.slice(0, 300),
+      ...(status !== undefined ? { status } : {}),
+      error: error.message,
     };
   }
 }
@@ -151,6 +151,7 @@ describe("LLM Provider Connectivity", () => {
       if (!env.GEMINI_API_KEY) return;
       const result = await testProviderConnectivity("gemini", () => ({
         provider: new GeminiLlmProvider({
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- required env var; test would skip/fail without it
           apiKey: env.GEMINI_API_KEY!,
           ...(env.GEMINI_BASE_URL ? { baseUrl: env.GEMINI_BASE_URL } : {}),
           ...(env.GEMINI_MODEL ? { model: env.GEMINI_MODEL } : {}),
@@ -275,6 +276,7 @@ describe("LLM Provider Connectivity", () => {
       if (!env.GROQ_API_KEY) return;
       const result = await testProviderConnectivity("groq", () => ({
         provider: new GroqLlmProvider({
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by the early-return above
           apiKey: env.GROQ_API_KEY!,
           ...(env.GROQ_BASE_URL ? { baseUrl: env.GROQ_BASE_URL } : {}),
           ...(env.GROQ_MODEL ? { model: env.GROQ_MODEL } : {}),

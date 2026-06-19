@@ -3,7 +3,7 @@ import type {
   NegotiationRoundEvaluator,
   NegotiationTicketClient,
   NegotiationDisclosureVerifier,
-} from "@ghostbroker/t3-enclave";
+} from "../enclave/index.js";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
 import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
@@ -31,7 +31,7 @@ import {
   type AuthoredMandatePolicy,
   type DerivedExecutionRails,
   type NegotiationStrategyProfile,
-} from "@ghostbroker/negotiation-core";
+} from "../negotiation-core/index.js";
 
 /**
  * A negotiation ticket awaiting pairing. Held in memory between

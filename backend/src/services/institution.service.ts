@@ -2,7 +2,7 @@ import {
   type TenantDidRegistry,
   rotateEnvelopeKey,
   createEnvelopeKeyMetadata,
-} from "@ghostbroker/t3-enclave";
+} from "../enclave/index.js";
 import { PublicError } from "../errors/public-error.js";
 import {
   institutionFromRecord,

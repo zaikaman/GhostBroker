@@ -1,6 +1,6 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Address, PublicClient, WalletClient } from "viem";
-import type { SettlementCommand } from "@ghostbroker/t3-enclave";
+import type { SettlementCommand } from "../../enclave/index.js";
 import { SepoliaErc20Rail } from "../../services/settlement-rails/chain-sepolia-rail.js";
 import type { SettlementRailContext, SettlementRailPlaintext } from "../../services/settlement-rails/rail.js";
 

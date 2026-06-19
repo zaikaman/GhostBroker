@@ -1,4 +1,4 @@
-import type { SettlementCommand } from "@ghostbroker/t3-enclave";
+import type { SettlementCommand } from "../../enclave/index.js";
 
 /**
  * The settlement rail is the off-TEE transport that actually moves

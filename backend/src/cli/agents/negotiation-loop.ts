@@ -4,13 +4,13 @@ import {
   type AgentAdmission,
   type AuthSession,
   type RedactedNegotiationSessionView,
-} from "@ghostbroker/agent-client";
+} from "../../sdk/agent-client/index.js";
 import {
   buildTurnContext,
   normalizeStrategy,
   type AuthoredMandatePolicy,
   type NegotiationStrategyProfile,
-} from "@ghostbroker/negotiation-core";
+} from "../../negotiation-core/index.js";
 import type { AgentEnv } from "./env.js";
 import {
   type NegotiationContext,
@@ -390,7 +390,7 @@ let admission: AgentAdmission;
       quoteAssetCode,
       session: liveSession,
       lastOutcome,
-      priorMoveRationale,
+      ...(priorMoveRationale !== undefined ? { priorMoveRationale } : {}),
       priorDisclosureRequests,
       priorDisclosureReveals,
     });

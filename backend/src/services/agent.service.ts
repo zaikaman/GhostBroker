@@ -14,8 +14,8 @@ import {
   type AuthorityRevocationRepository,
 } from "./authority-revocation.service.js";
 import type { MatchingOrchestrator } from "./matching-orchestrator.js";
-import type { DelegationCredential } from "@ghostbroker/agent-client";
-import type { DelegationActionScope } from "@ghostbroker/t3-enclave";
+import type { DelegationCredential } from "../sdk/agent-client/index.js";
+import type { DelegationActionScope } from "../enclave/index.js";
 
 export interface AgentAdmissionService {
   admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission>;

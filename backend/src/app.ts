@@ -114,7 +114,7 @@ import {
   runStartupCheck,
   T3EnclaveConfigError,
   type AuthenticatedT3NetworkClientOptions,
-} from "@ghostbroker/t3-enclave";
+} from "./enclave/index.js";
 
 function createCorsMiddleware(env: BackendEnv): RequestHandler {
   const allowedOrigins = getCorsAllowedOrigins(env);
@@ -224,7 +224,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   } catch (error: unknown) {
     if (error instanceof T3EnclaveConfigError) {
       throw new Error(
-        `T3 enclave startup check failed (NODE_ENV=${env.NODE_ENV}): ${error.issues.join("; ")}`,
+        `T3 enclave startup check failed (NODE_ENV=${env.NODE_ENV}): ${(error as T3EnclaveConfigError).issues.join("; ")}`,
         { cause: error },
       );
     }
@@ -269,8 +269,18 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // persisted to `output/identities/tenant_identity.json`
   // so a backend restart re-uses the same identity and
   // existing VCs stay valid.
+  //
+  // The T3N API key itself is used as the signing private
+  // key (it is the secp256k1 key that corresponds to the
+  // T3N DID's on-chain address). This ensures the ECDSA
+  // signature produced by `signDelegationCredential` can
+  // be verified against the issuer DID — previously the
+  // identity was a random keypair whose address never
+  // matched the DID, causing all delegation VC verifications
+  // to fail with "unverified" in live verification mode.
   const tenantIdentity = loadOrCreateTenantIdentity({
     tenantDid: t3NetworkClient.tenantDidValue,
+    signingPrivateKey: env.T3N_API_KEY,
   });
   const tenantDelegationSigner = new BackendTenantDelegationSigner(
     tenantIdentity,
@@ -352,7 +362,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       // production T3-tenant-TEE the same call returns
       // a TEE-held key.
       const { loadOrCreateTenantIdentity } = await import(
-        "@ghostbroker/t3-enclave"
+        "./enclave/index.js"
       );
       const tenantIdentity = loadOrCreateTenantIdentity({
         tenantDid:

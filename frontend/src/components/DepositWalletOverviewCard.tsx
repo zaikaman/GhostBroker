@@ -6,7 +6,6 @@ import {
   CheckmarkCircle01Icon,
   Copy01Icon,
   Link01Icon,
-  Loading03Icon,
   Refresh01Icon,
   Shield01Icon,
   Wallet01Icon,

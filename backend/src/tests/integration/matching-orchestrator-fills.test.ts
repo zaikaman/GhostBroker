@@ -8,7 +8,7 @@ import type {
   MatchContractClient,
   MatchEvaluationRequest,
   OpaqueMatchOutcome,
-} from "@ghostbroker/t3-enclave";
+} from "../../enclave/index.js";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { HiddenIntentService } from "../../services/hidden-intent.service.js";
 import type { AgentRepository } from "../../services/agent-repository.js";

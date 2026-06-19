@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   RailSettlementProof,
   SettlementRail,
@@ -6,7 +6,7 @@ import type {
   SettlementRailPlaintext,
 } from "../../services/settlement-rails/rail.js";
 import { MapSettlementRailDispatcher } from "../../services/settlement-rails/dispatcher.js";
-import type { SettlementCommand } from "@ghostbroker/t3-enclave";
+import type { SettlementCommand } from "../../enclave/index.js";
 import { PublicError } from "../../errors/public-error.js";
 import { SettlementService } from "../../services/settlement.service.js";
 import { TelemetryBus } from "../../services/telemetry-bus.js";
