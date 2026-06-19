@@ -46,14 +46,17 @@ const sampleIntent: PendingIntent = {
   agentDid: us2AgentDid,
   intentHandle: "intent_list_1",
   executionRef: "t3exec_list_1",
-  // Private fields — these must NOT appear in the response.
+  // Private fields -- these must NOT appear in the response.
   encryptedEnvelope: "t3env.ciphertext.secret",
   authorityRef: "authority:secret",
   delegationCredential: { id: "vc-list-1", issuer: "did:t3n:list" },
-  assetCode: "WBTC",
-  side: "buy",
-  quantity: 100,
-  price: 45000,
+  opaqueLockDescriptor: {
+    tradedAssetCode: "WBTC",
+    assetCode: "USDC",
+    side: "buy",
+    amount: 4_500_000,
+    attestationRef: "t3attest:list_1",
+  },
   sealedAt: "2026-06-12T00:00:00.000Z",
   instrumentScope: ["WBTC"],
   directionScope: ["buy", "sell"],
@@ -86,23 +89,24 @@ describe("GET /api/agents/intents contract", () => {
       .set("Authorization", `Bearer ${token}`)
       .expect(200);
 
+    // The orchestrator no longer holds plaintext asset / side /
+    // quantity / price in memory; the public view is the opaque
+    // intent handle + correlation ref + agent DID + sealed-at
+    // timestamp. Active order parameters are held only inside
+    // the TEE.
     expect(response.body).toEqual({
       intents: [
         {
           intentHandle: "intent_list_1",
           correlationRef: "corr_list_1",
           agentDid: us2AgentDid,
-          assetCode: "WBTC",
-          side: "buy",
-          quantity: 100,
-          price: 45000,
           sealedAt: "2026-06-12T00:00:00.000Z",
         },
       ],
     });
   });
 
-  it("does not leak encrypted envelope, authority ref, or authority limits", async () => {
+  it("does not leak encrypted envelope, authority ref, authority limits, or the lock descriptor", async () => {
     const app = createApp(
       buildBackendTestEnv(),
       buildServices({
@@ -129,6 +133,9 @@ describe("GET /api/agents/intents contract", () => {
     expect(serialized).not.toContain("maxNotional");
     expect(serialized).not.toContain("executionRef");
     expect(serialized).not.toContain("encryptedEnvelope");
+    expect(serialized).not.toContain("opaqueLockDescriptor");
+    expect(serialized).not.toContain("attestationRef");
+    expect(serialized).not.toContain("delegationCredential");
   });
 
   it("returns an empty list when there are no pending intents", async () => {

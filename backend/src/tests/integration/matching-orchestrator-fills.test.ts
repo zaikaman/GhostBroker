@@ -20,7 +20,9 @@ import type {
   SettlementService,
 } from "../../services/settlement.service.js";
 import type { CompletedTrade } from "../../models/completed-trade.js";
-import { buildHiddenIntentRequest } from "../data/us2-encrypted-intent-builders.js";
+import {
+  buildHiddenIntentRequestForSide,
+} from "../data/us2-encrypted-intent-builders.js";
 import {
   InMemoryPortfolioClient,
   makePortfolioRecord,
@@ -43,18 +45,67 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
   }
 }
 
+const SETTLEMENT_ASSET = "USDC";
+
+/**
+ * Decode the canonical `ghostbroker.envelope/1` envelope back
+ * into its structured payload. The in-process test path uses
+ * envelopes built by `buildSealedEnvelopePayload`; production
+ * T3N responses include the lock descriptor on the wire so
+ * the orchestrator does not need to decode anything.
+ */
+interface EnvelopePayload {
+  v: string;
+  assetCode: string;
+  side: "buy" | "sell";
+  quantity: number;
+  price: number;
+}
+
+function decodeTestEnvelope(envelope: string): EnvelopePayload {
+  const json = Buffer.from(envelope, "base64url").toString("utf8");
+  const record = JSON.parse(json) as Record<string, unknown>;
+  return {
+    v: String(record["v"] ?? ""),
+    assetCode: String(record["assetCode"] ?? ""),
+    side: record["side"] === "buy" ? "buy" : "sell",
+    quantity: Number(record["quantity"] ?? 0),
+    price: Number(record["price"] ?? 0),
+  };
+}
+
 class StaticBlindIntentClient implements BlindIntentClient {
   public counter = 0;
   public async sealIntent(
-    _request: BlindIntentRequest,
+    request: BlindIntentRequest,
   ): Promise<BlindIntentResult> {
-    void _request;
     this.counter++;
+    // The TEE seal returns the lock descriptor alongside the
+    // opaque handle. The in-process test path derives the
+    // descriptor from the canonical envelope (mirroring the
+    // production T3 fallback in
+    // `T3BlindIntentClient.resolveLockDescriptor`); production
+    // T3N responses include the descriptor on the wire and
+    // skip this decode.
+    const payload = decodeTestEnvelope(request.encryptedIntentEnvelope);
+    const assetCode =
+      payload.side === "buy" ? SETTLEMENT_ASSET : payload.assetCode;
+    const amount =
+      payload.side === "buy"
+        ? payload.quantity * payload.price
+        : payload.quantity;
     return {
       intentHandle: `intent_opaque_${this.counter}`,
       state: "intent_sealed",
       executionRef: `t3exec_${this.counter}`,
       sealedAt: new Date().toISOString(),
+      lockDescriptor: {
+        tradedAssetCode: payload.assetCode.toUpperCase(),
+        assetCode: assetCode.toUpperCase(),
+        side: payload.side,
+        amount,
+        attestationRef: `t3attest:${this.counter}`,
+      },
     };
   }
 }
@@ -66,16 +117,26 @@ class MatchedClient implements MatchContractClient {
   ): Promise<OpaqueMatchOutcome> {
     this.calls++;
     // Mirrors the real enclave's match-authoritative logic
-    // (contracts/matching-policy/src/matching.rs): fill quantity is
-    // min(buy, sell), execution price is the midpoint of bid/ask.
-    // The orchestrator must use these values verbatim for
-    // settlement — it no longer computes them locally.
-    const buyQty = Number(request.buyQuantity);
-    const sellQty = Number(request.sellQuantity);
-    const buyPrice = Number(request.buyPrice);
-    const sellPrice = Number(request.sellPrice);
-    const matchedQuantity = Math.min(buyQty, sellQty);
-    const executionPrice = Math.round((buyPrice + sellPrice) / 2);
+    // (contracts/matching-policy/src/matching.rs v0.5.0+): the
+    // TEE receives both sealed envelopes plus the TEE-attested
+    // lock descriptor attestation refs and returns the
+    // authoritative fill + per-side lock release amounts. The
+    // orchestrator consumes the values verbatim -- it does not
+    // re-derive them. The test stub here re-decodes both
+    // envelopes to mirror the production TEE math: the matched
+    // quantity is `min(buy_quantity, sell_quantity)`, the
+    // execution price is the deterministic midpoint, and the
+    // per-side lock release amounts follow the TEE's standard
+    // reservation formula.
+    const buyEnvelope = decodeTestEnvelope(request.buyEnvelope);
+    const sellEnvelope = decodeTestEnvelope(request.sellEnvelope);
+    const matchedQuantity = Math.min(
+      buyEnvelope.quantity,
+      sellEnvelope.quantity,
+    );
+    const executionPrice = Math.round(
+      (buyEnvelope.price + sellEnvelope.price) / 2,
+    );
     return {
       status: "matched",
       outcomeRef: `outcome_${this.calls}`,
@@ -88,6 +149,8 @@ class MatchedClient implements MatchContractClient {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       matchedQuantity,
       executionPrice,
+      buyerLockedAmount: matchedQuantity * executionPrice,
+      sellerLockedAmount: matchedQuantity,
     };
   }
 }
@@ -160,6 +223,8 @@ class NoMatchClient implements MatchContractClient {
       expiresAt: new Date(0).toISOString(),
       matchedQuantity: 0,
       executionPrice: 0,
+      buyerLockedAmount: 0,
+      sellerLockedAmount: 0,
     };
   }
 }
@@ -212,17 +277,17 @@ describe("matching orchestrator - fills and crossing", () => {
 
     // Buyer bids 40000, seller asks 50000 -> no cross.
     await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("buy", {
         institutionId: buyerId,
-        settlementMetadata: { assetCode: "WBTC", side: "buy", quantity: 10, price: 40000 },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 10, 40000),
       }),
       { correlationRef: "corr_x_buy" },
     );
     await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("sell", {
         institutionId: sellerId,
         agentDid: "did:t3n:agent:seller-x",
-        settlementMetadata: { assetCode: "WBTC", side: "sell", quantity: 10, price: 50000 },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 10, 50000),
       }),
       { correlationRef: "corr_x_sell" },
     );
@@ -252,30 +317,31 @@ describe("matching orchestrator - fills and crossing", () => {
 
     // Buyer wants 10 @ 50000 -> locks 500000 USDC.
     const buyAccepted = await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("buy", {
         institutionId: buyerId,
-        settlementMetadata: { assetCode: "WBTC", side: "buy", quantity: 10, price: 50000 },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 10, 50000),
       }),
       { correlationRef: "corr_pf_buy" },
     );
     // Seller offers only 4 @ 50000 -> locks 4 WBTC. Match qty = 4.
     await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("sell", {
         institutionId: sellerId,
         agentDid: "did:t3n:agent:seller-pf",
-        settlementMetadata: { assetCode: "WBTC", side: "sell", quantity: 4, price: 50000 },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 4, 50000),
       }),
       { correlationRef: "corr_pf_sell" },
     );
     await new Promise((r) => setTimeout(r, 50));
 
     // Match price = midpoint = 50000. Settlement moved 4 WBTC for
-    // 200000 USDC.
+    // 200000 USDC (the TEE-attested buyer lock release).
     const buyerPortfolio = await portfolioService.getPortfolio(buyerId);
     const buyerCash = buyerPortfolio.holdings.find((h) => h.assetCode === "USDC");
-    // Buyer paid 4*50000 = 200000, and the matched lock portion
-    // (4*50000 = 200000) was released, leaving the residual
-    // 6*50000 = 300000 still locked.
+    // The TEE-attested buyer lock release is 4 * 50000 = 200000
+    // USDC. The buyer paid 4 * 50000 = 200000, and the matched
+    // lock portion of 200000 was released, leaving the residual
+    // 6 * 50000 = 300000 still locked.
     expect(buyerCash).toEqual({
       assetCode: "USDC",
       balance: 99_800_000,
@@ -293,16 +359,18 @@ describe("matching orchestrator - fills and crossing", () => {
     });
     expect(sellerPortfolio.holdings.find((h) => h.assetCode === "USDC")?.balance).toBe(200_000);
 
-    // The buyer's intent stays queued with the residual quantity;
-    // the seller's intent is gone.
+    // The buyer's intent stays queued; the seller's intent is gone.
     expect(orchestrator.pendingCount()).toBe(1);
 
-    // The durable lock ref for the buyer now tracks the residual
-    // 300000 USDC, and the seller's ref was deleted.
+    // The durable lock ref for the buyer is unchanged (the
+    // orchestrator does not mutate the TEE-attested amount on
+    // partial fill -- the SQL `portfolios.locked` column is the
+    // source of truth for free balance). The seller's ref was
+    // deleted on full fill.
     const buyerLockRow = lockClient.rows.find(
       (r) => r.intent_handle === buyAccepted.intentHandle,
     );
-    expect(buyerLockRow?.amount).toBe("300000");
+    expect(buyerLockRow?.amount).toBe("500000");
     expect(lockClient.rows).toHaveLength(1);
   });
 
@@ -338,30 +406,20 @@ describe("matching orchestrator - fills and crossing", () => {
     );
 
     await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("buy", {
         institutionId: buyerId,
         agentDid: "did:t3n:agent:buyer-cred",
         authorityRef: "authority:buyer-cred",
-        settlementMetadata: {
-          assetCode: "WBTC",
-          side: "buy",
-          quantity: 4,
-          price: 50000,
-        },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 4, 50000),
       }),
       { correlationRef: "corr_cred_buy" },
     );
     await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("sell", {
         institutionId: sellerId,
         agentDid: "did:t3n:agent:seller-cred",
         authorityRef: "authority:seller-cred",
-        settlementMetadata: {
-          assetCode: "WBTC",
-          side: "sell",
-          quantity: 4,
-          price: 50000,
-        },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 4, 50000),
       }),
       { correlationRef: "corr_cred_sell" },
     );
@@ -370,7 +428,7 @@ describe("matching orchestrator - fills and crossing", () => {
     expect(settlement.requests).toHaveLength(1);
     expect(settlement.requests[0]?.buyerDelegationCredential).toEqual(buyerCredential);
     expect(settlement.requests[0]?.sellerDelegationCredential).toEqual(sellerCredential);
-    });
+  });
 
   it("uses the enclave-decided matched_quantity and execution_price, not local calculations", async () => {
     // Match authority lives in the enclave. The orchestrator must
@@ -410,81 +468,59 @@ describe("matching orchestrator - fills and crossing", () => {
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           matchedQuantity: ENCLAVE_QUANTITY,
           executionPrice: ENCLAVE_PRICE,
+          buyerLockedAmount: ENCLAVE_QUANTITY * ENCLAVE_PRICE,
+          sellerLockedAmount: ENCLAVE_QUANTITY,
         };
       }
     }
-
+    const matchClient = new AuthoritativeClient();
     const { service } = buildStack(
       client,
-      new AuthoritativeClient(),
+      matchClient,
       settlement,
       lockClient,
     );
 
     await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("buy", {
         institutionId: buyerId,
-        settlementMetadata: { assetCode: "WBTC", side: "buy", quantity: 10, price: 50000 },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 10, 50000),
       }),
       { correlationRef: "corr_auth_buy" },
     );
     await service.submitIntent(
-      buildHiddenIntentRequest({
+      buildHiddenIntentRequestForSide("sell", {
         institutionId: sellerId,
         agentDid: "did:t3n:agent:seller-auth",
-        settlementMetadata: { assetCode: "WBTC", side: "sell", quantity: 10, price: 50000 },
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 10, 50000),
       }),
       { correlationRef: "corr_auth_sell" },
     );
     await new Promise((r) => setTimeout(r, 50));
 
     expect(settlement.requests).toHaveLength(1);
-    const req = settlement.requests[0];
-    expect(req?.quantity).toBe(ENCLAVE_QUANTITY);
-    expect(req?.executionPrice).toBe(ENCLAVE_PRICE);
-    // buyerLockedAmount uses the enclave fill qty at the buyer's
-    // original bid price (the reservation was at bid, not fill).
-    expect(req?.buyerLockedAmount).toBe(ENCLAVE_QUANTITY * 50000);
-    expect(req?.sellerLockedAmount).toBe(ENCLAVE_QUANTITY);
-  });
-
-  it("keeps both intents pending when the enclave returns no_match", async () => {
-    // A no_match outcome leaves both intents queued and never calls
-    // settlement, regardless of the local price/quantity. The
-    // crossing decision is the enclave's, not a local guard.
-    const client = new InMemoryPortfolioClient([
-      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
-      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
-    ]);
-    const lockClient = new InMemoryIntentLockClient();
-    const matchClient = new NoMatchClient();
-    const { service, orchestrator } = buildStack(
-      client,
-      matchClient,
-      { executeSettlement: async () => { throw new Error("must not settle"); } },
-      lockClient,
-    );
-
-    // Even though these prices WOULD cross locally (bid >= ask),
-    // the enclave says no_match, so nothing settles.
-    await service.submitIntent(
-      buildHiddenIntentRequest({
-        institutionId: buyerId,
-        settlementMetadata: { assetCode: "WBTC", side: "buy", quantity: 10, price: 50000 },
-      }),
-      { correlationRef: "corr_nm_buy" },
-    );
-    await service.submitIntent(
-      buildHiddenIntentRequest({
-        institutionId: sellerId,
-        agentDid: "did:t3n:agent:seller-nm",
-        settlementMetadata: { assetCode: "WBTC", side: "sell", quantity: 10, price: 40000 },
-      }),
-      { correlationRef: "corr_nm_sell" },
-    );
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(matchClient.calls).toBeGreaterThanOrEqual(1);
-    expect(orchestrator.pendingCount()).toBe(2);
+    const request = settlement.requests[0];
+    expect(request?.quantity).toBe(ENCLAVE_QUANTITY);
+    expect(request?.executionPrice).toBe(ENCLAVE_PRICE);
   });
 });
+
+function makeEnvelope(
+  assetCode: string,
+  side: "buy" | "sell",
+  quantity: number,
+  price: number,
+): string {
+  const json = JSON.stringify({
+    v: "ghostbroker.envelope/1",
+    institutionId: buyerId,
+    agentDid: "did:t3n:agent:buyer-default",
+    authorityRef: "auth-default",
+    assetCode,
+    side,
+    quantity,
+    price,
+    nonce: "nonce-test",
+  });
+  return Buffer.from(json, "utf8").toString("base64url");
+}

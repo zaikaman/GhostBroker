@@ -12,6 +12,7 @@ import {
   Refresh01Icon,
   Link01Icon
 } from 'hugeicons-react';
+import { Skeleton } from './Skeleton';
 
 export interface PortfolioHolding {
   assetCode: string;
@@ -111,11 +112,51 @@ export function PortfolioCard({ institutionId }: PortfolioCardProps): React.JSX.
 
   if (isLoading) {
     return (
-      <div className="card" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 'var(--spacing-2xl)' }}>
-        <span className="pulse-dot" style={{ marginRight: '8px' }}></span>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-          Loading portfolio...
-        </span>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+        {/* Header Skeleton */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-sm)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '60%' }}>
+            <Skeleton variant="circle" width={18} height={18} />
+            <Skeleton variant="title" width="60%" style={{ margin: 0 }} />
+          </div>
+          <Skeleton variant="rect" width={80} height={24} style={{ borderRadius: '4px' }} />
+        </div>
+        
+        {/* Subtitle Skeleton */}
+        <Skeleton variant="text" width="90%" height={12} style={{ marginBottom: 'var(--spacing-sm)' }} />
+
+        {/* Holdings Grid Skeleton */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0 var(--spacing-lg)' }}>
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 'var(--spacing-sm) 0',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                <Skeleton variant="circle" width={16} height={16} />
+                <Skeleton variant="text" width={50} height={12} style={{ marginBottom: 0 }} />
+              </div>
+              <Skeleton variant="text" width={60} height={14} style={{ marginBottom: 0 }} />
+            </div>
+          ))}
+        </div>
+
+        {/* Faucet Section Skeleton */}
+        <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)', marginTop: 'var(--spacing-xs)' }}>
+          <Skeleton variant="text" width={120} height={12} style={{ marginBottom: '6px' }} />
+          <Skeleton variant="text" height={10} />
+          <Skeleton variant="text" width="80%" height={10} style={{ marginBottom: 'var(--spacing-sm)' }} />
+          <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+            <Skeleton variant="rect" width={110} height={28} style={{ borderRadius: '6px' }} />
+            <Skeleton variant="rect" width={150} height={28} style={{ borderRadius: '6px' }} />
+          </div>
+        </div>
       </div>
     );
   }

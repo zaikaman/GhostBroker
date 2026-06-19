@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import type { AuditReceipt } from '../services/api-client';
 import { Shield01Icon, AlertCircleIcon } from 'hugeicons-react';
+import { Skeleton } from './Skeleton';
 
 export interface EncryptedReceiptDrawerProps {
   receiptId: string | null;
@@ -61,9 +62,18 @@ export function EncryptedReceiptDrawer({
 
         <div className="drawer-body">
           {isLoading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--spacing-md)', padding: 'var(--spacing-2xl)', color: 'var(--color-text-muted)' }}>
-              <span className="pulse-dot"></span>
-              <span>Decrypting enclave audit reference...</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+              <span className="sr-only" style={{ display: 'none' }}>Decrypting enclave audit reference...</span>
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <Skeleton variant="text" width={100} height={10} style={{ marginBottom: 0 }} />
+                  <Skeleton variant="text" width="80%" height={14} style={{ marginBottom: 0 }} />
+                </div>
+              ))}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <Skeleton variant="text" width={150} height={10} style={{ marginBottom: 0 }} />
+                <Skeleton variant="rect" height={120} style={{ borderRadius: 'var(--radius-md)' }} />
+              </div>
             </div>
           ) : error ? (
             <div 

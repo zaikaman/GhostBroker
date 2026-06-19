@@ -13,6 +13,7 @@ import {
   AlertCircleIcon
 } from 'hugeicons-react';
 import { Pagination } from './Pagination';
+import { Skeleton } from './Skeleton';
 
 export interface PortfolioHistoryEntry {
   id: string;
@@ -117,11 +118,54 @@ export function PortfolioHistory({ institutionId }: PortfolioHistoryProps): Reac
 
   if (isLoading) {
     return (
-      <div className="card" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 'var(--spacing-xl)' }}>
-        <span className="pulse-dot" style={{ marginRight: '8px' }}></span>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-          Loading balance history...
-        </span>
+      <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '350px', gap: 'var(--spacing-md)' }}>
+        {/* Title Skeleton */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 'var(--spacing-xs)' }}>
+          <Skeleton variant="circle" width={16} height={16} />
+          <Skeleton variant="title" width="40%" style={{ margin: 0 }} />
+        </div>
+
+        {/* Paginated entries Skeleton */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 'var(--spacing-sm) var(--spacing-md)',
+                background: 'var(--color-input-bg)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.75rem',
+                gap: 'var(--spacing-sm)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', minWidth: 0, flex: 1 }}>
+                <Skeleton variant="circle" width={12} height={12} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '50%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Skeleton variant="text" width="40%" height={12} style={{ marginBottom: 0 }} />
+                    <Skeleton variant="rect" width={80} height={16} style={{ borderRadius: '4px' }} />
+                  </div>
+                  <Skeleton variant="text" width="60%" height={10} style={{ marginBottom: 0 }} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', width: '25%' }}>
+                <Skeleton variant="text" width="100%" height={12} style={{ marginBottom: 0 }} />
+                <Skeleton variant="text" width="70%" height={10} style={{ marginBottom: 0 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Pagination Skeleton */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
+          <Skeleton variant="rect" width={80} height={28} style={{ borderRadius: '4px' }} />
+          <Skeleton variant="text" width={120} height={12} style={{ marginBottom: 0 }} />
+          <Skeleton variant="rect" width={80} height={28} style={{ borderRadius: '4px' }} />
+        </div>
       </div>
     );
   }

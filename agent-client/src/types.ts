@@ -44,24 +44,6 @@ export interface EncryptedIntentRequest {
   agentDid: string;
   encryptedIntentEnvelope: string;
   authorityRef: string;
-  /**
-   * Optional plain-text settlement metadata. The backend's intent route
-   * accepts this as a sibling of the encrypted envelope — the orchestrator
-   * reads `assetCode`/`side`/`quantity`/`price` from this block, and the
-   * encrypted envelope carries the TEE-sealed commitment. The
-   * `$.settlementMetadata` path is exempt from the forbidden-fields scan
-   * (see `backend/src/validation/encrypted-intent.schema.ts`).
-   *
-   * The agent path that doesn't go through a TEE can pass this directly;
-   * production T3-enclave flows will seal the equivalent parameters in
-   * the envelope and may leave this block absent.
-   */
-  settlementMetadata?: {
-    assetCode: string;
-    side: "buy" | "sell";
-    quantity: number;
-    price: number;
-  };
 }
 
 export interface IntentAccepted {

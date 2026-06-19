@@ -46,11 +46,18 @@ export function isForbiddenOrderField(field: string): boolean {
   return forbiddenFieldSet.has(field.toLowerCase());
 }
 
-/** Fields that are exempt from the forbidden-fields scan.
- * These are platform-level metadata fields, not encrypted intent params.
+/**
+ * Scans the request body for forbidden order fields.
+ *
+ * Privacy boundary: the GhostBroker intent submit path accepts only the
+ * TEE-sealed envelope and an opaque handle. The orchestrator never
+ * receives plaintext asset / side / quantity / price on the wire; those
+ * values stay inside the T3 enclave and the orchestrator consumes
+ * TEE-attested descriptors (see `BalanceReservation`) for the
+ * downstream balance-lock math. There is no `$.settlementMetadata`
+ * exemption — any of the names in `forbiddenOrderFieldNames` appearing
+ * anywhere in the payload (root or nested) is rejected.
  */
-const exemptPaths = new Set<string>(["$.settlementMetadata"]);
-
 export function scanForbiddenFields(
   value: unknown,
   path = "$",
@@ -58,11 +65,6 @@ export function scanForbiddenFields(
   const findings: ForbiddenFieldFinding[] = [];
 
   function visit(node: unknown, currentPath: string): void {
-    // Skip entire subtrees that are exempt
-    if (exemptPaths.has(currentPath)) {
-      return;
-    }
-
     if (Array.isArray(node)) {
       node.forEach((item, index) => visit(item, `${currentPath}[${index}]`));
       return;

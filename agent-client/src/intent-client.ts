@@ -11,12 +11,14 @@ export class IntentClient {
   /**
    * Submit an encrypted hidden trading intent.
    *
-   * The optional `settlementMetadata` block is the plaintext commit that
-   * the orchestrator reads (`assetCode`, `side`, `quantity`, `price`).
-   * T3-enclave-backed agents will seal the equivalent parameters inside
-   * the envelope and may omit this block. Agents that don't have a TEE
-   * runner in front of them (loop agents, smoke tests, examples) can
-   * pass it here.
+   * The wire format is the TEE-sealed envelope plus an opaque handle.
+   * The agent is REQUIRED to seal `assetCode` / `side` / `quantity` /
+   * `price` into the envelope before calling this method (see
+   * `buildSealedEnvelope` in `@ghostbroker/agents` for a reference
+   * implementation, or the T3 runner for the production path). The
+   * orchestrator never receives plaintext trading parameters; the
+   * T3 enclave is the single authority on those values and returns
+   * a TEE-attested lock descriptor on the seal path.
    *
    * @param request - The intent submission payload
    * @param token - JWT session token from authentication
@@ -30,12 +32,6 @@ export class IntentClient {
     return this.submitEncryptedIntent(request, token);
   }
 
-  /**
-   * Explicit alias for {@link submitIntent} that documents the
-   * settlement-metadata-aware contract. Prefer this when the caller
-   * is providing both the encrypted envelope and the plaintext
-   * settlement metadata.
-   */
   public async submitEncryptedIntent(
     request: EncryptedIntentRequest,
     token: string,

@@ -4,6 +4,7 @@ import type {
 } from "@ghostbroker/t3-enclave";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
+import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
 import type {
   CancelIntentRequest,
   HiddenIntentAccepted,
@@ -120,8 +121,36 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
           maxNotional = agent.maxNotional ?? undefined;
         }
       } catch {
-        // Agent lookup failure is non-blocking â€” matching proceeds without limit checks
+        // Agent lookup failure is non-blocking -- matching proceeds without limit checks
       }
+    }
+
+    // Build the in-memory pending intent with ONLY opaque
+    // identifiers and the TEE-attested lock descriptor. The
+    // orchestrator never holds plaintext asset / side / quantity
+    // / price; the T3 enclave is the single source of truth on
+    // those values. The reservation is taken from the TEE's seal
+    // response, not from any plaintext on the wire.
+    const pendingIntent: PendingIntent = {
+      correlationRef: context.correlationRef,
+      institutionId: request.institutionId,
+      agentDid: request.agentDid,
+      intentHandle: sealed.intentHandle,
+      executionRef: sealed.executionRef,
+      encryptedEnvelope: request.encryptedIntentEnvelope,
+      authorityRef: request.authorityRef,
+      delegationCredential: delegationCredential ?? null,
+      opaqueLockDescriptor: sealed.lockDescriptor,
+      sealedAt: sealed.sealedAt,
+    };
+    if (instrumentScope) {
+      pendingIntent.instrumentScope = instrumentScope;
+    }
+    if (directionScope) {
+      pendingIntent.directionScope = directionScope;
+    }
+    if (maxNotional) {
+      pendingIntent.maxNotional = maxNotional;
     }
 
     // Acquire the balance reservation BEFORE pushing to the
@@ -129,29 +158,19 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     // from over-committing their institution's available
     // balance across multiple intents.
     //
-    // The lock amount is computed via the orchestrator's
-    // `lockDescriptorFor` so the descriptor formula lives in one
-    // place. If the orchestrator is not configured, the lock is
-    // skipped (matching still runs and `checkBalance` enforces
-    // a coarse check at the orchestrator level).
-    if (this.portfolioService && this.matchingOrchestrator) {
-      const syntheticIntent: PendingIntent = {
-        correlationRef: context.correlationRef,
-        institutionId: request.institutionId,
-        agentDid: request.agentDid,
-        intentHandle: sealed.intentHandle,
-        executionRef: sealed.executionRef,
-        encryptedEnvelope: request.encryptedIntentEnvelope,
-        authorityRef: request.authorityRef,
-        delegationCredential: delegationCredential ?? null,
-        assetCode: request.settlementMetadata.assetCode,
-        side: request.settlementMetadata.side,
-        quantity: request.settlementMetadata.quantity,
-        price: request.settlementMetadata.price,
-        sealedAt: sealed.sealedAt,
+    // The reservation values come from the TEE's seal response
+    // (`opaqueLockDescriptor`), NOT from any plaintext on the
+    // wire. The orchestrator carries the descriptor through to
+    // the portfolio service and never inspects the values
+    // against plaintext `side` / `quantity` / `price`. The
+    // descriptor is the TEE's authoritative claim for the
+    // per-intent reservation.
+    if (this.portfolioService) {
+      const reservation = {
+        institutionId: pendingIntent.institutionId,
+        assetCode: sealed.lockDescriptor.assetCode,
+        amount: sealed.lockDescriptor.amount,
       };
-      const reservation =
-        this.matchingOrchestrator.lockDescriptorFor(syntheticIntent);
 
       try {
         await this.portfolioService.lockBalance(
@@ -174,14 +193,33 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
           // gets a clear error and no intent is queued.
           throw error;
         }
-        // Transient DB / network error â€” log but allow the
-        // submit to proceed. The orchestrator's `checkBalance`
-        // and the settlement service will re-validate balances
-        // before any money moves. (See infra-gaps.md Gap 7
-        // for the trade-off discussion.)
-        console.error(
-          `[HiddenIntentService] Lock failed for ${context.correlationRef}:`,
-          error,
+        // Transient DB / network failure -- log through the
+        // structured logger (which redacts forbidden order
+        // fields) and allow the submit to proceed. The
+        // orchestrator's `checkBalance` and the settlement
+        // service will re-validate balances before any money
+        // moves. The error payload is the typed exception
+        // (no synthetic-intent closure), so it cannot carry
+        // plaintext trading parameters; we still route it
+        // through `redactForbiddenOrderFields` so any future
+        // regression is caught by the same scrubber.
+        logger.error(
+          {
+            event: "hidden_intent.lock_balance_failed",
+            correlationRef: context.correlationRef,
+            intentHandle: sealed.intentHandle,
+            institutionId: reservation.institutionId,
+            lockAssetCode: reservation.assetCode,
+            lockAmount: reservation.amount,
+            error: redactForbiddenOrderFields({
+              name: error instanceof Error ? error.name : "Error",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "non-Error thrown from portfolioService.lockBalance",
+            }),
+          },
+          "lock_balance failed; allowing submit to proceed for orchestrator re-validation",
         );
       }
 
@@ -209,68 +247,66 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
             agentDid: request.agentDid,
           });
         } catch (error) {
-          console.error(
-            `[HiddenIntentService] Failed to persist lock ref for ${sealed.intentHandle}:`,
-            error,
+          // The error payload comes from the Supabase RPC and
+          // is the typed exception (no synthetic-intent
+          // closure), so it cannot carry plaintext trading
+          // parameters. We still route it through the
+          // structured redacting logger so any future
+          // regressions are caught by the same scrubber.
+          logger.error(
+            {
+              event: "hidden_intent.lock_ref_persist_failed",
+              correlationRef: context.correlationRef,
+              intentHandle: sealed.intentHandle,
+              institutionId: reservation.institutionId,
+              lockAssetCode: reservation.assetCode,
+              lockAmount: reservation.amount,
+              error: redactForbiddenOrderFields({
+                name: error instanceof Error ? error.name : "Error",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "non-Error thrown from intentLockRepository.create",
+              }),
+            },
+            "lock ref persist failed; orphan-lock janitor will recover",
           );
         }
       }
     }
 
-    // Trigger matching against pending intents (fire-and-forget)
+    // Trigger matching against pending intents (fire-and-forget).
+    // When no orchestrator is configured (e.g. legacy harness or
+    // unit test), there is nothing to queue; the caller still
+    // gets a sealed intent handle.
     if (this.matchingOrchestrator) {
-      const pendingIntent: {
-        correlationRef: string;
-        institutionId: string;
-        agentDid: string;
-        intentHandle: string;
-        executionRef: string;
-        encryptedEnvelope: string;
-        authorityRef: string;
-        delegationCredential: unknown;
-        assetCode: string;
-        side: "buy" | "sell";
-        quantity: number;
-        price: number;
-        sealedAt: string;
-        instrumentScope?: string[];
-        directionScope?: string[];
-        maxNotional?: string;
-      } = {
-        correlationRef: context.correlationRef,
-        institutionId: request.institutionId,
-        agentDid: request.agentDid,
-        intentHandle: sealed.intentHandle,
-        executionRef: sealed.executionRef,
-        encryptedEnvelope: request.encryptedIntentEnvelope,
-        authorityRef: request.authorityRef,
-        delegationCredential: delegationCredential ?? null,
-        assetCode: request.settlementMetadata.assetCode,
-        side: request.settlementMetadata.side,
-        quantity: request.settlementMetadata.quantity,
-        price: request.settlementMetadata.price,
-        sealedAt: sealed.sealedAt,
-      };
-
-      if (instrumentScope) {
-        pendingIntent.instrumentScope = instrumentScope;
-      }
-      if (directionScope) {
-        pendingIntent.directionScope = directionScope;
-      }
-      if (maxNotional) {
-        pendingIntent.maxNotional = maxNotional;
-      }
-
-      this.matchingOrchestrator.onIntentSealed(
-        pendingIntent as Parameters<typeof this.matchingOrchestrator.onIntentSealed>[0],
-      ).catch((error: unknown) => {
-        // Matching/settlement failures are non-blocking â€” intent is already sealed
-        console.error(
-          `[MatchingOrchestrator] Match error for ${context.correlationRef}:`,
-          error,
-        );
-      });
+      this.matchingOrchestrator.onIntentSealed(pendingIntent).catch(
+        (error: unknown) => {
+          // Matching/settlement failures are non-blocking -- the
+          // intent is already sealed. The error here is the typed
+          // TEE / orchestrator error (no synthetic-intent
+          // closure), so it cannot carry plaintext trading
+          // parameters. Route through the structured redacting
+          // logger so any future regressions are caught.
+          logger.error(
+            {
+              event: "hidden_intent.match_error",
+              correlationRef: context.correlationRef,
+              intentHandle: sealed.intentHandle,
+              institutionId: request.institutionId,
+              agentId: request.agentDid,
+              error: redactForbiddenOrderFields({
+                name: error instanceof Error ? error.name : "Error",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "non-Error thrown from matchingOrchestrator.onIntentSealed",
+              }),
+            },
+            "matching orchestrator rejected the sealed intent",
+          );
+        },
+      );
     }
 
     return {
@@ -313,7 +349,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
 
   /**
    * Look up the Ghostbroker delegation VC persisted at admit time. Returns
-   * `null` if the agent record is missing or has no credential â€”
+   * `null` if the agent record is missing or has no credential --
    * the verifier will then reject as `unverified` / `malformed`.
    */
   private async loadDelegationCredential(
@@ -375,7 +411,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
         agentDid: request.agentDid,
         authorityRef: request.authorityRef,
         delegationCredential,
-        // Same requested action as submission â€” the proof is
+        // Same requested action as submission -- the proof is
         // for the same scope of capabilities.
         requestedAction: "intent.submit",
         revokedAuthorityRefs,
@@ -406,15 +442,31 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     // (via `releaseLockFor` inside `cancelIntent`); the ref
     // delete is the durable counterpart. If the delete fails
     // here, the janitor will pick it up after the TTL elapses
-    // and call `releaseBalance` again â€” the second call is a
+    // and call `releaseBalance` again -- the second call is a
     // no-op because the lock amount is already zero.
     if (this.intentLockRepository) {
       try {
         await this.intentLockRepository.delete(request.intentHandle);
       } catch (error) {
-        console.error(
-          `[HiddenIntentService] Failed to delete lock ref for ${request.intentHandle}:`,
-          error,
+        // The error payload is the typed exception from the
+        // Supabase RPC; the lock-ref row carries no plaintext
+        // trading parameters, so it cannot leak them. We still
+        // route through the structured redacting logger so any
+        // future regression is caught by the same scrubber.
+        logger.error(
+          {
+            event: "hidden_intent.lock_ref_delete_failed",
+            correlationRef: request.intentHandle,
+            intentHandle: request.intentHandle,
+            error: redactForbiddenOrderFields({
+              name: error instanceof Error ? error.name : "Error",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "non-Error thrown from intentLockRepository.delete",
+            }),
+          },
+          "lock ref delete failed; orphan-lock janitor will sweep after TTL",
         );
       }
     }

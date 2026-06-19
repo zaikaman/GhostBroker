@@ -27,17 +27,15 @@ const listIntentsQuerySchema = z.object({
 /**
  * Public-safe view of a pending intent. Strips fields that should
  * not be exposed through the API (encrypted envelope, authority
- * reference, authority limits) and returns only what an operator or
- * agent needs to monitor their queue.
+ * reference, authority limits, lock descriptor) and returns only
+ * what an operator needs to monitor their queue. The TEE is the
+ * sole authority on active order parameters; the orchestrator's
+ * in-memory queue carries opaque handles only.
  */
 interface PendingIntentView {
   intentHandle: string;
   correlationRef: string;
   agentDid: string;
-  assetCode: string;
-  side: "buy" | "sell";
-  quantity: number;
-  price: number;
   sealedAt: string;
 }
 
@@ -46,10 +44,6 @@ function toPendingIntentView(intent: PendingIntent): PendingIntentView {
     intentHandle: intent.intentHandle,
     correlationRef: intent.correlationRef,
     agentDid: intent.agentDid,
-    assetCode: intent.assetCode,
-    side: intent.side,
-    quantity: intent.quantity,
-    price: intent.price,
     sealedAt: intent.sealedAt,
   };
 }

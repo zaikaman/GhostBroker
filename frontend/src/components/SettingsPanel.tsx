@@ -15,6 +15,7 @@ import { EnclaveHealthMonitor } from './EnclaveHealthMonitor';
 import { PortfolioCard } from './PortfolioCard';
 import { SettlementProfileCard } from './SettlementProfileCard';
 import { Pagination } from './Pagination';
+import { Skeleton } from './Skeleton';
 
 // Custom SVG Gear Icon for Settings to guarantee compatibility
 const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSProperties }) => (
@@ -262,8 +263,26 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
             </div>
 
             {isAgentsLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)' }}>
-                <Loading03Icon size={24} style={{ animation: 'spin 1s linear infinite' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: '10px' }}>
+                  <Skeleton variant="text" width="15%" />
+                  <Skeleton variant="text" width="30%" />
+                  <Skeleton variant="text" width="15%" />
+                  <Skeleton variant="text" width="10%" />
+                  <Skeleton variant="text" width="15%" />
+                </div>
+                {[1, 2, 3].map((i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
+                    <Skeleton variant="text" width="15%" style={{ height: '14px' }} />
+                    <div style={{ width: '30%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <Skeleton variant="text" width="90%" style={{ height: '12px' }} />
+                      <Skeleton variant="text" width="60%" style={{ height: '10px' }} />
+                    </div>
+                    <Skeleton variant="text" width="15%" style={{ height: '14px' }} />
+                    <Skeleton variant="rect" width={60} height={18} style={{ borderRadius: '4px' }} />
+                    <Skeleton variant="rect" width={80} height={24} style={{ borderRadius: '4px' }} />
+                  </div>
+                ))}
               </div>
             ) : agentsError ? (
               <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-md)' }}>
@@ -388,8 +407,28 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
             )}
 
             {isInstLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--spacing-xl)', color: 'var(--color-text-muted)' }}>
-                <Loading03Icon size={24} style={{ animation: 'spin 1s linear infinite' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+                <div>
+                  <Skeleton variant="text" width={150} height={14} style={{ marginBottom: 'var(--spacing-sm)' }} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-md)' }}>
+                    {[1, 2].map((i) => (
+                      <div key={i} style={{ background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 'var(--spacing-md)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Skeleton variant="text" width="40%" height={14} style={{ marginBottom: 0 }} />
+                          <Skeleton variant="rect" width={50} height={16} style={{ borderRadius: '4px' }} />
+                        </div>
+                        <Skeleton variant="text" height={12} />
+                        <Skeleton variant="text" width="80%" height={12} />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                          <Skeleton variant="text" width="50%" height={10} style={{ marginBottom: 0 }} />
+                          <Skeleton variant="text" width="70%" height={10} style={{ marginBottom: 0 }} />
+                          <Skeleton variant="text" width="60%" height={10} style={{ marginBottom: 0 }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <Skeleton variant="rect" height={100} style={{ borderRadius: 'var(--radius-md)' }} />
               </div>
             ) : instError ? (
               <div className="status-badge error" style={{ justifyContent: 'center', padding: 'var(--spacing-md)' }}>

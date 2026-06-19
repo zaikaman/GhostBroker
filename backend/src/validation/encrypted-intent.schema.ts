@@ -5,17 +5,20 @@ import {
   type HiddenIntentRequest,
 } from "../models/hidden-intent.js";
 
-/** Subtrees exempt from forbidden-field scanning — platform metadata, not encrypted params */
-const exemptPaths = new Set<string>(["$.settlementMetadata"]);
-
+/**
+ * Walk the request body and reject any forbidden order field at any
+ * depth. There is no `$.settlementMetadata` exemption — the agent is
+ * required to seal `assetCode` / `side` / `quantity` / `price` into
+ * the `encryptedIntentEnvelope` and submit only the envelope plus an
+ * opaque handle. The orchestrator never sees plaintext trading
+ * parameters on the wire; the only authority on those values is the
+ * T3 enclave, which returns a TEE-attested lock descriptor on the
+ * seal path.
+ */
 function findForbiddenKeys(value: unknown): string[] {
   const findings: string[] = [];
 
   function visit(node: unknown, path: string): void {
-    if (exemptPaths.has(path)) {
-      return;
-    }
-
     if (Array.isArray(node)) {
       node.forEach((item, index) => visit(item, `${path}[${index}]`));
       return;

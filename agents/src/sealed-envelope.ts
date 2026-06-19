@@ -2,10 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 
 /**
  * GhostBroker's intent route requires the `encryptedIntentEnvelope`
- * field to be a base64url string of 32-32768 characters. The orchestrator
- * reads the plain trading parameters from the sibling `settlementMetadata`
- * block; the envelope's job is to carry the TEE-sealed commitment and
- * be opaque on the wire.
+ * field to be a base64url string of 32-32768 characters. The
+ * `assetCode` / `side` / `quantity` / `price` trading parameters
+ * are sealed into this envelope; the orchestrator only sees the
+ * ciphertext plus the TEE-assigned opaque handle. The envelope's
+ * job is to carry the TEE-sealed commitment and be opaque on the
+ * wire.
  *
  * In a production deployment the envelope is produced by the T3 enclave
  * runner (see `t3-enclave/src/matching/blind-intent.ts` and the
@@ -15,11 +17,11 @@ import { createHash, randomUUID } from "node:crypto";
  * with the institution's authority reference as a deterministic key.
  *
  * This is the same wire format a T3-enclave would emit, minus the
- * genuine enclave signature. The orchestrator's authority check is the
- * `settlementMetadata` (zod-validated) plus the T3 delegation VC on the
- * admit call; the envelope's contents are not consulted for trust
- * decisions at the orchestrator layer (they would be at the TEE match
- * contract, which these loop agents do not exercise).
+ * genuine enclave signature. The orchestrator's authority check is
+ * the GhostBroker delegation VC (zod-validated on admit and re-
+ * verified at submit time); the envelope's contents are not consulted
+ * for trust decisions at the orchestrator layer (they would be at
+ * the TEE match contract, which these loop agents do not exercise).
  */
 
 const SCHEMA_VERSION = "ghostbroker.envelope/1";

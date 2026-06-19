@@ -14,40 +14,38 @@ const portfoliosQuerySchema = z.object({
 /**
  * View of a single locked reservation, returned in the agent-level
  * portfolio payload. Mirrors the orchestrator's
- * `lockDescriptorFor` calculation: a buy intent locks
+ * `lockDescriptorFor`: a buy intent locks
  * `quantity * price` units of the settlement asset; a sell intent
- * locks `quantity` units of the traded asset.
+ * locks `quantity` units of the traded asset. The orchestrator's
+ * in-memory queue carries the TEE-attested lock descriptor (not
+ * plaintext `quantity` / `price`), so this view exposes only the
+ * derived reservation values -- never the underlying trading
+ * parameters. The TEE is the single source of truth on those.
  */
 interface PendingReservationView {
   intentHandle: string;
   assetCode: string;
   amount: number;
   side: "buy" | "sell";
-  quantity: number;
-  price: number;
 }
 
 function reservationFor(
-  intent: { intentHandle: string; assetCode: string; side: "buy" | "sell"; quantity: number; price: number },
-  settlementAssetCode: string,
-): PendingReservationView {
-  if (intent.side === "buy") {
-    return {
-      intentHandle: intent.intentHandle,
-      assetCode: settlementAssetCode,
-      amount: intent.quantity * intent.price,
-      side: intent.side,
-      quantity: intent.quantity,
-      price: intent.price,
+  intent: {
+    intentHandle: string;
+    opaqueLockDescriptor: {
+      assetCode: string;
+      side: "buy" | "sell";
+      amount: number;
     };
-  }
+  },
+  _settlementAssetCode: string,
+): PendingReservationView {
+  const descriptor = intent.opaqueLockDescriptor;
   return {
     intentHandle: intent.intentHandle,
-    assetCode: intent.assetCode,
-    amount: intent.quantity,
-    side: intent.side,
-    quantity: intent.quantity,
-    price: intent.price,
+    assetCode: descriptor.assetCode,
+    amount: descriptor.amount,
+    side: descriptor.side,
   };
 }
 

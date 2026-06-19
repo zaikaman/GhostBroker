@@ -6,16 +6,31 @@ export interface MatchEvaluationRequest {
   buyIntentHandle: string;
   sellIntentHandle: string;
   correlationRef: string;
-  /** Shared traded asset code (e.g. "WBTC"). Both sides must match. */
-  assetCode: string;
-  /** Buy bid price, as a decimal string for exact integer transport. */
-  buyPrice: string;
-  /** Buy quantity, as a decimal string for exact integer transport. */
-  buyQuantity: string;
-  /** Sell ask price, as a decimal string for exact integer transport. */
-  sellPrice: string;
-  /** Sell quantity, as a decimal string for exact integer transport. */
-  sellQuantity: string;
+  /**
+   * Sealed envelope for the buy-side intent. The T3 enclave
+   * holds the only decryption key and extracts `assetCode`,
+   * `side`, `quantity`, and `bidPrice` from it. Production
+   * `evaluate-match` v0.5.0+ consumes envelopes instead of
+   * plaintext trading parameters, so the orchestrator never
+   * holds plaintext outside the TEE.
+   */
+  buyEnvelope: string;
+  /**
+   * Sealed envelope for the sell-side intent.
+   */
+  sellEnvelope: string;
+  /**
+   * TEE-issued attestation reference for the buy-side lock
+   * descriptor. The enclave uses this to confirm the
+   * orchestrator is forwarding the lock claim the seal call
+   * actually produced for the buy intent handle.
+   */
+  buyLockAttestationRef: string;
+  /**
+   * TEE-issued attestation reference for the sell-side lock
+   * descriptor.
+   */
+  sellLockAttestationRef: string;
 }
 
 export interface OpaqueMatchOutcome {
@@ -42,6 +57,19 @@ export interface OpaqueMatchOutcome {
    * uses this for settlement and never recomputes it.
    */
   executionPrice: number;
+  /**
+   * TEE-attested per-side lock release amounts. The TEE is the
+   * sole authority on the original reservation (the seal call
+   * computed `quantity * bidPrice` for the buy side and
+   * `quantity` for the sell side); the matched portion of
+   * those reservations is `buyer_locked_amount` /
+   * `seller_locked_amount` here. The settlement service
+   * consumes these to release exactly the matched portion of
+   * each side's `portfolios.locked` row without the
+   * orchestrator needing to recompute the math.
+   */
+  buyerLockedAmount: number;
+  sellerLockedAmount: number;
 }
 
 export interface MatchContractClient {
@@ -79,17 +107,37 @@ interface T3MatchOutcomeResponse {
   status?: "matched" | "no_match";
   matched_quantity?: string;
   execution_price?: string;
+  buyer_locked_amount?: string;
+  seller_locked_amount?: string;
 }
 
 /**
- * First matching contract version with fractional-decimal wire
- * form. `0.4.0` accepts `"0.0001"` style quantities (and emits
- * `matched_quantity` / `execution_price` in the same
- * human-readable decimal form). `0.3.0` and earlier required
- * integer-only decimals and silently returned `no_match` on
- * any sub-unit fill.
+ * Wire shape version for the T3 `evaluate-match` contract. The
+ * T3N adapter (`readVersionFromBody`) reads this off the request
+ * body and routes execution to the matching published version:
+ *
+ *   - `0.4.0` — first fractional-decimal wire form (`"0.0001"`
+ *     quantities, `"70000"` prices). Required for sub-unit
+ *     fills; older `0.2.0` / `0.3.0` builds only accept integer
+ *     decimals and silently return `no_match` on anything
+ *     below 1. This version consumed plaintext `assetCode`,
+ *     `buyPrice`, `buyQuantity`, `sellPrice`, `sellQuantity` on
+ *     the wire.
+ *   - `0.5.0` — privacy boundary. Consumes sealed envelopes
+ *     (`buy_envelope`, `sell_envelope`) plus the TEE-attested
+ *     lock descriptor attestation references
+ *     (`buy_lock_attestation_ref`, `sell_lock_attestation_ref`)
+ *     and never requires plaintext price / quantity inputs
+ *     from the orchestrator. The TEE holds the only
+ *     decryption key for the envelopes and is the sole
+ *     authority on the per-side reservation math.
+ *
+ * `0.5.0` is the production default. The T3N testnet may still
+ * serve `0.4.0` for legacy tenants; the
+ * `T3_MATCHING_CONTRACT_VERSION` env var lets operators pin to
+ * a specific published version.
  */
-const DEFAULT_MATCHING_CONTRACT_VERSION = "0.4.0";
+const DEFAULT_MATCHING_CONTRACT_VERSION = "0.5.0";
 
 function requireOpaque(value: string | undefined, field: string): string {
   if (!value || value.trim().length === 0) {
@@ -176,14 +224,18 @@ export class T3MatchContractClient implements MatchContractClient {
         // snake_case keys. The public `MatchEvaluationRequest`
         // is camelCase to match the rest of the GhostBroker API
         // surface, so we translate at the network boundary.
+        // v0.5.0+ of the contract accepts sealed envelopes
+        // (the TEE holds the only decryption key) plus the
+        // TEE-attested lock descriptor attestation references;
+        // it no longer requires plaintext price / quantity
+        // inputs from the orchestrator.
         buy_intent_handle: request.buyIntentHandle,
         sell_intent_handle: request.sellIntentHandle,
         correlation_ref: request.correlationRef,
-        asset_code: request.assetCode,
-        buy_price: request.buyPrice,
-        buy_quantity: request.buyQuantity,
-        sell_price: request.sellPrice,
-        sell_quantity: request.sellQuantity,
+        buy_envelope: request.buyEnvelope,
+        sell_envelope: request.sellEnvelope,
+        buy_lock_attestation_ref: request.buyLockAttestationRef,
+        sell_lock_attestation_ref: request.sellLockAttestationRef,
       },
     });
 
@@ -203,6 +255,8 @@ export class T3MatchContractClient implements MatchContractClient {
     // authority back in the backend).
     let matchedQuantity = 0;
     let executionPrice = 0;
+    let buyerLockedAmount = 0;
+    let sellerLockedAmount = 0;
     if (status === "matched") {
       const q = parseFillNumber(response.body.matched_quantity);
       const p = parseFillNumber(response.body.execution_price);
@@ -216,8 +270,24 @@ export class T3MatchContractClient implements MatchContractClient {
           "T3 match response missing or non-positive execution_price on matched outcome.",
         );
       }
+      const buyerLockedRaw = parseFillNumber(response.body.buyer_locked_amount);
+      const sellerLockedRaw = parseFillNumber(
+        response.body.seller_locked_amount,
+      );
+      if (buyerLockedRaw === undefined || buyerLockedRaw <= 0) {
+        throw new Error(
+          "T3 match response missing or non-positive buyer_locked_amount on matched outcome.",
+        );
+      }
+      if (sellerLockedRaw === undefined || sellerLockedRaw <= 0) {
+        throw new Error(
+          "T3 match response missing or non-positive seller_locked_amount on matched outcome.",
+        );
+      }
       matchedQuantity = q;
       executionPrice = p;
+      buyerLockedAmount = buyerLockedRaw;
+      sellerLockedAmount = sellerLockedRaw;
     }
 
     return {
@@ -242,6 +312,8 @@ export class T3MatchContractClient implements MatchContractClient {
       status,
       matchedQuantity,
       executionPrice,
+      buyerLockedAmount,
+      sellerLockedAmount,
     };
   }
 }

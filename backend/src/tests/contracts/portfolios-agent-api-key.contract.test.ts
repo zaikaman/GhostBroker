@@ -80,10 +80,13 @@ const buyIntent: PendingIntent = {
   encryptedEnvelope: "t3env.ciphertext.buy.apikey",
   authorityRef: "authority:buy:apikey:1",
   delegationCredential: { id: "vc-buy-apikey", issuer: "did:t3n:apikey" },
-  assetCode: "WBTC",
-  side: "buy",
-  quantity: 1,
-  price: 50000,
+  opaqueLockDescriptor: {
+    tradedAssetCode: "WBTC",
+    assetCode: "USDC",
+    side: "buy",
+    amount: 50_000,
+    attestationRef: "t3attest:buy_apikey_1",
+  },
   sealedAt: "2026-06-14T00:00:00.000Z",
 };
 
@@ -168,13 +171,16 @@ describe("GET /api/portfolios/:institutionId?agentDid=... via API key (agent)", 
         { assetCode: "WBTC", balance: 5, locked: 0 },
       ],
       pendingReservations: [
+        // The TEE-attested lock descriptor is the orchestrator's
+        // sole authority on the per-intent reservation. The API
+        // key path returns the descriptor (asset code, side,
+        // amount) and the opaque handle, but never the raw
+        // trading parameters sealed into the envelope.
         {
           intentHandle: "intent_buy_apikey_1",
           assetCode: "USDC",
-          amount: 50000, // 1 * 50000
+          amount: 50_000,
           side: "buy",
-          quantity: 1,
-          price: 50000,
         },
       ],
     });

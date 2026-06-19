@@ -40,15 +40,21 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
 class StaticBlindIntentClient implements BlindIntentClient {
   public counter = 0;
   public async sealIntent(
-    request: BlindIntentRequest,
+    _request: BlindIntentRequest,
   ): Promise<BlindIntentResult> {
-    void request;
     this.counter++;
     return {
       intentHandle: `intent_opaque_${this.counter}`,
       state: "intent_sealed",
       executionRef: `t3exec_${this.counter}`,
       sealedAt: new Date().toISOString(),
+      lockDescriptor: {
+        tradedAssetCode: "WBTC",
+        assetCode: "USDC",
+        side: "buy",
+        amount: 4_500_000,
+        attestationRef: `t3attest:${this.counter}`,
+      },
     };
   }
 }
@@ -69,6 +75,8 @@ class NoOpMatchClient implements MatchContractClient {
       expiresAt: new Date(0).toISOString(),
       matchedQuantity: 0,
       executionPrice: 0,
+      buyerLockedAmount: 0,
+      sellerLockedAmount: 0,
     };
   }
 }

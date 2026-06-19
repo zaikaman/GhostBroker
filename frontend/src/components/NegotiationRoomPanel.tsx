@@ -10,6 +10,7 @@ import {
 } from 'hugeicons-react';
 import { apiClient, type NegotiationSession } from '../services/api-client';
 import { DisclosureTimeline } from './DisclosureTimeline';
+import { Skeleton } from './Skeleton';
 
 const STATUS_COLORS: Record<NegotiationSession['status'], string> = {
   pairing: '#d6a94c',
@@ -181,8 +182,27 @@ export function NegotiationRoomPanel(): React.JSX.Element {
 
   if (loading && sessions.length === 0) {
     return (
-      <div className="card" style={{ padding: '24px' }}>
-        <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>Loading negotiation sessions...</p>
+      <div aria-label="Loading negotiation sessions" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <Skeleton variant="title" width={180} height={18} style={{ marginBottom: 'var(--spacing-xs)' }} />
+        {[1, 2].map((i) => (
+          <div key={i} className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '40%' }}>
+                <Skeleton variant="rect" width={60} height={20} style={{ borderRadius: '4px' }} />
+                <Skeleton variant="text" width={80} height={14} style={{ marginBottom: 0 }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '40%', justifyContent: 'flex-end' }}>
+                <Skeleton variant="text" width={60} height={12} style={{ marginBottom: 0 }} />
+                <Skeleton variant="text" width={50} height={12} style={{ marginBottom: 0 }} />
+                <Skeleton variant="text" width={80} height={12} style={{ marginBottom: 0 }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Skeleton variant="rect" width={140} height={20} style={{ borderRadius: '4px' }} />
+              <Skeleton variant="rect" width={110} height={20} style={{ borderRadius: '4px' }} />
+            </div>
+          </div>
+        ))}
       </div>
     );
   }

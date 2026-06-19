@@ -30,6 +30,8 @@ class CapturingNetworkClient implements T3NetworkClient {
         status: "matched",
         matched_quantity: "4",
         execution_price: "50000",
+        buyer_locked_amount: "200000",
+        seller_locked_amount: "4",
       } as TBody,
     };
   }
@@ -39,11 +41,10 @@ const request: MatchEvaluationRequest = {
   buyIntentHandle: "intent_buy_opaque",
   sellIntentHandle: "intent_sell_opaque",
   correlationRef: "corr_us3",
-  assetCode: "WBTC",
-  buyPrice: "51000",
-  buyQuantity: "10",
-  sellPrice: "49000",
-  sellQuantity: "4",
+  buyEnvelope: "t3env.buyer.envelope.base64url.ciphertext",
+  sellEnvelope: "t3env.seller.envelope.base64url.ciphertext",
+  buyLockAttestationRef: "t3attest:buyer",
+  sellLockAttestationRef: "t3attest:seller",
 };
 
 describe("match contract client", () => {
@@ -63,18 +64,19 @@ describe("match contract client", () => {
     // contract's `EvaluateMatchInput` deserializer in
     // contracts/matching-policy/src/lib.rs, and carries the
     // explicit contract version so the T3N adapter routes to the
-    // v0.4.0 build (the first fractional-decimal wire form that
-    // accepts `"0.0001"` style quantities).
+    // v0.5.0 build (the privacy-boundary wire form that consumes
+    // sealed envelopes + TEE-attested lock descriptor
+    // attestation refs rather than plaintext price / quantity
+    // inputs).
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.4.0",
+      version: "0.5.0",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
-      asset_code: request.assetCode,
-      buy_price: request.buyPrice,
-      buy_quantity: request.buyQuantity,
-      sell_price: request.sellPrice,
-      sell_quantity: request.sellQuantity,
+      buy_envelope: request.buyEnvelope,
+      sell_envelope: request.sellEnvelope,
+      buy_lock_attestation_ref: request.buyLockAttestationRef,
+      sell_lock_attestation_ref: request.sellLockAttestationRef,
     });
   });
 
@@ -101,6 +103,8 @@ describe("match contract client", () => {
             status: "matched",
             matched_quantity: "4",
             execution_price: "50000",
+            buyer_locked_amount: "200000",
+            seller_locked_amount: "4",
           } as TBody,
         };
       }
@@ -138,6 +142,8 @@ describe("match contract client", () => {
             status: "matched",
             matched_quantity: "4",
             execution_price: "50000",
+            buyer_locked_amount: "200000",
+            seller_locked_amount: "4",
           } as TBody,
         };
       }
@@ -166,7 +172,10 @@ describe("match contract client", () => {
             encrypted_trade_fields_ref: "fields_no_qty",
             expires_at: "2026-06-13T00:00:00.000Z",
             status: "matched",
+            matched_price: "50000",
             execution_price: "50000",
+            buyer_locked_amount: "200000",
+            seller_locked_amount: "4",
           } as TBody,
         };
       }
@@ -194,6 +203,8 @@ describe("match contract client", () => {
             status: "matched",
             matched_quantity: "4",
             execution_price: "0",
+            buyer_locked_amount: "200000",
+            seller_locked_amount: "4",
           } as TBody,
         };
       }
@@ -221,6 +232,8 @@ describe("match contract client", () => {
             status: "no_match",
             matched_quantity: "",
             execution_price: "",
+            buyer_locked_amount: "",
+            seller_locked_amount: "",
           } as TBody,
         };
       }
@@ -241,13 +254,13 @@ describe("match contract client", () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3MatchContractClient({
       networkClient,
-      contractVersion: "0.4.5",
+      contractVersion: "0.5.1",
     });
 
     await client.evaluateMatch(request);
 
     const body = networkClient.requests[0]?.body as Record<string, unknown>;
-    expect(body.version).toBe("0.4.5");
+    expect(body.version).toBe("0.5.1");
   });
 
   it("decodes fractional-decimal fill fields from the v0.4.0 wire form", async () => {
@@ -273,6 +286,8 @@ describe("match contract client", () => {
             status: "matched",
             matched_quantity: "0.0001",
             execution_price: "50000",
+            buyer_locked_amount: "0.005",
+            seller_locked_amount: "0.0001",
           } as TBody,
         };
       }
@@ -307,6 +322,8 @@ describe("match contract client", () => {
             status: "matched",
             matched_quantity: "1e-4",
             execution_price: "50000",
+            buyer_locked_amount: "0.05",
+            seller_locked_amount: "0.0001",
           } as TBody,
         };
       }

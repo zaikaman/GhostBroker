@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { ArrowRight, Menu, X } from 'lucide-react';
+import { LockIcon } from 'hugeicons-react';
 import '../styles/landing-v2.css';
 
 interface LandingPageProps {
@@ -11,6 +12,7 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
+  // HLS Video streaming setup
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -76,46 +78,36 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
       <div className="overlay-left-to-right" />
       <div className="overlay-bottom-up" />
 
-      {/* 4. Central Glow SVG */}
-      <svg
-        className="central-glow-svg"
-        viewBox="0 0 1000 400"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <defs>
-          <filter id="glowBlur" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="25" />
-          </filter>
-        </defs>
-        <ellipse
-          cx="500"
-          cy="100"
-          rx="350"
-          ry="80"
-          fill="url(#glowGradient)"
-          filter="url(#glowBlur)"
-          opacity="0.35"
-        />
-        <linearGradient id="glowGradient" x1="150" y1="100" x2="850" y2="100" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#00f2fe" />
-          <stop offset="50%" stopColor="#5ed29c" />
-          <stop offset="100%" stopColor="#0575e6" />
-        </linearGradient>
-      </svg>
+      {/* 3. Outer HUD Framework */}
+      <div className="hud-console-frame" aria-hidden="true">
+        <div className="console-corner console-corner-tl" />
+        <div className="console-corner console-corner-tr" />
+        <div className="console-corner console-corner-bl" />
+        <div className="console-corner console-corner-br" />
+      </div>
 
-      {/* 5. Global Navigation Header */}
+      {/* 4. Global Navigation Header */}
       <header className="header-v2">
         <div className="logo-v2" onClick={() => handleNavClick('hero-top')}>
-          <span style={{ fontSize: '1.25rem', letterSpacing: '0.05em', opacity: 0.9 }}>GhostBroker</span>
+          <span>GhostBroker</span>
+          <span className="logo-dot" />
         </div>
+
+        {/* Center Live Badge */}
+        {/* <div className="hud-status-bar-center">
+          <div className="status-badge-item">
+            <span className="pulse-dot green" />
+            <span className="status-label-text">TEE STATE: ACTIVE</span>
+          </div>
+          <div className="status-badge-separator" />
+          <div className="status-badge-item">
+            <span className="pulse-dot green" />
+            <span className="status-label-text">NETWORK: T3 TESTNET</span>
+          </div>
+        </div> */}
 
         {/* Desktop Menu */}
         <nav className="nav-menu-desktop" aria-label="Desktop Navigation">
-          <button type="button" onClick={() => handleNavClick('hero-top')} className="nav-link-v2">
-            Protocol
-          </button>
           <a
             href="https://docs.terminal3.io"
             target="_blank"
@@ -124,9 +116,6 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
           >
             TEE Sandbox
           </a>
-          <button type="button" onClick={() => handleNavClick('hero-top')} className="nav-link-v2">
-            Security
-          </button>
           <button type="button" className="btn-nav-primary" onClick={onLaunch}>
             Enter Observatory
           </button>
@@ -146,9 +135,6 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
 
       {/* Mobile Menu Overlay */}
       <div className={`mobile-menu-overlay ${isMobileMenuOpen ? 'active' : ''}`} aria-hidden={!isMobileMenuOpen}>
-        <button type="button" onClick={() => handleNavClick('hero-top')} className="mobile-nav-link">
-          Protocol
-        </button>
         <a
           href="https://docs.terminal3.io"
           target="_blank"
@@ -158,9 +144,6 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
         >
           TEE Sandbox
         </a>
-        <button type="button" onClick={() => handleNavClick('hero-top')} className="mobile-nav-link">
-          Security
-        </button>
         <button
           type="button"
           className="btn-nav-primary"
@@ -174,33 +157,27 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
         </button>
       </div>
 
-      {/* 6. Main Hero Grid */}
+      {/* 5. Main Hero Section */}
       <main className="hero-v2-section" id="hero-top">
         <div className="hero-v2-grid">
-          {/* Left Side: Headline and copy */}
           <div className="hero-v2-content-wrapper">
-            {/* The Liquid Glass Card */}
-            <div className="liquid-glass-card-wrapper">
-              <div className="liquid-glass-card">
-                <div className="liquid-glass-tag">[ GB-TEE ]</div>
-                <h3 className="liquid-glass-headline">
-                  TEE-Enforced <em>Agent</em> Execution
-                </h3>
-                <p className="liquid-glass-description">
-                  Programmatic matching shielded from human eyes inside attested Intel SGX enclaves.
-                </p>
-              </div>
+            <div className="system-tag-badge">
+              <LockIcon size={12} className="tag-icon" />
+              <span>ZERO-HUMAN VISIBILITY ATTESTED</span>
             </div>
 
-            <span className="hero-v2-eyebrow">Zero-Knowledge Block Trading</span>
             <h1 className="hero-v2-headline">
-              Autonomous Liquidity.<br />
-              Sealed in Silicon<span className="hero-v2-headline-dot">.</span>
+              Autonomous<br />
+              Liquidity.<br />
+              <span className="italic-display">Sealed in Silicon</span>
+              <span className="headline-dot">.</span>
             </h1>
+
             <p className="hero-v2-description">
               Deploy autonomous verified agents to execute large block trades securely inside hardware enclaves, 
-              completely hidden from the public and human operators to prevent market slippage.
+              completely hidden from public orderbooks and human operators to eliminate front-running and slippage.
             </p>
+
             <div className="hero-v2-cta-container">
               <button type="button" className="btn-v2-primary" onClick={onLaunch}>
                 Enter Observatory Console <ArrowRight size={18} />
@@ -214,11 +191,9 @@ export function LandingPage({ onLaunch }: LandingPageProps): React.JSX.Element {
               </button>
             </div>
           </div>
-
-          {/* Right Side: Empty to allow background video to be fully visible on right as in Image 3 */}
-          <div className="hero-v2-visual-panel" aria-hidden="true" />
         </div>
       </main>
     </div>
   );
 }
+

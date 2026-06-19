@@ -48,7 +48,7 @@ describe("POST /api/agents/intents privacy contract", () => {
   });
 
   it.each(["asset", "side", "quantity", "price"] as const)(
-    "rejects plaintext %s fields",
+    "rejects plaintext %s fields at the root",
     async (field) => {
       const app = createApp(buildBackendTestEnv(), services);
 
@@ -58,6 +58,38 @@ describe("POST /api/agents/intents privacy contract", () => {
         .send({
           ...buildHiddenIntentRequest(),
           [field]: "SHOULD_NOT_BE_ACCEPTED",
+        })
+        .expect(400);
+
+      expect(response.body).toEqual({
+        code: "validation_failed",
+        message: "The request could not be accepted.",
+      });
+    },
+  );
+
+  it.each(["assetCode", "side", "quantity", "price"] as const)(
+    "rejects plaintext %s fields nested under any object (no $.settlementMetadata exemption)",
+    async (field) => {
+      const app = createApp(buildBackendTestEnv(), services);
+
+      // The previous version of the schema exempted
+      // `$.settlementMetadata` from the forbidden-fields scan so
+      // the agent could pass plaintext asset / side / quantity /
+      // price as a sibling of the envelope. The privacy boundary
+      // requires the orchestrator to never see plaintext trading
+      // parameters; the exemption has been removed. Any attempt
+      // to nest forbidden order fields under any object -- even
+      // one that looks like the old settlement metadata block --
+      // is rejected with 400.
+      const response = await request(app)
+        .post("/api/agents/intents")
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          ...buildHiddenIntentRequest(),
+          settlementMetadata: {
+            [field]: "SHOULD_NOT_BE_ACCEPTED",
+          },
         })
         .expect(400);
 

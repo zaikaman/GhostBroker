@@ -58,6 +58,8 @@ export function buildSettlementExecutionRequest(
       status: "matched",
       matchedQuantity: 100,
       executionPrice: 45000,
+      buyerLockedAmount: 4_500_000,
+      sellerLockedAmount: 100,
     },
     buyerAgentDid: "did:t3n:agent:buyer-us3",
     sellerAgentDid: "did:t3n:agent:seller-us3",

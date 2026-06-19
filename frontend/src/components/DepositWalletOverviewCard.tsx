@@ -11,6 +11,7 @@ import {
   Shield01Icon,
   Wallet01Icon,
 } from "hugeicons-react";
+import { Skeleton } from "./Skeleton";
 
 interface DepositWalletOverviewCardProps {
   institutionId: string;
@@ -75,32 +76,43 @@ export function DepositWalletOverviewCard({
 
   if (isLoading) {
     return (
-      <div
-        className="card"
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          padding: "var(--spacing-2xl)",
-        }}
-      >
-        <Loading03Icon
-          size={16}
-          style={{
-            color: "var(--color-accent)",
-            animation: "spin 1s linear infinite",
-            marginRight: "8px",
-          }}
-        />
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.8rem",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          Loading deposit wallet...
-        </span>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+        {/* Header Skeleton */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--spacing-md)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '60%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Skeleton variant="circle" width={18} height={18} />
+              <Skeleton variant="title" width="70%" style={{ margin: 0 }} />
+            </div>
+            <Skeleton variant="text" width="90%" height={10} style={{ marginBottom: 0 }} />
+          </div>
+          <Skeleton variant="rect" width={80} height={24} style={{ borderRadius: '4px' }} />
+        </div>
+
+        {/* Deposit Address Block Skeleton */}
+        <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', padding: 'var(--spacing-sm) 0 var(--spacing-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ width: '80%' }}>
+            <Skeleton variant="text" width={100} height={10} style={{ marginBottom: '4px' }} />
+            <Skeleton variant="rect" height={20} style={{ borderRadius: '4px' }} />
+          </div>
+          <Skeleton variant="circle" width={16} height={16} />
+        </div>
+
+        {/* Metrics Grid Skeleton */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 'var(--spacing-md)' }}>
+          {[1, 2, 3].map((i) => (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <Skeleton variant="text" width={50} height={10} style={{ marginBottom: 0 }} />
+              <Skeleton variant="rect" height={24} style={{ borderRadius: '4px' }} />
+            </div>
+          ))}
+        </div>
+
+        {/* Footer Skeleton */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--spacing-md)', paddingTop: 'var(--spacing-md)', borderTop: '1px solid rgba(255, 255, 255, 0.05)', flexWrap: 'wrap', gap: 'var(--spacing-md)' }}>
+          <Skeleton variant="rect" width={130} height={22} style={{ borderRadius: '4px' }} />
+          <Skeleton variant="text" width={220} height={12} style={{ marginBottom: 0 }} />
+        </div>
       </div>
     );
   }

@@ -19,6 +19,8 @@ const outcome: OpaqueMatchOutcome = {
   status: "matched",
   matchedQuantity: 4,
   executionPrice: 50000,
+  buyerLockedAmount: 200000,
+  sellerLockedAmount: 4,
 };
 
 const buyerVc = { id: "buyer-vc", issuer: "did:t3n:buyer" };

@@ -10,6 +10,33 @@ export const us2AuthorityRef = "authority:us2:intent-submit";
 export const us2EncryptedEnvelope =
   "t3env.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.ciphertext";
 
+/**
+ * Build a default valid envelope for tests. The envelope is a
+ * base64url-encoded JSON blob tagged with the canonical
+ * `ghostbroker.envelope/1` schema version. The TEE re-decodes
+ * this envelope in the in-process fallback path to derive the
+ * lock descriptor; the orchestrator itself never decodes it.
+ */
+function buildSealedEnvelopePayload(
+  assetCode: string,
+  side: "buy" | "sell",
+  quantity: number,
+  price: number,
+): string {
+  const json = JSON.stringify({
+    v: "ghostbroker.envelope/1",
+    institutionId: us2InstitutionId,
+    agentDid: us2AgentDid,
+    authorityRef: us2AuthorityRef,
+    assetCode,
+    side,
+    quantity,
+    price,
+    nonce: "nonce-test",
+  });
+  return Buffer.from(json, "utf8").toString("base64url");
+}
+
 export function buildBackendTestEnv(
   overrides: Partial<BackendEnv> = {},
 ): BackendEnv {
@@ -25,7 +52,7 @@ export function buildBackendTestEnv(
     T3_NETWORK_URL: "",
     T3_TENANT_DID: "did:t3n:institution:us2",
     T3_MATCH_CONTRACT_ID: "match-contract-us2",
-    T3_MATCHING_CONTRACT_VERSION: "0.4.0",
+    T3_MATCHING_CONTRACT_VERSION: "0.5.0",
     RECEIPT_KEY_VERSION: "receipt-key-v1",
     SETTLEMENT_ASSET_CODE: "USDC",
     AUTH_SESSION_SECRET:
@@ -42,12 +69,6 @@ export function buildHiddenIntentRequest(
     agentDid: us2AgentDid,
     encryptedIntentEnvelope: us2EncryptedEnvelope,
     authorityRef: us2AuthorityRef,
-    settlementMetadata: {
-      assetCode: "WBTC",
-      side: "buy",
-      quantity: 100,
-      price: 45000,
-    },
     ...overrides,
   };
 }
@@ -65,12 +86,12 @@ export function buildHiddenIntentRequestForSide(
       side === "buy"
         ? "did:t3n:agent:buyer-us2"
         : "did:t3n:agent:seller-us2",
-    settlementMetadata: {
-      assetCode: "WBTC",
+    encryptedIntentEnvelope: buildSealedEnvelopePayload(
+      "WBTC",
       side,
-      quantity: 100,
-      price: side === "buy" ? 47000 : 43000,
-    },
+      100,
+      side === "buy" ? 47000 : 43000,
+    ),
     ...overrides,
   });
 }

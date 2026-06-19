@@ -502,6 +502,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     tokenBalanceClient,
     tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
     minimumTokenBalance: 1n,
+    settlementAssetCode: env.SETTLEMENT_ASSET_CODE,
   });
 
   const matchContractClient = new T3MatchContractClient({

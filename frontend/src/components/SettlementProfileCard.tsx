@@ -26,6 +26,8 @@ import {
   Shield01Icon,
   Wallet01Icon,
 } from "hugeicons-react";
+import { Skeleton } from "./Skeleton";
+
 
 /**
  * WS6: settlement profile card.
@@ -155,8 +157,41 @@ export function SettlementProfileCard({
 
   if (loading) {
     return (
-      <div className="settlement-profile-card settlement-profile-card--loading">
-        <Loading03Icon size={14} /> Loading settlement profile...
+      <div className="card settlement-profile-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+        {/* Header Skeleton */}
+        <div style={{ display: 'flex', alignItems: 'center', justifySpace: 'between', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--spacing-sm)', marginBottom: 'var(--spacing-xs)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '60%' }}>
+            <Skeleton variant="circle" width={18} height={18} />
+            <Skeleton variant="title" width="60%" style={{ margin: 0 }} />
+          </div>
+          <Skeleton variant="rect" width={100} height={20} style={{ borderRadius: '4px' }} />
+        </div>
+
+        {/* Deposit Address Block Skeleton */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <Skeleton variant="text" width={140} height={12} style={{ marginBottom: 0 }} />
+          <Skeleton variant="rect" height={36} style={{ borderRadius: 'var(--radius-md)' }} />
+        </div>
+
+        {/* Balances Grid Skeleton */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <Skeleton variant="text" width={120} height={12} style={{ marginBottom: 0 }} />
+            <Skeleton variant="rect" width={90} height={16} style={{ borderRadius: '4px' }} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--spacing-sm)' }}>
+            <Skeleton variant="rect" height={52} style={{ borderRadius: '8px' }} />
+            <Skeleton variant="rect" height={52} style={{ borderRadius: '8px' }} />
+            <Skeleton variant="rect" height={52} style={{ borderRadius: '8px' }} />
+          </div>
+        </div>
+
+        {/* Action Buttons Skeleton */}
+        <div style={{ display: 'flex', gap: 'var(--spacing-sm)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)', marginTop: 'var(--spacing-xs)' }}>
+          <Skeleton variant="rect" height={34} style={{ borderRadius: '9999px', flex: 1 }} />
+          <Skeleton variant="rect" height={34} style={{ borderRadius: '9999px', flex: 1 }} />
+          <Skeleton variant="rect" height={34} style={{ borderRadius: '9999px', flex: 1 }} />
+        </div>
       </div>
     );
   }

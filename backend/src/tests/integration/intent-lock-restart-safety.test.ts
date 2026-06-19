@@ -75,6 +75,13 @@ class StaticBlindIntentClient implements BlindIntentClient {
       state: "intent_sealed",
       executionRef: `t3exec_restart_${this.counter}`,
       sealedAt: new Date().toISOString(),
+      lockDescriptor: {
+        tradedAssetCode: "WBTC",
+        assetCode: "USDC",
+        side: "buy",
+        amount: 4_500_000,
+        attestationRef: `t3attest:restart_${this.counter}`,
+      },
     };
   }
 }
@@ -95,6 +102,8 @@ class NoOpMatchClient implements MatchContractClient {
       expiresAt: new Date(0).toISOString(),
       matchedQuantity: 0,
       executionPrice: 0,
+      buyerLockedAmount: 0,
+      sellerLockedAmount: 0,
     };
   }
 }

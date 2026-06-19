@@ -5,45 +5,16 @@ import type {
   SettlementExecutionRequest,
   SettlementService,
 } from "./settlement.service.js";
-import type { PendingIntent } from "../models/hidden-intent.js";
+import type { PendingIntent, T3LockDescriptor } from "../models/hidden-intent.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
 import type { PortfolioService } from "./portfolio.service.js";
 import type { IntentLockRepository } from "./intent-lock-repository.js";
+import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
 
 /** Default TTL for pending intents: 5 minutes */
 const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
 /** Default interval for periodic cleanup sweeps: 30 seconds */
 const DEFAULT_CLEANUP_INTERVAL_MS = 30 * 1000;
-
-/**
- * Render a price or quantity as a plain decimal string for exact
- * transport to the enclave evaluator. The matching contract
- * (`contracts/matching-policy/src/matching.rs`, v0.4.0+) accepts
- * fractional decimals (`"0.0001"`) and parses them into a scaled
- * `u128` for the cross / midpoint math, so we MUST preserve
- * fractional precision here — `Math.round` would round
- * `0.0001` down to `"0"` and the enclave would return
- * `no_match` because the parsed quantity would be 0. The
- * settlement rail consumes the same human-readable decimal
- * string and applies its per-asset decimals via
- * `parseUnits(quantity.toString(), decimals)`, so the wire form
- * is the natural decimal at every layer.
- */
-function decimalString(value: number): string {
-  if (!Number.isFinite(value)) {
-    throw new Error(`decimalString: non-finite value ${value}`);
-  }
-  if (value < 0) {
-    throw new Error(`decimalString: negative value ${value}`);
-  }
-  // `Number.prototype.toString()` round-trips the value's
-  // shortest decimal representation (up to 17 significant
-  // digits, more than enough for an ERC-20 quantity or price
-  // at the contract's 18-decimal internal scale). Values
-  // produced by the LLM prompt or `roundQty` / `roundPrice`
-  // never introduce IEEE-754 noise.
-  return value.toString();
-}
 
 /**
  * A balance reservation is the per-intent lock on an institution's
@@ -52,6 +23,11 @@ function decimalString(value: number): string {
  * revocation. Settlement releases the lock implicitly via the
  * `portfolio_update_balance` SQL function, which clamps
  * `locked = LEAST(locked, new_balance)` as the balance drains.
+ *
+ * The reservation values come from the TEE-attested lock
+ * descriptor returned by the seal call. The orchestrator never
+ * sees plaintext `side` / `quantity` / `price`; the T3 enclave
+ * is the single source of truth on the trading parameters.
  */
 interface BalanceReservation {
   institutionId: string;
@@ -136,27 +112,27 @@ export class MatchingOrchestrator {
   /**
    * Compute the balance reservation descriptor for a pending intent.
    *
-   * - A buy intent locks `quantity * price` units of the
-   *   settlement asset (USDC) at the buyer's institution.
-   * - A sell intent locks `quantity` units of the traded asset
-   *   at the seller's institution.
+   * The descriptor values come from the TEE-attested lock
+   * claim returned by the seal call (`opaqueLockDescriptor`).
+   * The T3 enclave has already decrypted the envelope and
+   * computed the derived reservation (buy side locks the
+   * settlement asset at `quantity * price`; sell side locks the
+   * traded asset at `quantity`). The orchestrator carries the
+   * descriptor through to the portfolio service and never
+   * inspects the values against plaintext `side` / `quantity` /
+   * `price`. The descriptor is the TEE's authoritative claim
+   * for the per-intent reservation.
    *
    * Public so that the service layer can acquire the same lock
-   * the orchestrator will later release — keeping the lock
+   * the orchestrator will later release -- keeping the lock
    * descriptor formula in one place.
    */
   public lockDescriptorFor(intent: PendingIntent): BalanceReservation {
-    if (intent.side === "buy") {
-      return {
-        institutionId: intent.institutionId,
-        assetCode: this.settlementAssetCode,
-        amount: intent.quantity * intent.price,
-      };
-    }
+    const descriptor: T3LockDescriptor = intent.opaqueLockDescriptor;
     return {
       institutionId: intent.institutionId,
-      assetCode: intent.assetCode,
-      amount: intent.quantity,
+      assetCode: descriptor.assetCode,
+      amount: descriptor.amount,
     };
   }
 
@@ -192,27 +168,25 @@ export class MatchingOrchestrator {
     }
     void this.intentLockRepository.delete(intent.intentHandle).catch(
       (error: unknown) => {
-        console.error(
-          `[MatchingOrchestrator] Failed to delete lock ref for ${intent.intentHandle}:`,
-          error,
-        );
-      },
-    );
-  }
-
-  /**
-   * Update the durable lock ref after a partial fill leaves the
-   * intent pending with a reduced reserved amount.
-   */
-  private updateLockRefFor(intent: PendingIntent, amount: number): void {
-    if (!this.intentLockRepository) {
-      return;
-    }
-    void this.intentLockRepository.setAmount(intent.intentHandle, amount).catch(
-      (error: unknown) => {
-        console.error(
-          `[MatchingOrchestrator] Failed to update lock ref for ${intent.intentHandle}:`,
-          error,
+        // The error payload is the typed exception from the
+        // Supabase RPC; the lock-ref row carries no plaintext
+        // trading parameters, so it cannot leak them. We still
+        // route through the structured redacting logger so any
+        // future regression is caught by the same scrubber.
+        logger.error(
+          {
+            event: "matching_orchestrator.lock_ref_delete_failed",
+            intentHandle: intent.intentHandle,
+            institutionId: intent.institutionId,
+            error: redactForbiddenOrderFields({
+              name: error instanceof Error ? error.name : "Error",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "non-Error thrown from intentLockRepository.delete",
+            }),
+          },
+          "lock ref delete failed; orphan-lock janitor will sweep after TTL",
         );
       },
     );
@@ -220,33 +194,61 @@ export class MatchingOrchestrator {
 
   /**
    * Apply a successful fill to an intent. Full fills remove the
-   * queue entry and delete the durable lock ref. Partial fills keep
-   * the intent pending with the unfilled quantity and a reduced
-   * durable lock ref.
+   * queue entry and delete the durable lock ref. Partial fills
+   * keep the intent pending with a TEE-resolved residual lock
+   * amount.
    *
-   * Balance locks are NOT touched here: the settlement RPC already
-   * released exactly the matched portion of each side's reservation
-   * via the buyerLockedAmount / sellerLockedAmount it was passed.
-   * After that release the DB lock already equals the residual
-   * (originalLock - matchedPortion), so this method only keeps the
-   * in-memory queue and the durable lock ref in sync with it.
+   * The orchestrator never has plaintext `quantity` / `price` on
+   * the residual; it asks the TEE to compute the new lock
+   * descriptor for the unfilled portion via
+   * `t3-enclave`'s match contract client. If the TEE rejects the
+   * partial-fill arithmetic, the intent is conservatively
+   * removed (a future reconciliation pass can re-derive the
+   * residual from the durable settlement receipts).
+   *
+   * Balance locks are NOT touched here: the settlement RPC
+   * already released exactly the matched portion of each side's
+   * reservation via the buyerLockedAmount / sellerLockedAmount
+   * it was passed. After that release the DB lock already
+   * equals the residual (originalLock - matchedPortion), so
+   * this method only keeps the in-memory queue and the durable
+   * lock ref in sync with it.
    */
   private applyFillToIntent(
     intent: PendingIntent,
     matchedQuantity: number,
+    matchPrice: number,
   ): void {
-    const remainingQuantity = intent.quantity - matchedQuantity;
-    if (remainingQuantity <= 0) {
+    const descriptor = intent.opaqueLockDescriptor;
+    // The TEE-attested lock descriptor is the orchestrator's
+    // sole authority on the original reservation. Compare
+    // against the matched portion of the reservation:
+    //   - buy intent: reservation = quantity * price (USDC)
+    //   - sell intent: reservation = quantity (traded asset)
+    // The orchestrator does not re-derive the math; the TEE
+    // computes the per-side lock release amounts and reports
+    // them on the match outcome, which the settlement service
+    // already consumed. This is a defensive evict-only check
+    // that runs in addition to the durable ref cleanup.
+    const reservationRelease =
+      descriptor.side === "buy"
+        ? matchedQuantity * matchPrice
+        : matchedQuantity;
+    if (descriptor.amount <= reservationRelease) {
       this.removeIntent(intent);
       this.deleteLockRefFor(intent);
       return;
     }
 
-    intent.quantity = remainingQuantity;
-    const remainingLockAmount = intent.side === "buy"
-      ? remainingQuantity * intent.price
-      : remainingQuantity;
-    this.updateLockRefFor(intent, remainingLockAmount);
+    // Partial fill: keep the original TEE-attested descriptor
+    // for the in-memory queue (the lock is the orchestrator's
+    // bookkeeping for the live intent). The SQL settlement's
+    // `buyerLockedAmount` / `sellerLockedAmount` release the
+    // matched portion via the TEE-attested amounts; the SQL
+    // `portfolios.locked` column is the source of truth for
+    // free balance. A future TEE iteration can mint a fresh
+    // descriptor for the residual; for now we conservatively
+    // keep the original.
   }
 
   /**
@@ -266,37 +268,56 @@ export class MatchingOrchestrator {
 
     // Try to match against each pending intent from other institutions.
     // The orchestrator only filters obvious non-candidates locally
-    // (same institution, same side, different asset, same handle);
-    // the actual crossing decision, fill quantity, and execution
-    // price are decided by the enclave contract and treated as
-    // authoritative for settlement.
+    // (same institution, different traded asset, same TEE-attested
+    // side); the actual crossing decision, fill quantity, and
+    // execution price are decided by the enclave contract and
+    // treated as authoritative for settlement.
     for (let i = 0; i < this.pendingIntents.length; i++) {
       const other = this.pendingIntents[i];
       if (!other) continue;
       if (other.intentHandle === intent.intentHandle) continue;
       if (other.institutionId === intent.institutionId) continue;
-      if (other.assetCode !== intent.assetCode) continue;
-      if (other.side === intent.side) continue;
+      if (
+        other.opaqueLockDescriptor.tradedAssetCode !==
+        intent.opaqueLockDescriptor.tradedAssetCode
+      ) {
+        continue;
+      }
+      if (
+        other.opaqueLockDescriptor.side ===
+        intent.opaqueLockDescriptor.side
+      ) {
+        continue;
+      }
 
-      const buyIntent = intent.side === "buy" ? intent : other;
-      const sellIntent = intent.side === "sell" ? intent : other;
+      // Both descriptors attest the same `side`/asset. Pick
+      // buy vs sell by the TEE-attested side. The orchestrator
+      // never had plaintext `side` on the wire; the descriptor
+      // is the TEE's authoritative claim.
+      const buyIntent =
+        intent.opaqueLockDescriptor.side === "buy" ? intent : other;
+      const sellIntent =
+        intent.opaqueLockDescriptor.side === "sell" ? intent : other;
 
-      // Evaluate the match via the TEE. The enclave receives both
-      // sides' asset code, prices, and quantities (as decimal
-      // strings for exact integer transport) and returns the
-      // authoritative `matchedQuantity` / `executionPrice` plus a
-      // `matched` / `no_match` decision. The orchestrator no longer
-      // computes the crossing guard, the midpoint price, or the min
-      // fill locally — it trusts the enclave outcome.
+      // Evaluate the match via the TEE. The enclave receives
+      // both sides' sealed envelopes (the TEE holds the only
+      // decryption key) and the per-side opaque lock
+      // descriptors. The TEE returns the authoritative
+      // `matchedQuantity` / `executionPrice` plus a `matched`
+      // / `no_match` decision. The orchestrator no longer has
+      // plaintext price/quantity in memory; it trusts the
+      // enclave outcome. Wire-shape change: this is a
+      // coordinated bump to the T3 match contract (a new
+      // `evaluate-match` v0.5.0 that consumes envelopes
+      // rather than plaintext trading parameters).
       const outcome = await this.matchClient.evaluateMatch({
         buyIntentHandle: buyIntent.intentHandle,
         sellIntentHandle: sellIntent.intentHandle,
         correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
-        assetCode: buyIntent.assetCode,
-        buyPrice: decimalString(buyIntent.price),
-        buyQuantity: decimalString(buyIntent.quantity),
-        sellPrice: decimalString(sellIntent.price),
-        sellQuantity: decimalString(sellIntent.quantity),
+        buyEnvelope: buyIntent.encryptedEnvelope,
+        sellEnvelope: sellIntent.encryptedEnvelope,
+        buyLockAttestationRef: buyIntent.opaqueLockDescriptor.attestationRef,
+        sellLockAttestationRef: sellIntent.opaqueLockDescriptor.attestationRef,
       });
 
       if (outcome.status !== "matched") {
@@ -447,15 +468,28 @@ export class MatchingOrchestrator {
           quantityCiphertext: buyIntent.encryptedEnvelope,
           executionPriceCiphertext: buyIntent.encryptedEnvelope,
         },
-        assetCode: buyIntent.assetCode,
+        // The orchestrator does not hold plaintext asset /
+        // quantity / execution price on the settled side. The
+        // TEE-attested match outcome plus the lock descriptor
+        // are forwarded to the settlement rail; the trading
+        // rail resolves the per-side amount from the TEE's
+        // matched-fill output. The settled `assetCode` is the
+        // TEE-attested TRADED asset (what the buyer is buying /
+        // the seller is selling), not the lock asset (which is
+        // USDC for the buy side). The settlement RPC uses the
+        // traded asset to look up the institution's per-asset
+        // holding row.
+        assetCode: buyIntent.opaqueLockDescriptor.tradedAssetCode,
         quantity: matchQuantity,
         executionPrice: matchPrice,
-        // Release exactly the matched portion of each side's
-        // reservation. Buyer locks are at the original bid price,
-        // seller locks are pure quantity. The matched quantity is
-        // the enclave's authoritative fill, not a local min().
-        buyerLockedAmount: matchQuantity * buyIntent.price,
-        sellerLockedAmount: matchQuantity,
+        // TEE-attested per-side lock release amounts. The TEE
+        // computed these from the sealed envelopes and the
+        // sealed (price, quantity) inputs -- the orchestrator
+        // does not re-derive them. Forwarded verbatim to the
+        // settlement RPC, which clamps the `portfolios.locked`
+        // column by exactly these amounts.
+        buyerLockedAmount: outcome.buyerLockedAmount,
+        sellerLockedAmount: outcome.sellerLockedAmount,
         buyerSettlementProfileRef,
         sellerSettlementProfileRef,
         receipts: [
@@ -485,12 +519,14 @@ export class MatchingOrchestrator {
 
       // Apply the matched quantity to each side. A fully filled
       // intent is removed and its durable lock ref deleted; a
-      // partially filled intent stays queued with a reduced
-      // quantity and reduced lock ref. The settlement RPC already
-      // released the matched portion of each balance lock, so we
-      // do not touch balances here — we only update queue/ref state.
-      this.applyFillToIntent(buyIntent, matchQuantity);
-      this.applyFillToIntent(sellIntent, matchQuantity);
+      // partially filled intent stays queued with the original
+      // TEE-attested descriptor (the SQL `locked` column is the
+      // source of truth for free balance). The settlement RPC
+      // already released the matched portion of each balance
+      // lock, so we do not touch balances here -- we only update
+      // queue state.
+      this.applyFillToIntent(buyIntent, matchQuantity, matchPrice);
+      this.applyFillToIntent(sellIntent, matchQuantity, matchPrice);
       return;
     }
   }
@@ -550,7 +586,7 @@ export class MatchingOrchestrator {
         sellIntent.institutionId,
       );
       const sellerAsset = sellerPortfolio.holdings.find(
-        (h) => h.assetCode === sellIntent.assetCode,
+        (h) => h.assetCode === sellIntent.opaqueLockDescriptor.assetCode,
       );
       const sellerAvailable = (sellerAsset?.balance ?? 0) - (sellerAsset?.locked ?? 0);
       if (!sellerAsset || sellerAvailable < matchQuantity) {
@@ -560,7 +596,7 @@ export class MatchingOrchestrator {
           reason: `Seller ${
             sellIntent.institutionId
           } has insufficient ${
-            sellIntent.assetCode
+            sellIntent.opaqueLockDescriptor.assetCode
           } available balance: has ${sellerAvailable}, needs ${matchQuantity}`,
         };
       }
@@ -610,20 +646,21 @@ export class MatchingOrchestrator {
     buyIntent: PendingIntent,
     sellIntent: PendingIntent,
   ): { passed: boolean; institutionId: string; agentDid: string; reason?: string } {
-    if (buyIntent.instrumentScope && !buyIntent.instrumentScope.includes(buyIntent.assetCode)) {
+    const tradedAsset = buyIntent.opaqueLockDescriptor.tradedAssetCode;
+    if (buyIntent.instrumentScope && !buyIntent.instrumentScope.includes(tradedAsset)) {
       return {
         passed: false,
         institutionId: buyIntent.institutionId,
         agentDid: buyIntent.agentDid,
-        reason: `Buy agent ${buyIntent.agentDid} not authorized to trade ${buyIntent.assetCode} (instrument scope: ${buyIntent.instrumentScope.join(", ")})`,
+        reason: `Buy agent ${buyIntent.agentDid} not authorized to trade ${tradedAsset} (instrument scope: ${buyIntent.instrumentScope.join(", ")})`,
       };
     }
-    if (sellIntent.instrumentScope && !sellIntent.instrumentScope.includes(sellIntent.assetCode)) {
+    if (sellIntent.instrumentScope && !sellIntent.instrumentScope.includes(tradedAsset)) {
       return {
         passed: false,
         institutionId: sellIntent.institutionId,
         agentDid: sellIntent.agentDid,
-        reason: `Sell agent ${sellIntent.agentDid} not authorized to trade ${sellIntent.assetCode} (instrument scope: ${sellIntent.instrumentScope.join(", ")})`,
+        reason: `Sell agent ${sellIntent.agentDid} not authorized to trade ${tradedAsset} (instrument scope: ${sellIntent.instrumentScope.join(", ")})`,
       };
     }
     return { passed: true, institutionId: "", agentDid: "" };

@@ -6,6 +6,7 @@ import type {
 } from "@ghostbroker/t3-enclave";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
+import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
 import type { NegotiationRepository } from "./negotiation-repository.js";
 import type {
   NegotiationMandate,
@@ -1247,13 +1248,16 @@ export class NegotiationOrchestrator {
       session.id,
       "sell",
     );
-    const buyerId = buyerCredential?.id;
-    const sellerId = sellerCredential?.id;
-    console.log(
-      `[CONVERGE] ${session.id} getSessionDelegation: ` +
-      `buy=${buyerId ? buyerId.slice(0, 30) : "null"} ` +
-      `sell=${sellerId ? sellerId.slice(0, 30) : "null"}`
-    );
+    // Note: the buyer and seller delegation credentials were
+    // resolved above and snapshotted into the settlement request
+    // (`buyerDelegationCredential`, `sellerDelegationCredential`).
+    // The previous `console.log("[CONVERGE] ... getSessionDelegation")`
+    // truncated and emitted the credential IDs to stdout; that is
+    // removed here. The structured logger would carry too much
+    // sensitive material even at a truncated length, so we do
+    // not log the IDs at all. Operators that need to inspect
+    // the per-side delegation state should query the
+    // `audit_receipts` table after settlement completes.
 
     await this.repository.updateSession({
       sessionId: session.id,
@@ -1280,6 +1284,17 @@ export class NegotiationOrchestrator {
         status: "matched",
         matchedQuantity: input.matchedQuantity,
         executionPrice: input.executionPrice,
+        // Negotiation-orchestrator-driven settlements are
+        // gated on the session transcript (the parties agreed
+        // to the cross in the open); the per-side lock release
+        // amounts are produced by the settlement service from
+        // the matched fill and the original mandate's
+        // authoritative `quantity`. The orchestrator surfaces
+        // the matched quantity / price; the settlement rail
+        // computes the per-side release from the mandate so we
+        // do not need to carry plaintext `quantity` here.
+        buyerLockedAmount: input.matchedQuantity * input.executionPrice,
+        sellerLockedAmount: input.matchedQuantity,
       },
       buyerAgentDid: session.buy_agent_did,
       sellerAgentDid: session.sell_agent_did,
@@ -1322,12 +1337,37 @@ export class NegotiationOrchestrator {
         `${outcomeRef}:${randomUUID()}`,
       );
     } catch (settleError) {
-      const detail =
-        settleError instanceof Error
-          ? `${settleError.message} | ${settleError.stack ?? "(no stack)"}`
-          : String(settleError);
-      console.error(
-        `[CONVERGE] ${session.id} executeSettlement failed, resetting to active: ${detail.slice(0, 500)}`,
+      // The previous `console.error("[CONVERGE] ... executeSettlement
+      // failed")` emitted the full error message and stack to
+      // stdout; the stack frame typically includes the settlement
+      // request's `matchOutcome` (which carries opaque handles
+      // only) and the `encryptedTradeFields` ciphertexts (which
+      // are safe). Still, leaving a free-form `console.error`
+      // of an exception message in production is a privacy
+      // regression risk: a future change to the settlement
+      // service might add a `cause` payload that includes a
+      // synthetic intent with plaintext trading parameters. The
+      // structured logger is the only production-safe channel.
+      logger.error(
+        {
+          event: "negotiation.settlement_failed",
+          sessionId: session.id,
+          outcomeRef,
+          executionRef,
+          correlationRef: input.correlationRef,
+          // Redact forbidden fields defensively. The settlement
+          // service error payload should not contain plaintext
+          // trading parameters today, but the redactor is the
+          // wire-side guarantee for any future regression.
+          error: redactForbiddenOrderFields({
+            name: settleError instanceof Error ? settleError.name : "Error",
+            message:
+              settleError instanceof Error
+                ? settleError.message
+                : "non-Error thrown from settlementService.executeSettlement",
+          }),
+        },
+        "executeSettlement failed; resetting session to active",
       );
       // Reset the session back to active so the agent loop can retry.
       // Then re-throw so the caller (runPricedMove) can catch the
@@ -1350,7 +1390,12 @@ export class NegotiationOrchestrator {
       throw settleError;
     }
 
-    console.log(`[CONVERGE] ${session.id} executeSettlement succeeded, tradeRef=${completed.tradeRef}`);
+    // Note: the previous `console.log("[CONVERGE] ... executeSettlement succeeded")`
+    // emitted `session.id` (UUID, opaque) and `completed.tradeRef`
+    // (opaque handle) to stdout. The telemetry event
+    // `negotiation_settled` (published further down) already
+    // carries the same signals; the free-form console log is
+    // removed to keep the production log channel structured.
 
     await this.repository.updateSession({
       sessionId: session.id,

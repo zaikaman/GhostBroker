@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { CompletedTrade } from '../services/api-client';
 import { LockIcon, ScrollIcon, Shield01Icon } from 'hugeicons-react';
 import { Pagination } from './Pagination';
+import { Skeleton } from './Skeleton';
 
 export interface CompletedTradesTableProps {
   trades: CompletedTrade[];
@@ -28,19 +29,41 @@ export function CompletedTradesTable({
 
   if (isLoading) {
     return (
-      <div 
-        className="table-container" 
-        style={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          padding: 'var(--spacing-2xl)',
-          color: 'var(--color-text-secondary)',
-          fontFamily: 'var(--font-mono)'
-        }}
-      >
-        <span className="pulse-dot" style={{ marginRight: '8px' }}></span>
-        Querying secure trade history ledger...
+      <div className="table-container" style={{ padding: 'var(--spacing-md)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+        <span className="sr-only" style={{ display: 'none' }}>Querying secure trade history ledger...</span>
+        <table className="trades-table" aria-label="Querying secure trade history ledger">
+          <thead>
+            <tr>
+              <th scope="col"><Skeleton variant="text" width={70} height={10} style={{ marginBottom: 0 }} /></th>
+              <th scope="col"><Skeleton variant="text" width={90} height={10} style={{ marginBottom: 0 }} /></th>
+              <th scope="col"><Skeleton variant="text" width={60} height={10} style={{ marginBottom: 0 }} /></th>
+              <th scope="col"><Skeleton variant="text" width={100} height={10} style={{ marginBottom: 0 }} /></th>
+              <th scope="col"><Skeleton variant="text" width={50} height={10} style={{ marginBottom: 0 }} /></th>
+              <th scope="col"><Skeleton variant="text" width={80} height={10} style={{ marginBottom: 0 }} /></th>
+              <th scope="col"><Skeleton variant="text" width={90} height={10} style={{ marginBottom: 0 }} /></th>
+            </tr>
+          </thead>
+          <tbody>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <tr key={i}>
+                <td><Skeleton variant="text" width={120} height={12} style={{ marginBottom: 0 }} /></td>
+                <td><Skeleton variant="text" width={80} height={12} style={{ marginBottom: 0 }} /></td>
+                <td><Skeleton variant="text" width={60} height={12} style={{ marginBottom: 0 }} /></td>
+                <td><Skeleton variant="text" width={70} height={12} style={{ marginBottom: 0 }} /></td>
+                <td><Skeleton variant="rect" width={55} height={18} style={{ borderRadius: '4px' }} /></td>
+                <td><Skeleton variant="text" width={140} height={12} style={{ marginBottom: 0 }} /></td>
+                <td><Skeleton variant="rect" width={90} height={24} style={{ borderRadius: '4px' }} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        
+        {/* Pagination Skeleton */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-md)' }}>
+          <Skeleton variant="rect" width={80} height={28} style={{ borderRadius: '4px' }} />
+          <Skeleton variant="text" width={120} height={12} style={{ marginBottom: 0 }} />
+          <Skeleton variant="rect" width={80} height={28} style={{ borderRadius: '4px' }} />
+        </div>
       </div>
     );
   }

@@ -29,6 +29,7 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
 }
 
 class StaticBlindIntentClient implements BlindIntentClient {
+  public counter = 0;
   public async sealIntent(
     request: BlindIntentRequest,
   ): Promise<BlindIntentResult> {
@@ -38,6 +39,13 @@ class StaticBlindIntentClient implements BlindIntentClient {
       state: "intent_sealed",
       executionRef: "t3exec_us2",
       sealedAt: "2026-06-12T00:00:00.000Z",
+      lockDescriptor: {
+        tradedAssetCode: "WBTC",
+        assetCode: "USDC",
+        side: "buy",
+        amount: 4_500_000,
+        attestationRef: "t3attest:us2",
+      },
     };
   }
 }

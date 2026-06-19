@@ -265,12 +265,6 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
         agentDid: identity.did,
         encryptedIntentEnvelope: envelope.envelope,
         authorityRef: admission.authorityRef,
-        settlementMetadata: {
-          assetCode,
-          side,
-          quantity: decision.quantity,
-          price: decision.price,
-        },
       });
       log(side, `Intent sealed: ${accepted.intentHandle}`);
       lastOutcome = `intent sealed (${accepted.intentHandle})`;

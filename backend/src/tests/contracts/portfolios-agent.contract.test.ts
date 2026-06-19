@@ -67,10 +67,13 @@ const buyIntent: PendingIntent = {
   encryptedEnvelope: "t3env.ciphertext.buy",
   authorityRef: "authority:buy:1",
   delegationCredential: { id: "vc-buy-1", issuer: "did:t3n:buy" },
-  assetCode: "WBTC",
-  side: "buy",
-  quantity: 2,
-  price: 50000,
+  opaqueLockDescriptor: {
+    tradedAssetCode: "WBTC",
+    assetCode: "USDC",
+    side: "buy",
+    amount: 100_000,
+    attestationRef: "t3attest:buy_1",
+  },
   sealedAt: "2026-06-12T00:00:00.000Z",
 };
 
@@ -83,10 +86,13 @@ const sellIntent: PendingIntent = {
   encryptedEnvelope: "t3env.ciphertext.sell",
   authorityRef: "authority:sell:1",
   delegationCredential: { id: "vc-sell-1", issuer: "did:t3n:sell" },
-  assetCode: "WBTC",
-  side: "sell",
-  quantity: 3,
-  price: 51000,
+  opaqueLockDescriptor: {
+    tradedAssetCode: "WBTC",
+    assetCode: "WBTC",
+    side: "sell",
+    amount: 3,
+    attestationRef: "t3attest:sell_1",
+  },
   sealedAt: "2026-06-12T00:00:01.000Z",
 };
 
@@ -154,21 +160,22 @@ describe("GET /api/portfolios/:institutionId?agentDid=... contract", () => {
         { assetCode: "WBTC", balance: 5, locked: 0 },
       ],
       pendingReservations: [
+        // The TEE-attested lock descriptor is the orchestrator's
+        // sole authority on the per-intent reservation. The
+        // dashboard sees the descriptor (asset code, side,
+        // amount) and the opaque handle, but never the raw
+        // trading parameters sealed into the envelope.
         {
           intentHandle: "intent_buy_1",
           assetCode: "USDC",
-          amount: 100000, // 2 * 50000
+          amount: 100000,
           side: "buy",
-          quantity: 2,
-          price: 50000,
         },
         {
           intentHandle: "intent_sell_1",
           assetCode: "WBTC",
-          amount: 3, // quantity directly
+          amount: 3,
           side: "sell",
-          quantity: 3,
-          price: 51000,
         },
       ],
     });

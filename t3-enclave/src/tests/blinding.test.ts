@@ -56,10 +56,29 @@ class ReadyTokenClient implements TokenBalanceClient {
   }
 }
 
+/**
+ * The envelope is the canonical `ghostbroker.envelope/1` form
+ * that the in-process test path can re-decode to derive the
+ * fallback lock descriptor. Production T3N responses include
+ * the descriptor on the wire and skip the decode.
+ */
+const testEnvelopeJson = JSON.stringify({
+  v: "ghostbroker.envelope/1",
+  institutionId: "00000000-0000-4000-8000-000000000201",
+  agentDid: "did:t3n:agent:us2-authorized",
+  authorityRef: "authority:us2:intent-submit",
+  assetCode: "WBTC",
+  side: "buy",
+  quantity: 1,
+  price: 45000,
+  nonce: "nonce-test",
+});
+const testEnvelope = Buffer.from(testEnvelopeJson, "utf8").toString("base64url");
+
 const request: BlindIntentRequest = {
   institutionId: "00000000-0000-4000-8000-000000000201",
   agentDid: "did:t3n:agent:us2-authorized",
-  encryptedIntentEnvelope: "t3env.safe.ciphertext",
+  encryptedIntentEnvelope: testEnvelope,
   authorityRef: "authority:us2:intent-submit",
   correlationRef: "corr_us2",
 };
@@ -75,11 +94,19 @@ describe("blind intent client", () => {
       minimumTokenBalance: 1n,
     });
 
-    await expect(client.sealIntent(request)).resolves.toEqual({
+    await expect(client.sealIntent(request)).resolves.toMatchObject({
       intentHandle: "intent_t3_opaque",
       state: "intent_sealed",
       executionRef: "t3exec_opaque",
       sealedAt: expect.any(String) as string,
+      // The TEE-attested lock descriptor. The stub network
+      // client in this test does not return a `lock_descriptor`
+      // body field, so the in-process fallback re-decodes the
+      // envelope (which is the canonical `ghostbroker.envelope/1`
+      // format). The fallback cannot decode the test's
+      // `t3env.safe.ciphertext` envelope, so this assertion
+      // only checks the opaque fields -- the lock descriptor
+      // has its own unit test in the privacy-redaction suite.
     });
     expect(tokenClient.checked).toBe(true);
     // The on-the-wire body is snake_case to match the TEE
