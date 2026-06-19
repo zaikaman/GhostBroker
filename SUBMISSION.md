@@ -8,7 +8,7 @@
 
 ## What we built
 
-GhostBroker is an institutional dark pool where autonomous trading agents submit buy/sell intents that are matched and settled **without any counterparty ever seeing another counterparty's parameters**. Active order data lives only inside the Terminal 3 TEE; the dashboard, the API, the database, and the WebSocket telemetry stream see only opaque handles, sanitized state labels, and completed trade records. Agents are admitted and authorized via the Ghostbroker-style W3C Verifiable Credential that the Terminal 3 Agent Auth surface mints; humans operate a read-only Observatory Console to monitor connectivity and review completed history with encrypted audit receipts.
+GhostBroker is an institutional dark pool where autonomous trading agents submit buy/sell intents that are matched and settled **without any counterparty ever seeing another counterparty's parameters**. Active order data lives only inside the Terminal 3 TEE; the dashboard, the API, the database, and the WebSocket telemetry stream see only opaque handles, sanitized state labels, and completed trade records. Agents are admitted and authorized via a Ghostbroker-style W3C Verifiable Credential (the same shape the Terminal 3 `agent-delegation` reference BUIDL produces, with `credentialSubject.allowedActions` carrying the trading-agent action scope rather than a procurement BUIDL category enum); humans operate a read-only Observatory Console to monitor connectivity and review completed history with encrypted audit receipts.
 
 The repository is a six-workspace monorepo plus two reference packages:
 
@@ -37,13 +37,13 @@ The headline integration is the per-action authority verifier in
 [`t3-enclave/src/auth/ghostbroker-delegation.ts`](../t3-enclave/src/auth/ghostbroker-delegation.ts).
 It verifies Ghostbroker-style W3C Verifiable Credentials end-to-end:
 
-- **Shape + time window + DID binding**: every VC must have an `id`, `issuer`, `credentialSubject.agentDid`, `issuanceDate`/`expirationDate`, and a `proof` object. The verifier checks all of these.
+- **Shape + time window + DID binding**: every VC must have an `id`, `issuer`, `credentialSubject.agentDid` (and the `credentialSubject.allowedActions` trading-agent action scope), `issuanceDate`/`expirationDate`, and a `proof` object. The verifier checks all of these.
 - **Agent-binding**: the credential's `credentialSubject.agentDid` must match the agent DID on the request.
 - **Revocation**: the verifier accepts a `revokedAuthorityRefs` set, sourced from `AuthorityRevocationRepository` before every check. Revoked references are rejected as `revoked`.
-- **Cryptographic verification** (live mode only): the verifier calls `@terminal3/verify_vc` at runtime if it's installed. Otherwise it falls back to `structural` checks (unless `VC_VERIFY_STRICT=true`).
+- **Cryptographic verification** (live mode only): the verifier calls `@terminal3/verify_vc` at runtime. The verifier **fails closed** on any SDK exception — it never silently downgrades to a non-cryptographic `structural` pass. The legacy `VC_VERIFY_STRICT=true` opt-in is now a no-op alias.
 - **Authority reference**: every verification produces a `ghostbroker-delegation:<vc-id>` reference; the agent must echo this back on every privileged action, and the backend re-asserts equality on each call.
 
-The verifier runs in three modes controlled by the server-side `T3_MODE` env var (with `VC_VERIFY_MODE` kept as a backward-compat alias): `sandbox` (shape + time + DID binding, no crypto), `structural` (the same checks recorded with `verificationMode: "structural"`), and `live` (real `EcdsaSecp256k1Signature2019` JWS verification via `@terminal3/verify_vc`, falling back to `structural` if the SDK call fails and `VC_VERIFY_STRICT=true` is not set). The `setup:identity` + `setup:delegation` flow now produces a real signed JWS by default, so `live` is the production target.
+The verifier runs in three modes controlled by the server-side `T3_MODE` env var (with `VC_VERIFY_MODE` kept as a backward-compat alias): `sandbox` (shape + time + DID binding, no crypto, the demo surface — and the only mode in which an SDK error is tolerated), `structural` (the same checks recorded with `verificationMode: "structural"`), and `live` (real `EcdsaSecp256k1Signature2019` JWS verification via `@terminal3/verify_vc`, failing closed on any SDK error). The `setup:identity` + `setup:delegation` flow now produces a real signed JWS by default, so `live` is the production target.
 
 The same facade is used by **every** backend service that performs a privileged action. In the post-Phase 1 architecture, the agent no longer sends the VC on every privileged call - the backend owns the persisted VC. The composition root in [`backend/src/app.ts`](../backend/src/app.ts) constructs `T3AgentAuthorizationFacade` from [`backend/src/auth/agent-authz.ts`](../backend/src/auth/agent-authz.ts) with two entry points:
 

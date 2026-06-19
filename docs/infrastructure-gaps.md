@@ -26,7 +26,7 @@ GhostBroker has strong **cryptographic primitives** (DID auth, delegation proofs
 ### Agent Admission
 
 - `POST /api/agents/admit` — Verifies a Ghostbroker-style W3C delegation VC (the credential format the live T3N onboarding surface mints)
-- Delegation VC verification in `t3-enclave/src/auth/ghostbroker-delegation.ts` (sandbox / structural / live modes, server-side `VC_VERIFY_MODE`)
+- Delegation VC verification in `t3-enclave/src/auth/ghostbroker-delegation.ts` (sandbox / structural / live modes, server-side `T3_MODE` with `VC_VERIFY_MODE` as a backward-compat alias; the verifier **fails closed** on any SDK error in `live` and `structural` mode — `sandbox` is the only mode that tolerates SDK errors)
 - Authority claims model in `t3-enclave/src/auth/authority-claims.ts` (instrumentScope, directionScope, maxNotionalMinorUnits)
 - The agent SDK no longer ships a separate delegation-proof builder — the Ghostbroker delegation VC is loaded from disk (e.g. `output/delegations/agent_delegation.json`) and passed straight into `client.admitAgent({...delegationCredential})`. See `agents/src/delegation.ts` for the on-disk format.
 

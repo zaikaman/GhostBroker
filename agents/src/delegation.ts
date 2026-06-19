@@ -14,14 +14,23 @@ import type { DelegationCredential } from "@ghostbroker/agent-client";
  *   3. Human-readable summaries.
  *
  * The canonical signer lives in `@ghostbroker/agent-client/src/delegation-signer.ts`.
+ *
+ * The `credentialSubject.allowedActions` enum is the
+ * trading-agent action scope (the same `RequestedAgentAction`
+ * enum the verifier and orchestrator use), not the procurement
+ * BUIDL's `allowedCategories` enum. See
+ * `t3-enclave/src/auth/ghostbroker-delegation.ts` for the full
+ * rationale.
  */
 
-const purchaseCategorySchema = z.enum([
-  "office-supplies",
-  "software",
-  "hardware",
-  "services",
-  "travel",
+const delegationActionScopeSchema = z.enum([
+  "agent.admit",
+  "intent.submit",
+  "settlement.execute",
+  "negotiation.open",
+  "negotiation.move",
+  "negotiation.disclose",
+  "negotiation.settle",
 ]);
 
 export const delegationSchema = z.object({
@@ -34,7 +43,7 @@ export const delegationSchema = z.object({
     id: z.string().min(1),
     agentDid: z.string().min(1),
     maxSpendUsd: z.number().positive(),
-    allowedCategories: z.array(purchaseCategorySchema).min(1),
+    allowedActions: z.array(delegationActionScopeSchema).min(1),
     approverEmail: z.string().email().optional(),
     purpose: z.string().min(1),
   }),
@@ -77,7 +86,7 @@ export function delegationSummary(credential: DelegationCredential): string {
     `Issuer: ${credential.issuer}`,
     `Agent: ${subject.agentDid}`,
     `Budget: $${subject.maxSpendUsd.toFixed(2)}`,
-    `Categories: ${subject.allowedCategories.join(", ")}`,
+    `Actions: ${subject.allowedActions.join(", ")}`,
     `Valid until: ${credential.expirationDate}`,
     `Purpose: ${subject.purpose}`,
   ].join("\n");

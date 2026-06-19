@@ -15,6 +15,7 @@ import {
 } from "./authority-revocation.service.js";
 import type { MatchingOrchestrator } from "./matching-orchestrator.js";
 import type { DelegationCredential } from "@ghostbroker/agent-client";
+import type { DelegationActionScope } from "@ghostbroker/t3-enclave";
 
 export interface AgentAdmissionService {
   admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission>;
@@ -76,9 +77,7 @@ export interface AgentManagementService extends AgentAdmissionService {
     label?: string;
     policy: {
       maxSpendUsd: number;
-      allowedCategories: readonly (
-        "office-supplies" | "software" | "hardware" | "services" | "travel"
-      )[];
+      allowedActions: readonly DelegationActionScope[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;
@@ -94,9 +93,7 @@ export interface AgentManagementService extends AgentAdmissionService {
       agentDid: string;
       institutionId: string;
       maxSpendUsd: number;
-      allowedCategories: readonly (
-        "office-supplies" | "software" | "hardware" | "services" | "travel"
-      )[];
+      allowedActions: readonly DelegationActionScope[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;
@@ -374,9 +371,7 @@ export class AgentService implements AgentManagementService {
     label?: string;
     policy: {
       maxSpendUsd: number;
-      allowedCategories: readonly (
-        "office-supplies" | "software" | "hardware" | "services" | "travel"
-      )[];
+      allowedActions: readonly DelegationActionScope[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;
@@ -386,9 +381,7 @@ export class AgentService implements AgentManagementService {
       agentDid: string;
       institutionId: string;
       maxSpendUsd: number;
-      allowedCategories: readonly (
-        "office-supplies" | "software" | "hardware" | "services" | "travel"
-      )[];
+      allowedActions: readonly DelegationActionScope[];
       approverEmail?: string;
       purpose?: string;
       mandate?: NegotiationMandateInput;
@@ -408,7 +401,7 @@ export class AgentService implements AgentManagementService {
       agentDid,
       institutionId: input.institutionId,
       maxSpendUsd: input.policy.maxSpendUsd,
-      allowedCategories: input.policy.allowedCategories,
+      allowedActions: input.policy.allowedActions,
       ...(input.policy.approverEmail
         ? { approverEmail: input.policy.approverEmail }
         : {}),

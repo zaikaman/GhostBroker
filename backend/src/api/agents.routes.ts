@@ -98,7 +98,7 @@ export function createAgentsRouter(
 
       const provisionPolicy = {
         maxSpendUsd: parsed.data.policy.maxSpendUsd,
-        allowedCategories: [...parsed.data.policy.allowedCategories],
+        allowedActions: [...parsed.data.policy.allowedActions],
         ...(parsed.data.policy.approverEmail
           ? { approverEmail: parsed.data.policy.approverEmail }
           : {}),
@@ -120,7 +120,7 @@ export function createAgentsRouter(
         policy: provisionPolicy,
         signCredential: (input) => tenantSigner.mint({
           ...input,
-          allowedCategories: [...input.allowedCategories],
+          allowedActions: [...input.allowedActions],
         }),
       });
 
@@ -288,7 +288,7 @@ export function createAgentsRouter(
         agentDid: agent.agentDid,
         institutionId: agent.institutionId,
         maxSpendUsd: policy.data.maxSpendUsd,
-        allowedCategories: [...policy.data.allowedCategories],
+        allowedActions: [...policy.data.allowedActions],
         ...(policy.data.approverEmail
           ? { approverEmail: policy.data.approverEmail }
           : {}),

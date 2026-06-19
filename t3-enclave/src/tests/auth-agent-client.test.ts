@@ -11,7 +11,7 @@ const vc = {
     id: "did:t3n:0x0000000000000000000000000000000000000099",
     agentDid: "did:t3n:agent:us1-authorized",
     maxSpendUsd: 1000,
-    allowedCategories: ["software"],
+    allowedActions: ["agent.admit"],
     purpose: "test",
   },
   proof: {
@@ -40,7 +40,7 @@ describe("T3 agent delegation adapter", () => {
       agentDid: baseRequest.agentDid,
       authorityRef: baseRequest.authorityRef,
       policyHash:
-        "7b88a2ae04139e3ed85f17567a4b7c27a38933ecbbb04067cd106620488bf146",
+        "ce3b08cb992446501f996876ef99c9b1df7bff343186555495966dbf3a3725ec",
     });
   });
 
@@ -90,6 +90,43 @@ describe("T3 agent delegation adapter", () => {
       status: "rejected",
       agentDid: baseRequest.agentDid,
       reason: "expired",
+    });
+  });
+
+  it("rejects a VC with a procurement purchase-category scope (legacy shape)", async () => {
+    // The procurement BUIDL enum
+    // (`office-supplies | software | hardware | services | travel`)
+    // is no longer a valid scope on a GhostBroker trading-agent
+    // delegation VC. The verifier must reject it as `malformed`
+    // so a stale dashboard snapshot can never re-introduce a
+    // procurement-style grant to a trading agent.
+    const client = new GhostbrokerDelegationAgentAuthClient();
+    // Replace `allowedActions` (the trading-agent action
+    // scope) with the legacy procurement `allowedCategories`.
+    // The verifier's `ghostbrokerDelegationSchema` requires
+    // `allowedActions` to be a non-empty array of the
+    // `DelegationActionScope` enum, so the absence of
+    // `allowedActions` fails the schema parse.
+    const { allowedActions: _omit, ...legacySubject } =
+      vc.credentialSubject;
+    void _omit;
+    const procurementVc = {
+      ...vc,
+      credentialSubject: {
+        ...legacySubject,
+        allowedCategories: ["software", "travel"],
+      },
+    };
+
+    await expect(
+      client.verifyDelegation({
+        ...baseRequest,
+        delegationCredential: procurementVc,
+      }),
+    ).resolves.toEqual({
+      status: "rejected",
+      agentDid: baseRequest.agentDid,
+      reason: "malformed",
     });
   });
 });

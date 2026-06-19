@@ -173,30 +173,36 @@ backward-compat alias):
 
 - **`sandbox`** - shape + time window + DID binding. No crypto. This
   is the default and the mode the demo "Spin up demo agents" button
-  uses. Unsigned demo credentials pass.
+  uses. Unsigned demo credentials pass. The `sandbox` mode is also
+  the only mode in which an SDK error is tolerated (the demo surface
+  keeps the historical "verified on SDK error" behaviour).
 - **`structural`** - the same checks, recorded with
   `verificationMode: "structural"`. Used in CI and integration tests.
 - **`live`** - real `EcdsaSecp256k1Signature2019` JWS verification
-  via `@terminal3/verify_vc`. If the SDK call fails (the package API
-  has changed, the verification helper cannot reach a registry, etc.)
-  the verifier falls back to `structural` unless
-  `VC_VERIFY_STRICT=true` is set. Demo markers are rejected as
-  `demo_proof_in_live_mode`.
+  via `@terminal3/verify_vc`. The verifier **fails closed** on any
+  SDK exception: it never silently downgrades to a non-cryptographic
+  `structural` pass. Demo markers are rejected as
+  `demo_proof_in_live_mode`. The legacy `VC_VERIFY_STRICT=true` opt-in
+  is now a no-op (the verifier always fails closed outside `sandbox`).
 
 The verifier checks every VC for:
 
 - **Shape + time window + DID binding.** Every VC must have an `id`,
-  `issuer`, `credentialSubject.agentDid`, `issuanceDate`/
-  `expirationDate`, and a `proof` object. The verifier checks all of
-  these against the request's `agentDid` and `now`.
+  `issuer`, `credentialSubject.agentDid` (plus the
+  `credentialSubject.allowedActions` trading-agent action scope),
+  `issuanceDate`/`expirationDate`, and a `proof` object. The
+  verifier checks all of these against the request's `agentDid` and
+  `now`.
 - **Agent-binding.** The credential's `credentialSubject.agentDid` must
   match the agent DID on the request.
 - **Revocation.** The verifier accepts a `revokedAuthorityRefs` set,
   sourced from `AuthorityRevocationRepository` before every check.
   Revoked references are rejected as `revoked`.
 - **Cryptographic verification (live mode).** The verifier calls
-  `@terminal3/verify_vc` at runtime when the mode is `live`. Otherwise
-  it falls back to `structural` checks unless `VC_VERIFY_STRICT=true`.
+  `@terminal3/verify_vc` at runtime when the mode is `live`. The
+  verifier fails closed on any SDK error — see
+  `t3-enclave/src/auth/ghostbroker-delegation.ts`'s `tryLiveVerify`
+  for the production-grade contract.
 - **Authority reference.** Every verification produces a
   `ghostbroker-delegation:<vc-id>` reference. The agent must echo this
   back on every privileged action, and the backend re-asserts equality
@@ -618,7 +624,7 @@ that matter most:
 | `T3_TENANT_DID` | yes | The institution's Terminal 3 DID |
 | `T3_MODE` | no | `sandbox` (default), `structural`, or `live` |
 | `VC_VERIFY_MODE` | no | Backward-compat alias for `T3_MODE` |
-| `VC_VERIFY_STRICT` | no | When `true`, refuse to fall back from `live` to `structural` |
+| `VC_VERIFY_STRICT` | no | No-op alias retained for backwards compatibility. The verifier always fails closed on any `@terminal3/verify_vc` exception outside `sandbox` mode; `sandbox` is the only mode in which the historical "verified on SDK error" behaviour is preserved. |
 | `OPERATOR_CHALLENGE_TTL_SECONDS` | no | DID challenge-response TTL, defaults to `300` |
 | `OPERATOR_SESSION_TTL_SECONDS` | no | Operator JWT TTL, defaults to `28800` (8h) |
 | `AGENT_SESSION_TTL_SECONDS` | no | Agent JWT TTL, defaults to `28800` (8h) |

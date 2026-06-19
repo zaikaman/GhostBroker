@@ -151,17 +151,26 @@ export type UpdateAgentLabelBody = z.infer<typeof updateAgentLabelSchema>;
  * mint a runaway VC. The backend signs the VC with the
  * institution's tenant keypair — the user never holds or
  * sees the signing key.
+ *
+ * The `allowedActions` field is the trading-agent action
+ * scope (the same `RequestedAgentAction` enum the verifier
+ * and orchestrator use), not the procurement BUIDL's
+ * purchase-category enum. See
+ * `t3-enclave/src/auth/ghostbroker-delegation.ts` for the
+ * full rationale.
  */
 export const mintDelegationPolicySchema = z.object({
   maxSpendUsd: z.number().positive().max(1_000_000_000),
-  allowedCategories: z
+  allowedActions: z
     .array(
       z.enum([
-        "office-supplies",
-        "software",
-        "hardware",
-        "services",
-        "travel",
+        "agent.admit",
+        "intent.submit",
+        "settlement.execute",
+        "negotiation.open",
+        "negotiation.move",
+        "negotiation.disclose",
+        "negotiation.settle",
       ]),
     )
     .min(1)

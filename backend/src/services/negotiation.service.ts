@@ -17,6 +17,7 @@ import type {
   NegotiationRepository,
 } from "./negotiation-repository.js";
 import type { DelegationCredential } from "@ghostbroker/agent-client";
+import type { DelegationActionScope } from "@ghostbroker/t3-enclave";
 import {
   normalizeStrategy,
   type AuthoredMandatePolicy,
@@ -128,7 +129,10 @@ export class NegotiationService implements NegotiationManagementService {
       agentDid: agent.agentDid,
       institutionId: agent.institutionId,
       maxSpendUsd: 1,
-      allowedCategories: ["services"] as ("office-supplies" | "software" | "hardware" | "services" | "travel")[],
+      allowedActions: [
+        "agent.admit",
+        "intent.submit",
+      ] satisfies readonly DelegationActionScope[],
       mandate: (authored ?? legacy) as NegotiationMandateInput,
     };
 

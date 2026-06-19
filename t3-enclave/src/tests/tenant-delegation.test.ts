@@ -40,7 +40,7 @@ describe("tenant-delegation signer", () => {
         agentDid: "did:t3n:0xagent",
         institutionId: "00000000-0000-4000-8000-000000000101",
         maxSpendUsd: 50_000,
-        allowedCategories: ["office-supplies", "software"],
+        allowedActions: ["agent.admit", "intent.submit"],
         approverEmail: "finance@acme.example",
         purpose: "Q2 office refresh",
         validityMonths: 6,
@@ -61,22 +61,23 @@ describe("tenant-delegation signer", () => {
         agentDid: "did:t3n:0xagent",
         requestedAction: "agent.admit",
       },
-      "live",
+      "structural",
     );
     expect(result.status).toBe("verified");
     if (result.status !== "verified") {
       throw new Error("unreachable: expected verified status");
     }
-    // The verifier is allowed to fall back to `structural`
-    // mode in test environments where `@terminal3/verify_vc`
-    // cannot reach its registry (see the documented behavior
-    // in `t3-enclave/src/auth/ghostbroker-delegation.ts`'s
-    // `tryLiveVerify`). The load-bearing contract is: the
-    // verifier must ACCEPT a VC we just signed, in either
-    // `live` or `structural` mode. In production with a
-    // reachable T3N registry, the mode is `live`; the
-    // structural fallback is the safety net the verifier
-    // documents explicitly.
+    // The verifier is allowed to round-trip the freshly
+    // signed VC in `structural` mode here (the test sets
+    // the mode explicitly). In `live` mode the verifier
+    // will reach `@terminal3/verify_vc` and accept the
+    // VC on a reachable T3N registry, or fail closed
+    // (`rejected` / `unverified`) on a transient SDK
+    // error. The load-bearing contract is: the verifier
+    // must ACCEPT a VC we just signed. In production with
+    // a reachable T3N registry, the mode is `live`; the
+    // `structural` mode is the explicitly-opted-in
+    // structural pass the test exercises here.
     expect(["live", "structural"]).toContain(result.verificationMode);
     expect(result.authorityRef).toBe(
       `ghostbroker-delegation:${credential.id}`,
@@ -93,7 +94,7 @@ describe("tenant-delegation signer", () => {
         agentDid: "did:t3n:0xagent",
         institutionId: "00000000-0000-4000-8000-000000000101",
         maxSpendUsd: 1_000,
-        allowedCategories: ["software"],
+        allowedActions: ["agent.admit"],
       },
       identity,
     );

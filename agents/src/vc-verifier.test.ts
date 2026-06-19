@@ -12,7 +12,7 @@ const sandboxVc: DelegationCredential = {
     id: "did:t3n:0x0000000000000000000000000000000000000001",
     agentDid: "did:t3n:0xagent",
     maxSpendUsd: 500,
-    allowedCategories: ["office-supplies"],
+    allowedActions: ["agent.admit", "intent.submit"],
     purpose: "test",
   },
   proof: {

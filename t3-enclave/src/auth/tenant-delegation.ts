@@ -3,6 +3,7 @@ import {
   buildDelegationSigningBody,
   mintDelegationCredentialBody,
   signDelegationCredential,
+  type DelegationActionScope,
   type DelegationCredential,
   type DelegationSigningBody,
 } from "@ghostbroker/agent-client";
@@ -42,23 +43,30 @@ import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
  * and the `EcdsaSecp256k1Signature2019` proof type are all
  * unchanged. Only the issuer identity moves from "agent"
  * to "institution".
+ *
+ * The VC's `credentialSubject.allowedActions` is the
+ * agent's trading-action scope (the same `RequestedAgentAction`
+ * enum the verifier and orchestrator use), not the
+ * procurement BUIDL's purchase-category enum. See
+ * `t3-enclave/src/auth/ghostbroker-delegation.ts` for the
+ * full rationale.
  */
 
-const purchaseCategorySchema = z.enum([
-  "office-supplies",
-  "software",
-  "hardware",
-  "services",
-  "travel",
+const delegationActionScopeSchema = z.enum([
+  "agent.admit",
+  "intent.submit",
+  "settlement.execute",
+  "negotiation.open",
+  "negotiation.move",
+  "negotiation.disclose",
+  "negotiation.settle",
 ]);
-
-export type PurchaseCategory = z.infer<typeof purchaseCategorySchema>;
 
 export const tenantDelegationPolicySchema = z.object({
   agentDid: z.string().min(1),
   institutionId: z.string().min(1),
   maxSpendUsd: z.number().positive(),
-  allowedCategories: z.array(purchaseCategorySchema).min(1),
+  allowedActions: z.array(delegationActionScopeSchema).min(1),
   approverEmail: z.string().email().optional(),
   purpose: z.string().min(1).optional(),
   validityMonths: z.number().int().positive().max(120).optional(),
@@ -91,7 +99,7 @@ export function mintTenantDelegation(
     agentDid: parsed.agentDid,
     issuerDid: identity.did,
     maxSpendUsd: parsed.maxSpendUsd,
-    allowedCategories: [...parsed.allowedCategories],
+    allowedActions: [...parsed.allowedActions] as DelegationActionScope[],
     ...(parsed.approverEmail ? { approverEmail: parsed.approverEmail } : {}),
     ...(parsed.purpose ? { purpose: parsed.purpose } : {}),
     ...(parsed.validityMonths ? { validityMonths: parsed.validityMonths } : {}),

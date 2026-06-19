@@ -49,7 +49,7 @@ describe("delegation credential loading / validation", () => {
     expect(loaded.id).toMatch(/^urn:uuid:ghostbroker-delegation-/);
   });
 
-  it("rejects an unknown purchase category", () => {
+  it("rejects an unknown action scope", () => {
     const badPath = join(tmp, "bad.json");
     writeFileSync(
       badPath,
@@ -63,7 +63,7 @@ describe("delegation credential loading / validation", () => {
           id: "did:t3n:0x0000000000000000000000000000000000000001",
           agentDid: "did:t3n:0xagent",
           maxSpendUsd: 1_000,
-          allowedCategories: ["weapons"], // not in the enum
+          allowedActions: ["weapons"], // not in the enum
           purpose: "test",
         },
       }),

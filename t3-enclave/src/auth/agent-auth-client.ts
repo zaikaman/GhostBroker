@@ -6,28 +6,52 @@ import type {
 } from "./ghostbroker-delegation.js";
 
 /**
- * The single delegation verifier used by the GhostBroker backend.
+ * Single production agent authorization adapter.
  *
- * Ghostbroker-style W3C Verifiable Credential is the only credential
- * format supported end-to-end. The live T3N network today issues
- * exactly this shape (the Ghostbroker delegation BUIDL is the only published
- * live reference for "what Terminal 3 actually gives you"); the
- * JCS Smart VC shape is reserved for a future programmatic T3
- * issuer and is not part of the production code path.
+ * Ghostbroker-style W3C Verifiable Credentials are the only
+ * credential format the live T3N onboarding surface mints. The
+ * live JCS Smart-VC prove flow is no longer supported; the
+ * dashboard (and, in the post-Phase 1 architecture, the
+ * backend's own `tenant-delegation.ts` signer) is the canonical
+ * issuer of every delegation VC the system accepts.
  *
  * The `authorityRef` returned to the agent is the credential's
  * `id` (e.g. `urn:uuid:ghostbroker-delegation-...`), which the
  * run-loop persists and echoes back on every privileged action
- * (`submitIntent`, `cancelIntent`, `settlement.execute`).
+ * (`submitIntent`, `cancelIntent`, `settlement.execute`,
+ * `negotiation.*`).
  *
- * The verifier runs entirely from the in-memory VC. The legacy
- * live-network fallback (`POST /agent-delegations/verify`) was
- * removed in the post-Phase 1 rewrite: the Ghostbroker delegation
- * verifier is now a pure function over the persisted VC, so the
- * class no longer accepts or stores a `T3NetworkClient` or a
- * verification-path argument. The `authorityRef` on the request is
- * used to confirm the agent is presenting the same credential it
- * was admitted with (a stale VC is rejected as `over_scoped`).
+ * The verifier is a **pure in-memory function** over the
+ * persisted VC. It does NOT call any `T3NetworkClient` and does
+ * NOT call a live `POST /agent-delegations/verify` endpoint:
+ * the earlier live-network fallback was removed in the
+ * post-Phase 1 rewrite because the GhostBroker verifier in
+ * `ghostbroker-delegation.ts` is the single source of truth,
+ * and the live-network surface for programmatic delegation
+ * remains undocumented in the Terminal 3 public docs. The
+ * `T3AgentIdentityVerifier` (a separate, non-authoritative
+ * DID-challenge check used only for the dashboard login flow)
+ * is the only place a T3 network call is made at the auth
+ * boundary, and that call is best-effort, not a primary
+ * authority gate.
+ *
+ * Production behaviour:
+ *
+ *   - `verifyGhostbrokerDelegationCredential` runs the W3C VC
+ *     shape + time-window + DID-binding + revocation checks,
+ *     and (in `live` mode) the `EcdsaSecp256k1Signature2019`
+ *     crypto verification via `@terminal3/verify_vc`.
+ *   - In `live` and `structural` modes, the verifier fails
+ *     closed on any SDK error — it never silently downgrades
+ *     to a non-cryptographic pass. In `sandbox` mode the
+ *     historical "verified on SDK error" semantic is kept for
+ *     the demo surface.
+ *   - The request's `authorityRef` is compared against the
+ *     verifier's `authorityRef`. A mismatch is the
+ *     `over_scoped` rejection: the agent is presenting a
+ *     different VC than the one it was admitted with, which
+ *     is the load-bearing check that detects a session
+ *     reuse against a stale credential.
  */
 
 export type { RequestedAgentAction } from "./ghostbroker-delegation.js";
@@ -75,12 +99,15 @@ export interface AgentDelegationVerifier {
 }
 
 /**
- * Ghostbroker-only agent authorization adapter. The verifier runs
- * entirely from the in-memory VC, with the VC's own `id` and
- * `issuer` driving `authorityRef` and `policyHash`. The legacy
- * `POST /agent-delegations/verify` live-network fallback has been
- * removed in the post-Phase 1 rewrite; this class is now a pure
- * function over the persisted credential.
+ * Single concrete production adapter. The historical second
+ * implementation, the `POST /agent-delegations/verify`
+ * live-network fallback, was removed in the post-Phase 1
+ * rewrite — see the file-level docstring. The structural
+ * `AgentDelegationVerifier` interface above is retained for
+ * the runner dependency-injection seam in
+ * `t3-enclave/src/runner/agent-loop.ts`; it is not a contract
+ * the project promises to satisfy with more than one
+ * implementation.
  */
 export class GhostbrokerDelegationAgentAuthClient
   implements AgentDelegationVerifier

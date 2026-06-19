@@ -27,14 +27,34 @@ export type RequestedAgentAction =
  * `proof.jws`, and runs in one of three modes:
  *
  *   - "sandbox":    structural checks only; sandbox proof markers pass.
+ *                   SDK errors are accepted (the verifier returns
+ *                   `verified` with `verificationMode: "sandbox"`),
+ *                   because the demo surface is the only place this
+ *                   mode is intended to run.
  *   - "live":       real cryptographic verification via
  *                   `@terminal3/verify_vc` (`verifyEcdsaVc` for
- *                   `EcdsaSecp256k1Signature2019` proofs). Falls
- *                   back to "structural" if unavailable, unless
- *                   `VC_VERIFY_STRICT=true`.
+ *                   `EcdsaSecp256k1Signature2019` proofs). The
+ *                   verifier **fails closed** if the SDK throws:
+ *                   the returned `reason` is `"unverified"` and the
+ *                   agent is rejected. The verifier never silently
+ *                   downgrades to a non-cryptographic "structural"
+ *                   pass on an SDK error in this mode.
  *   - "structural": real shape + time-window + DID-binding checks
  *                   with no crypto. This is the mode the project
- *                   ships as its "sandbox/demo" production gate.
+ *                   ships as its "sandbox/demo" production gate
+ *                   when the live SDK is unavailable. Like `live`,
+ *                   an SDK throw here fails closed.
+ *
+ * Why the verifier fails closed on SDK error in every non-sandbox
+ * mode: a security-critical verifier that returns `verified` when
+ * it could not cryptographically verify is an attack surface for
+ * any adversarial T3 SDK version bump. The legacy "fall back to
+ * structural" behaviour was an opt-in safety net controlled by
+ * `VC_VERIFY_STRICT=true`; the production-grade default is the
+ * inverse — fail closed unless the operator has explicitly opted
+ * into `sandbox` mode. The `VC_VERIFY_STRICT` flag is retained as
+ * a no-op alias for backwards compatibility; the verifier always
+ * fails closed on SDK error outside `sandbox` mode.
  *
  * The `setup:identity` + `setup:delegation` flow now produces
  * a real `EcdsaSecp256k1Signature2019` JWS by default, so the
@@ -53,13 +73,47 @@ export type RequestedAgentAction =
  * same opaque-reference shape the original path produced.
  */
 
-const purchaseCategorySchema = z.enum([
-  "office-supplies",
-  "software",
-  "hardware",
-  "services",
-  "travel",
+/**
+ * Action scope carried inside a Ghostbroker delegation VC's
+ * `credentialSubject.allowedActions`.
+ *
+ * The Terminal 3 docs do not publish a canonical "agent delegation
+ * VC" schema. GhostBroker's verifier accepts the only delegation
+ * credential the live T3N onboarding surface mints, which is the
+ * W3C VC the dashboard (and, in the post-Phase 1 architecture, the
+ * backend's own `tenant-delegation.ts` signer) produces. The
+ * VC's `allowedActions` field is the agent's scope over the
+ * privileged actions the runtime actually enforces — the same
+ * action set the `RequestedAgentAction` discriminator in the
+ * verifier carries.
+ *
+ * Earlier revisions of this schema borrowed the procurement
+ * BUIDL's `purchaseCategorySchema` enum
+ * (`office-supplies | software | hardware | services | travel`).
+ * That enum is meaningful for a B2B-procurement delegate acting
+ * against a vendor catalog, but it is the wrong shape for a
+ * trading agent: none of those values map to anything the
+ * GhostBroker orchestrator can gate. The live surface — the
+ * dashboard, the run-loop, the orchestrator, the settlement
+ * command builder — enforces its privileged action set on the
+ * `RequestedAgentAction` enum documented at the top of this
+ * file. The VC scope is now the same enum, so the verifier and
+ * the orchestrator speak the same language about what the
+ * agent is allowed to do.
+ */
+const delegationActionScopeSchema = z.enum([
+  "agent.admit",
+  "intent.submit",
+  "settlement.execute",
+  "negotiation.open",
+  "negotiation.move",
+  "negotiation.disclose",
+  "negotiation.settle",
 ]);
+
+export type DelegationActionScope = z.infer<
+  typeof delegationActionScopeSchema
+>;
 
 const negotiationUrgencySchema = z.enum(["low", "normal", "high", "critical"]);
 const negotiationMandateSchema = z.object({
@@ -87,9 +141,9 @@ export const ghostbrokerDelegationSchema = z.object({
     id: z.string().min(1),
     agentDid: z.string().min(1),
     maxSpendUsd: z.number().positive(),
-    allowedCategories: z.array(purchaseCategorySchema).min(1),
+    allowedActions: z.array(delegationActionScopeSchema).min(1),
     approverEmail: z.string().email().optional(),
-    purpose: z.string().min(1),
+    purpose: z.string().min(1).optional(),
     mandate: negotiationMandateSchema.optional(),
   }),
   proof: z
@@ -168,6 +222,11 @@ export type GhostbrokerVerificationResult =
  * passed to `@terminal3/verify_vc`. They are NOT placeholders for
  * missing functionality — they are a deliberate discriminator in a
  * three-mode verifier (sandbox / structural / live).
+ *
+ * The verifier fails closed on any `@terminal3/verify_vc` exception
+ * outside `sandbox` mode, so a demo marker reaching the live crypto
+ * path is a no-op (the demo branch above short-circuits before
+ * `tryLiveVerify` runs).
  */
 const SANDBOX_PROOF_MARKERS = [
   "sandbox-proof-placeholder",
@@ -307,18 +366,31 @@ export async function verifyGhostbrokerDelegationCredential(
     };
   }
 
+  if (mode === "structural") {
+    return {
+      status: "verified",
+      agentDid,
+      authorityRef: authorityRefFor(safe),
+      policyHash: policyHashFor(safe),
+      verificationMode: "structural",
+    };
+  }
+
   // Live + signed: verify cryptographically via
-  // `@terminal3/verify_vc`. If the call fails (e.g. the SDK
-  // is being run in an environment where the verification
-  // helper cannot reach a registry, or the package API has
-  // changed), fall back to `structural` mode unless
-  // `VC_VERIFY_STRICT=true` is set.
-  return tryLiveVerify(safe, agentDid);
+  // `@terminal3/verify_vc`. The verifier fails closed if the
+  // SDK throws — a security-critical verifier that returns
+  // `verified` when it could not cryptographically verify is
+  // an attack surface for any adversarial T3 SDK version bump
+  // or transient SDK outage. The only mode in which the
+  // verifier accepts a VC on an SDK error is `sandbox`, which
+  // is the demo / dev surface and is not the production gate.
+  return tryLiveVerify(safe, agentDid, mode);
 }
 
 async function tryLiveVerify(
   safe: GhostbrokerDelegationCredential,
   agentDid: string,
+  mode: GhostbrokerVerificationMode,
 ): Promise<GhostbrokerVerificationResult> {
   try {
     // Shape matches the `SignedCredential` contract that
@@ -359,23 +431,31 @@ async function tryLiveVerify(
       verificationMode: "live",
     };
   } catch (error: unknown) {
-    // Detail is kept for the warning channel (a future
-    // structured-log path) but is not currently surfaced in
-    // the result; reference it once so the catch binding is
-    // actually used.
+    // Reference the error once so the catch binding is used
+    // by a future structured-log path without changing the
+    // current return shape.
     void (
       error instanceof Error ? error.message : "VC verification error"
     );
-    if (process.env.VC_VERIFY_STRICT === "true") {
-      return { status: "rejected", agentDid, reason: "unverified" };
+    // Production-grade default: fail closed on any SDK
+    // exception in `live` or `structural` mode. The legacy
+    // `VC_VERIFY_STRICT=true` opt-in is now a no-op — the
+    // verifier always fails closed outside `sandbox` mode,
+    // and `sandbox` is the only mode the operator should use
+    // if they want the historical "verified on SDK error"
+    // behaviour. The flag is retained so existing operator
+    // scripts that set it keep working.
+    void process.env["VC_VERIFY_STRICT"];
+    if (mode === "sandbox") {
+      return {
+        status: "verified",
+        agentDid,
+        authorityRef: authorityRefFor(safe),
+        policyHash: policyHashFor(safe),
+        verificationMode: "sandbox",
+      };
     }
-    return {
-      status: "verified",
-      agentDid,
-      authorityRef: authorityRefFor(safe),
-      policyHash: policyHashFor(safe),
-      verificationMode: "structural",
-    };
+    return { status: "rejected", agentDid, reason: "unverified" };
   }
 }
 

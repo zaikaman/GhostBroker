@@ -37,13 +37,52 @@ import { z } from "zod";
  * branch.
  */
 
-const purchaseCategorySchema = z.enum([
-  "office-supplies",
-  "software",
-  "hardware",
-  "services",
-  "travel",
+/**
+ * The action scope carried in the delegation VC's
+ * `credentialSubject.allowedActions`.
+ *
+ * GhostBroker's verifier accepts the only delegation credential
+ * the live T3N onboarding surface mints, which is the W3C VC the
+ * dashboard (and, in the post-Phase 1 architecture, the
+ * backend's own signer in
+ * `t3-enclave/src/auth/tenant-delegation.ts`) produces. The
+ * schema's `allowedActions` field is the agent's scope over the
+ * privileged actions the runtime actually enforces.
+ *
+ * Earlier revisions of this schema borrowed the procurement
+ * BUIDL's `purchaseCategorySchema` enum
+ * (`office-supplies | software | hardware | services | travel`).
+ * That enum is meaningful for a B2B-procurement delegate acting
+ * against a vendor catalog, but it is the wrong shape for a
+ * trading agent: none of those values map to anything the
+ * GhostBroker orchestrator can gate. The live surface — the
+ * dashboard, the run-loop, the orchestrator, the settlement
+ * command builder — enforces its privileged action set on the
+ * `RequestedAgentAction` enum documented in
+ * `t3-enclave/src/auth/ghostbroker-delegation.ts`. The VC scope
+ * is the same enum, so the signer, the verifier, and the
+ * orchestrator speak the same language about what the agent is
+ * allowed to do.
+ *
+ * The Terminal 3 docs do not publish a canonical "agent
+ * delegation VC" schema. The shape below is the only one the
+ * live onboarding surface mints; the `terminal3docs.md` reference
+ * explicitly notes the agent-delegation shape is undocumented
+ * and that the BUIDL reference is "not clearly documented".
+ * Treat this schema as a GhostBroker-owned contract, not as a
+ * T3N-mandated one.
+ */
+const delegationActionScopeSchema = z.enum([
+  "agent.admit",
+  "intent.submit",
+  "settlement.execute",
+  "negotiation.open",
+  "negotiation.move",
+  "negotiation.disclose",
+  "negotiation.settle",
 ]);
+
+export type DelegationActionScope = z.infer<typeof delegationActionScopeSchema>;
 
 const negotiationUrgencySchema = z.enum(["low", "normal", "high", "critical"]);
 const negotiationSideSchema = z.enum(["buy", "sell"]);
@@ -126,7 +165,7 @@ export const delegationCredentialSchema = z.object({
     id: z.string().min(1),
     agentDid: z.string().min(1),
     maxSpendUsd: z.number().positive(),
-    allowedCategories: z.array(purchaseCategorySchema).min(1),
+    allowedActions: z.array(delegationActionScopeSchema).min(1),
     approverEmail: z.string().email().optional(),
     purpose: z.string().min(1),
     mandate: negotiationMandateSchema.optional(),
@@ -361,10 +400,12 @@ export interface MintDelegationCredentialBody {
   maxSpendUsd: number;
   /** Issuer DID. Defaults to the agent's own DID. */
   issuerDid?: string;
-  /** Allowed purchase categories for the delegation policy. */
-  allowedCategories?: (
-    "office-supplies" | "software" | "hardware" | "services" | "travel"
-    )[];
+  /**
+   * The trading-agent action scope the delegation authorizes.
+   * Defaults to a conservative `agent.admit` + `intent.submit`
+   * scope so a fresh VC never inherits a stale broad grant.
+   */
+  allowedActions?: DelegationActionScope[];
   /** Approver email (human-readable audit trail). */
   approverEmail?: string;
   /** Purpose string (human-readable audit trail). */
@@ -414,10 +455,7 @@ export function mintDelegationCredentialBody(
       id: issuerDid,
       agentDid: options.agentDid,
       maxSpendUsd: options.maxSpendUsd,
-      allowedCategories: options.allowedCategories ?? [
-        "office-supplies",
-        "software",
-      ],
+      allowedActions: options.allowedActions ?? ["agent.admit", "intent.submit"],
       approverEmail: options.approverEmail ?? "finance@acme.example",
       purpose:
         options.purpose ??

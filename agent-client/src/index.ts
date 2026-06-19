@@ -55,6 +55,7 @@ export {
   mintDelegationCredentialBody,
   negotiationMandateSchema,
   signDelegationCredential,
+  type DelegationActionScope,
   type DelegationCredential,
   type DelegationSigningBody,
   type MintAndSignDelegationOptions,

@@ -7,14 +7,26 @@ import { isDelegationActive } from "./delegation.js";
  * The verifier has three modes, exactly as Ghostbroker delegation defines them:
  *   - "sandbox": structural checks only; sandbox proof markers pass.
  *   - "live":    real cryptographic verification via @terminal3/verify_vc.
- *                Falls back to "structural" if the SDK is unavailable
- *                and VC_VERIFY_STRICT is not "true".
+ *                Fails closed (returns `verified: false`) on any
+ *                SDK error or runtime import failure. The legacy
+ *                "fall back to structural on SDK error" behaviour was
+ *                an attack surface for adversarial T3 SDK version
+ *                bumps; the production-grade default fails closed.
  *   - "structural": real shape + time-window + DID-binding checks, no
  *                   crypto. This is the mode the Ghostbroker delegation BUIDL
  *                   ships as its "sandbox/demo" production gate.
  *
  * The GhostBroker admit path runs the same verifier server-side; the
  * result is what makes the admit call succeed (or return 403).
+ *
+ * **Fail-closed contract.** In every mode except `sandbox`, an SDK
+ * error or missing module is converted to `verified: false` with the
+ * SDK error message attached. The agent process must refuse to
+ * present a VC it could not cryptographically verify, because the
+ * backend's `loadAndVerify` facade runs the same fail-closed
+ * verifier on every privileged call and would reject it. The only
+ * mode in which an SDK error is tolerated is `sandbox`, which is
+ * the demo surface.
  */
 
 export interface VerificationResult {
@@ -161,8 +173,14 @@ export async function verifyDelegationCredential(
     };
   }
 
-  // Live + signed: try to load @terminal3/verify_vc at runtime; if
-  // it's not installed, fall back to structural.
+  // Live + signed: try to load @terminal3/verify_vc at runtime.
+  // The verifier fails closed on any SDK error or missing module
+  // — a security-critical verifier that returns `verified: true`
+  // when it could not cryptographically verify is an attack
+  // surface for any adversarial T3 SDK version bump. The only
+  // mode in which an SDK error is tolerated is `sandbox`, which
+  // is the demo surface. The `VC_VERIFY_STRICT` flag is retained
+  // as a no-op alias for backwards compatibility.
   try {
     const verifyVcModule = (await import("@terminal3/verify_vc" as string).catch(
       () => null,
@@ -190,16 +208,19 @@ export async function verifyDelegationCredential(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "VC verification error";
-    if (process.env.VC_VERIFY_STRICT === "true") {
-      return { verified: false, mode: "live", message, warnings };
-    }
-    warnings.push(
-      `Cryptographic verification unavailable (${message}); falling back to structural checks.`,
-    );
+    // The legacy `VC_VERIFY_STRICT=true` opt-in is now a no-op
+    // for fail-closed behavior; the verifier always fails closed
+    // outside `sandbox` mode. The flag is retained so existing
+    // operator scripts that set it keep working. The `sandbox`
+    // path returns at the top of the function, so this catch is
+    // only reached in `live` or `structural` mode — both of
+    // which fail closed.
+    void process.env["VC_VERIFY_STRICT"];
+    void warnings; // reserved for the future structured-log path
     return {
-      verified: true,
-      mode: "structural",
-      message: "Structural validation passed with verification fallback.",
+      verified: false,
+      mode: mode === "structural" ? "structural" : "live",
+      message: `Cryptographic verification failed: ${message}`,
       warnings,
     };
   }

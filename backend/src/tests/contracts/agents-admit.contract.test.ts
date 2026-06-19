@@ -169,7 +169,7 @@ describe("POST /api/agents/admit contract", () => {
               id: "did:t3n:test-tenant",
               agentDid: us1AgentDid,
               maxSpendUsd: 1,
-              allowedCategories: ["services"],
+              allowedActions: ["agent.admit"],
               purpose: "Negotiate within mandate bounds",
             },
             proof: {
@@ -200,7 +200,7 @@ describe("POST /api/agents/admit contract", () => {
         label: "Northstar Negotiator",
         policy: {
           maxSpendUsd: 1,
-          allowedCategories: ["services"],
+          allowedActions: ["agent.admit"],
           purpose: "Negotiate within mandate bounds",
         },
       })

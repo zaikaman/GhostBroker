@@ -78,7 +78,7 @@ export function buildAdmitAgentRequest(
         id: "did:t3n:0x0000000000000000000000000000000000000099",
         agentDid: us1AgentDid,
         maxSpendUsd: 1000,
-        allowedCategories: ["software"],
+        allowedActions: ["agent.admit"],
         purpose: "test",
       },
       proof: {
