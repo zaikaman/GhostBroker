@@ -13,6 +13,15 @@
     "noEmit": false,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "vitest.config.ts"],
-  "exclude": ["dist", "coverage", "node_modules"]
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "dist",
+    "coverage",
+    "node_modules",
+    "contracts/**"
+  ]
 }

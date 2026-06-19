@@ -2,7 +2,7 @@
   "name": "ghostbroker",
   "version": "0.1.0",
   "private": true,
-  "description": "Institutional dark pool platform with isolated frontend, backend, and Terminal 3 enclave workspaces.",
+  "description": "Institutional dark pool platform with isolated frontend and backend workspaces. Backend hosts the Express REST API, WebSocket telemetry, Terminal 3 enclave, settlement rails, hosted-agent CLI, agent SDK, and Rust/Solidity contract sources.",
   "type": "module",
   "engines": {
     "node": ">=20.19.0",
@@ -10,18 +10,17 @@
   },
   "packageManager": "npm@10.0.0",
   "workspaces": [
-    "negotiation-core",
-    "t3-enclave",
-    "backend",
     "frontend",
-    "agent-client",
-    "agents"
+    "backend"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run build --workspace @ghostbroker/negotiation-core && npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "test:watch": "npm run test:watch --workspaces --if-present"
+    "test:watch": "npm run test:watch --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspace @ghostbroker/frontend",
+    "dev:frontend": "npm run dev --workspace @ghostbroker/frontend",
+    "dev:backend": "npm run dev --workspace @ghostbroker/backend"
   }
 }
