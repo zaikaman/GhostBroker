@@ -567,9 +567,9 @@ npm run dev --workspace @ghostbroker/frontend
 npm run sandbox:check --workspace @ghostbroker/t3-enclave
 
 # Run the hosted buyer / seller / negotiator
-npm run buyer --workspace @ghostbroker/agents
-npm run seller --workspace @ghostbroker/agents
-npm run hosted --workspace @ghostbroker/agents
+npm run buyer --workspace @ghostbroker/backend
+npm run seller --workspace @ghostbroker/backend
+npm run hosted --workspace @ghostbroker/backend
 ```
 
 ### Recommended local test order
@@ -694,8 +694,8 @@ This is the fastest path from a clean checkout to a settled trade:
    compares against on `POST /api/auth/api-key`.
 
 4. **Deploy an agent.** Use the Agent Deployment Guide in the
-   dashboard, or run `npm run hosted --workspace @ghostbroker/agents`
-   after copying `agents/.env.example` to `agents/.env` and filling
+   dashboard, or run `npm run hosted --workspace @ghostbroker/backend`
+   after copying `backend/.env.example` to `backend/.env` and filling
    in the API key + at least one LLM provider.
 
 5. **Watch it settle.** The hosted agent mints its DID, admits

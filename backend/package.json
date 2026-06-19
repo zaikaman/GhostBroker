@@ -17,6 +17,7 @@
     "agent:buyer": "tsx src/cli/agents/buyer-agent.ts",
     "agent:seller": "tsx src/cli/agents/seller-agent.ts",
     "agent:hosted": "tsx src/cli/agents/hosted-agent.ts",
+    "hosted": "npm run agent:hosted",
     "verify:t3n-tenant": "tsx scripts/verify-t3n-tenant.ts",
     "contract:build:matching": "cd contracts/matching-policy && cargo build --target wasm32-wasip2 --release",
     "contract:publish:matching": "tsx scripts/publish-matching.ts",

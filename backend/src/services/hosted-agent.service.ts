@@ -171,7 +171,11 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
 
     const existingState = this.runtimeStates.get(id);
     if (existingState?.child && existingState.child.exitCode === null) {
-      throw new PublicError("service_unavailable", 409);
+      const pid = existingState.child.pid;
+      console.log(
+        `[HOSTED] start request for agent ${id} ignored — runtime already running (pid=${pid ?? "unknown"}, startedAt=${existingState.startedAt ?? "unknown"})`,
+      );
+      return this.getHostedAgent(id, institutionId);
     }
 
     const institution = await this.institutionService.getInstitution(institutionId);
@@ -448,19 +452,44 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     const runnerArgs = [...this.runner.slice(1)];
 
     if (isScriptMode && this.hostedScript) {
-      return spawn(runnerBin, [...runnerArgs, this.hostedScript], {
+      console.log(
+        `[HOSTED] spawning ${runnerBin} ${[...runnerArgs, this.hostedScript].join(" ")} (cwd=${this.agentsDir}, shell=${shell})`,
+      );
+      const child = spawn(runnerBin, [...runnerArgs, this.hostedScript], {
         cwd: this.agentsDir,
         env,
         stdio: ["ignore", "pipe", "pipe"],
         shell,
       });
+      this.attachDiagnostics(child, runtime.agentId);
+      return child;
     }
 
-    return spawn(runnerBin, [...runnerArgs, "hosted"], {
+    console.log(
+      `[HOSTED] spawning ${runnerBin} ${[...runnerArgs, "hosted"].join(" ")} (cwd=${this.agentsDir}, shell=${shell})`,
+    );
+    const child = spawn(runnerBin, [...runnerArgs, "hosted"], {
       cwd: this.agentsDir,
       env,
       stdio: ["ignore", "pipe", "pipe"],
       shell,
+    });
+    this.attachDiagnostics(child, runtime.agentId);
+    return child;
+  }
+
+  private attachDiagnostics(child: ChildProcess, agentId: string): void {
+    child.on("error", (error) => {
+      console.error(`[HOSTED] spawn error for agent ${agentId}: ${error.message}`);
+    });
+    child.on("exit", (code, signal) => {
+      if ((code ?? 0) !== 0) {
+        console.error(
+          `[HOSTED] agent ${agentId} runtime exited code=${code ?? "unknown"}${signal ? ` signal=${signal}` : ""}`,
+        );
+      } else {
+        console.log(`[HOSTED] agent ${agentId} runtime exited cleanly`);
+      }
     });
   }
 

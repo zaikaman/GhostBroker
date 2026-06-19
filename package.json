@@ -21,6 +21,10 @@
     "test:watch": "npm run test:watch --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @ghostbroker/frontend",
     "dev:frontend": "npm run dev --workspace @ghostbroker/frontend",
-    "dev:backend": "npm run dev --workspace @ghostbroker/backend"
+    "dev:backend": "npm run dev --workspace @ghostbroker/backend",
+    "buyer": "npm run agent:buyer --workspace @ghostbroker/backend",
+    "seller": "npm run agent:seller --workspace @ghostbroker/backend",
+    "hosted": "npm run agent:hosted --workspace @ghostbroker/backend",
+    "sandbox:check": "npm run sandbox:check --workspace @ghostbroker/backend"
   }
 }
