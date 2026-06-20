@@ -1324,12 +1324,6 @@ processes from the same web process; those children are tied to the web
 dyno's lifetime and are restarted by the operator via
 `POST /api/hosted-agents/start` after each Heroku dyno cycle.
 
-> **v1 trade-off**: Heroku cycles web dynos every 24 hours, which terminates
-> all running hosted-agent child processes. Operators must restart any
-> active hosted agents after each cycle. A v2 supervisor pattern (running
-> hosted agents in a dedicated worker dyno with Supabase-backed state) is
-> the production fix; it is out of scope for this deploy.
-
 ### Frontend (Vercel)
 
 The frontend is a Vite + React 19 SPA. Deploy from the `frontend/`
