@@ -97,7 +97,7 @@ ghostbroker/
 |   |   |-- hooks/                     Real-time telemetry and data hooks
 |   |   |-- services/                  API client, telemetry, wallet auth
 |   |   |-- styles/                    Design system CSS (theme, dashboard, landing)
-|   |   +-- test/                      17 frontend test files (71 tests)
+|   |   +-- test/                      19 frontend test files (71 tests)
 |   |-- public/                        Static assets
 |   +-- package.json                   @ghostbroker/frontend workspace
 |
@@ -684,7 +684,7 @@ The interface follows the "Attested Enclave" design language documented in
 - **Components**: Glassmorphic cards with `backdrop-filter: blur(12px)`,
   double-mask composited borders, pill-shaped buttons.
 
-### Component Inventory (23 components)
+### Component Inventory (25 components)
 
 | Component                    | Purpose                                    |
 | ---------------------------- | ------------------------------------------ |
@@ -1211,7 +1211,7 @@ npm run test:e2e
 
 | Module | Test files | Tests passing | Tests skipped |
 |---|---|---|---|
-| **frontend** (workspace, jsdom) | **17** | **69** | **0** |
+| **frontend** (workspace, jsdom) | **19** | **69** | **0** |
 | **backend** (workspace, node) | **92** passed + **1** skipped | **508** | **8** (chain-sepolia, gated) |
 | **Total** | **110** (109 passed + 1 skipped) | **577** | **8** |
 
@@ -1231,7 +1231,7 @@ hosted agent management, and telemetry redaction.
 deposit wallet service, operator auth sessions, portfolio service, privacy
 redaction, settlement reconciler, and negotiation orchestrator.
 
-**Frontend tests** (17 files) -- React component and service tests via
+**Frontend tests** (19 files) -- React component and service tests via
 Testing Library: agent panels, deployment guide, completed trades, deposit
 wallet, encrypted receipts, live activity stream, processing status,
 settlement profile, accessibility, and privacy redaction.
