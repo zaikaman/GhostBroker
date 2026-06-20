@@ -9,11 +9,14 @@ import {
 export interface GeminiProviderOptions {
   apiKey: string;
   /**
-   * Override the Gemini API base URL. Defaults to the v98store
-   * proxy documented for the demo (`v1beta` root). The provider
-   * appends `/models/{model}:generateContent`.
+   * Required Gemini API base URL. There is no default — callers MUST
+   * pass the explicit endpoint for their deployment (e.g. Google's
+   * `https://generativelanguage.googleapis.com/v1beta` for the
+   * documented Gemini API, an Azure-hosted Gemini endpoint, or a
+   * self-hosted reverse proxy). The provider appends
+   * `/models/{model}:generateContent`.
    */
-  baseUrl?: string;
+  baseUrl: string;
   /**
    * Override the Gemini model id. Defaults to `gemini-3.1-flash-lite`,
    * which is the workspace's primary model.
@@ -33,7 +36,6 @@ export interface GeminiProviderOptions {
   fetchImpl?: typeof fetch;
 }
 
-const DEFAULT_BASE_URL = "https://v98store.com/v1beta";
 const DEFAULT_MODEL = "gemini-3.1-flash-lite";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -73,8 +75,18 @@ export class GeminiLlmProvider implements LlmProvider {
         message: "GeminiLlmProvider requires a non-empty apiKey",
       });
     }
+    if (!options.baseUrl || options.baseUrl.trim().length === 0) {
+      throw new LlmProviderError({
+        provider: "gemini",
+        kind: "config",
+        message:
+          "GeminiLlmProvider requires a non-empty baseUrl. " +
+          "Set GEMINI_BASE_URL to your Gemini endpoint (e.g. " +
+          "https://generativelanguage.googleapis.com/v1beta).",
+      });
+    }
     this.apiKey = options.apiKey;
-    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/u, "");
+    this.baseUrl = options.baseUrl.replace(/\/+$/u, "");
     this.model = options.model ?? DEFAULT_MODEL;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);

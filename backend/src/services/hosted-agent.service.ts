@@ -433,6 +433,12 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       // works without needing to set these vars in the backend's shell
       // or worry about stale backend env vars overriding the agent's
       // .env (which is the canonical source for agent LLM keys).
+      // We also clear any *_BASE_URL the backend may have set so the
+      // hosted agent can never silently inherit a stale third-party
+      // proxy — agents MUST ship an explicit *_BASE_URL in their own
+      // .env (the agent env loader treats .env values as defaults that
+      // do not override anything already set; clearing them here
+      // forces a fresh read from agents/.env on every spawn).
       GEMINI_API_KEY: undefined,
       GEMINI_MODEL: undefined,
       GEMINI_BASE_URL: undefined,
@@ -441,6 +447,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       OPENAI_BASE_URL: undefined,
       GROQ_API_KEY: undefined,
       GROQ_MODEL: undefined,
+      GROQ_BASE_URL: undefined,
     };
     const isWin = process.platform === "win32";
     const shell = isWin && this.runner[0] === "npm";

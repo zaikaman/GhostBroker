@@ -91,56 +91,99 @@ export function booleanEnv(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
-export const agentEnvSchema = z.object({
-  GHOSTBROKER_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)),
-  GHOSTBROKER_API_KEY: z.string().regex(/^gbk_/u, "must start with the gbk_ prefix").optional(),
-  GHOSTBROKER_SESSION_TOKEN: z.string().trim().min(1).optional(),
-  GHOSTBROKER_SESSION_EXPIRES_AT: z.string().trim().min(1).optional(),
-  GHOSTBROKER_INSTITUTION_ID: z.string().uuid().optional(),
-  GHOSTBROKER_INSTITUTION_DISPLAY_NAME: z.string().trim().min(1).optional(),
-  GHOSTBROKER_INSTITUTION_TENANT_DID: z.string().trim().min(1).optional(),
-  T3N_API_KEY: z.string().min(1).optional(),
-  T3N_API_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)).optional(),
-  AGENT_IDENTITY_CONFIG_PATH: z.string().min(1).optional(),
-  AGENT_IDENTITY_DID: z.string().min(1).optional(),
-  DELEGATION_CREDENTIAL_PATH: z.string().min(1).optional(),
+export const agentEnvSchema = z
+  .object({
+    GHOSTBROKER_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)),
+    GHOSTBROKER_API_KEY: z.string().regex(/^gbk_/u, "must start with the gbk_ prefix").optional(),
+    GHOSTBROKER_SESSION_TOKEN: z.string().trim().min(1).optional(),
+    GHOSTBROKER_SESSION_EXPIRES_AT: z.string().trim().min(1).optional(),
+    GHOSTBROKER_INSTITUTION_ID: z.string().uuid().optional(),
+    GHOSTBROKER_INSTITUTION_DISPLAY_NAME: z.string().trim().min(1).optional(),
+    GHOSTBROKER_INSTITUTION_TENANT_DID: z.string().trim().min(1).optional(),
+    T3N_API_KEY: z.string().min(1).optional(),
+    T3N_API_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)).optional(),
+    AGENT_IDENTITY_CONFIG_PATH: z.string().min(1).optional(),
+    AGENT_IDENTITY_DID: z.string().min(1).optional(),
+    DELEGATION_CREDENTIAL_PATH: z.string().min(1).optional(),
 
-  // ── LLM provider chain (Gemini primary, OpenAI fallback, Groq last) ──
-  /**
-   * Comma-separated provider order. The agent tries each in turn and
-   * falls back on transient failures (5xx, 429, network, empty /
-   * malformed responses). Auth / 400 errors are fatal — a different
-   * provider won't accept a prompt that one rejected. Default:
-   * `gemini,openai,groq`.
-   */
-  LLM_PROVIDER_CHAIN: z.string().trim().min(1).optional(),
-  /** Primary provider — Gemini (v98store proxy). */
-  GEMINI_API_KEY: z.string().min(1).optional(),
-  GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.1-flash-lite"),
-  GEMINI_BASE_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)).optional(),
-  /** Fallback #1 — OpenAI-compatible (Azure OpenAI in this workspace). */
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  OPENAI_MODEL: z.string().trim().min(1).default("gpt-5-nano"),
-  OPENAI_BASE_URL: z
-    .string()
-    .url()
-    .or(z.string().regex(/^https?:\/\//u))
-    .optional(),
-  /** Fallback #2 — Groq (existing). */
-  GROQ_API_KEY: z.string().min(1).optional(),
-  GROQ_MODEL: z.string().trim().min(1).default("qwen/qwen3-32b"),
-  GROQ_BASE_URL: z.string().url().or(z.string().regex(/^https?:\/\//u)).optional(),
+    // ── LLM provider chain (Gemini primary, OpenAI fallback, Groq last) ──
+    /**
+     * Comma-separated provider order. The agent tries each in turn and
+     * falls back on transient failures (5xx, 429, network, empty /
+     * malformed responses). Auth / 400 errors are fatal — a different
+     * provider won't accept a prompt that one rejected. Default:
+     * `gemini,openai,groq`.
+     */
+    LLM_PROVIDER_CHAIN: z.string().trim().min(1).optional(),
+    /** Primary provider — Gemini. */
+    GEMINI_API_KEY: z.string().min(1).optional(),
+    GEMINI_MODEL: z.string().trim().min(1).default("gemini-3.1-flash-lite"),
+    /**
+     * Required when GEMINI_API_KEY is set. The LLM clients no longer
+     * ship a default base URL — operators must point at the documented
+     * Google endpoint (or their own sanctioned Azure / on-prem proxy)
+     * explicitly. Keeping this as `https://...` (not just any string)
+     * so a typo like `http//foo` fails fast at startup.
+     */
+    GEMINI_BASE_URL: z
+      .string()
+      .url()
+      .or(z.string().regex(/^https?:\/\//u))
+      .optional(),
+    /** Fallback #1 — OpenAI-compatible (Azure OpenAI or OpenAI). */
+    OPENAI_API_KEY: z.string().min(1).optional(),
+    OPENAI_MODEL: z.string().trim().min(1).default("gpt-5-nano"),
+    /** Required when OPENAI_API_KEY is set. No implicit default. */
+    OPENAI_BASE_URL: z
+      .string()
+      .url()
+      .or(z.string().regex(/^https?:\/\//u))
+      .optional(),
+    /** Fallback #2 — Groq. */
+    GROQ_API_KEY: z.string().min(1).optional(),
+    GROQ_MODEL: z.string().trim().min(1).default("qwen/qwen3-32b"),
+    /** Required when GROQ_API_KEY is set. No implicit default. */
+    GROQ_BASE_URL: z
+      .string()
+      .url()
+      .or(z.string().regex(/^https?:\/\//u))
+      .optional(),
 
-  POLL_INTERVAL_MS: z.number().positive().default(5_000),
-  AGENT_QUOTE_ASSET_CODE: z.string().trim().min(1).max(32).default("USDC"),
-  MAX_TICKS: z.number().positive().default(40),
-  DRY_RUN: z.boolean().default(false),
+    POLL_INTERVAL_MS: z.number().positive().default(5_000),
+    AGENT_QUOTE_ASSET_CODE: z.string().trim().min(1).max(32).default("USDC"),
+    MAX_TICKS: z.number().positive().default(40),
+    DRY_RUN: z.boolean().default(false),
 
-  AGENT_AVAILABLE_QUOTE_BALANCE: z.coerce.number().nonnegative().optional(),
-  AGENT_AVAILABLE_BASE_BALANCE: z.coerce.number().nonnegative().optional(),
-  HOSTED_AGENT_ID: z.string().uuid().optional(),
-  HOSTED_MANDATE_ID: z.string().uuid().optional(),
-});
+    AGENT_AVAILABLE_QUOTE_BALANCE: z.coerce.number().nonnegative().optional(),
+    AGENT_AVAILABLE_BASE_BALANCE: z.coerce.number().nonnegative().optional(),
+    HOSTED_AGENT_ID: z.string().uuid().optional(),
+    HOSTED_MANDATE_ID: z.string().uuid().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // Cross-field: every provider that has a credential must also
+    // have an explicit base URL. The LLM clients themselves throw
+    // `kind: "config"` if the URL is missing — but failing at env
+    // parse time gives a much clearer error than waiting for the
+    // first tick to crash deep in the runtime.
+    const requireBaseUrl = (
+      apiKeyName: "GEMINI_API_KEY" | "OPENAI_API_KEY" | "GROQ_API_KEY",
+      baseUrlName: "GEMINI_BASE_URL" | "OPENAI_BASE_URL" | "GROQ_BASE_URL",
+      provider: string,
+    ): void => {
+      if (data[apiKeyName] && !data[baseUrlName]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${baseUrlName} is required when ${apiKeyName} is set ` +
+            `(no implicit default; point ${provider} at your explicit endpoint, ` +
+            `e.g. https://generativelanguage.googleapis.com/v1beta for Gemini).`,
+          path: [baseUrlName],
+        });
+      }
+    };
+    requireBaseUrl("GEMINI_API_KEY", "GEMINI_BASE_URL", "Gemini");
+    requireBaseUrl("OPENAI_API_KEY", "OPENAI_BASE_URL", "OpenAI");
+    requireBaseUrl("GROQ_API_KEY", "GROQ_BASE_URL", "Groq");
+  });
 
 export type AgentEnv = z.infer<typeof agentEnvSchema>;
 

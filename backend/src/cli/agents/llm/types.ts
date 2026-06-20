@@ -49,6 +49,7 @@ export type LlmProviderErrorKind =
   | "network"
   | "empty"
   | "shape"
+  | "config"
   | "unknown";
 
 /**
@@ -56,7 +57,9 @@ export type LlmProviderErrorKind =
  * chain uses to decide whether to try the next provider: auth and
  * `bad_request` are NOT transient (no point hitting OpenAI if Gemini
  * rejected our prompt); server / rate_limit / network / empty / shape
- * ARE transient (the next provider may succeed).
+ * ARE transient (the next provider may succeed). Config errors are
+ * NOT transient — retrying with the same options will keep failing
+ * until the operator fixes the agent's environment.
  */
 export class LlmProviderError extends Error {
   public readonly provider: string;
@@ -84,7 +87,7 @@ export class LlmProviderError extends Error {
 function defaultTransient(kind: LlmProviderErrorKind, status: number | undefined): boolean {
   if (status === 401 || status === 403) return false;
   if (status === 400 || status === 404) return false;
-  if (kind === "auth" || kind === "bad_request") return false;
+  if (kind === "auth" || kind === "bad_request" || kind === "config") return false;
   return true;
 }
 

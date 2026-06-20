@@ -100,8 +100,10 @@ export function buildLlmChain(options: BuildLlmChainOptions): FallbackLlmProvide
 
   if (providers.length === 0) {
     throw new Error(
-      "No LLM providers configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or GROQ_API_KEY " +
-        "(or a combination) in the agent environment.",
+      "No LLM providers configured. Set (GEMINI_API_KEY + GEMINI_BASE_URL), " +
+        "(OPENAI_API_KEY + OPENAI_BASE_URL), or (GROQ_API_KEY + GROQ_BASE_URL) " +
+        "(or a combination) in the agent environment. Every provider requires " +
+        "BOTH the credential and an explicit endpoint — there are no implicit defaults.",
     );
   }
 
@@ -115,28 +117,28 @@ function buildProvider(
 ): LlmProvider | undefined {
   switch (id) {
     case "gemini": {
-      if (!env.GEMINI_API_KEY) return undefined;
+      if (!env.GEMINI_API_KEY || !env.GEMINI_BASE_URL) return undefined;
       return new GeminiLlmProvider({
         apiKey: env.GEMINI_API_KEY,
-        ...(env.GEMINI_BASE_URL ? { baseUrl: env.GEMINI_BASE_URL } : {}),
+        baseUrl: env.GEMINI_BASE_URL,
         ...(env.GEMINI_MODEL ? { model: env.GEMINI_MODEL } : {}),
         ...fetchOpts,
       });
     }
     case "openai": {
-      if (!env.OPENAI_API_KEY) return undefined;
+      if (!env.OPENAI_API_KEY || !env.OPENAI_BASE_URL) return undefined;
       return new OpenAILlmProvider({
         apiKey: env.OPENAI_API_KEY,
-        ...(env.OPENAI_BASE_URL ? { baseUrl: env.OPENAI_BASE_URL } : {}),
+        baseUrl: env.OPENAI_BASE_URL,
         ...(env.OPENAI_MODEL ? { model: env.OPENAI_MODEL } : {}),
         ...fetchOpts,
       });
     }
     case "groq": {
-      if (!env.GROQ_API_KEY) return undefined;
+      if (!env.GROQ_API_KEY || !env.GROQ_BASE_URL) return undefined;
       return new GroqLlmProvider({
         apiKey: env.GROQ_API_KEY,
-        ...(env.GROQ_BASE_URL ? { baseUrl: env.GROQ_BASE_URL } : {}),
+        baseUrl: env.GROQ_BASE_URL,
         ...(env.GROQ_MODEL ? { model: env.GROQ_MODEL } : {}),
         ...fetchOpts,
       });

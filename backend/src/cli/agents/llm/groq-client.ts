@@ -9,11 +9,13 @@ import {
 export interface GroqProviderOptions {
   apiKey: string;
   /**
-   * Override the Groq API base URL. Defaults to the public Groq
-   * Cloud endpoint. Kept as an override so a self-hosted proxy
-   * (e.g. on-prem) can be swapped in without code changes.
+   * Required Groq-compatible base URL. There is no default — callers
+   * MUST pass the explicit endpoint for their deployment (e.g.
+   * `https://api.groq.com/openai/v1` for Groq Cloud or a self-hosted
+   * reverse proxy). Kept as a required field so a self-hosted proxy
+   * can be swapped in without code changes.
    */
-  baseUrl?: string;
+  baseUrl: string;
   /**
    * Override the Groq model id. Defaults to `qwen/qwen3-32b`, which
    * is the model the workspace previously used.
@@ -29,7 +31,6 @@ export interface GroqProviderOptions {
   fetchImpl?: typeof fetch;
 }
 
-const DEFAULT_BASE_URL = "https://api.groq.com/openai/v1";
 const DEFAULT_MODEL = "qwen/qwen3-32b";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -66,8 +67,18 @@ export class GroqLlmProvider implements LlmProvider {
         message: "GroqLlmProvider requires a non-empty apiKey",
       });
     }
+    if (!options.baseUrl || options.baseUrl.trim().length === 0) {
+      throw new LlmProviderError({
+        provider: "groq",
+        kind: "config",
+        message:
+          "GroqLlmProvider requires a non-empty baseUrl. " +
+          "Set GROQ_BASE_URL to your Groq-compatible endpoint " +
+          "(e.g. https://api.groq.com/openai/v1).",
+      });
+    }
     this.apiKey = options.apiKey;
-    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/u, "");
+    this.baseUrl = options.baseUrl.replace(/\/+$/u, "");
     this.model = options.model ?? DEFAULT_MODEL;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);

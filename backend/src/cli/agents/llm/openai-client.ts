@@ -9,11 +9,13 @@ import {
 export interface OpenAIProviderOptions {
   apiKey: string;
   /**
-   * Override the OpenAI base URL. Defaults to the Azure OpenAI v1
-   * endpoint that hosts `gpt-5-nano` for this workspace. The provider
-   * appends `/chat/completions`.
+   * Required OpenAI-compatible base URL. There is no default — callers
+   * MUST pass the explicit endpoint for their deployment (e.g. Azure
+   * OpenAI at `https://<resource>.openai.azure.com/openai/v1`, OpenAI
+   * at `https://api.openai.com/v1`, or a self-hosted reverse proxy).
+   * The provider appends `/chat/completions`.
    */
-  baseUrl?: string;
+  baseUrl: string;
   /**
    * Override the OpenAI model id. Defaults to `gpt-5-nano`.
    */
@@ -28,7 +30,6 @@ export interface OpenAIProviderOptions {
   fetchImpl?: typeof fetch;
 }
 
-const DEFAULT_BASE_URL = "https://roguegoescrazy.services.ai.azure.com/openai/v1";
 const DEFAULT_MODEL = "gpt-5-nano";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -67,8 +68,18 @@ export class OpenAILlmProvider implements LlmProvider {
         message: "OpenAILlmProvider requires a non-empty apiKey",
       });
     }
+    if (!options.baseUrl || options.baseUrl.trim().length === 0) {
+      throw new LlmProviderError({
+        provider: "openai",
+        kind: "config",
+        message:
+          "OpenAILlmProvider requires a non-empty baseUrl. " +
+          "Set OPENAI_BASE_URL to your OpenAI-compatible endpoint " +
+          "(e.g. https://api.openai.com/v1 or your Azure OpenAI deployment).",
+      });
+    }
     this.apiKey = options.apiKey;
-    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/u, "");
+    this.baseUrl = options.baseUrl.replace(/\/+$/u, "");
     this.model = options.model ?? DEFAULT_MODEL;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);

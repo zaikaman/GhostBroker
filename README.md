@@ -934,14 +934,24 @@ The backend requires a `.env` file at `backend/.env`. Copy from
 
 ### LLM Provider Keys (for hosted agents)
 
-| Variable         | Description                                      |
-| ---------------- | ------------------------------------------------ |
-| `GEMINI_API_KEY`  | Google Gemini API key                            |
-| `GEMINI_MODEL`    | Gemini model (default: `gemini-3.1-flash-lite`)  |
-| `OPENAI_API_KEY`  | OpenAI API key                                   |
-| `OPENAI_MODEL`    | OpenAI model (default: `gpt-5-nano`)             |
-| `GROQ_API_KEY`    | Groq API key                                     |
-| `GROQ_MODEL`      | Groq model (default: `qwen/qwen3-32b`)          |
+Every provider that has a credential MUST also have an explicit `*_BASE_URL`.
+The LLM clients (`gemini-client.ts`, `openai-client.ts`, `groq-client.ts`)
+no longer ship default endpoints — operators point each provider at the
+documented endpoint for their own deployment (Google Gemini, OpenAI /
+Azure OpenAI, Groq Cloud, or a sanctioned self-hosted proxy). Missing
+`*_BASE_URL` fails fast at agent env-load time with a clear "config" error.
+
+| Variable             | Description                                           |
+| -------------------- | ----------------------------------------------------- |
+| `GEMINI_API_KEY`     | Google Gemini API key                                 |
+| `GEMINI_MODEL`       | Gemini model (default: `gemini-3.1-flash-lite`)       |
+| `GEMINI_BASE_URL`    | Required when `GEMINI_API_KEY` is set (e.g. `https://generativelanguage.googleapis.com/v1beta`) |
+| `OPENAI_API_KEY`     | OpenAI API key                                        |
+| `OPENAI_MODEL`       | OpenAI model (default: `gpt-5-nano`)                  |
+| `OPENAI_BASE_URL`    | Required when `OPENAI_API_KEY` is set (e.g. `https://api.openai.com/v1` or Azure OpenAI deployment URL) |
+| `GROQ_API_KEY`       | Groq API key                                          |
+| `GROQ_MODEL`         | Groq model (default: `qwen/qwen3-32b`)                |
+| `GROQ_BASE_URL`      | Required when `GROQ_API_KEY` is set (e.g. `https://api.groq.com/openai/v1`) |
 
 ### Chain Rail Variables (opt-in)
 
