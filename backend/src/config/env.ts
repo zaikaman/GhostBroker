@@ -5,7 +5,19 @@ function loadProcessEnvFile(source: NodeJS.ProcessEnv): void {
     return;
   }
 
-  process.loadEnvFile?.();
+  // `loadEnvFile` is a Node 20.12+ convenience for local dev. The `?.`
+  // guards older Node builds where the function does not exist; the
+  // try/catch handles the production case where the platform supplies
+  // the env vars and the local `.env` file is absent. A missing file
+  // is the expected state on Heroku (env vars come from
+  // `heroku config:set`) and must not crash the boot.
+  try {
+    process.loadEnvFile?.();
+  } catch {
+    // .env is optional. In production the platform supplies env vars;
+    // in dev a missing .env just means the operator is relying on
+    // whatever is in their shell environment.
+  }
 }
 
 /** Convert empty-string, whitespace, carriage returns, and placeholder env vars to `undefined` so that `.optional()` fields pass validation. */
