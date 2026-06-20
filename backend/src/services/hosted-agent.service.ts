@@ -256,12 +256,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
 
     const child = state.child;
     if (child && child.exitCode === null) {
-      child.kill("SIGTERM");
-      await new Promise((resolveStop) => setTimeout(resolveStop, 1000));
-      const currentChild = state.child;
-      if (currentChild && currentChild.exitCode === null) {
-        currentChild.kill("SIGKILL");
-      }
+      await this.terminateChildTree(child);
     }
 
     state.child = undefined;
@@ -277,6 +272,39 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       } catch {
         // best effort
       }
+    }
+  }
+
+  /**
+   * Terminates the hosted-agent child process along with every process
+   * it spawned. On Windows we MUST walk the tree because the spawn
+   * uses `shell: true` (cmd.exe wraps the actual `node hosted-agent.ts`
+   * grandchild); `ChildProcess#kill()` only terminates the cmd.exe
+   * wrapper and the orphaned grandchild keeps polling the orchestrator
+   * — which is the bug the dashboard's STOP button used to exhibit.
+   */
+  private async terminateChildTree(child: ChildProcess): Promise<void> {
+    const pid = child.pid;
+    if (!pid) {
+      return;
+    }
+
+    if (process.platform === "win32") {
+      await new Promise<void>((resolve) => {
+        const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        killer.once("exit", () => resolve());
+        killer.once("error", () => resolve());
+      });
+      return;
+    }
+
+    child.kill("SIGTERM");
+    await new Promise((resolveStop) => setTimeout(resolveStop, 1000));
+    if (child.exitCode === null) {
+      child.kill("SIGKILL");
     }
   }
 

@@ -1,4 +1,4 @@
-﻿import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+﻿import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -151,4 +151,81 @@ describe("ChildProcessHostedAgentService.stopHostedAgent", () => {
     const stoppedAgain = await service.stopHostedAgent(agentId, institutionId);
     expect(stoppedAgain.runtime.running).toBe(false);
   });
+
+  it.runIf(process.platform === "win32")(
+    "terminates the grandchild process tree on Windows shell-mode spawn",
+    async () => {
+      // Reproduces the dashboard's STOP button being a no-op on
+      // Windows. The production spawn uses `runner: ["npm", "run"]`
+      // with `shell: true`, so `child` is the cmd.exe wrapper and
+      // the actual `node hosted-agent.ts` is a grandchild. Plain
+      // `child.kill()` only kills the wrapper; the grandchild keeps
+      // polling. After the fix, taskkill /T /F walks the tree.
+      const pidFile = join(workspace, "grandchild.pid");
+      writeFileSync(
+        join(workspace, "keepalive-grandchild.mjs"),
+        [
+          "import { writeFileSync } from 'node:fs';",
+          `writeFileSync(${JSON.stringify(pidFile.replace(/\\/g, "\\\\"))}, String(process.pid));`,
+          "setInterval(() => {}, 1000);",
+          "",
+        ].join("\n"),
+      );
+
+      const service = new ChildProcessHostedAgentService({
+        agentsDir: workspace,
+        backendUrl: "http://localhost:3000",
+        authSessionSecret: "test-auth-session-secret-with-more-than-32-characters",
+        agentService: buildAgentService(),
+        institutionService,
+        negotiationService,
+        // cmd.exe /c is the closest in-test analogue to `npm run`
+        // on Windows: the spawned `child` is the shell wrapper, and
+        // the long-lived grandchild is `node keepalive-grandchild.mjs`.
+        runner: ["cmd.exe", "/c"],
+        hostedScript: "node keepalive-grandchild.mjs",
+      });
+
+      const started = await service.startHostedAgent(agentId, institutionId);
+      expect(started.runtime.running).toBe(true);
+      expect(started.runtime.pid).toBeTypeOf("number");
+
+      // Wait for the grandchild to record its pid so we can prove
+      // taskkill /T reaches it (not just the cmd.exe wrapper).
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        try {
+          const recorded = readFileSync(pidFile, "utf8").trim();
+          if (recorded) break;
+        } catch {
+          // file not written yet
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+      const grandchildPid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+      expect(Number.isFinite(grandchildPid)).toBe(true);
+      // Sanity-check the test setup: wrapper pid must differ from
+      // grandchild pid. If they're ever equal the test is no longer
+      // exercising the shell-wrapped path.
+      expect(grandchildPid).not.toBe(started.runtime.pid);
+
+      const stopped = await service.stopHostedAgent(agentId, institutionId);
+      expect(stopped.runtime.running).toBe(false);
+
+      // Give the OS a moment to reap after TerminateProcess.
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+
+      // process.kill(pid, 0) on Windows throws ESRCH if the pid is
+      // gone. The whole point of the fix is that this no longer
+      // throws — the grandchild was actually killed, not just the
+      // cmd.exe wrapper.
+      let grandchildAlive = true;
+      try {
+        process.kill(grandchildPid, 0);
+      } catch (err) {
+        grandchildAlive = (err as NodeJS.ErrnoException).code !== "ESRCH";
+      }
+      expect(grandchildAlive).toBe(false);
+    },
+  );
 });
