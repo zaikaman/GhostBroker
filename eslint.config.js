@@ -15,7 +15,8 @@ export default tseslint.config(
       "**/test-results/**",
       "**/.supabase/**",
       "**/.agents/**",
-      "**/.hermes/**"
+      "**/.hermes/**",
+      "example/**"
     ]
   },
   js.configs.recommended,

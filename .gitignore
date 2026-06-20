@@ -72,8 +72,4 @@ Thumbs.db
 *.tmp
 *.swp
 
-# Vendored reference implementation cloned into the workspace
-# by the T3 onboarding flow; it carries its own
-# `.git` history and build artefacts that are not part of
-# the GhostBroker source tree.
-ghostbroker-delegation-reference
+example

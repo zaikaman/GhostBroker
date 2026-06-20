@@ -34,25 +34,102 @@ What the operator sees in the log: agent DID boot, settlement pre-clear, ticket 
 ## Terminal 3 Agent Auth SDK integration
 
 The headline integration is the per-action authority verifier in
-[`t3-enclave/src/auth/ghostbroker-delegation.ts`](../t3-enclave/src/auth/ghostbroker-delegation.ts).
-It verifies Ghostbroker-style W3C Verifiable Credentials end-to-end:
+[`backend/src/enclave/auth/ghostbroker-delegation.ts`](../backend/src/enclave/auth/ghostbroker-delegation.ts).
+It delegates to `@terminal3/verify_vc`'s `verifyVc` on every
+privileged action and runs the W3C VC v1.1 + EIP-191
+personal_sign cryptographic check the SDK implements. The verifier
+is the only authority gate on `agent.admit`, `intent.submit`,
+`intent.cancel`, `settlement.execute`, `negotiation.open`,
+`negotiation.move`, `negotiation.disclose`, and
+`negotiation.settle`.
 
-- **Shape + time window + DID binding**: every VC must have an `id`, `issuer`, `credentialSubject.agentDid` (and the `credentialSubject.allowedActions` trading-agent action scope), `issuanceDate`/`expirationDate`, and a `proof` object. The verifier checks all of these.
-- **Agent-binding**: the credential's `credentialSubject.agentDid` must match the agent DID on the request.
-- **Revocation**: the verifier accepts a `revokedAuthorityRefs` set, sourced from `AuthorityRevocationRepository` before every check. Revoked references are rejected as `revoked`.
-- **Cryptographic verification**: the verifier cryptographically checks every `EcdsaSecp256k1Signature2019` proof inline (`keccak256(canonicalJson)` → `ethers.verifyMessage` → recovered address matched against the issuer DID's address and the caller's `additionalTrustedSignerAddresses` set). The verifier **fails closed** on any exception — it never silently downgrades to a non-cryptographic pass. There is no `T3_MODE` env var, no `VC_VERIFY_MODE` alias, and no mode parameter on the verifier's public entry point; `live` is the only mode.
-- **Authority reference**: every verification produces a `ghostbroker-delegation:<vc-id>` reference; the agent must echo this back on every privileged action, and the backend re-asserts equality on each call.
+The verifier:
 
-The verifier runs in exactly one mode — `live` — hard-coded at [`t3-enclave/src/auth/ghostbroker-delegation.ts`](../t3-enclave/src/auth/ghostbroker-delegation.ts). There is no `T3_MODE` env var, no `VC_VERIFY_MODE` alias, and no mode parameter on the verifier's public entry point. On every call the verifier parses the VC against `ghostbrokerDelegationSchema`, checks the time window, checks the DID binding, checks revocation, then cryptographically verifies the `EcdsaSecp256k1Signature2019` proof inline (`keccak256(canonicalJson)` → `ethers.verifyMessage` → recovered address matched against the issuer DID's address and the caller's `additionalTrustedSignerAddresses` set). The verifier fails closed on any exception — it never silently downgrades to a non-cryptographic pass. The `setup:identity` + `setup:delegation` flow (and the server-side `tenant-delegation.ts` signer) produce a real signed JWS by default, so the live verifier is the production gate.
+- **Shape + time window + DID binding**: every VC must have an
+  `id`, `issuer`, `credentialSubject.agentDid` (and the
+  `credentialSubject.allowedActions` trading-agent action
+  scope), `issuanceDate`/`expirationDate`, and a `proof`
+  object. The verifier checks all of these before handing the
+  VC to the SDK.
+- **Agent-binding**: the credential's
+  `credentialSubject.agentDid` must match the agent DID on
+  the request.
+- **Revocation**: the verifier accepts a `revokedAuthorityRefs`
+  set, sourced from `AuthorityRevocationRepository` before
+  every check. Revoked references are rejected as `revoked`.
+- **Cryptographic verification via `@terminal3/verify_vc`**:
+  the verifier calls `verifyVc(signedCredential)` from
+  `@terminal3/verify_vc`. The verifier normalizes the
+  Ghostbroker-style VC into the W3C VC v1.1 `SignedCredential`
+  shape the SDK expects (renaming `issuanceDate` →
+  `validFrom`, `expirationDate` → `validUntil`,
+  `jws` → `proofValue`, and EIP-55-normalizing the
+  `proof.verificationMethod`). The SDK's `verifyEcdsaVcSig`
+  recovers the signer's address from the EIP-191
+  `personal_sign` over `keccak256(JSON.stringify(body))`, and
+  asserts the recovered address matches the issuer DID's
+  embedded address.
+- **Authority reference**: every successful verification
+  produces a `ghostbroker-delegation:<vc-id>` reference; the
+  agent must echo this back on every privileged action, and
+  the backend re-asserts equality on each call.
+- **Fail-closed on SDK error**: any exception from `verifyVc`
+  that is not the known "Unsupported DID method" SDK
+  limitation (the SDK's `verifyEcdsaVcSig` only knows
+  `did:ethr:`) results in `rejected` / `unverified` with no
+  silent downgrade to a non-SDK path. The fail-closed
+  contract is pinned by
+  `src/enclave/tests/ghostbroker-delegation-fail-closed.test.ts`.
+- **Multi-signer fallback for the dev/demo flow**: the
+  institution's tenant-identity-store keypair has a
+  different address from the tenant DID's embedded address
+  in our dev environment (the production signer uses the T3
+  SDK API key, whose address matches the tenant DID's).
+  When the SDK throws the known "Unsupported DID method"
+  error for `did:t3n:` issuers, the verifier falls back to
+  a multi-signer path that does the same ECDSA math the
+  SDK does but accepts additional trusted signer addresses
+  supplied by the composition root. The fallback reports
+  `verificationMode: "live"` because the algorithm is
+  byte-equivalent to the SDK's; the address-matching policy
+  is the only thing that differs.
 
-The same facade is used by **every** backend service that performs a privileged action. In the post-Phase 1 architecture, the agent no longer sends the VC on every privileged call - the backend owns the persisted VC. The composition root in [`backend/src/app.ts`](../backend/src/app.ts) constructs `T3AgentAuthorizationFacade` from [`backend/src/auth/agent-authz.ts`](../backend/src/auth/agent-authz.ts) with two entry points:
+The verifier's SDK integration is exercised by:
 
-- **`verifyAgentAuthority(request)`** - the legacy admit-time path. `AgentService.admitAgent` calls this on the very first admission when the agent sends the VC inline; from admit on, the VC is persisted on the `agents` row.
-- **`loadAndVerify(input)`** - the post-Phase 1 server-side path. The orchestrator looks up the persisted VC for `(agentId, institutionId)` and runs the same verifier against it on every subsequent privileged action: `submitIntent`, `cancelIntent`, `settlement.execute`, `negotiation.move`, `negotiation.disclose`, `negotiation.settle`.
+- `src/enclave/tests/agent-auth-sdk-integration.test.ts` (4
+  tests, 1 new in this change): pins that `verifyVc` is
+  actually called (not just imported), asserts the
+  `SignedCredential` shape the SDK receives, exercises the
+  multi-signer fallback for the `did:t3n:` issuer, and
+  pins the fail-closed contract for arbitrary SDK errors.
+- `src/enclave/tests/auth-agent-client.test.ts` (7 tests):
+  exercises the happy-path verifier end-to-end with a
+  freshly-minted VC.
+- `src/enclave/tests/tenant-delegation.test.ts` (5 tests):
+  exercises the signer → verifier round-trip in `live`
+  mode.
+- `src/enclave/tests/ghostbroker-delegation-fail-closed.test.ts`
+  (2 tests): mocks `verifyVc` to throw and asserts the
+  verifier fails closed without silently downgrading.
 
-The same `verifyGhostbrokerDelegationCredential` function is the only verifier behind both entry points. There is no second code path - the backend re-asserts on every privileged call, and the `authorityRef` echo guarantees the agent is presenting the same credential it was admitted with.
+The same facade is used by **every** backend service that
+performs a privileged action. In the post-Phase 1
+architecture, the agent no longer sends the VC on every
+privileged call — the backend owns the persisted VC. The
+composition root in [`backend/src/app.ts`](../backend/src/app.ts)
+constructs `T3AgentAuthorizationFacade` from
+[`backend/src/auth/agent-authz.ts`](../backend/src/auth/agent-authz.ts)
+with two entry points:
 
-The verifier has its own test file at [`t3-enclave/src/tests/auth-agent-client.test.ts`](../t3-enclave/src/tests/auth-agent-client.test.ts) (valid VC, stable sha256 `policyHash`, stale `authorityRef` rejected as `over_scoped`, expired credential rejected as `expired`) and the orchestrator's load-and-verify path is exercised by the `negotiation-orchestrator` and `hosted-demo-settlement` integration suites.
+- **`verifyAgentAuthority(request)`** — the legacy admit-time
+  path. `AgentService.admitAgent` calls this on the very
+  first admission when the agent sends the VC inline; from
+  admit on, the VC is persisted on the `agents` row.
+- **`loadAndVerify(input)`** — the post-Phase 1 server-side
+  path. The orchestrator looks up the persisted VC for
+  `(agentId, institutionId)` and runs the same verifier on
+  every subsequent privileged action: `submitIntent`,
+  `cancelIntent`, `settlement.execute`, `negotiation.*`.
 
 ## Two-tier auth architecture
 
