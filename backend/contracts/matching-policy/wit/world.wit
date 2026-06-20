@@ -90,30 +90,45 @@ interface contracts {
   // seller's ask. The orchestrator is a verifier around the
   // enclave outcome, not the price matcher.
   //
+  // v0.7.0: the caller must also pass the per-side identity
+  // (`buy_institution_id`, `sell_institution_id`,
+  // `buy_authority_ref`, `sell_authority_ref`). The TEE echoes
+  // those fields back on both `matched` and `no_match` outcomes
+  // and binds them to the `match_attestation_ref` so the audit
+  // log carries a TEE-attested identity instead of an
+  // orchestrator-stamped override. The orchestrator asserts the
+  // echo matches the queue values it submitted and fails closed
+  // on mismatch.
+  //
   // Input  (JSON): EvaluateMatchInput
   //   {
-  //     "buy_intent_handle":  "intent_...",
-  //     "sell_intent_handle": "intent_...",
-  //     "correlation_ref":    "corr_...",
-  //     "asset_code":         "WBTC",
-  //     "buy_price":          "<decimal-string>",
-  //     "buy_quantity":       "<decimal-string>",
-  //     "sell_price":         "<decimal-string>",
-  //     "sell_quantity":      "<decimal-string>",
+  //     "buy_intent_handle":   "intent_...",
+  //     "sell_intent_handle":  "intent_...",
+  //     "correlation_ref":     "corr_...",
+  //     "asset_code":          "WBTC",
+  //     "buy_price":           "<decimal-string>",
+  //     "buy_quantity":        "<decimal-string>",
+  //     "sell_price":          "<decimal-string>",
+  //     "sell_quantity":       "<decimal-string>",
+  //     "buy_institution_id":  "<uuid>",
+  //     "sell_institution_id": "<uuid>",
+  //     "buy_authority_ref":   "ghostbroker-delegation:...",
+  //     "sell_authority_ref":  "ghostbroker-delegation:...",
   //   }
   // Output (JSON): EvaluateMatchOutput
   //   {
-  //     "outcome_ref":               "outcome_<32-hex>",
-  //     "execution_ref":             "t3exec_<uuid>",
-  //     "buyer_institution_id":      "",   // stamped by orchestrator
-  //     "seller_institution_id":     "",   // stamped by orchestrator
-  //     "encrypted_trade_fields_ref": "t3fields_<32-hex>",
-  //     "buyer_authority_ref":       "",   // stamped by orchestrator
-  //     "seller_authority_ref":      "",   // stamped by orchestrator
-  //     "expires_at":                "<iso8601>",
-  //     "status":                    "matched" | "no_match",
-  //     "matched_quantity":          "<decimal-string>",  // "" on no_match
-  //     "execution_price":           "<decimal-string>",  // "" on no_match
+  //     "outcome_ref":              "outcome_<32-hex>",
+  //     "execution_ref":            "t3exec_<uuid>",
+  //     "buyer_institution_id":     "<uuid>",     // echoed from input
+  //     "seller_institution_id":    "<uuid>",     // echoed from input
+  //     "encrypted_trade_fields_ref":"t3fields_<32-hex>",
+  //     "buyer_authority_ref":      "...",        // echoed from input
+  //     "seller_authority_ref":     "...",        // echoed from input
+  //     "expires_at":               "<iso8601>",
+  //     "status":                   "matched" | "no_match",
+  //     "matched_quantity":         "<decimal-string>",  // "" on no_match
+  //     "execution_price":          "<decimal-string>",  // "" on no_match
+  //     "match_attestation_ref":    "match_attest_<32-hex>",
   //   }
   evaluate-match: func(req: generic-input) -> result<list<u8>, string>;
 

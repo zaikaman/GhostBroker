@@ -54,6 +54,9 @@ export function buildSettlementExecutionRequest(
       encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
       buyerAuthorityRef: "authority:buyer:settle",
       sellerAuthorityRef: "authority:seller:settle",
+      // v0.7.0: TEE-attested match attestation binding the
+      // recorded institution IDs to the match outcome.
+      matchAttestationRef: "match_attest_us3",
       expiresAt: "2026-06-13T00:00:00.000Z",
       status: "matched",
       matchedQuantity: 100,

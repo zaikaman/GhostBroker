@@ -125,6 +125,27 @@ export class NegotiationService implements NegotiationManagementService {
 
     const { authored, rails, legacy } = this.resolveMandatePayload(input.request);
 
+    // The negotiation mandate flow persists a fresh tenant-signed
+    // delegation VC on the agent record (overwriting whatever the
+    // dashboard's "Configure Agent" step wrote). The hosted
+    // negotiator's runtime lifecycle re-verifies this VC against
+    // the full action scope it actually exercises:
+    //   - `agent.admit`            → `admitAgent` at startup
+    //   - `negotiation.open`       → `submitNegotiationTicket`
+    //   - `negotiation.move`       → `submitNegotiationMove`
+    //   - `negotiation.disclose`   → reveal-typed moves
+    //
+    // Granting only `["agent.admit", "intent.submit"]` here (the
+    // legacy hidden-intent scope) caused the hosted runtime to
+    // fail with `action_not_allowed` on its first
+    // `submitNegotiationTicket` call: the action-scope check in
+    // `t3-enclave/src/auth/ghostbroker-delegation.ts` rejects a
+    // VC whose `allowedActions` does not include the requested
+    // action, regardless of what the orchestrator routes the call
+    // to. We grant the full trading-action set so the same VC
+    // also covers any intent / settlement paths the agent is
+    // ever asked to perform, matching the canonical scope the
+    // backend's migration shim in `agent-authz.ts` accepts.
     const policy = {
       agentDid: agent.agentDid,
       institutionId: agent.institutionId,
@@ -132,6 +153,12 @@ export class NegotiationService implements NegotiationManagementService {
       allowedActions: [
         "agent.admit",
         "intent.submit",
+        "intent.cancel",
+        "settlement.execute",
+        "negotiation.open",
+        "negotiation.move",
+        "negotiation.disclose",
+        "negotiation.settle",
       ] satisfies readonly DelegationActionScope[],
       mandate: (authored ?? legacy) as NegotiationMandateInput,
     };

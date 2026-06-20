@@ -26,7 +26,7 @@
 //!                        (same asset, opposite side, different
 //!                        institution, distinct handles) agrees.
 //!
-//! As of v0.6.0, the wire form for prices and quantities on
+//! As of v0.7.0, the wire form for prices and quantities on
 //! `evaluate-match` is a plain decimal string at the contract's
 //! internal `WIRE_SCALE` (1e18): `"0.0001"`, `"70000"`,
 //! `"12345.6789"`. Match authority still lives inside the
@@ -53,13 +53,42 @@
 //!     `status: "compatible"` only when every structural axis
 //!     agrees (handle well-formedness, asset agreement, opposite
 //!     side, different institution, distinct handles).
+//!
+//! v0.7.0 changes (audit-trail fix for the orchestrator's
+//! silent overwrites of the buyer/seller institution IDs and
+//! authority refs on the match outcome):
+//!   * `evaluate-match` now requires the orchestrator to pass
+//!     `buy_institution_id`, `sell_institution_id`,
+//!     `buy_authority_ref`, `sell_authority_ref` on every call.
+//!     These are the values the orchestrator already has in its
+//!     pending-intent queue (the same values the seal call
+//!     accepted at submit time). The TEE no longer returns empty
+//!     strings — it echoes the supplied identity fields on both
+//!     `matched` and `no_match` outcomes, so the audit log
+//!     carries a TEE-attested match outcome instead of an
+//!     orchestrator-stamped override. The orchestrator asserts
+//!     the echo matches the queue values it submitted and fails
+//!     closed on mismatch (poisoned queue, lost binding, TEE
+//!     returning different values).
+//!   * `evaluate-match` now also returns `match_attestation_ref`:
+//!     a deterministic SHA-256 over the canonical concatenation
+//!     of (buy_intent_handle, buy_institution_id,
+//!     sell_intent_handle, sell_institution_id, buy_authority_ref,
+//!     sell_authority_ref, correlation_ref, asset_code,
+//!     outcome_ref, execution_ref). Anyone with the input fields
+//!     and the outcome/execution refs can re-derive the
+//!     attestation and confirm the recorded institution IDs are
+//!     the IDs the TEE bound to the match outcome. The
+//!     settlement record stores this ref so a judge reading the
+//!     completed_trades row can verify the institution IDs in
+//!     the row are the IDs the TEE bound to the match outcome.
 
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 extern crate alloc;
 
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -77,7 +106,7 @@ wit_bindgen::generate!({
 
 mod matching;
 
-pub const CONTRACT_VERSION: &str = "0.6.0";
+pub const CONTRACT_VERSION: &str = "0.7.0";
 
 struct Component;
 
@@ -201,16 +230,39 @@ pub struct EvaluateMatchInput {
     pub buy_quantity: String,
     pub sell_price: String,
     pub sell_quantity: String,
+    /// Per-side identity fields. Required on every `evaluate-match`
+    /// call as of v0.7.0. The orchestrator already holds these in
+    /// its pending-intent queue (they were verified at seal time
+    /// via `seal-intent`'s `institution_id` / `authority_ref`).
+    /// The TEE echoes them back on both `matched` and `no_match`
+    /// outcomes and binds them to the `match_attestation_ref` so
+    /// the audit log carries a TEE-attested identity instead of an
+    /// orchestrator-stamped override. A `matched` call that omits
+    /// any of these is a hard error — the TEE refuses to fill
+    /// without a complete identity binding.
+    pub buy_institution_id: String,
+    pub sell_institution_id: String,
+    pub buy_authority_ref: String,
+    pub sell_authority_ref: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct EvaluateMatchOutput {
     pub outcome_ref: String,
     pub execution_ref: String,
+    /// Echoed `buy_institution_id` from the input. The TEE is the
+    /// binding authority on this value as of v0.7.0 — the audit
+    /// log records this string as the buyer institution for the
+    /// outcome, not the orchestrator's in-memory queue value.
+    /// Empty only when the caller submitted empty on a `no_match`
+    /// (the TEE does not synthesize an identity it was not given).
     pub buyer_institution_id: String,
+    /// Echoed `sell_institution_id` from the input.
     pub seller_institution_id: String,
     pub encrypted_trade_fields_ref: String,
+    /// Echoed `buy_authority_ref` from the input.
     pub buyer_authority_ref: String,
+    /// Echoed `sell_authority_ref` from the input.
     pub seller_authority_ref: String,
     pub expires_at: String,
     pub status: String,
@@ -223,6 +275,20 @@ pub struct EvaluateMatchOutput {
     /// prices, rounded half-up on the smallest unit. Emitted at the
     /// same wire scale as the input (`"50000"`). Empty on `no_match`.
     pub execution_price: String,
+    /// Deterministic SHA-256 attestation binding the match outcome
+    /// to the supplied identity. Computed as
+    /// `SHA-256(buy_intent_handle || buy_institution_id ||
+    /// sell_intent_handle || sell_institution_id ||
+    /// buy_authority_ref || sell_authority_ref || correlation_ref
+    /// || asset_code || outcome_ref || execution_ref)`. Anyone with
+    /// the input fields and the outcome/execution refs can
+    /// re-derive the attestation and confirm the recorded
+    /// institution IDs are the ones the TEE bound to the match
+    /// outcome. The settlement record stores this ref so a judge
+    /// reading the `completed_trades` row can verify the
+    /// institution IDs in the row are the IDs the TEE bound to
+    /// the match outcome.
+    pub match_attestation_ref: String,
 }
 
 // ─── evaluate-pair types (negotiation ticket pair authority) ───

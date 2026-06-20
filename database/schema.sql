@@ -225,12 +225,13 @@ CREATE TABLE public.negotiation_disclosures (
   from_did text NOT NULL CHECK (from_did <> ''::text),
   from_side text NOT NULL CHECK (from_side = ANY (ARRAY['buy'::text, 'sell'::text])),
   claim_type text NOT NULL CHECK (claim_type <> ''::text),
-  claim_assertion_ciphertext text NOT NULL CHECK (claim_assertion_ciphertext <> ''::text),
+  claim_assertion_ciphertext text NOT NULL,
   verified boolean NOT NULL DEFAULT false,
   t3_attestation_ref text NOT NULL CHECK (t3_attestation_ref <> ''::text),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT negotiation_disclosures_pkey PRIMARY KEY (id),
-  CONSTRAINT negotiation_disclosures_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.negotiation_sessions(id)
+  CONSTRAINT negotiation_disclosures_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.negotiation_sessions(id),
+  CONSTRAINT negotiation_disclosures_claim_assertion_ciphertext_check CHECK (verified = false OR (verified = true AND claim_assertion_ciphertext <> ''::text))
 );
 CREATE TABLE public.published_contracts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

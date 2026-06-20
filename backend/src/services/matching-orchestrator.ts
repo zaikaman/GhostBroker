@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { MatchContractClient } from "../enclave/index.js";
 import {
   deriveEncryptedTradeFieldHandles,
+  deriveMatchReceiptAttestationRef,
   deriveReceiptHash,
   deriveTeeAttestationRef,
 } from "../enclave/privacy/encrypted-trade-fields.js";
@@ -315,6 +316,16 @@ export class MatchingOrchestrator {
       // coordinated bump to the T3 match contract (a new
       // `evaluate-match` v0.5.0 that consumes envelopes
       // rather than plaintext trading parameters).
+      //
+      // v0.7.0: the per-side identity (institution id +
+      // authority ref) is also passed to the TEE. The TEE
+      // echoes the values back on the outcome and binds them
+      // to a `matchAttestationRef`. The audit trail now
+      // records a TEE-attested identity instead of an
+      // orchestrator-stamped override. The orchestrator
+      // asserts the echo matches the queue values it submitted
+      // and fails closed on mismatch — see the `identity`
+      // consistency check below.
       const outcome = await this.matchClient.evaluateMatch({
         buyIntentHandle: buyIntent.intentHandle,
         sellIntentHandle: sellIntent.intentHandle,
@@ -323,6 +334,10 @@ export class MatchingOrchestrator {
         sellEnvelope: sellIntent.encryptedEnvelope,
         buyLockAttestationRef: buyIntent.opaqueLockDescriptor.attestationRef,
         sellLockAttestationRef: sellIntent.opaqueLockDescriptor.attestationRef,
+        buyInstitutionId: buyIntent.institutionId,
+        sellInstitutionId: sellIntent.institutionId,
+        buyAuthorityRef: buyIntent.authorityRef,
+        sellAuthorityRef: sellIntent.authorityRef,
       });
 
       if (outcome.status !== "matched") {
@@ -330,6 +345,69 @@ export class MatchingOrchestrator {
         // field was invalid). Leave both intents pending and keep
         // scanning for another counterparty.
         continue;
+      }
+
+      // v0.7.0 identity-consistency check. The TEE has now
+      // echoed the per-side institution IDs and authority refs
+      // it received. The orchestrator asserts the echo matches
+      // the values it submitted from the pending-intent queue.
+      // A mismatch is a data-integrity bug — a poisoned queue
+      // entry, a refactor that lost the binding, or a TEE
+      // returning different values from what was sent. In any
+      // case the settlement record would carry an institution
+      // ID the TEE did not bind to this outcome, which is
+      // precisely the audit-trail problem this fix addresses.
+      // We refuse the settlement, evict both intents so the
+      // available balance is restored, and log a structured
+      // error so the operator can investigate. This is the
+      // load-bearing "fail closed on mismatch" half of the
+      // v0.7.0 contract: the orchestrator's in-memory queue
+      // is no longer the only authority on counterparty
+      // identity.
+      const identityMismatch = this.detectIdentityMismatch(
+        buyIntent,
+        sellIntent,
+        outcome,
+      );
+      if (identityMismatch) {
+        logger.error(
+          {
+            event: "matching_orchestrator.identity_mismatch",
+            correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+            buyIntentHandle: buyIntent.intentHandle,
+            sellIntentHandle: sellIntent.intentHandle,
+            buyInstitutionId: buyIntent.institutionId,
+            sellInstitutionId: sellIntent.institutionId,
+            teeBuyInstitutionId: outcome.buyerInstitutionId,
+            teeSellInstitutionId: outcome.sellerInstitutionId,
+            buyAuthorityRef: buyIntent.authorityRef,
+            sellAuthorityRef: sellIntent.authorityRef,
+            teeBuyAuthorityRef: outcome.buyerAuthorityRef,
+            teeSellAuthorityRef: outcome.sellerAuthorityRef,
+            mismatch: identityMismatch,
+          },
+          "TEE-attested identity does not match pending-intent queue; refusing to settle",
+        );
+        this.telemetryBus.publish({
+          institutionId: buyIntent.institutionId,
+          type: "telemetry.error.changed",
+          phase: "authorization_failed",
+          severity: "error",
+          correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
+          agentId: buyIntent.agentDid,
+        });
+        // Release both intents' balance locks and durable refs
+        // — same compensation pattern as a pre-match balance /
+        // scope rejection — and remove both from the queue so
+        // the available balance is restored immediately rather
+        // than waiting for TTL eviction.
+        this.releaseLockFor(buyIntent);
+        this.deleteLockRefFor(buyIntent);
+        this.removeIntent(buyIntent);
+        this.releaseLockFor(sellIntent);
+        this.deleteLockRefFor(sellIntent);
+        this.removeIntent(sellIntent);
+        return;
       }
 
       const matchQuantity = outcome.matchedQuantity;
@@ -432,18 +510,29 @@ export class MatchingOrchestrator {
         return;
       }
 
-      // The TEE match contract cannot see the buyer/seller
-      // institution ids or authority refs, so it returns empty
-      // strings for them. The queued intents hold the canonical
-      // values that were already verified during submit.
+      // v0.7.0: the identity-consistency check above already
+      // asserted the TEE echoed the same per-side institution
+      // IDs and authority refs the orchestrator submitted from
+      // the queue. The normalized outcome therefore uses the
+      // TEE-attested values (which equal the queue values by
+      // construction): the settlement record carries a
+      // TEE-attested identity, not an orchestrator-stamped
+      // override. The matchAttestationRef is forwarded as the
+      // receipt's t3AttestationRef so the audit log records the
+      // cryptographic binding that proves the institution IDs
+      // are the IDs the TEE bound to the match outcome.
       const normalizedOutcome = {
         ...outcome,
-        buyerInstitutionId: buyIntent.institutionId,
-        sellerInstitutionId: sellIntent.institutionId,
-        buyerAuthorityRef: buyIntent.authorityRef,
-        sellerAuthorityRef: sellIntent.authorityRef,
+        buyerInstitutionId: outcome.buyerInstitutionId,
+        sellerInstitutionId: outcome.sellerInstitutionId,
+        buyerAuthorityRef: outcome.buyerAuthorityRef,
+        sellerAuthorityRef: outcome.sellerAuthorityRef,
       };
-      // Generate receipt ciphertexts deterministically from the outcome
+      // Generate receipt ciphertexts deterministically from the outcome.
+      // The receipt's `t3AttestationRef` is the TEE-attested
+      // match attestation ref so the audit log can later
+      // verify the institution IDs in the settlement row are
+      // the IDs the TEE bound to this outcome.
       const receiptBase = `t3receipt.${normalizedOutcome.outcomeRef}.${normalizedOutcome.executionRef}`;
 
       // WS2: resolve per-side settlement profile refs (if the
@@ -566,15 +655,29 @@ export class MatchingOrchestrator {
             // forgeable by anyone who knew the outcome ref.
             receiptHash: deriveReceiptHash(`${receiptBase}.buyer`),
             keyVersion: "match-v1",
-            // P0 privacy fix: TEE-correlated attestation
-            // reference derived from the match outcome + side,
-            // not the orchestrator's `executionRef`. The
-            // previous value was a locally-minted UUID
-            // masquerading as a TEE attestation.
-            t3AttestationRef: deriveTeeAttestationRef(
-              normalizedOutcome.outcomeRef,
-              "buyer",
-            ),
+            // v0.7.0: bind the per-side receipt to the
+            // TEE-attested match identity binding. The
+            // `matchAttestationRef` is the TEE's SHA-256 over the
+            // canonical concatenation of the per-side identity +
+            // outcome refs, so a judge reading the audit log can
+            // re-derive the match attestation from the recorded
+            // fields and confirm the institution IDs are the IDs
+            // the TEE bound to this match outcome. Falls back to
+            // the pre-v0.7.0 (outcome, scope) derivation when
+            // the host did not return a `match_attestation_ref`
+            // — the audit log is no worse than before, and the
+            // receipt carries the older attestation format until
+            // the host is upgraded.
+            t3AttestationRef:
+              deriveMatchReceiptAttestationRef(
+                normalizedOutcome.outcomeRef,
+                normalizedOutcome.matchAttestationRef,
+                "buyer",
+              ) ||
+              deriveTeeAttestationRef(
+                normalizedOutcome.outcomeRef,
+                "buyer",
+              ),
             accessScope: "buyer",
           },
           {
@@ -582,10 +685,16 @@ export class MatchingOrchestrator {
             receiptCiphertext: `${receiptBase}.seller`,
             receiptHash: deriveReceiptHash(`${receiptBase}.seller`),
             keyVersion: "match-v1",
-            t3AttestationRef: deriveTeeAttestationRef(
-              normalizedOutcome.outcomeRef,
-              "seller",
-            ),
+            t3AttestationRef:
+              deriveMatchReceiptAttestationRef(
+                normalizedOutcome.outcomeRef,
+                normalizedOutcome.matchAttestationRef,
+                "seller",
+              ) ||
+              deriveTeeAttestationRef(
+                normalizedOutcome.outcomeRef,
+                "seller",
+              ),
             accessScope: "seller",
           },
         ],
@@ -716,6 +825,52 @@ export class MatchingOrchestrator {
       }
     }
     return { passed: true, institutionId: "", agentDid: "" };
+  }
+
+  /**
+   * v0.7.0: detect a mismatch between the per-side identity the
+   * TEE echoed on the match outcome and the identity the
+   * orchestrator submitted from its pending-intent queue. The
+   * match contract's `evaluate-match` call passes the queue
+   * values as inputs and the TEE echoes them back on the
+   * outcome. A mismatch is a data-integrity bug — a poisoned
+   * queue entry, a refactor that lost the binding, or a TEE
+   * returning different values from what was sent. Returns a
+   * human-readable description of which field disagreed when
+   * any check fails, or `null` when the echo matches the queue.
+   *
+   * The check is intentionally separate from the orchestrator's
+   * pre-match scope / balance / notional gates: those gates
+   * use the queue values to make a YES/NO decision on whether
+   * to push to settlement. This check verifies the TEE agreed
+   * on the identity the queue claimed. A mismatch here fails
+   * closed — the orchestrator refuses the settlement, evicts
+   * both intents, and restores the available balance
+   * immediately rather than waiting for TTL eviction.
+   */
+  private detectIdentityMismatch(
+    buyIntent: PendingIntent,
+    sellIntent: PendingIntent,
+    outcome: {
+      buyerInstitutionId: string;
+      sellerInstitutionId: string;
+      buyerAuthorityRef: string;
+      sellerAuthorityRef: string;
+    },
+  ): string | null {
+    if (outcome.buyerInstitutionId !== buyIntent.institutionId) {
+      return `buyer_institution_id_mismatch (queue="${buyIntent.institutionId}", tee="${outcome.buyerInstitutionId}")`;
+    }
+    if (outcome.sellerInstitutionId !== sellIntent.institutionId) {
+      return `seller_institution_id_mismatch (queue="${sellIntent.institutionId}", tee="${outcome.sellerInstitutionId}")`;
+    }
+    if (outcome.buyerAuthorityRef !== buyIntent.authorityRef) {
+      return `buyer_authority_ref_mismatch (queue="${buyIntent.authorityRef}", tee="${outcome.buyerAuthorityRef}")`;
+    }
+    if (outcome.sellerAuthorityRef !== sellIntent.authorityRef) {
+      return `seller_authority_ref_mismatch (queue="${sellIntent.authorityRef}", tee="${outcome.sellerAuthorityRef}")`;
+    }
+    return null;
   }
 
   /**

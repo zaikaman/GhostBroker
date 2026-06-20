@@ -1567,6 +1567,14 @@ export class NegotiationOrchestrator {
         encryptedTradeFieldsRef: transcriptRef,
         buyerAuthorityRef: `ghostbroker-delegation:${buyerCredential?.id ?? ""}`,
         sellerAuthorityRef: `ghostbroker-delegation:${sellerCredential?.id ?? ""}`,
+        // Negotiation-orchestrator-driven settlements carry
+        // an empty match attestation ref: this settlement path
+        // is gated on the session transcript rather than the
+        // TEE match contract, so the v0.7.0 TEE-attested
+        // match_attestation_ref is not applicable. The receipt
+        // builder falls back to the per-side derivation when
+        // the match attestation is empty.
+        matchAttestationRef: "",
         expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
         status: "matched",
         matchedQuantity: input.matchedQuantity,

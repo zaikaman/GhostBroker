@@ -31,16 +31,79 @@ export interface MatchEvaluationRequest {
    * descriptor.
    */
   sellLockAttestationRef: string;
+  /**
+   * The buyer institution UUID the orchestrator already holds
+   * in its pending-intent queue (the value the seal call
+   * accepted at submit time on the buy side). Required as of
+   * v0.7.0 so the TEE can echo it back on the match outcome —
+   * the audit trail carries the TEE-attested value instead of
+   * an orchestrator-stamped override. The orchestrator asserts
+   * the echo matches the queue value and fails closed on
+   * mismatch.
+   */
+  buyInstitutionId: string;
+  /**
+   * The seller institution UUID the orchestrator already holds
+   * in its pending-intent queue. Required as of v0.7.0; see
+   * `buyInstitutionId` for the rationale.
+   */
+  sellInstitutionId: string;
+  /**
+   * The buy-side authority ref (the Ghostbroker delegation VC
+   * reference the buy agent presented at submit time). Required
+   * as of v0.7.0; the TEE echoes it back on the match outcome
+   * and binds it to `matchAttestationRef` for the audit trail.
+   */
+  buyAuthorityRef: string;
+  /**
+   * The sell-side authority ref. Required as of v0.7.0; see
+   * `buyAuthorityRef` for the rationale.
+   */
+  sellAuthorityRef: string;
 }
 
 export interface OpaqueMatchOutcome {
   outcomeRef: string;
   executionRef: string;
+  /**
+   * TEE-echoed buyer institution UUID (v0.7.0+). The audit
+   * trail carries this value as the buyer for the outcome —
+   * not the orchestrator's in-memory queue value. The
+   * orchestrator asserts the echo matches the queue value it
+   * submitted before settling.
+   */
   buyerInstitutionId: string;
+  /**
+   * TEE-echoed seller institution UUID (v0.7.0+). See
+   * `buyerInstitutionId` for the rationale.
+   */
   sellerInstitutionId: string;
   encryptedTradeFieldsRef: string;
+  /**
+   * TEE-echoed buyer authority ref (v0.7.0+). The settlement
+   * record stores this ref alongside the institution IDs so an
+   * auditor can verify the buy-side authority bound to the
+   * outcome matches the buy-side authority on the VC the agent
+   * presented at submit time.
+   */
   buyerAuthorityRef: string;
+  /**
+   * TEE-echoed seller authority ref (v0.7.0+). See
+   * `buyerAuthorityRef` for the rationale.
+   */
   sellerAuthorityRef: string;
+  /**
+   * TEE-attested match attestation ref (v0.7.0+). Deterministic
+   * SHA-256 over the canonical concatenation of (buy handle,
+   * buyer institution ID, sell handle, seller institution ID,
+   * buy authority ref, sell authority ref, correlation ref,
+   * asset code, outcome ref, execution ref). The settlement
+   * record stores this ref so a judge reading the
+   * `completed_trades` row can re-derive the attestation from
+   * the recorded fields and confirm the institution IDs in the
+   * row are the IDs the TEE bound to the match outcome.
+   */
+  matchAttestationRef: string;
   expiresAt: string;
   status: "matched" | "no_match";
   /**
@@ -103,6 +166,7 @@ interface T3MatchOutcomeResponse {
   encrypted_trade_fields_ref?: string;
   buyer_authority_ref?: string;
   seller_authority_ref?: string;
+  match_attestation_ref?: string;
   expires_at?: string;
   status?: "matched" | "no_match";
   matched_quantity?: string;
@@ -132,12 +196,19 @@ interface T3MatchOutcomeResponse {
  *     decryption key for the envelopes and is the sole
  *     authority on the per-side reservation math.
  *
- * `0.5.0` is the production default. The T3N testnet may still
- * serve `0.4.0` for legacy tenants; the
- * `T3_MATCHING_CONTRACT_VERSION` env var lets operators pin to
- * a specific published version.
+ * `0.7.0` is the production default. The `evaluate-match`
+ * contract now echoes the per-side institution IDs and
+ * authority refs the orchestrator passed in (previously the
+ * TEE returned empty strings and the orchestrator stamped the
+ * values from its in-memory queue — a silent overwrite that
+ * hid poisoned-queue bugs from the audit trail). v0.7.0 also
+ * returns a `match_attestation_ref` binding the echoed identity
+ * to the outcome so a judge reading the completed_trades row
+ * can verify the institution IDs are the IDs the TEE bound to
+ * the match. The orchestrator asserts the echo matches the
+ * queue values it submitted and fails closed on mismatch.
  */
-const DEFAULT_MATCHING_CONTRACT_VERSION = "0.5.0";
+const DEFAULT_MATCHING_CONTRACT_VERSION = "0.7.0";
 
 function requireOpaque(value: string | undefined, field: string): string {
   if (!value || value.trim().length === 0) {
@@ -236,6 +307,16 @@ export class T3MatchContractClient implements MatchContractClient {
         sell_envelope: request.sellEnvelope,
         buy_lock_attestation_ref: request.buyLockAttestationRef,
         sell_lock_attestation_ref: request.sellLockAttestationRef,
+        // v0.7.0: per-side identity. The TEE echoes these back
+        // on the match outcome and binds them to
+        // `match_attestation_ref`. Required fields — the
+        // orchestrator's pending-intent queue already holds
+        // them (verified at seal time) and failing the call
+        // would be a data-integrity bug at the orchestrator.
+        buy_institution_id: request.buyInstitutionId,
+        sell_institution_id: request.sellInstitutionId,
+        buy_authority_ref: request.buyAuthorityRef,
+        sell_authority_ref: request.sellAuthorityRef,
       },
     });
 
@@ -293,13 +374,12 @@ export class T3MatchContractClient implements MatchContractClient {
     return {
       outcomeRef: requireOpaque(response.body.outcome_ref, "outcome_ref"),
       executionRef: response.body.execution_ref ?? `t3exec_${randomUUID()}`,
-      // The TEE match contract intentionally returns empty strings
-      // for the buyer/seller institution ids and authority refs:
-      // it does not have that context inside the enclave. The
-      // orchestrator already verified both agents and stamps the
-      // actual values from its pending-intent queue before
-      // settlement. Requiring these to be non-empty here would make
-      // every real T3-backed match evaluation fail.
+      // v0.7.0: the TEE echoes the per-side identity back on
+      // every outcome. We still accept an empty string for
+      // backwards compatibility with pre-0.7.0 hosts — the
+      // orchestrator's pending-intent queue stamping is the
+      // legacy fallback and the audit story is no worse than
+      // v0.6.0 in that case. New hosts always echo.
       buyerInstitutionId: response.body.buyer_institution_id ?? "",
       sellerInstitutionId: response.body.seller_institution_id ?? "",
       encryptedTradeFieldsRef: requireOpaque(
@@ -308,6 +388,13 @@ export class T3MatchContractClient implements MatchContractClient {
       ),
       buyerAuthorityRef: response.body.buyer_authority_ref ?? "",
       sellerAuthorityRef: response.body.seller_authority_ref ?? "",
+      // v0.7.0: TEE-attested match attestation. Required for
+      // settlement records going forward; a missing value falls
+      // back to an empty string so a pre-0.7.0 host doesn't
+      // crash the orchestrator. The settlement record builder
+      // surfaces the empty string to the audit log so a
+      // downgrade is visible.
+      matchAttestationRef: response.body.match_attestation_ref ?? "",
       expiresAt: requireOpaque(response.body.expires_at, "expires_at"),
       status,
       matchedQuantity,

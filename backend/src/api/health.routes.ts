@@ -91,7 +91,7 @@ export function buildEnclaveIdentityResponse(
     t3NetworkEnv,
     t3TenantDid: env.T3_TENANT_DID ?? null,
     matchingContractId: env.T3_MATCH_CONTRACT_ID ?? null,
-    matchingContractVersion: env.T3_MATCHING_CONTRACT_VERSION ?? "0.6.0",
+    matchingContractVersion: env.T3_MATCHING_CONTRACT_VERSION ?? "0.7.0",
     tenantSigningAddress,
     tenantIssuerDid,
     attestationHandlePrefix: "t3attest:",

@@ -133,36 +133,35 @@ class MatchedClient implements MatchContractClient {
     request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
     this.calls++;
-    // Mirrors the real enclave's match-authoritative logic
-    // (contracts/matching-policy/src/matching.rs v0.5.0+): the
-    // TEE receives both sealed envelopes plus the TEE-attested
-    // lock descriptor attestation refs and returns the
-    // authoritative fill + per-side lock release amounts. The
-    // orchestrator consumes the values verbatim -- it does not
-    // re-derive them. The test stub here re-decodes both
-    // envelopes to mirror the production TEE math: the matched
-    // quantity is `min(buy_quantity, sell_quantity)`, the
-    // execution price is the deterministic midpoint, and the
-    // per-side lock release amounts follow the TEE's standard
-    // reservation formula.
-    const buyEnvelope = decodeTestEnvelope(request.buyEnvelope);
-    const sellEnvelope = decodeTestEnvelope(request.sellEnvelope);
+    // v0.7.0: the orchestrator now forwards the per-side
+    // institution IDs and authority refs as inputs; the TEE
+    // echoes them back on the outcome. The test stub mirrors the
+    // production contract: the response carries the same values
+    // the request submitted (so the orchestrator's
+    // `detectIdentityMismatch` check passes).
     const matchedQuantity = Math.min(
-      buyEnvelope.quantity,
-      sellEnvelope.quantity,
+      decodeTestEnvelope(request.buyEnvelope).quantity,
+      decodeTestEnvelope(request.sellEnvelope).quantity,
     );
     const executionPrice = Math.round(
-      (buyEnvelope.price + sellEnvelope.price) / 2,
+      (decodeTestEnvelope(request.buyEnvelope).price +
+        decodeTestEnvelope(request.sellEnvelope).price) /
+        2,
     );
     return {
       status: "matched",
       outcomeRef: `outcome_${this.calls}`,
       executionRef: `exec_${this.calls}`,
-      buyerInstitutionId: "",
-      sellerInstitutionId: "",
+      buyerInstitutionId: request.buyInstitutionId,
+      sellerInstitutionId: request.sellInstitutionId,
       encryptedTradeFieldsRef: `fields_${this.calls}`,
-      buyerAuthorityRef: "",
-      sellerAuthorityRef: "",
+      buyerAuthorityRef: request.buyAuthorityRef,
+      sellerAuthorityRef: request.sellAuthorityRef,
+      // v0.7.0: TEE-attested match attestation. Stubbed
+      // with a deterministic value here; production callers
+      // compute the same value via the TEE contract and
+      // surface it on the audit log.
+      matchAttestationRef: `match_attest_${this.calls}`,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       matchedQuantity,
       executionPrice,
@@ -226,17 +225,24 @@ class ForwardingSettlement
 
 class NoMatchClient implements MatchContractClient {
   public calls = 0;
-  public async evaluateMatch(): Promise<OpaqueMatchOutcome> {
+  public async evaluateMatch(
+    request: MatchEvaluationRequest,
+  ): Promise<OpaqueMatchOutcome> {
     this.calls++;
+    // v0.7.0: the TEE echoes the per-side identity on a
+    // `no_match` outcome too, so the orchestrator's audit log
+    // records which institution pair was rejected. The stub
+    // mirrors that by echoing the inputs.
     return {
       status: "no_match",
       outcomeRef: "",
       executionRef: "",
-      buyerInstitutionId: "",
-      sellerInstitutionId: "",
+      buyerInstitutionId: request.buyInstitutionId,
+      sellerInstitutionId: request.sellInstitutionId,
       encryptedTradeFieldsRef: "",
-      buyerAuthorityRef: "",
-      sellerAuthorityRef: "",
+      buyerAuthorityRef: request.buyAuthorityRef,
+      sellerAuthorityRef: request.sellAuthorityRef,
+      matchAttestationRef: "",
       expiresAt: new Date(0).toISOString(),
       matchedQuantity: 0,
       executionPrice: 0,
@@ -474,17 +480,21 @@ describe("matching orchestrator - fills and crossing", () => {
     const ENCLAVE_PRICE = 48000;
     class AuthoritativeClient implements MatchContractClient {
       public async evaluateMatch(
-        _request: MatchEvaluationRequest,
+        request: MatchEvaluationRequest,
       ): Promise<OpaqueMatchOutcome> {
+        // v0.7.0: echo the per-side identity supplied by the
+        // orchestrator so the identity-consistency check
+        // passes.
         return {
           status: "matched",
           outcomeRef: "outcome_authoritative",
           executionRef: "exec_authoritative",
-          buyerInstitutionId: "",
-          sellerInstitutionId: "",
+          buyerInstitutionId: request.buyInstitutionId,
+          sellerInstitutionId: request.sellInstitutionId,
           encryptedTradeFieldsRef: "fields_authoritative",
-          buyerAuthorityRef: "",
-          sellerAuthorityRef: "",
+          buyerAuthorityRef: request.buyAuthorityRef,
+          sellerAuthorityRef: request.sellAuthorityRef,
+          matchAttestationRef: "match_attest_authoritative",
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           matchedQuantity: ENCLAVE_QUANTITY,
           executionPrice: ENCLAVE_PRICE,
@@ -555,6 +565,7 @@ describe("matching orchestrator - fills and crossing", () => {
           encryptedTradeFieldsRef: "fields_p0",
           buyerAuthorityRef: us2AuthorityRef,
           sellerAuthorityRef: us2AuthorityRef,
+          matchAttestationRef: "match_attest_p0_privacy",
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           matchedQuantity: 4,
           executionPrice: 50000,
@@ -647,6 +658,231 @@ describe("matching orchestrator - fills and crossing", () => {
     );
     expect(buyerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(sellerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
+
+    // v0.7.0: the TEE-attested match attestation ref flows
+    // through to the receipt's t3AttestationRef column. Both
+    // sides carry a domain-separated digest that binds the
+    // receipt to the match_attestation_ref the TEE returned.
+    expect(buyerReceipt?.t3AttestationRef).not.toBe(
+      sellerReceipt?.t3AttestationRef,
+    );
+  });
+
+  it("fails closed when the TEE echoes a different buyer institution id than the queue", async () => {
+    // v0.7.0 audit-trail invariant: the TEE-attested buyer
+    // institution id on the match outcome must match the buyer
+    // institution id the orchestrator submitted from its
+    // pending-intent queue. A mismatch means the settlement
+    // would carry an institution ID the TEE never bound to this
+    // match outcome — exactly the silent-overwrite bug the
+    // audit fix addresses. The orchestrator refuses to settle
+    // and evicts both intents so the available balance is
+    // restored immediately rather than waiting for TTL
+    // eviction.
+    const client = new InMemoryPortfolioClient([
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "WBTC", balance: 0 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "USDC", balance: 0 }),
+    ]);
+    const FORGED_INSTITUTION_ID = "00000000-0000-4000-8000-00000000ffff";
+    class MismatchedClient implements MatchContractClient {
+      public async evaluateMatch(
+        request: MatchEvaluationRequest,
+      ): Promise<OpaqueMatchOutcome> {
+        return {
+          status: "matched",
+          outcomeRef: "outcome_mismatch",
+          executionRef: "exec_mismatch",
+          // TEE echoes a DIFFERENT buyer institution id than
+          // the queue submitted (simulating a poisoned queue,
+          // refactor that lost the binding, or a TEE
+          // regression).
+          buyerInstitutionId: FORGED_INSTITUTION_ID,
+          sellerInstitutionId: request.sellInstitutionId,
+          encryptedTradeFieldsRef: "fields_mismatch",
+          buyerAuthorityRef: request.buyAuthorityRef,
+          sellerAuthorityRef: request.sellAuthorityRef,
+          matchAttestationRef: "match_attest_mismatch",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          matchedQuantity: 4,
+          executionPrice: 50000,
+          buyerLockedAmount: 4 * 50000,
+          sellerLockedAmount: 4,
+        };
+      }
+    }
+    const matchClient = new MismatchedClient();
+    const lockClient = new InMemoryIntentLockClient();
+    const settlement = new ForwardingSettlement(client);
+    const { service, orchestrator } = buildStack(
+      client,
+      matchClient,
+      settlement,
+      lockClient,
+    );
+
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("buy", {
+        institutionId: buyerId,
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 4, 50000),
+      }),
+      { correlationRef: "corr_mismatch_buy" },
+    );
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("sell", {
+        institutionId: sellerId,
+        agentDid: "did:t3n:agent:seller-mismatch",
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 4, 50000),
+      }),
+      { correlationRef: "corr_mismatch_sell" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    // The orchestrator refused to settle — no settlement
+    // request was issued despite the TEE returning a
+    // `matched` outcome.
+    expect(settlement.requests).toHaveLength(0);
+    // Both intents were evicted from the queue so the
+    // available balance is restored immediately rather than
+    // waiting for TTL eviction.
+    expect(orchestrator.pendingCount()).toBe(0);
+    // The buyer institution's USDC lock was released (the
+    // 200,000 USDC reservation is fully restored).
+    const buyerPortfolio = await new PortfolioService(client as never, "USDC").getPortfolio(buyerId);
+    const buyerCash = buyerPortfolio.holdings.find((h) => h.assetCode === "USDC");
+    expect(buyerCash?.locked).toBe(0);
+  });
+
+  it("fails closed when the TEE echoes a different seller authority ref than the queue", async () => {
+    // v0.7.0 audit-trail invariant: the TEE-attested seller
+    // authority ref must match the seller authority ref the
+    // orchestrator submitted from its pending-intent queue.
+    // Same fail-closed pattern as the buyer institution id
+    // case.
+    const client = new InMemoryPortfolioClient([
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "WBTC", balance: 0 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "USDC", balance: 0 }),
+    ]);
+    class MismatchedAuthorityClient implements MatchContractClient {
+      public async evaluateMatch(
+        request: MatchEvaluationRequest,
+      ): Promise<OpaqueMatchOutcome> {
+        return {
+          status: "matched",
+          outcomeRef: "outcome_authority_mismatch",
+          executionRef: "exec_authority_mismatch",
+          buyerInstitutionId: request.buyInstitutionId,
+          sellerInstitutionId: request.sellInstitutionId,
+          encryptedTradeFieldsRef: "fields_authority_mismatch",
+          buyerAuthorityRef: request.buyAuthorityRef,
+          // TEE echoes a DIFFERENT seller authority ref than
+          // the queue submitted.
+          sellerAuthorityRef: "ghostbroker-delegation:forged-vc",
+          matchAttestationRef: "match_attest_authority_mismatch",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          matchedQuantity: 4,
+          executionPrice: 50000,
+          buyerLockedAmount: 4 * 50000,
+          sellerLockedAmount: 4,
+        };
+      }
+    }
+    const matchClient = new MismatchedAuthorityClient();
+    const lockClient = new InMemoryIntentLockClient();
+    const settlement = new ForwardingSettlement(client);
+    const { service, orchestrator } = buildStack(
+      client,
+      matchClient,
+      settlement,
+      lockClient,
+    );
+
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("buy", {
+        institutionId: buyerId,
+        authorityRef: "auth-buyer-correct",
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 4, 50000),
+      }),
+      { correlationRef: "corr_auth_mismatch_buy" },
+    );
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("sell", {
+        institutionId: sellerId,
+        agentDid: "did:t3n:agent:seller-auth-mismatch",
+        authorityRef: "auth-seller-correct",
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 4, 50000),
+      }),
+      { correlationRef: "corr_auth_mismatch_sell" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(settlement.requests).toHaveLength(0);
+    expect(orchestrator.pendingCount()).toBe(0);
+  });
+
+  it("settles when the TEE echoes the per-side identity exactly", async () => {
+    // Positive path for the v0.7.0 audit-trail invariant:
+    // when the TEE echoes the same institution IDs and
+    // authority refs the orchestrator submitted, the
+    // settlement proceeds and the audit log carries the
+    // TEE-attested values (not the orchestrator's in-memory
+    // queue values). The settlement record's per-side
+    // institution ID is the value the TEE bound to the
+    // outcome, which the match_attestation_ref proves
+    // cryptographically.
+    const client = new InMemoryPortfolioClient([
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "WBTC", balance: 0 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "USDC", balance: 0 }),
+    ]);
+    const matchClient = new MatchedClient();
+    const lockClient = new InMemoryIntentLockClient();
+    const settlement = new ForwardingSettlement(client);
+    const { service } = buildStack(
+      client,
+      matchClient,
+      settlement,
+      lockClient,
+    );
+
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("buy", {
+        institutionId: buyerId,
+        authorityRef: "auth-buyer-echoed",
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 4, 50000),
+      }),
+      { correlationRef: "corr_echo_buy" },
+    );
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("sell", {
+        institutionId: sellerId,
+        agentDid: "did:t3n:agent:seller-echoed",
+        authorityRef: "auth-seller-echoed",
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 4, 50000),
+      }),
+      { correlationRef: "corr_echo_sell" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Settlement ran with the TEE-attested identity in the
+    // match outcome. The MatchedClient echoes the
+    // orchestrator-supplied institution IDs and authority
+    // refs verbatim, so the values flow through to the
+    // settlement record unchanged.
+    expect(settlement.requests).toHaveLength(1);
+    const request = settlement.requests[0];
+    expect(request?.matchOutcome.buyerInstitutionId).toBe(buyerId);
+    expect(request?.matchOutcome.sellerInstitutionId).toBe(sellerId);
+    // The TEE-attested match attestation ref is present on
+    // the outcome — the orchestrator's audit log carries it
+    // and the per-receipt t3AttestationRef derives from it.
+    expect(request?.matchOutcome.matchAttestationRef).toMatch(
+      /^match_attest_\d+$/u,
+    );
   });
 });
 

@@ -140,17 +140,24 @@ class StaticBlindIntentClient implements BlindIntentClient {
 
 class NoOpMatchClient implements MatchContractClient {
   public async evaluateMatch(
-    _request: MatchEvaluationRequest,
+    request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
+    // v0.7.0: echo the per-side identity the orchestrator
+    // forwarded. This is a `no_match` outcome, so the
+    // orchestrator's `detectIdentityMismatch` check is not
+    // exercised (it only fires on `matched`), but mirroring the
+    // inputs keeps the stub shape consistent with the production
+    // TEE behavior.
     return {
       status: "no_match",
       outcomeRef: "",
       executionRef: "",
-      buyerInstitutionId: "",
-      sellerInstitutionId: "",
+      buyerInstitutionId: request.buyInstitutionId,
+      sellerInstitutionId: request.sellInstitutionId,
       encryptedTradeFieldsRef: "",
-      buyerAuthorityRef: "",
-      sellerAuthorityRef: "",
+      buyerAuthorityRef: request.buyAuthorityRef,
+      sellerAuthorityRef: request.sellAuthorityRef,
+      matchAttestationRef: "",
       expiresAt: new Date(0).toISOString(),
       matchedQuantity: 0,
       executionPrice: 0,
@@ -445,18 +452,21 @@ describe("matching orchestrator — balance reservations", () => {
     );
 
     class MatchedClient implements MatchContractClient {
-      public async evaluateMatch(): Promise<OpaqueMatchOutcome> {
-        // Enclave-decided fill: 100 WBTC @ 50000 midpoint. The
-        // orchestrator settles on these authoritative values.
+      public async evaluateMatch(
+        request: MatchEvaluationRequest,
+      ): Promise<OpaqueMatchOutcome> {
+        // v0.7.0: echo the orchestrator-supplied identity so
+        // the identity-consistency check passes.
         return {
           status: "matched",
           outcomeRef: "outcome_test",
           executionRef: "exec_test",
-          buyerInstitutionId: buyerId,
-          sellerInstitutionId: sellerId,
+          buyerInstitutionId: request.buyInstitutionId,
+          sellerInstitutionId: request.sellInstitutionId,
           encryptedTradeFieldsRef: "fields_ref",
-          buyerAuthorityRef: "auth_buyer",
-          sellerAuthorityRef: "auth_seller",
+          buyerAuthorityRef: request.buyAuthorityRef,
+          sellerAuthorityRef: request.sellAuthorityRef,
+          matchAttestationRef: "match_attest_test",
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           matchedQuantity: 100,
           executionPrice: 50000,
@@ -621,17 +631,25 @@ describe("matching orchestrator — balance reservations", () => {
     // released.
     class MatchedForBalanceCheckClient implements MatchContractClient {
       public async evaluateMatch(
-        _request: MatchEvaluationRequest,
+        request: MatchEvaluationRequest,
       ): Promise<OpaqueMatchOutcome> {
+        // v0.7.0: echo the orchestrator's per-side identity so
+        // the identity-consistency check passes. The point of
+        // this test is the balance check that runs AFTER the
+        // identity check — the seller's available WBTC is 0
+        // (consumed by its own submit-time lock) so the balance
+        // check fails and the counterparty (buyer) is evicted
+        // with its lock released.
         return {
           status: "matched",
           outcomeRef: "outcome_balance_check",
           executionRef: "exec_balance_check",
-          buyerInstitutionId: "",
-          sellerInstitutionId: "",
+          buyerInstitutionId: request.buyInstitutionId,
+          sellerInstitutionId: request.sellInstitutionId,
           encryptedTradeFieldsRef: "fields_balance_check",
-          buyerAuthorityRef: "",
-          sellerAuthorityRef: "",
+          buyerAuthorityRef: request.buyAuthorityRef,
+          sellerAuthorityRef: request.sellAuthorityRef,
+          matchAttestationRef: "match_attest_balance_check",
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           matchedQuantity: 100,
           executionPrice: 50000,

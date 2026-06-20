@@ -26,6 +26,7 @@ class CapturingNetworkClient implements T3NetworkClient {
         encrypted_trade_fields_ref: "encrypted_trade_fields_us3",
         buyer_authority_ref: "authority:buyer:settle",
         seller_authority_ref: "authority:seller:settle",
+        match_attestation_ref: "match_attest_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         expires_at: "2026-06-13T00:00:00.000Z",
         status: "matched",
         matched_quantity: "4",
@@ -45,6 +46,15 @@ const request: MatchEvaluationRequest = {
   sellEnvelope: "t3env.seller.envelope.base64url.ciphertext",
   buyLockAttestationRef: "t3attest:buyer",
   sellLockAttestationRef: "t3attest:seller",
+  // v0.7.0: per-side identity is now required on every
+  // `evaluate-match` call so the TEE can echo the values back
+  // and bind them to a match attestation. The orchestrator's
+  // pending-intent queue already holds these (verified at seal
+  // time) and forwards them verbatim.
+  buyInstitutionId: "00000000-0000-4000-8000-000000000301",
+  sellInstitutionId: "00000000-0000-4000-8000-000000000302",
+  buyAuthorityRef: "authority:buyer:settle",
+  sellAuthorityRef: "authority:seller:settle",
 };
 
 describe("match contract client", () => {
@@ -64,12 +74,13 @@ describe("match contract client", () => {
     // contract's `EvaluateMatchInput` deserializer in
     // contracts/matching-policy/src/lib.rs, and carries the
     // explicit contract version so the T3N adapter routes to the
-    // v0.5.0 build (the privacy-boundary wire form that consumes
-    // sealed envelopes + TEE-attested lock descriptor
-    // attestation refs rather than plaintext price / quantity
-    // inputs).
+    // v0.7.0 build (the audit-trail identity echo + match
+    // attestation version). The per-side institution IDs and
+    // authority refs are forwarded to the TEE so it can echo
+    // them back on the outcome and bind them to the match
+    // attestation ref.
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.5.0",
+      version: "0.7.0",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
@@ -77,16 +88,45 @@ describe("match contract client", () => {
       sell_envelope: request.sellEnvelope,
       buy_lock_attestation_ref: request.buyLockAttestationRef,
       sell_lock_attestation_ref: request.sellLockAttestationRef,
+      buy_institution_id: request.buyInstitutionId,
+      sell_institution_id: request.sellInstitutionId,
+      buy_authority_ref: request.buyAuthorityRef,
+      sell_authority_ref: request.sellAuthorityRef,
     });
   });
 
-  it("accepts a matched outcome whose institution/authority fields are empty", async () => {
-    // The TEE matching contract cannot see the buyer/seller
-    // institution ids or authority refs, so it returns empty
-    // strings for them (contracts/matching-policy/src/matching.rs).
-    // The client must NOT reject this — the orchestrator stamps the
-    // canonical values from its verified pending-intent queue before
-    // settlement. Requiring them here made every real match throw.
+  it("surfaces the TEE-echoed institution ids and authority refs on a matched outcome", async () => {
+    // v0.7.0 audit-trail fix: the TEE echoes the per-side
+    // identity on the match outcome and binds them to a match
+    // attestation ref. The client surfaces them on the
+    // `OpaqueMatchOutcome` so the orchestrator can assert the
+    // echo matches the queue values it submitted and use the
+    // TEE-attested values for settlement (not the in-memory
+    // queue values).
+    const client = new T3MatchContractClient({
+      networkClient: new CapturingNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).resolves.toMatchObject({
+      status: "matched",
+      buyerInstitutionId: "00000000-0000-4000-8000-000000000301",
+      sellerInstitutionId: "00000000-0000-4000-8000-000000000302",
+      buyerAuthorityRef: "authority:buyer:settle",
+      sellerAuthorityRef: "authority:seller:settle",
+      matchAttestationRef:
+        "match_attest_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+  });
+
+  it("accepts a matched outcome with empty identity for backwards compatibility", async () => {
+    // v0.7.0: an empty identity on a matched outcome is no
+    // longer a happy path (the TEE refuses to fill without
+    // non-empty identity). But the client still surfaces the
+    // empty strings it received so a pre-v0.7.0 host that
+    // returns the legacy shape doesn't crash the orchestrator
+    // — the orchestrator's `detectIdentityMismatch` check
+    // catches the mismatch and refuses the settlement. See the
+    // matching-orchestrator tests for the fail-closed path.
     class EmptyFieldsNetworkClient implements T3NetworkClient {
       public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
         return {
@@ -99,6 +139,7 @@ describe("match contract client", () => {
             encrypted_trade_fields_ref: "encrypted_trade_fields_empty",
             buyer_authority_ref: "",
             seller_authority_ref: "",
+            match_attestation_ref: "",
             expires_at: "2026-06-13T00:00:00.000Z",
             status: "matched",
             matched_quantity: "4",
@@ -120,9 +161,54 @@ describe("match contract client", () => {
       sellerInstitutionId: "",
       buyerAuthorityRef: "",
       sellerAuthorityRef: "",
+      matchAttestationRef: "",
       status: "matched",
       matchedQuantity: 4,
       executionPrice: 50000,
+    });
+  });
+
+  it("accepts a no_match outcome without per-side identity fields", async () => {
+    // `no_match` is a non-fill. The TEE still echoes the
+    // identity on the rejection so the orchestrator's audit log
+    // records which institution pair was rejected, but a
+    // legacy pre-v0.7.0 host that returns empty strings on a
+    // no_match does not block the orchestrator (the
+    // orchestrator only enforces identity on a matched outcome;
+    // a no_match is a benign rejection).
+    class NoMatchNetworkClient implements T3NetworkClient {
+      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
+        return {
+          status: 202,
+          body: {
+            outcome_ref: "match_outcome_nomatch",
+            execution_ref: "t3exec_nomatch",
+            buyer_institution_id: "",
+            seller_institution_id: "",
+            encrypted_trade_fields_ref: "fields_nomatch",
+            buyer_authority_ref: "",
+            seller_authority_ref: "",
+            match_attestation_ref: "",
+            expires_at: "2026-06-13T00:00:00.000Z",
+            status: "no_match",
+            matched_quantity: "",
+            execution_price: "",
+            buyer_locked_amount: "",
+            seller_locked_amount: "",
+          } as TBody,
+        };
+      }
+    }
+
+    const client = new T3MatchContractClient({
+      networkClient: new NoMatchNetworkClient(),
+    });
+
+    await expect(client.evaluateMatch(request)).resolves.toMatchObject({
+      status: "no_match",
+      matchedQuantity: 0,
+      executionPrice: 0,
+      matchAttestationRef: "",
     });
   });
 
@@ -219,48 +305,17 @@ describe("match contract client", () => {
     );
   });
 
-  it("returns zeroed fill fields on a no_match outcome", async () => {
-    class NoMatchNetworkClient implements T3NetworkClient {
-      public async request<TBody = unknown>(): Promise<T3NetworkResponse<TBody>> {
-        return {
-          status: 202,
-          body: {
-            outcome_ref: "match_outcome_nomatch",
-            execution_ref: "t3exec_nomatch",
-            encrypted_trade_fields_ref: "fields_nomatch",
-            expires_at: "2026-06-13T00:00:00.000Z",
-            status: "no_match",
-            matched_quantity: "",
-            execution_price: "",
-            buyer_locked_amount: "",
-            seller_locked_amount: "",
-          } as TBody,
-        };
-      }
-    }
-
-    const client = new T3MatchContractClient({
-      networkClient: new NoMatchNetworkClient(),
-    });
-
-    await expect(client.evaluateMatch(request)).resolves.toMatchObject({
-      status: "no_match",
-      matchedQuantity: 0,
-      executionPrice: 0,
-    });
-  });
-
   it("honours an explicit contractVersion override", async () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3MatchContractClient({
       networkClient,
-      contractVersion: "0.5.1",
+      contractVersion: "0.7.1",
     });
 
     await client.evaluateMatch(request);
 
     const body = networkClient.requests[0]?.body as Record<string, unknown>;
-    expect(body.version).toBe("0.5.1");
+    expect(body.version).toBe("0.7.1");
   });
 
   it("decodes fractional-decimal fill fields from the v0.4.0 wire form", async () => {
@@ -277,11 +332,12 @@ describe("match contract client", () => {
           body: {
             outcome_ref: "match_outcome_fractional",
             execution_ref: "t3exec_fractional",
-            buyer_institution_id: "",
-            seller_institution_id: "",
+            buyer_institution_id: "00000000-4000-8000-000000000301", // padded
+            seller_institution_id: "00000000-4000-8000-000000000302", // padded
             encrypted_trade_fields_ref: "fields_fractional",
-            buyer_authority_ref: "",
-            seller_authority_ref: "",
+            buyer_authority_ref: "authority:buyer:settle",
+            seller_authority_ref: "authority:seller:settle",
+            match_attestation_ref: "match_attest_fractional",
             expires_at: "2026-06-13T00:00:00.000Z",
             status: "matched",
             matched_quantity: "0.0001",

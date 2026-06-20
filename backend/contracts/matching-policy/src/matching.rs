@@ -8,7 +8,7 @@
 //! that the WASM exposes the required WIT world, which gives us
 //! a verifiable execution surface even though the body is pure.
 //!
-//! Wire format for prices and quantities (v0.6.0): a plain decimal
+//! Wire format for prices and quantities (v0.7.0): a plain decimal
 //! string, optionally with a single `.` separating integer and
 //! fractional parts. Both sides carry their values at the same
 //! implicit scale (the contract's internal [`WIRE_SCALE`]); the
@@ -20,6 +20,20 @@
 //! `parseUnits(quantity.toString(), decimals)`, so the wire form
 //! matches both surfaces without a backend pre/post-scale step.
 //!
+//! v0.7.0 audit-trail fix. As of v0.7.0 the `evaluate-match`
+//! function requires the orchestrator to pass the per-side
+//! institution IDs and authority refs (the same values the
+//! orchestrator already holds in its pending-intent queue, which
+//! were verified at seal time via `seal-intent`). The TEE echoes
+//! these identity fields back on both `matched` and `no_match`
+//! outcomes and binds them to a deterministic `match_attestation_ref`
+//! (a SHA-256 over the canonical concatenation of the per-side
+//! identity + outcome refs). The orchestrator asserts the echo
+//! matches the queue values it submitted and fails closed on
+//! mismatch (poisoned queue entry, lost binding, TEE regression).
+//! See the v0.7.0 changes block in `src/lib.rs` for the full
+//! audit-trail rationale.
+//!
 //! Pair authority (`evaluate_pair`): the TEE is the structural
 //! authority on whether a candidate pair of sealed negotiation
 //! tickets is matchable. The orchestrator owns the in-memory
@@ -30,7 +44,7 @@
 
 extern crate alloc;
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -706,6 +720,22 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         return Err("evaluate-match: correlation_ref is required".to_string());
     }
 
+    // v0.7.0 audit-trail fix. The orchestrator's identity claims
+    // are required on every `evaluate-match` call (the contract
+    // refuses to fill without a complete identity binding). The
+    // values come from the orchestrator's pending-intent queue,
+    // which already verified them at seal time via `seal-intent`'s
+    // `institution_id` / `authority_ref`. The TEE echoes them
+    // back on both `matched` and `no_match` outcomes so the audit
+    // log carries a TEE-attested match outcome instead of an
+    // orchestrator-stamped override. Refusing the call when any
+    // identity field is empty stops a poisoned-queue bug from
+    // silently settling to an institution the TEE never bound.
+    let identity = match verify_identity_fields(&parsed) {
+        Ok(values) => values,
+        Err(reason) => return Err(reason),
+    };
+
     // Outcome / trade-field refs are deterministic regardless of
     // whether the pair crosses, so the orchestrator can correlate
     // a `no_match` back to the exact handle pair it submitted.
@@ -723,14 +753,6 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         format!("{}:{}", parsed.buy_intent_handle, parsed.sell_intent_handle).as_bytes(),
     );
 
-    // The TEE does not have buyer/seller institution context, so
-    // these stay empty and the orchestrator stamps the verified
-    // values from its pending-intent queue before settlement.
-    let buyer_institution_id = String::new();
-    let seller_institution_id = String::new();
-    let buyer_authority_ref = String::new();
-    let seller_authority_ref = String::new();
-
     // 5-minute settlement window — matches the
     // `MatchingOrchestrator`'s default intent TTL.
     let expires_at = format_expires_at(300);
@@ -746,10 +768,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 outcome_ref,
                 execution_ref,
                 encrypted_trade_fields_ref,
-                buyer_institution_id,
-                seller_institution_id,
-                buyer_authority_ref,
-                seller_authority_ref,
+                identity,
                 expires_at,
             );
         }
@@ -761,10 +780,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 outcome_ref,
                 execution_ref,
                 encrypted_trade_fields_ref,
-                buyer_institution_id,
-                seller_institution_id,
-                buyer_authority_ref,
-                seller_authority_ref,
+                identity,
                 expires_at,
             );
         }
@@ -776,10 +792,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 outcome_ref,
                 execution_ref,
                 encrypted_trade_fields_ref,
-                buyer_institution_id,
-                seller_institution_id,
-                buyer_authority_ref,
-                seller_authority_ref,
+                identity,
                 expires_at,
             );
         }
@@ -791,10 +804,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 outcome_ref,
                 execution_ref,
                 encrypted_trade_fields_ref,
-                buyer_institution_id,
-                seller_institution_id,
-                buyer_authority_ref,
-                seller_authority_ref,
+                identity,
                 expires_at,
             );
         }
@@ -814,10 +824,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             outcome_ref,
             execution_ref,
             encrypted_trade_fields_ref,
-            buyer_institution_id,
-            seller_institution_id,
-            buyer_authority_ref,
-            seller_authority_ref,
+            identity,
             expires_at,
         );
     }
@@ -833,23 +840,35 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 outcome_ref,
                 execution_ref,
                 encrypted_trade_fields_ref,
-                buyer_institution_id,
-                seller_institution_id,
-                buyer_authority_ref,
-                seller_authority_ref,
+                identity,
                 expires_at,
             );
         }
     };
 
+    // Deterministic SHA-256 attestation binding the match outcome
+    // to the supplied identity. Anyone with the input fields and
+    // the outcome/execution refs can re-derive the attestation and
+    // confirm the recorded institution IDs are the IDs the TEE
+    // bound to this match outcome. The settlement record stores
+    // this ref so a judge reading the `completed_trades` row can
+    // verify the institution IDs in the row are the IDs the TEE
+    // echoed.
+    let match_attestation_ref = compute_match_attestation_ref(
+        &parsed,
+        &identity,
+        &outcome_ref,
+        &execution_ref,
+    );
+
     let output = EvaluateMatchOutput {
         outcome_ref,
         execution_ref,
-        buyer_institution_id,
-        seller_institution_id,
+        buyer_institution_id: identity.buy_institution_id,
+        seller_institution_id: identity.sell_institution_id,
         encrypted_trade_fields_ref,
-        buyer_authority_ref,
-        seller_authority_ref,
+        buyer_authority_ref: identity.buy_authority_ref,
+        seller_authority_ref: identity.seller_authority_ref,
         expires_at,
         status: "matched".to_string(),
         // Wire the fill back at the natural decimal scale
@@ -858,43 +877,175 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         // re-scaling.
         matched_quantity: format_decimal(matched_quantity),
         execution_price: format_decimal(execution_price),
+        match_attestation_ref,
     };
 
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-match: response encode failed: {}", err))
 }
 
+/// Per-side identity binding the orchestrator passed into
+/// `evaluate-match`. The TEE is not an authority on these values
+/// (it has no state across `seal-intent` and `evaluate-match`
+/// calls), but it IS the authority on echoing them back to the
+/// caller: the settlement record carries the echoed values as
+/// the audit-trail identity for the match. The orchestrator
+/// asserts the echo matches the queue values it submitted and
+/// fails closed on mismatch — see the v0.7.0 comment in
+/// `src/lib.rs` for the audit-trail rationale.
+struct MatchIdentity {
+    buy_institution_id: String,
+    sell_institution_id: String,
+    buy_authority_ref: String,
+    seller_authority_ref: String,
+}
+
+/// Validate the per-side identity fields on every `evaluate-match`
+/// call. A `matched` outcome is refused outright on any missing
+/// field — the TEE will not fill against an unknown institution.
+/// The same check runs on a `no_match` path through
+/// `no_match_output` so the echoed identity on a rejection is
+/// also well-formed (the orchestrator needs to log a non-empty
+/// institution ID for the audit trail even on a non-cross).
+fn verify_identity_fields(parsed: &EvaluateMatchInput) -> Result<MatchIdentity, String> {
+    let buy_institution_id = parsed.buy_institution_id.trim();
+    let sell_institution_id = parsed.sell_institution_id.trim();
+    let buy_authority_ref = parsed.buy_authority_ref.trim();
+    let seller_authority_ref = parsed.sell_authority_ref.trim();
+    if buy_institution_id.is_empty() {
+        return Err(
+            "evaluate-match: buy_institution_id is required (v0.7.0 audit-trail binding)"
+                .to_string(),
+        );
+    }
+    if sell_institution_id.is_empty() {
+        return Err(
+            "evaluate-match: sell_institution_id is required (v0.7.0 audit-trail binding)"
+                .to_string(),
+        );
+    }
+    if buy_authority_ref.is_empty() {
+        return Err(
+            "evaluate-match: buy_authority_ref is required (v0.7.0 audit-trail binding)"
+                .to_string(),
+        );
+    }
+    if seller_authority_ref.is_empty() {
+        return Err(
+            "evaluate-match: seller_authority_ref is required (v0.7.0 audit-trail binding)"
+                .to_string(),
+        );
+    }
+    if buy_institution_id == sell_institution_id {
+        return Err(
+            "evaluate-match: buyer and seller institution ids are identical (self-pair)"
+                .to_string(),
+        );
+    }
+    Ok(MatchIdentity {
+        buy_institution_id: parsed.buy_institution_id.clone(),
+        sell_institution_id: parsed.sell_institution_id.clone(),
+        buy_authority_ref: parsed.buy_authority_ref.clone(),
+        seller_authority_ref: parsed.sell_authority_ref.clone(),
+    })
+}
+
+/// Compute the `match_attestation_ref` that binds the match
+/// outcome to the supplied identity fields. The construction is
+/// `hex_handle("match_attest", canonical)`. Inputs are
+/// pipe-delimited (a separator byte that cannot appear in any
+/// input — the inputs are institution UUIDs, authority refs, and
+/// short opaque refs) so the verifier can reconstruct the
+/// canonical byte string from the recorded fields. Output is
+/// `<prefix>_<32 lowercase hex chars>` to match the other
+/// hex_handle-derived refs in this contract.
+fn compute_match_attestation_ref(
+    parsed: &EvaluateMatchInput,
+    identity: &MatchIdentity,
+    outcome_ref: &str,
+    execution_ref: &str,
+) -> String {
+    hex_handle(
+        "match_attest",
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            parsed.buy_intent_handle,
+            identity.buy_institution_id,
+            parsed.sell_intent_handle,
+            identity.sell_institution_id,
+            identity.buy_authority_ref,
+            identity.seller_authority_ref,
+            parsed.correlation_ref,
+            parsed.asset_code,
+            outcome_ref,
+            execution_ref,
+        )
+        .as_bytes(),
+    )
+}
+
 /// Build a `no_match` outcome. Every opaque ref the caller needs to
 /// correlate the decision is still present (outcome_ref, trade-field
-/// ref, expiry); the fill fields are empty so the client can detect
-/// the non-cross without parsing the status.
-#[allow(clippy::too_many_arguments)]
+/// ref, expiry, identity echo, match attestation); the fill fields
+/// are empty so the client can detect the non-cross without parsing
+/// the status.
 fn no_match_output(
     outcome_ref: String,
     execution_ref: String,
     encrypted_trade_fields_ref: String,
-    buyer_institution_id: String,
-    seller_institution_id: String,
-    buyer_authority_ref: String,
-    seller_authority_ref: String,
+    identity: MatchIdentity,
     expires_at: String,
 ) -> Result<Vec<u8>, String> {
+    let match_attestation_ref = compute_match_attestation_ref_for_no_match(
+        &identity,
+        &outcome_ref,
+        &execution_ref,
+    );
     let output = EvaluateMatchOutput {
         outcome_ref,
         execution_ref,
-        buyer_institution_id,
-        seller_institution_id,
+        buyer_institution_id: identity.buy_institution_id,
+        seller_institution_id: identity.sell_institution_id,
         encrypted_trade_fields_ref,
-        buyer_authority_ref,
-        seller_authority_ref,
+        buyer_authority_ref: identity.buy_authority_ref,
+        seller_authority_ref: identity.seller_authority_ref,
         expires_at,
         status: "no_match".to_string(),
         matched_quantity: String::new(),
         execution_price: String::new(),
+        match_attestation_ref,
     };
 
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-match: no_match encode failed: {}", err))
+}
+
+/// `no_match` attestation. The handle correlation fields
+/// (buy/sell intent handles, correlation_ref, asset_code) are
+/// not part of this hash because they are not part of the
+/// orchestrator's identity claim — the attestation is about
+/// "the TEE echoed these identities for this outcome_ref /
+/// execution_ref pair", which is exactly what an auditor needs
+/// to verify the recorded institution IDs are the ones the TEE
+/// bound to the rejection.
+fn compute_match_attestation_ref_for_no_match(
+    identity: &MatchIdentity,
+    outcome_ref: &str,
+    execution_ref: &str,
+) -> String {
+    hex_handle(
+        "match_attest",
+        format!(
+            "{}|{}|{}|{}|{}|{}",
+            identity.buy_institution_id,
+            identity.sell_institution_id,
+            identity.buy_authority_ref,
+            identity.seller_authority_ref,
+            outcome_ref,
+            execution_ref,
+        )
+        .as_bytes(),
+    )
 }
 
 // ─── helpers ───

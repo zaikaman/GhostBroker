@@ -105,17 +105,21 @@ class StaticBlindIntentClient implements BlindIntentClient {
 
 class NoOpMatchClient implements MatchContractClient {
   public async evaluateMatch(
-    _request: MatchEvaluationRequest,
+    request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
+    // v0.7.0: echo the per-side identity the orchestrator
+    // forwarded (see the comment on the intent-cancellation
+    // NoOpMatchClient).
     return {
       status: "no_match",
       outcomeRef: "",
       executionRef: "",
-      buyerInstitutionId: "",
-      sellerInstitutionId: "",
+      buyerInstitutionId: request.buyInstitutionId,
+      sellerInstitutionId: request.sellInstitutionId,
       encryptedTradeFieldsRef: "",
-      buyerAuthorityRef: "",
-      sellerAuthorityRef: "",
+      buyerAuthorityRef: request.buyAuthorityRef,
+      sellerAuthorityRef: request.sellAuthorityRef,
+      matchAttestationRef: "",
       expiresAt: new Date(0).toISOString(),
       matchedQuantity: 0,
       executionPrice: 0,
