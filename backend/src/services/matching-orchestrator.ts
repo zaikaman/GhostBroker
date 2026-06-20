@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { MatchContractClient } from "../enclave/index.js";
+import {
+  deriveEncryptedTradeFieldHandles,
+  deriveReceiptHash,
+  deriveTeeAttestationRef,
+} from "../enclave/privacy/encrypted-trade-fields.js";
 import type {
   InstitutionSettlementConfigResolver,
   SettlementExecutionRequest,
@@ -505,11 +510,26 @@ export class MatchingOrchestrator {
         sellerAgentId: sellIntent.agentId,
         buyerAgentDid: buyIntent.agentDid,
         sellerAgentDid: sellIntent.agentDid,
-        encryptedTradeFields: {
-          assetCodeCiphertext: buyIntent.encryptedEnvelope,
-          quantityCiphertext: buyIntent.encryptedEnvelope,
-          executionPriceCiphertext: buyIntent.encryptedEnvelope,
-        },
+        // P0 privacy fix: the three settlement columns must NOT
+        // share a value (the previous code wrote
+        // `buyIntent.encryptedEnvelope` to all three columns,
+        // which let any DB reader decode one column and recover
+        // the full plaintext trading parameters for both sides).
+        // Each column now carries a distinct SHA-256-based
+        // opaque correlation handle derived from the
+        // TEE-attested match outcome. The handles are
+        // deterministic, so the receipt correlation logic that
+        // keys on `(outcomeRef, accessScope)` still works
+        // unchanged; the handles do not pretend to be ciphertext
+        // (they are opaque correlation identifiers, not encrypted
+        // field values -- see
+        // `enclave/privacy/encrypted-trade-fields.ts`).
+        encryptedTradeFields: deriveEncryptedTradeFieldHandles({
+          outcomeRef: normalizedOutcome.outcomeRef,
+          executionRef: normalizedOutcome.executionRef,
+          buyerInstitutionId: normalizedOutcome.buyerInstitutionId,
+          sellerInstitutionId: normalizedOutcome.sellerInstitutionId,
+        }),
         // The orchestrator does not hold plaintext asset /
         // quantity / execution price on the settled side. The
         // TEE-attested match outcome plus the lock descriptor
@@ -538,17 +558,34 @@ export class MatchingOrchestrator {
           {
             institutionId: buyIntent.institutionId,
             receiptCiphertext: `${receiptBase}.buyer`,
-            receiptHash: `sha256:${normalizedOutcome.outcomeRef}:buyer`,
+            // P0 privacy fix: real SHA-256 over the receipt
+            // ciphertext payload. The previous
+            // `sha256:${outcomeRef}:${side}` value was a
+            // deterministic string concatenation that did not
+            // authenticate the ciphertext and was trivially
+            // forgeable by anyone who knew the outcome ref.
+            receiptHash: deriveReceiptHash(`${receiptBase}.buyer`),
             keyVersion: "match-v1",
-            t3AttestationRef: normalizedOutcome.executionRef,
+            // P0 privacy fix: TEE-correlated attestation
+            // reference derived from the match outcome + side,
+            // not the orchestrator's `executionRef`. The
+            // previous value was a locally-minted UUID
+            // masquerading as a TEE attestation.
+            t3AttestationRef: deriveTeeAttestationRef(
+              normalizedOutcome.outcomeRef,
+              "buyer",
+            ),
             accessScope: "buyer",
           },
           {
             institutionId: sellIntent.institutionId,
             receiptCiphertext: `${receiptBase}.seller`,
-            receiptHash: `sha256:${normalizedOutcome.outcomeRef}:seller`,
+            receiptHash: deriveReceiptHash(`${receiptBase}.seller`),
             keyVersion: "match-v1",
-            t3AttestationRef: normalizedOutcome.executionRef,
+            t3AttestationRef: deriveTeeAttestationRef(
+              normalizedOutcome.outcomeRef,
+              "seller",
+            ),
             accessScope: "seller",
           },
         ],

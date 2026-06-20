@@ -4,6 +4,7 @@ export * from "./matching/index.js";
 export * from "./matching/match-contract-client.js";
 export * from "./matching/settlement-command.js";
 export * from "./negotiation/index.js";
+export * from "./privacy/encrypted-trade-fields.js";
 export * from "./runner/create-runner.js";
 export * from "./runner/lifecycle.js";
 export * from "./sandbox/config.js";

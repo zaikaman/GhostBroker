@@ -26,7 +26,7 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 | Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
 | Smart contracts | **Real Rust WASI P2 matching contract** (`backend/contracts/matching-policy/`, 952 LOC, compiled to `matching_policy.wasm` 214,548 bytes, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
 | Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 56 tests) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
-| Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); ciphertext-only `completed_trades` |
+| Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); opaque per-field correlation handles on `completed_trades` |
 | Heroku durability | All runtime state is Supabase-backed (no `backend/output/` file writes); the tenant signing keypair and the T3N publish record both survive Heroku dyno restarts and Heroku's ephemeral dyno filesystem |
 | Documentation gap report | 19 findings filed in `terminal3-adk-onboarding-doc-gaps.md` (T3-ONB-001 through T3-ONB-019) |
 
@@ -66,7 +66,7 @@ return result.isValid ? "verified" : "rejected";
 
 The application is structurally impossible without the SDK's privacy guarantees. Three concrete patterns the bounty brief does not pre-supply:
 
-**Hidden-intent dark pool across a live negotiation engine.** Agents do not post standing orders; they seal per-session tickets and engage in turn-based bilateral negotiation. The matching contract (`evaluate-match` inside `matching.rs:694-865`) only ever sees opaque `intent_handle`s; settlement amounts are computed inside the TEE and written as ciphertext columns to Supabase.
+**Hidden-intent dark pool across a live negotiation engine.** Agents do not post standing orders; they seal per-session tickets and engage in turn-based bilateral negotiation. The matching contract (`evaluate-match` inside `matching.rs:694-865`) only ever sees opaque `intent_handle`s; settlement amounts are computed inside the TEE and persisted as opaque per-field correlation handles (domain-separated `sha256:` digests of the TEE-attested match outcome) on `completed_trades`, so no Supabase reader can recover the plaintext asset/quantity/price.
 
 **Authority-bound LLM strategy.** Hosted agents run a multi-provider LLM chain (Gemini → OpenAI → Groq) under a per-agent negotiation mandate. The LLM proposes a move; the orchestrator clamps it against the agent's verifiable authority envelope (price band, quantity cap, notional ceiling, claim ladder) before submission. The mandate is derived from the same delegation VC the SDK verified. Mandates are snapshotted into the negotiation session row, so a mid-session revocation halts future moves automatically.
 
@@ -107,7 +107,7 @@ The application is structurally impossible without the SDK's privacy guarantees.
                                +-------------+
 ```
 
-The privacy boundary is enforced at three independent layers: API schema (Zod rejects any plaintext intent params at the edge), WebSocket telemetry (`redact-event.ts` enforces an allowlist), and database schema (`completed_trades` stores settlement data as ciphertext).
+The privacy boundary is enforced at three independent layers: API schema (Zod rejects any plaintext intent params at the edge), WebSocket telemetry (`redact-event.ts` enforces an allowlist), and database schema (`completed_trades` stores settlement data as opaque per-field correlation handles derived from the TEE-attested match outcome, not as plaintext or raw ciphertext).
 
 ---
 

@@ -372,21 +372,53 @@ deny list.
 
 ### Layer 3: Database Schema
 
-The `completed_trades` table stores settlement data exclusively as ciphertext:
+The `completed_trades` table stores the per-field settlement metadata
+exclusively as **opaque correlation handles** derived deterministically from
+the TEE-attested match outcome:
 
-- `asset_code_ciphertext` -- Encrypted asset identifier
-- `quantity_ciphertext` -- Encrypted trade quantity
-- `execution_price_ciphertext` -- Encrypted execution price
+- `asset_code_ciphertext` -- `sha256:` digest over the TEE-attested match
+  outcome and per-side institution ids, domain-separated by
+  `ghostbroker.completed_trades.asset_code.v1`
+- `quantity_ciphertext` -- `sha256:` digest over the same TEE-attested
+  inputs, domain-separated by `ghostbroker.completed_trades.quantity.v1`
+- `execution_price_ciphertext` -- `sha256:` digest over the same
+  TEE-attested inputs, domain-separated by
+  `ghostbroker.completed_trades.execution_price.v1`
 
-All three columns have `CHECK (column <> '')` constraints. The corresponding
-plaintext values never cross the Supabase boundary. What an operator sees in
+The three columns are pairwise distinct because each is hashed over a
+different domain-separated input, and none of them carries the raw
+encrypted envelope or any plaintext trading parameter. The
+`audit_receipts.receipt_hash` column is a real SHA-256 over the receipt
+ciphertext payload (the receipt's authenticity is bound to the actual
+ciphertext bytes, not to a forgeable `sha256:${outcomeRef}:${side}`
+string), and `audit_receipts.t3_attestation_ref` is a SHA-256 over the
+match outcome plus the per-side access scope so a DB reader cannot
+correlate buyer and seller receipts to the same locally-minted
+orchestrator UUID.
+
+All three columns have `CHECK (column <> '')` constraints, and the
+helpers live in
+`backend/src/enclave/privacy/encrypted-trade-fields.ts` so the
+domain-separation constants stay in one place. The schema in
+`database/migrations/003_create_completed_trades.sql` is unchanged
+because the column shape was always opaque-text; the only thing that
+changed is the value the orchestrator writes. The settlement record
+is **not** encrypted field-level ciphertext today -- it is an opaque
+correlation handle -- so the README §Privacy Boundary deliberately
+calls these "opaque correlation handles" rather than "encrypted
+identifiers" or "encrypted execution price". A future TEE contract
+version (the v0.6.0 wire form) can mint the digests inside the
+enclave and replace this derivation with real per-field ciphertext
+without touching the orchestrator call sites. What an operator sees in
 the Observatory Console:
 
 - Connection status (backend, WebSocket, Supabase, T3 sandbox, per-agent)
 - Sanitized state transitions: `agent_verified`, `intent_sealed`,
   `encrypted_evaluation`, `settlement_finalized`, `receipt_available`
-- Completed trade records (post-settlement only, encrypted fields)
-- Audit receipt metadata (hash, key version, attestation reference)
+- Completed trade records (post-settlement only, opaque correlation
+  handle columns)
+- Audit receipt metadata (real SHA-256 hash of the receipt ciphertext,
+  key version, TEE-attested attestation reference)
 
 ---
 

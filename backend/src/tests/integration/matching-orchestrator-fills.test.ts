@@ -22,6 +22,7 @@ import type {
 import type { CompletedTrade } from "../../models/completed-trade.js";
 import {
   buildHiddenIntentRequestForSide,
+  us2AuthorityRef,
 } from "../data/us2-encrypted-intent-builders.js";
 import {
   InMemoryPortfolioClient,
@@ -521,6 +522,132 @@ describe("matching orchestrator - fills and crossing", () => {
     const request = settlement.requests[0];
     expect(request?.quantity).toBe(ENCLAVE_QUANTITY);
     expect(request?.executionPrice).toBe(ENCLAVE_PRICE);
+  });
+
+  it("populates the three settlement ciphertext columns with distinct opaque handles (P0 privacy)", async () => {
+    // P0 regression: the previous orchestrator code populated all
+    // three columns with the buy-side `encryptedEnvelope` blob,
+    // which let any DB reader decode one column and recover the
+    // plaintext asset/quantity/price for both sides. The columns
+    // now carry distinct SHA-256-based opaque correlation handles
+    // derived from the TEE-attested match outcome.
+    const client = new InMemoryPortfolioClient([
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
+      makePortfolioRecord({ institutionId: buyerId, assetCode: "WBTC", balance: 0 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "WBTC", balance: 1000 }),
+      makePortfolioRecord({ institutionId: sellerId, assetCode: "USDC", balance: 0 }),
+    ]);
+    // Local stub that echoes the orchestrator-supplied institution
+    // IDs / authority refs on the match outcome. The orchestrator
+    // fails closed when the TEE echo disagrees with the
+    // pending-intent queue values, so the stub must populate these
+    // fields for settlement to run.
+    const P0_OUTCOME_REF = "outcome_p0_privacy";
+    const P0_EXECUTION_REF = "exec_p0_privacy";
+    class MatchedClientWithIds implements MatchContractClient {
+      public async evaluateMatch(): Promise<OpaqueMatchOutcome> {
+        return {
+          status: "matched",
+          outcomeRef: P0_OUTCOME_REF,
+          executionRef: P0_EXECUTION_REF,
+          buyerInstitutionId: buyerId,
+          sellerInstitutionId: sellerId,
+          encryptedTradeFieldsRef: "fields_p0",
+          buyerAuthorityRef: us2AuthorityRef,
+          sellerAuthorityRef: us2AuthorityRef,
+          matchAttestationRef: "t3attest_p0_privacy",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          matchedQuantity: 4,
+          executionPrice: 50000,
+          buyerLockedAmount: 4 * 50000,
+          sellerLockedAmount: 4,
+        };
+      }
+    }
+    const matchClient = new MatchedClientWithIds();
+    const lockClient = new InMemoryIntentLockClient();
+    const settlement = new ForwardingSettlement(client);
+    const { service } = buildStack(
+      client,
+      matchClient,
+      settlement,
+      lockClient,
+    );
+
+    const buyEnvelope = makeEnvelope("WBTC", "buy", 4, 50000);
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("buy", {
+        institutionId: buyerId,
+        encryptedIntentEnvelope: buyEnvelope,
+      }),
+      { correlationRef: "corr_p0_buy" },
+    );
+    await service.submitIntent(
+      buildHiddenIntentRequestForSide("sell", {
+        institutionId: sellerId,
+        agentDid: "did:t3n:agent:seller-p0",
+        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 4, 50000),
+      }),
+      { correlationRef: "corr_p0_sell" },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(settlement.requests).toHaveLength(1);
+    const request = settlement.requests[0];
+    expect(request).toBeDefined();
+    const fields = request?.encryptedTradeFields;
+    expect(fields).toBeDefined();
+
+    // The three columns are pairwise distinct.
+    expect(fields?.assetCodeCiphertext).not.toBe(fields?.quantityCiphertext);
+    expect(fields?.assetCodeCiphertext).not.toBe(
+      fields?.executionPriceCiphertext,
+    );
+    expect(fields?.quantityCiphertext).not.toBe(
+      fields?.executionPriceCiphertext,
+    );
+
+    // None of the columns equals the encrypted envelope that was
+    // used to derive them. The previous code wrote the envelope
+    // directly into all three columns, which is the regression
+    // we are locking down here.
+    expect(fields?.assetCodeCiphertext).not.toBe(buyEnvelope);
+    expect(fields?.quantityCiphertext).not.toBe(buyEnvelope);
+    expect(fields?.executionPriceCiphertext).not.toBe(buyEnvelope);
+
+    // The handles carry the `sha256:` opaque-handle prefix and
+    // are 64-hex characters after the prefix (so the dashboard
+    // and audit tools can recognise them).
+    expect(fields?.assetCodeCiphertext).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(fields?.quantityCiphertext).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(fields?.executionPriceCiphertext).toMatch(
+      /^sha256:[0-9a-f]{64}$/u,
+    );
+
+    // Receipt integrity: the hash authenticates the ciphertext
+    // payload, and the TEE attestation reference is distinct
+    // from the orchestrator's `executionRef` (the previous bug
+    // reused `executionRef` for both sides, which let a DB
+    // reader correlate buyer and seller receipts to the same
+    // orchestrator-minted UUID).
+    const buyerReceipt = request?.receipts.find(
+      (r) => r.accessScope === "buyer",
+    );
+    const sellerReceipt = request?.receipts.find(
+      (r) => r.accessScope === "seller",
+    );
+    expect(buyerReceipt).toBeDefined();
+    expect(sellerReceipt).toBeDefined();
+    expect(buyerReceipt?.receiptHash).not.toBe(
+      `sha256:${P0_OUTCOME_REF}:buyer`,
+    );
+    expect(buyerReceipt?.receiptHash).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(buyerReceipt?.t3AttestationRef).not.toBe(P0_EXECUTION_REF);
+    expect(buyerReceipt?.t3AttestationRef).not.toBe(
+      sellerReceipt?.t3AttestationRef,
+    );
+    expect(buyerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(sellerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
   });
 });
 

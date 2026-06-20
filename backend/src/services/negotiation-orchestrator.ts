@@ -4,6 +4,11 @@ import type {
   NegotiationTicketClient,
   NegotiationDisclosureVerifier,
 } from "../enclave/index.js";
+import {
+  deriveEncryptedTradeFieldHandles,
+  deriveReceiptHash,
+  deriveTeeAttestationRef,
+} from "../enclave/privacy/encrypted-trade-fields.js";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
 import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
@@ -1527,11 +1532,24 @@ export class NegotiationOrchestrator {
       sellerAgentId: sellerAgentRecord.id,
       buyerAgentDid: session.buy_agent_did,
       sellerAgentDid: session.sell_agent_did,
-      encryptedTradeFields: {
-        assetCodeCiphertext: transcriptRef,
-        quantityCiphertext: transcriptRef,
-        executionPriceCiphertext: transcriptRef,
-      },
+      // P0 privacy fix: the three settlement columns must NOT
+      // share a value (the previous code wrote `transcriptRef`
+      // to all three columns, which collapsed asset, quantity,
+      // and execution-price correlation into one ref). Each
+      // column now carries a distinct SHA-256-based opaque
+      // correlation handle derived from the TEE-attested
+      // outcome. The handles are deterministic, so the receipt
+      // correlation logic that keys on `(outcomeRef,
+      // accessScope)` still works unchanged. The handles do not
+      // pretend to be ciphertext (they are opaque correlation
+      // identifiers, not encrypted field values -- see
+      // `enclave/privacy/encrypted-trade-fields.ts`).
+      encryptedTradeFields: deriveEncryptedTradeFieldHandles({
+        outcomeRef,
+        executionRef,
+        buyerInstitutionId: session.buy_institution_id,
+        sellerInstitutionId: session.sell_institution_id,
+      }),
       assetCode: session.asset_code,
       quantity: input.matchedQuantity,
       executionPrice: input.executionPrice,
@@ -1541,17 +1559,28 @@ export class NegotiationOrchestrator {
         {
           institutionId: session.buy_institution_id,
           receiptCiphertext: `${receiptBase}.buyer`,
-          receiptHash: `sha256:${outcomeRef}:buyer`,
+          // P0 privacy fix: real SHA-256 over the receipt
+          // ciphertext payload. The previous
+          // `sha256:${outcomeRef}:side` value was a
+          // deterministic string concatenation that did not
+          // authenticate the ciphertext and was trivially
+          // forgeable by anyone who knew the outcome ref.
+          receiptHash: deriveReceiptHash(`${receiptBase}.buyer`),
           keyVersion: "negotiation-v1",
-          t3AttestationRef: executionRef,
+          // P0 privacy fix: TEE-correlated attestation
+          // reference derived from the match outcome + side,
+          // not the orchestrator's `executionRef`. The
+          // previous value was a locally-minted UUID
+          // masquerading as a TEE attestation.
+          t3AttestationRef: deriveTeeAttestationRef(outcomeRef, "buyer"),
           accessScope: "buyer",
         },
         {
           institutionId: session.sell_institution_id,
           receiptCiphertext: `${receiptBase}.seller`,
-          receiptHash: `sha256:${outcomeRef}:seller`,
+          receiptHash: deriveReceiptHash(`${receiptBase}.seller`),
           keyVersion: "negotiation-v1",
-          t3AttestationRef: executionRef,
+          t3AttestationRef: deriveTeeAttestationRef(outcomeRef, "seller"),
           accessScope: "seller",
         },
       ],
