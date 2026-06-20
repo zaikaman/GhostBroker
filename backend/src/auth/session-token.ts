@@ -53,18 +53,16 @@ interface OperatorSessionJwtPayload {
   exp: number;
 }
 
-const claimsSchema = z.object({
-  sub: z.string().min(1),
-  did: z.string().min(1),
-  institutionId: z.string().uuid(),
-  operatorId: z.string().min(1),
-  walletAddress: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
-  depositAddress: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
-  iat: z.number().int().positive(),
-  exp: z.number().int().positive(),
-});
-
-type ParsedClaims = z.infer<typeof claimsSchema>;
+interface ParsedClaims {
+  sub: string;
+  did: string;
+  institutionId: string;
+  operatorId: string;
+  walletAddress?: string;
+  depositAddress?: string;
+  iat: number;
+  exp: number;
+}
 
 function encode(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
