@@ -174,9 +174,6 @@ function buildOpenAIRequestBody(request: LlmRequest, model: string): Record<stri
     model,
     messages: request.messages.map((msg) => ({ role: msg.role, content: msg.content })),
   };
-  if (typeof request.temperature === "number") {
-    body.temperature = clamp(request.temperature, 0, 2);
-  }
   if (typeof request.topP === "number") {
     body.top_p = clamp(request.topP, 0, 1);
   }

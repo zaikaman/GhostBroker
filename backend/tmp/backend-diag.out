@@ -1,0 +1,5 @@
+
+> @ghostbroker/backend@0.1.0 dev
+> tsx watch src/server.ts
+
+{"level":30,"time":1781965396403,"pid":15792,"hostname":"DESKTOP-I1S5SR8","name":"ghostbroker-backend","port":3001,"msg":"Backend server listening."}

@@ -110,6 +110,13 @@ function decimalString(value: number): string {
   return value.toString();
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
 /**
  * Reconstruct a strategy profile from a persisted mandate. If the
  * mandate has no authored columns (legacy), returns null and the
@@ -656,6 +663,41 @@ export class NegotiationOrchestrator {
       },
       "received negotiation move",
     );
+    if (input.move.action === "reveal") {
+      // Diagnostic: surface what the agent actually sent on a
+      // reveal round so we can see whether the claimCredential
+      // arrived, what its issuer DID is, and whether the JWS is
+      // well-formed. The previous logger.debug above only carried
+      // the action — insufficient to debug a "verified: false"
+      // disclosure-gate regression from the backend log alone.
+      const credential = asRecord(input.claimCredential);
+      const proof = asRecord(credential?.proof);
+      logger.warn(
+        {
+          event: "negotiation.move.reveal_received",
+          sessionId: input.sessionId,
+          institutionId: input.institutionId,
+          agentDidPrefix: input.agentDid.slice(0, 30),
+          moveClaimType: input.move.claimType,
+          credentialPresent: credential !== undefined,
+          credentialIssuer: typeof credential?.issuer === "string" ? credential.issuer : null,
+          credentialSubjectKeys: Array.isArray(credential?.credentialSubject)
+            ? null
+            : credential && typeof credential.credentialSubject === "object" && credential.credentialSubject !== null
+              ? Object.keys(credential.credentialSubject as Record<string, unknown>)
+              : null,
+          proofType: typeof proof?.type === "string" ? proof.type : null,
+          proofVerificationMethod:
+            typeof proof?.verificationMethod === "string" ? proof.verificationMethod : null,
+          proofJwsPresent: typeof proof?.jws === "string",
+          proofJwsPrefix:
+            typeof proof?.jws === "string"
+              ? (proof.jws as string).slice(0, 18)
+              : null,
+        },
+        "reveal round received; diagnostic snapshot of claim credential",
+      );
+    }
     const verification = await this.authorization.loadAndVerify({
       institutionId: input.institutionId,
       agentId: input.agentId,
@@ -1340,6 +1382,20 @@ export class NegotiationOrchestrator {
       disclosableClaims: input.mandate.disclosableClaims,
       claimCredential: input.claimCredential,
     });
+    logger.warn(
+      {
+        event: "negotiation.disclosure.verified",
+        sessionId: input.session.id,
+        institutionId: input.institutionId,
+        agentDidPrefix: input.agentDid.slice(0, 30),
+        claimType,
+        verified: verified.verified,
+        attestationRef: verified.t3AttestationRef,
+        attestationRefPrefix: verified.t3AttestationRef.slice(0, 28),
+        assertionCiphertextLength: verified.assertionCiphertext.length,
+      },
+      "disclosure verifier returned a verdict",
+    );
 
     // Persist the disclosure row (assertion ciphertext + attestation
     // ref live there) and then append the round that references it.
@@ -1458,7 +1514,22 @@ export class NegotiationOrchestrator {
       requiredClaims: sellerRequired,
       receivedVerifiedClaims: sellerReceivedVerifiedClaims,
     });
-    return buyerOk && sellerOk;
+    const satisfied = buyerOk && sellerOk;
+    logger.warn(
+      {
+        event: "negotiation.disclosure_gate.evaluated",
+        sessionId: session.id,
+        buyerRequired,
+        buyerReceived: buyerReceivedVerifiedClaims,
+        buyerGateSatisfied: buyerOk,
+        sellerRequired,
+        sellerReceived: sellerReceivedVerifiedClaims,
+        sellerGateSatisfied: sellerOk,
+        overallSatisfied: satisfied,
+      },
+      "disclosure gate evaluated",
+    );
+    return satisfied;
   }
 
   private async convergeAndSettle(input: {

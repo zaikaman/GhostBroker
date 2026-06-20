@@ -358,10 +358,37 @@ async function trySdkVerify(signed: SignedCredential): Promise<SdkVerifyResult> 
       },
       "disclosure-verifier SDK verification outcome",
     );
+    // Diagnostic: emit the full SDK result on rejection too so an
+    // operator reading the log can tell why the SDK rejected
+    // (issuer DID method unsupported, signature mismatch, expired
+    // VC, etc.) without enabling VC_VERIFY_DEBUG. The `message`
+    // field carries the SDK's exact reason. This is the wire-side
+    // signal we need when the agent process mints a `did:t3n:` VC
+    // and the SDK throws "Unsupported DID method: t3n".
+    if (!result.isValid) {
+      logger.warn(
+        {
+          event: "negotiation.disclosure_verifier.sdk_rejected",
+          issuer: signed.issuer,
+          verificationMethod: signed.proof.verificationMethod,
+          sdkIsValid: result.isValid,
+          sdkMessage: result.message,
+        },
+        "disclosure verifier: SDK rejected the claim VC",
+      );
+    }
     return { isValid: result.isValid, message: result.message };
   } catch (error) {
     const errMessage = error instanceof Error ? error.message : String(error);
-    logger.debug({ err: errMessage }, "disclosure-verifier SDK threw");
+    logger.warn(
+      {
+        event: "negotiation.disclosure_verifier.sdk_threw",
+        issuer: signed.issuer,
+        verificationMethod: signed.proof.verificationMethod,
+        sdkError: errMessage,
+      },
+      "disclosure verifier: SDK threw an exception",
+    );
     return { isValid: false, message: `sdk_error:${errMessage}` };
   }
 }

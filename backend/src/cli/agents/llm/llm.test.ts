@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { GeminiLlmProvider, __testing } from "./gemini-client.js";
-import { OpenAILlmProvider } from "./openai-client.js";
+import { OpenAILlmProvider, __testing as __openaiTesting } from "./openai-client.js";
 import { GroqLlmProvider } from "./groq-client.js";
 import { FallbackLlmProvider, AggregateLlmError } from "./fallback-chain.js";
 import { LlmProviderError, type LlmResponse } from "./types.js";
@@ -297,6 +297,23 @@ describe("OpenAILlmProvider", () => {
       expect((err as LlmProviderError).kind).toBe("config");
       expect((err as LlmProviderError).message).toMatch(/baseUrl/i);
     }
+  });
+
+  it("builds the request body and omits temperature completely", () => {
+    const body = __openaiTesting.buildOpenAIRequestBody(
+      {
+        messages: [{ role: "user", content: "hello" }],
+        temperature: 0.7,
+        topP: 0.9,
+      },
+      "gpt-5-nano"
+    );
+    expect(body).toEqual({
+      model: "gpt-5-nano",
+      messages: [{ role: "user", content: "hello" }],
+      top_p: 0.9,
+    });
+    expect(body).not.toHaveProperty("temperature");
   });
 });
 
