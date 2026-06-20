@@ -1,3 +1,5 @@
+import { WS_TELEMETRY_URL } from './env.js';
+
 export type TelemetryEventType =
   | 'telemetry.connection.changed'
   | 'telemetry.agent.changed'
@@ -88,7 +90,7 @@ export class TelemetryClient {
   private isExplicitClosed = false;
 
   constructor() {
-    this.url = (import.meta.env.VITE_WS_TELEMETRY_URL || 'ws://localhost:3001/ws/telemetry').replace(/\/$/, '');
+    this.url = WS_TELEMETRY_URL;
   }
 
   public connect(token?: string): void {

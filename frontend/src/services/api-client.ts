@@ -3,6 +3,8 @@ export interface HealthResponse {
   services: Record<string, 'ok' | 'degraded' | 'unavailable'>;
 }
 
+import { API_BASE_URL } from './env.js';
+
 export interface EnclaveIdentity {
   t3NetworkEnv: 'testnet' | 'production';
   t3TenantDid: string | null;
@@ -311,7 +313,6 @@ export class ApiClientError extends Error {
   }
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
 const AUTH_TOKEN_KEY = 'ghostbroker-auth-token';
 const AUTH_SESSION_KEY = 'ghostbroker-auth-session';
 
