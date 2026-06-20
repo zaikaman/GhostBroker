@@ -703,6 +703,34 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
       negotiationService,
       ...(institutionApprovalService ? { institutionApprovalService } : {}),
+      // Hosted agents need the institution's tenant signing keypair
+      // (whose derived `did:ethr:0x<address>` is the only issuer
+      // format `@terminal3/verify_vc`'s `verifyEcdsaVcSig` accepts)
+      // to mint W3C claim VCs the disclosure verifier can hand to
+      // the SDK without it throwing "Unsupported DID method: t3n".
+      // The agent process gets the private key + derived DID as
+      // env vars at spawn time; it uses the env-supplied values
+      // for claim VCs while keeping the backend-assigned
+      // `AGENT_IDENTITY_DID` (`did:t3n:...`) for admit / ticket
+      // calls — those are bound to the institution's T3 identity,
+      // not to the signing keypair.
+      //
+      // The single-tenant dev / demo path uses the backend-wide
+      // tenant identity (`tenantIdentity`, loaded once at boot
+      // from `T3_TENANT_DID` / `TENANT_SIGNING_PRIVATE_KEY`) for
+      // every institution's hosted agent. The institution's own
+      // `t3_tenant_did` field uses the `did:t3:0x<wallet>` format
+      // — a different shape than the `tenant_identities` primary
+      // key (`did:t3n:0x<addr>`, the T3N handshake identifier) —
+      // so a per-institution lookup against the table would miss
+      // in the dev path. The shared backend-wide row is the
+      // authoritative keypair for claim VC signing until the
+      // table is partitioned per-institution.
+      tenantIdentityLookup: async () => ({
+        signingPrivateKey: tenantIdentity.privateKey,
+        signingPublicKey: tenantIdentity.publicKey,
+        issuerDid: tenantIdentity.did,
+      }),
     }),
     authService: new DidAuthService({
       institutions: institutionRepository,

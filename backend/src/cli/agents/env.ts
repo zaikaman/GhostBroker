@@ -158,6 +158,30 @@ export const agentEnvSchema = z
     AGENT_AVAILABLE_BASE_BALANCE: z.coerce.number().nonnegative().optional(),
     HOSTED_AGENT_ID: z.string().uuid().optional(),
     HOSTED_MANDATE_ID: z.string().uuid().optional(),
+
+    /**
+     * Institution's tenant signing keypair + derived `did:ethr:`
+     * issuer DID. Wired by the backend's `ChildProcessHostedAgentService`
+     * at agent spawn time from the `tenant_identities` row. The
+     * agent uses these to mint W3C claim VCs the disclosure
+     * verifier can hand to `@terminal3/verify_vc` without it
+     * throwing "Unsupported DID method: t3n". All three fields
+     * are supplied together by the hosted-agent-service; the
+     * negotiation loop falls back to the agent's own DID /
+     * keypair when the hosted-agent-service did not set them.
+     */
+    HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]{64}$/u)
+      .optional(),
+    HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]{66}$/u)
+      .optional(),
+    HOSTED_AGENT_TENANT_SIGNER_DID: z
+      .string()
+      .regex(/^did:ethr:0x[0-9a-fA-F]{40}$/u)
+      .optional(),
   })
   .superRefine((data, ctx) => {
     // Cross-field: every provider that has a credential must also
@@ -226,6 +250,11 @@ export function loadAgentEnv(): AgentEnv {
     ),
     HOSTED_AGENT_ID: process.env.HOSTED_AGENT_ID,
     HOSTED_MANDATE_ID: process.env.HOSTED_MANDATE_ID,
+    HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY:
+      process.env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY,
+    HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY:
+      process.env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY,
+    HOSTED_AGENT_TENANT_SIGNER_DID: process.env.HOSTED_AGENT_TENANT_SIGNER_DID,
   });
   if (!parsed.success) {
     console.error("Invalid environment:");

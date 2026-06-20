@@ -418,15 +418,29 @@ function toSignedCredential(
 ): SignedCredential {
   const credential = asRecord(claimCredential) ?? {};
   const proof = asRecord(credential.proof) ?? {};
+  // The `@context` MUST be byte-identical to what the agent's
+  // signer hashed at sign time. The previous implementation
+  // unconditionally appended `"https://www.w3.org/2018/credentials/v1"`
+  // to the agent's context array — but the agent's signer
+  // already includes that URL in the signing body's `@context`
+  // (see `backend/src/cli/agents/claim-credential.ts`), so
+  // appending it again produced a transformed credential with
+  // the URL listed twice. `JSON.stringify` then produced a
+  // different byte sequence, the keccak256 hash diverged from
+  // what the signer hashed, and the SDK's recovered signer
+  // address did not match `proof.verificationMethod`. The
+  // dedup here restores byte-equality with the signing body.
+  const baseContext = Array.isArray(credential["@context"])
+    ? (credential["@context"] as unknown[]).filter(
+        (entry): entry is string => typeof entry === "string",
+      )
+    : [];
+  const w3cV1Url = "https://www.w3.org/2018/credentials/v1";
+  const context = baseContext.includes(w3cV1Url)
+    ? baseContext
+    : [...baseContext, w3cV1Url];
   return {
-    "@context": [
-      ...(Array.isArray(credential["@context"])
-        ? (credential["@context"] as unknown[]).filter(
-            (entry): entry is string => typeof entry === "string",
-          )
-        : []),
-      "https://www.w3.org/2018/credentials/v1",
-    ],
+    "@context": context,
     id:
       typeof credential.id === "string"
         ? (credential.id as `${string}:${string}`)

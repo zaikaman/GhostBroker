@@ -57,6 +57,35 @@ export interface ChildProcessHostedAgentServiceOptions {
     "getMandateByAgent" | "listMandatesByAgent"
   >;
   institutionApprovalService?: InstitutionApprovalService;
+  /**
+   * Resolve the institution's tenant signing keypair at agent
+   * spawn time. The agent process uses the private key to sign
+   * W3C claim VCs and the derived `did:ethr:0x<address>` as the
+   * VC issuer DID — the only issuer format
+   * `@terminal3/verify_vc`'s `verifyEcdsaVcSig` accepts (a
+   * `did:t3n:` issuer makes the SDK throw "Unsupported DID
+   * method: t3n" and the disclosure verifier would record
+   * `verified: false`). The lookup MUST be supplied in production;
+   * without it the spawned agent cannot produce signed claim
+   * VCs and the disclosure gate stays permanently unsatisfied.
+   *
+   * The demo / single-tenant dev path uses ONE backend-wide
+   * tenant identity (the row keyed under the backend's
+   * `T3_TENANT_DID` env var, loaded once at boot) for every
+   * institution's hosted agent — the `institutionId` parameter
+   * is unused in that mode. Production deployments with
+   * per-institution signing keys will swap this for a per-row
+   * lookup.
+   *
+   * Tests that exercise the service without spawning real
+   * agents can omit this field — the constructor and the
+   * non-spawn paths don't touch it.
+   */
+  tenantIdentityLookup?: (institutionId: string) => Promise<{
+    signingPrivateKey: string;
+    signingPublicKey: string;
+    issuerDid: string;
+  }>;
   runner?: readonly string[];
   hostedScript?: string;
 }
@@ -73,6 +102,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     "getMandateByAgent" | "listMandatesByAgent"
   >;
   private readonly institutionApprovalService: InstitutionApprovalService | undefined;
+  private readonly tenantIdentityLookup: ChildProcessHostedAgentServiceOptions["tenantIdentityLookup"];
   private readonly runner: readonly string[];
   private readonly hostedScript: string | undefined;
 
@@ -84,6 +114,7 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     this.institutionService = options.institutionService;
     this.negotiationService = options.negotiationService;
     this.institutionApprovalService = options.institutionApprovalService;
+    this.tenantIdentityLookup = options.tenantIdentityLookup;
     this.runner = options.runner ?? ["npm", "run"];
     this.hostedScript = options.hostedScript;
   }
@@ -194,6 +225,23 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       ),
     });
 
+    // Resolve the institution's tenant signing keypair at spawn
+    // time so the agent can mint W3C claim VCs with a
+    // `did:ethr:0x<address>` issuer DID (the only format
+    // `@terminal3/verify_vc` accepts). The agent keeps the
+    // backend-assigned `AGENT_IDENTITY_DID` (`did:t3n:...`) for
+    // admit / ticket calls; the tenant keypair is used ONLY for
+    // claim VCs.
+    if (!this.tenantIdentityLookup) {
+      throw new PublicError(
+        "service_unavailable",
+        503,
+        undefined,
+        "Cannot start hosted agent: tenantIdentityLookup is not wired. The agent needs the institution's tenant signing keypair to mint signed claim VCs.",
+      );
+    }
+    const tenantIdentity = await this.tenantIdentityLookup(institutionId);
+
     const child = this.spawnHostedAgent(
       {
         agentDid: record.agent.agentDid,
@@ -206,6 +254,9 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
         institutionId: institution.id,
         displayName: institution.displayName,
         tenantDid: institution.t3TenantDid,
+        tenantSigningPrivateKey: tenantIdentity.signingPrivateKey,
+        tenantSigningPublicKey: tenantIdentity.signingPublicKey,
+        tenantSignerDid: tenantIdentity.issuerDid,
       },
     );
     // The settlement readiness check (assertSettlementReady above) is
@@ -467,6 +518,23 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       institutionId: string;
       displayName: string;
       tenantDid: string;
+      /**
+       * Institution's tenant signing private key (the
+       * dedicated secp256k1 key loaded from
+       * `TENANT_SIGNING_PRIVATE_KEY` or persisted on the
+       * `tenant_identities` row). The agent process uses
+       * this to sign W3C claim VCs — NOT for the
+       * delegation VC (the backend owns that path).
+       */
+      tenantSigningPrivateKey: string;
+      /** Compressed secp256k1 public key derived from `tenantSigningPrivateKey`. */
+      tenantSigningPublicKey: string;
+      /**
+       * `did:ethr:0x<address>` derived from `tenantSigningPrivateKey`.
+       * The VC issuer DID — the only format
+       * `@terminal3/verify_vc`'s `verifyEcdsaVcSig` accepts.
+       */
+      tenantSignerDid: string;
     },
   ): ChildProcess {
     const isScriptMode = this.hostedScript !== undefined;
@@ -494,6 +562,18 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       POLL_INTERVAL_MS: String(runtime.config.pollIntervalMs),
       MAX_TICKS: String(runtime.config.maxTicks),
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
+      // Tenant signing keypair + derived DID. The agent uses
+      // these to mint W3C claim VCs the disclosure verifier
+      // can hand to the SDK without it throwing "Unsupported
+      // DID method: t3n". The private key inherits the
+      // institution's KMS-grade confidentiality from the
+      // backend's own secret-loading path (env or
+      // tenant_identities row); it lands in the child
+      // process's env only for the lifetime of the agent
+      // run.
+      HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY: session.tenantSigningPrivateKey,
+      HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY: session.tenantSigningPublicKey,
+      HOSTED_AGENT_TENANT_SIGNER_DID: session.tenantSignerDid,
       ...(hasLocalEnv
         ? {
             // Strip LLM provider credentials + base URLs from the

@@ -161,6 +161,11 @@ describe("ChildProcessHostedAgentService.logTail privacy redaction", () => {
       negotiationService,
       runner: ["node"],
       hostedScript: "leaky-keepalive.mjs",
+      tenantIdentityLookup: async () => ({
+        signingPrivateKey: "0x" + "11".repeat(32),
+        signingPublicKey: "0x02" + "22".repeat(32),
+        issuerDid: "did:ethr:0x" + "33".repeat(20),
+      }),
     });
 
     const started = await service.startHostedAgent(agentId, institutionId);

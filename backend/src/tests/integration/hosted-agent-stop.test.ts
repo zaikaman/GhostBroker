@@ -138,6 +138,11 @@ describe("ChildProcessHostedAgentService.stopHostedAgent", () => {
       negotiationService,
       runner: ["node"],
       hostedScript: "keepalive.mjs",
+      tenantIdentityLookup: async () => ({
+        signingPrivateKey: "0x" + "11".repeat(32),
+        signingPublicKey: "0x02" + "22".repeat(32),
+        issuerDid: "did:ethr:0x" + "33".repeat(20),
+      }),
     });
 
     const started = await service.startHostedAgent(agentId, institutionId);
@@ -184,6 +189,11 @@ describe("ChildProcessHostedAgentService.stopHostedAgent", () => {
         // the long-lived grandchild is `node keepalive-grandchild.mjs`.
         runner: ["cmd.exe", "/c"],
         hostedScript: "node keepalive-grandchild.mjs",
+        tenantIdentityLookup: async () => ({
+          signingPrivateKey: "0x" + "11".repeat(32),
+          signingPublicKey: "0x02" + "22".repeat(32),
+          issuerDid: "did:ethr:0x" + "33".repeat(20),
+        }),
       });
 
       const started = await service.startHostedAgent(agentId, institutionId);

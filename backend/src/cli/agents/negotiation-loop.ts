@@ -100,6 +100,26 @@ export interface NegotiationLoopResult {
   admissionAuthorityRef: string | undefined;
 }
 
+/**
+ * True when the hosted-agent-service has supplied the
+ * institution's tenant signing keypair + derived
+ * `did:ethr:0x<address>` as env vars. All three fields MUST be
+ * set together (the backend never sets just one); partial
+ * configuration is treated as "not configured" so the agent
+ * loop surfaces a clear "tenant signer not wired" log line
+ * instead of building a half-broken VC.
+ */
+function hasTenantSignerCredentials(env: AgentEnv): boolean {
+  return (
+    typeof env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY === "string" &&
+    env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY.length === 66 &&
+    typeof env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY === "string" &&
+    env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY.length === 68 &&
+    typeof env.HOSTED_AGENT_TENANT_SIGNER_DID === "string" &&
+    env.HOSTED_AGENT_TENANT_SIGNER_DID.startsWith("did:ethr:")
+  );
+}
+
 function buildSessionFromEnv(env: AgentEnv): AuthSession | undefined {
   if (
     !env.GHOSTBROKER_SESSION_TOKEN ||
@@ -439,43 +459,54 @@ let admission: AgentAdmission;
         });
         lastOutcome = `walkaway -> ${result.status}`;
       } else {
-        // Build a real W3C Verifiable Credential signed with the
-        // agent's secp256k1 keypair so the backend's
-        // `T3NegotiationDisclosureVerifier` can hand it to
-        // `@terminal3/verify_vc`'s `verifyVc` and confirm the JWS.
-        // The verifier's `t3_attestation_ref` derivation is bound
-        // to the JWS the SDK recovered a signer from, so the
-        // recorded attestation ref is anchored to real
-        // cryptographic evidence — not to a local UUID. The
-        // previous `buildSelfAttestedClaimCredential` shape was
-        // not ECDSA-signed and the verifier returned a synthesized
-        // `Date.now() + randomUUID()` attestation ref (the P0
-        // disclosure-verifier bug).
+// Build a real W3C Verifiable Credential signed with the
+        // institution's tenant signing keypair (the dedicated
+        // secp256k1 keypair the backend stores on the
+        // `tenant_identities` row). The keypair's derived
+        // `did:ethr:0x<address>` is the issuer DID on the VC —
+        // the only format `@terminal3/verify_vc`'s
+        // `verifyEcdsaVcSig` accepts. A `did:t3n:` issuer
+        // would make the SDK throw "Unsupported DID method:
+        // t3n" and the disclosure verifier would record
+        // `verified: false`, leaving the disclosure gate
+        // permanently unsatisfied.
         //
-        // When the agent process was launched with a forced DID
-        // (no keypair — `AGENT_IDENTITY_DID` env var path) we
-        // cannot mint a signed VC; we omit the credential entirely
-        // so the backend records the disclosure as `verified: false`
-        // rather than crashing the agent loop. The trust-level
-        // filter excludes unverified disclosures from the
-        // settlement gate.
-        const hasSigningKey =
-          typeof identity.privateKey === "string" &&
-          identity.privateKey.length > 0 &&
-          typeof identity.publicKey === "string" &&
-          identity.publicKey.length > 0;
+        // The agent's own DID (`identity.did`, the
+        // backend-assigned `did:t3n:...`) stays as the
+        // `agentDid` on admit / ticket / move calls — those
+        // are bound to the institution's T3 identity, not to
+        // the signing keypair. The tenant signing key is used
+        // ONLY for claim VCs.
+        const tenantSigner = hasTenantSignerCredentials(env)
+          ? {
+              privateKey: env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY!,
+              publicKey: env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY!,
+              issuerDid: env.HOSTED_AGENT_TENANT_SIGNER_DID!,
+            }
+          : null;
         const claimCredential =
           moveToSubmit.action === "reveal" &&
           moveToSubmit.claimType &&
-          hasSigningKey
+          tenantSigner
             ? buildSignedClaimCredential({
-                issuerDid: identity.did,
-                privateKey: identity.privateKey,
-                publicKey: identity.publicKey,
+                issuerDid: tenantSigner.issuerDid,
+                privateKey: tenantSigner.privateKey,
+                publicKey: tenantSigner.publicKey,
                 subjectId: session.institution.displayName,
                 claimType: moveToSubmit.claimType,
               })
             : undefined;
+
+        if (
+          moveToSubmit.action === "reveal" &&
+          moveToSubmit.claimType &&
+          !claimCredential
+        ) {
+          log(
+            side,
+            `reveal skipped credential build: tenant signer env vars not set (privateKey=${Boolean(env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY)}, publicKey=${Boolean(env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY)}, issuerDid=${Boolean(env.HOSTED_AGENT_TENANT_SIGNER_DID)})`,
+          );
+        }
 
         const result = await client.submitNegotiationMove(sessionId, {
           agentId: env.HOSTED_AGENT_ID ?? "00000000-0000-0000-0000-000000000000",
