@@ -555,7 +555,6 @@ describe("matching orchestrator - fills and crossing", () => {
           encryptedTradeFieldsRef: "fields_p0",
           buyerAuthorityRef: us2AuthorityRef,
           sellerAuthorityRef: us2AuthorityRef,
-          matchAttestationRef: "t3attest_p0_privacy",
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           matchedQuantity: 4,
           executionPrice: 50000,

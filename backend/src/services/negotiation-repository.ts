@@ -1,4 +1,5 @@
 import { PublicError } from "../errors/public-error.js";
+import { logger } from "../logging/logger.js";
 import {
   negotiationMandateFromRecord,
   type NegotiationDisclosureRecord,
@@ -231,7 +232,14 @@ function parseProposalCiphertext(
       price: typeof parsed.price === "number" ? parsed.price : null,
       quantity: typeof parsed.quantity === "number" ? parsed.quantity : null,
     };
-  } catch {
+  } catch (err) {
+    logger.debug(
+      {
+        err,
+        event: "negotiation.parse_proposal_ciphertext_failed",
+      },
+      "Failed to decode standing-proposal ciphertext; treating as null fields.",
+    );
     return { price: null, quantity: null };
   }
 }

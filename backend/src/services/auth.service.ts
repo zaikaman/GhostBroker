@@ -154,7 +154,15 @@ export class DidAuthService implements AuthSessionService {
       });
 
       return institution;
-    } catch {
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          did,
+          event: "auth.find_or_create_institution_primary_failed",
+        },
+        "Primary institution create failed; checking for race winner.",
+      );
       // Race: another request may have just created this institution
       const retry = await this.institutions.findByTenantDid(did);
       if (retry && retry.status === "active") {

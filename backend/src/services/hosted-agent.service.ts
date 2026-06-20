@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { issueOperatorSessionToken } from "../auth/session-token.js";
 import { PublicError } from "../errors/public-error.js";
+import { logger } from "../logging/logger.js";
 import {
   type CreateHostedAgentRequest,
   type HostedAgentRecord,
@@ -270,8 +271,16 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     for (const state of states) {
       try {
         await this.stopHostedAgent(state.agentId, state.institutionId);
-      } catch {
-        // best effort
+      } catch (err) {
+        logger.warn(
+          {
+            err,
+            agentId: state.agentId,
+            institutionId: state.institutionId,
+            event: "hosted_agent.stop_all_single_failed",
+          },
+          "Best-effort stop failed for a single hosted agent; continuing.",
+        );
       }
     }
   }

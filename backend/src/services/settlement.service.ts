@@ -7,6 +7,7 @@ import {
   type SettlementCommandBuilder,
 } from "../enclave/index.js";
 import { PublicError } from "../errors/public-error.js";
+import { logger } from "../logging/logger.js";
 import type { AuditReceiptRecord } from "../models/audit-receipt.js";
 import {
   completedTradeFromRecord,
@@ -729,9 +730,16 @@ export class SettlementService {
       this.publishRailReversed(buyerInstitutionId, reversed, correlationRef);
       this.publishRailReversed(sellerInstitutionId, reversed, correlationRef);
     } catch (reverseError) {
-      console.error(
-        `[SettlementService] Failed to compensate rail dispatch for ${proof.railTradeRef}:`,
-        reverseError,
+      logger.error(
+        {
+          err: reverseError,
+          railTradeRef: proof.railTradeRef,
+          buyerInstitutionId,
+          sellerInstitutionId,
+          correlationRef,
+          event: "settlement.rail_compensation_failed",
+        },
+        "Failed to compensate rail dispatch; manual intervention required.",
       );
     }
   }

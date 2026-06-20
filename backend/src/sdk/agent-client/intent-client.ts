@@ -1,5 +1,6 @@
 import type { IntentAccepted, EncryptedIntentRequest } from "./types.js";
 import { GhostBrokerApiError } from "./errors.js";
+import { logger } from "../../logging/logger.js";
 
 export class IntentClient {
   private readonly baseUrl: string;
@@ -61,7 +62,16 @@ export class IntentClient {
         (body.code as GhostBrokerApiError["code"]) || "request_failed",
         body.message || `HTTP ${response.status}`,
       );
-    } catch {
+    } catch (err) {
+      logger.debug(
+        {
+          err,
+          event: "sdk.parse_error_fallback",
+          url: response.url,
+          status: response.status,
+        },
+        "SDK failed to parse error response body; falling back to request_failed.",
+      );
       return new GhostBrokerApiError(response.status, "request_failed", `HTTP ${response.status}`);
     }
   }

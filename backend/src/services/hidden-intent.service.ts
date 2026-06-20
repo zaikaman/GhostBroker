@@ -128,8 +128,16 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
           directionScope = agent.directionScope ?? undefined;
           maxNotional = agent.maxNotional ?? undefined;
         }
-      } catch {
-        // Agent lookup failure is non-blocking -- matching proceeds without limit checks
+      } catch (err) {
+        logger.warn(
+          {
+            err,
+            agentId: request.agentId,
+            institutionId: request.institutionId,
+            event: "hidden_intent.agent_lookup_failed",
+          },
+          "Agent lookup failure is non-blocking -- matching proceeds without limit checks.",
+        );
       }
     }
 

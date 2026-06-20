@@ -1,4 +1,6 @@
 import { ethRecoverEip191 } from "@terminal3/t3n-sdk";
+import { z } from "zod";
+import { logger } from "../../logging/logger.js";
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
 
 /**
@@ -80,6 +82,30 @@ export interface RejectedAgentIdentity {
 export type AgentIdentityVerificationResult =
   | VerifiedAgentIdentity
   | RejectedAgentIdentity;
+
+const verifiedAgentIdentitySchema = z
+  .object({
+    status: z.literal("verified"),
+    did: z.string().min(1),
+    walletAddress: z.string().min(1).optional(),
+  })
+  .transform((value) => {
+    const verified: VerifiedAgentIdentity = value.walletAddress
+      ? { status: "verified", did: value.did, walletAddress: value.walletAddress }
+      : { status: "verified", did: value.did };
+    return verified;
+  });
+
+const rejectedAgentIdentitySchema = z.object({
+  status: z.literal("rejected"),
+  did: z.string().min(1),
+  reason: z.enum(["invalid_signature", "unverified"]),
+});
+
+const agentIdentityVerificationResultSchema = z.discriminatedUnion("status", [
+  verifiedAgentIdentitySchema,
+  rejectedAgentIdentitySchema,
+]);
 
 export interface AgentIdentityVerifier {
   verifyAgentIdentity(
@@ -180,7 +206,16 @@ export class T3AgentIdentityVerifier implements AgentIdentityVerifier {
             walletAddress: expectedAddress,
           };
         }
-      } catch {
+      } catch (err) {
+        logger.warn(
+          {
+            err,
+            did: request.did,
+            expectedAddress,
+            event: "agent_identity.signature_recovery_failed",
+          },
+          "EIP-191 signature recovery threw; treating as invalid signature.",
+        );
         return {
           status: "rejected",
           did: request.did,
@@ -237,8 +272,33 @@ export class T3AgentIdentityVerifier implements AgentIdentityVerifier {
         };
       }
 
-      return response.body;
-    } catch {
+      const parsed = agentIdentityVerificationResultSchema.safeParse(response.body);
+      if (!parsed.success) {
+        logger.warn(
+          {
+            issues: parsed.error.issues,
+            did: request.did,
+            event: "agent_identity.upstream_response_shape_invalid",
+          },
+          "Upstream T3 identity fallback returned a body that does not match the AgentIdentityVerificationResult schema; failing closed.",
+        );
+        return {
+          status: "rejected",
+          did: request.did,
+          reason: "unverified",
+        };
+      }
+
+      return parsed.data;
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          did: request.did,
+          event: "agent_identity.upstream_fallback_failed",
+        },
+        "Best-effort T3 identity fallback threw; failing closed.",
+      );
       return {
         status: "rejected",
         did: request.did,

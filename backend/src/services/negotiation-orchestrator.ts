@@ -343,7 +343,16 @@ export class NegotiationOrchestrator {
         return null;
       }
       return { id: agent.id, agentDid: agent.agentDid };
-    } catch {
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          institutionId,
+          agentDid,
+          event: "negotiation.lookup_agent_failed",
+        },
+        "Failed to load agent record; session will expire.",
+      );
       return null;
     }
   }
@@ -1194,11 +1203,22 @@ export class NegotiationOrchestrator {
           matchedQuantity,
           correlationRef,
         });
-      } catch {
+      } catch (err) {
         // convergeAndSettle reset the session to "active" and
         // published settlement_failed telemetry before re-throwing.
         // Return "active" so the agent gets a clean response and
         // can retry on its next tick instead of crashing on a 503.
+        logger.warn(
+          {
+            err,
+            sessionId: session.id,
+            correlationRef,
+            executionPrice,
+            matchedQuantity,
+            event: "negotiation.converge_and_settle_failed",
+          },
+          "convergeAndSettle failed; returning active session state to caller.",
+        );
         return { status: "active" };
       }
       // `convergeAndSettle` may abort the session (e.g. when

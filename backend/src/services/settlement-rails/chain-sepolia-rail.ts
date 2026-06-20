@@ -14,6 +14,7 @@ import {
   type WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { logger } from "../../logging/logger.js";
 import type { SettlementCommand } from "../../enclave/index.js";
 import type {
   RailSettlementProof,
@@ -496,8 +497,16 @@ export class SepoliaErc20Rail implements SettlementRail {
             args.paymentAmount === expected.paymentAmount;
           return { matched, log: rawLog };
         }
-      } catch {
-        // The log was not the Settled event; skip.
+      } catch (err) {
+        logger.debug(
+          {
+            err,
+            txHash,
+            logAddress: rawLog.address,
+            event: "chain_rail.decode_log_skipped",
+          },
+          "Log was not a Settled event for this rail; skipping.",
+        );
         continue;
       }
     }
