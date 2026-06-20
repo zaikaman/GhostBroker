@@ -9,10 +9,15 @@
     "npm": ">=10.0.0"
   },
   "packageManager": "npm@10.0.0",
-  "workspaces": [
-    "frontend",
-    "backend"
-  ],
+  "workspaces": {
+    "packages": [
+      "frontend",
+      "backend"
+    ],
+    "nohoist": [
+      "**/backend/**"
+    ]
+  },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
