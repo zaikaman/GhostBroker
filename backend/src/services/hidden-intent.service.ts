@@ -350,7 +350,7 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
       institutionId: request.institutionId,
       agentId: request.agentId,
       agentDid: request.agentDid,
-      requestedAction: "intent.submit",
+      requestedAction: "intent.cancel",
     });
     if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);

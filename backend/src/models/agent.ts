@@ -172,6 +172,7 @@ export const mintDelegationPolicySchema = z.object({
       z.enum([
         "agent.admit",
         "intent.submit",
+        "intent.cancel",
         "settlement.execute",
         "negotiation.open",
         "negotiation.move",

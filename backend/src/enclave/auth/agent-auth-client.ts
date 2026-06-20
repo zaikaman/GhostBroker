@@ -71,7 +71,8 @@ export type AgentDelegationRejectionReason =
   | "over_scoped"
   | "unverified"
   | "agent_mismatch"
-  | "malformed";
+  | "malformed"
+  | "action_not_allowed";
 
 export interface VerifiedAgentDelegation {
   status: "verified";

@@ -66,6 +66,7 @@ import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
 const delegationActionScopeSchema = z.enum([
   "agent.admit",
   "intent.submit",
+  "intent.cancel",
   "settlement.execute",
   "negotiation.open",
   "negotiation.move",

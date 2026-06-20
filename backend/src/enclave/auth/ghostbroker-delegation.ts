@@ -8,12 +8,17 @@ import { logger } from "../../logging/logger.js";
 /**
  * The action an agent is attempting on the backend. Used as the
  * discriminator across the agent authorization surface
- * (admit / intent.submit / settlement.execute). The
- * Ghostbroker delegation verifier passes this through unchanged.
+ * (admit / intent.submit / intent.cancel / settlement.execute /
+ * negotiation.*). The Ghostbroker delegation verifier enforces
+ * that `credentialSubject.allowedActions` contains the requested
+ * action — a VC scoped only to `["agent.admit"]` cannot be used
+ * for `intent.submit`, `settlement.execute`, or any negotiation
+ * action.
  */
 export type RequestedAgentAction =
   | "agent.admit"
   | "intent.submit"
+  | "intent.cancel"
   | "settlement.execute"
   | "negotiation.open"
   | "negotiation.move"
@@ -49,12 +54,20 @@ export type RequestedAgentAction =
  *    DID on the incoming request. A mismatch yields
  *    `agent_mismatch`.
  *
- * 4. **Revocation check** — The verifier accepts a
+ * 4. **Action scope** — The credential's
+ *    `credentialSubject.allowedActions` must include the
+ *    `requestedAction` on the incoming request. This is the
+ *    load-bearing check that makes the "authority-bound" claim
+ *    real: a VC scoped only to `["agent.admit"]` cannot be used
+ *    to submit intents, settle, or move in a negotiation. A
+ *    mismatch yields `action_not_allowed`.
+ *
+ * 5. **Revocation check** — The verifier accepts a
  *    `revokedAuthorityRefs` set sourced from
  *    `AuthorityRevocationRepository` before every check. Revoked
  *    references are rejected with reason `revoked`.
  *
- * 5. **Cryptographic verification via `@terminal3/verify_vc`**
+ * 6. **Cryptographic verification via `@terminal3/verify_vc`**
  *    — The verifier calls `verifyVc(signedCredential)` from
  *    `@terminal3/verify_vc`. The verifier normalizes the
  *    Ghostbroker-style VC into the `SignedCredential` shape the
@@ -76,12 +89,12 @@ export type RequestedAgentAction =
  *    the issuer DID; the SDK throws on a `did:t3n:` issuer;
  *    an SDK outage) fails closed with reason `unverified`.
  *
- * 6. **Authority reference** — Every successful verification
+ * 7. **Authority reference** — Every successful verification
  *    produces a `ghostbroker-delegation:<vc-id>` reference. The
  *    agent must echo this on every privileged action, and the
  *    backend re-asserts equality on each call.
  *
- * 7. **Policy hash** — A stable SHA-256 hex fingerprint derived
+ * 8. **Policy hash** — A stable SHA-256 hex fingerprint derived
  *    from the canonicalized credential, suitable for equality
  *    checks, database indexing, and UI display.
  *
@@ -96,6 +109,7 @@ export type RequestedAgentAction =
 const delegationActionScopeSchema = z.enum([
   "agent.admit",
   "intent.submit",
+  "intent.cancel",
   "settlement.execute",
   "negotiation.open",
   "negotiation.move",
@@ -163,11 +177,15 @@ export interface GhostbrokerVerificationRequest {
   institutionId: string;
   agentDid: string;
   /**
-   * The action the agent is attempting. The Ghostbroker VC encodes
-   * its own action set (the `allowedActions` trading-agent scope),
-   * so the requested action here is informational — the verifier
-   * confirms the credential binds to the agent, not the action.
-   * The orchestrator enforces the per-action checks downstream.
+   * The action the agent is attempting. The verifier enforces
+   * that `credentialSubject.allowedActions` contains this value
+   * before allowing any action through — a VC scoped only to
+   * `["agent.admit"]` cannot be used to submit intents, settle,
+   * or move in a negotiation. Every caller (`agent.admit`,
+   * `intent.submit`, `intent.cancel`, `settlement.execute`,
+   * `negotiation.open`, `negotiation.move`,
+   * `negotiation.disclose`, `negotiation.settle`) is required
+   * to pass the action that matches the route it is invoking.
    */
   requestedAction: RequestedAgentAction;
   revokedAuthorityRefs?: ReadonlySet<string>;
@@ -190,7 +208,8 @@ export interface RejectedGhostbrokerDelegation {
     | "revoked"
     | "unverified"
     | "agent_mismatch"
-    | "malformed";
+    | "malformed"
+    | "action_not_allowed";
 }
 
 export type GhostbrokerVerificationResult =
@@ -426,8 +445,9 @@ async function trySdkVerify(
  *   1. shape (Zod),
  *   2. time window,
  *   3. DID binding,
- *   4. revocation,
- *   5. cryptographic verification via `@terminal3/verify_vc`
+ *   4. action scope (requestedAction ∈ allowedActions),
+ *   5. revocation,
+ *   6. cryptographic verification via `@terminal3/verify_vc`
  *      (the headline SDK integration). The SDK is the SOLE
  *      cryptographic path — there is no manual fallback. The
  *      SDK call returns `verified` when the recovered signer's
@@ -486,6 +506,30 @@ export async function verifyGhostbrokerDelegationCredential(
     };
   }
   logger.debug("DID binding passed");
+
+  // Action scope. The VC encodes its own action set
+  // (`credentialSubject.allowedActions`); the request encodes
+  // what the agent is actually trying to do. The two must
+  // agree. This is the load-bearing check that makes the
+  // "authority-bound" claim real: a VC scoped only to
+  // `["agent.admit"]` cannot be used to submit intents,
+  // settle, or move in a negotiation, regardless of how the
+  // orchestrator routes the call downstream.
+  if (!safe.credentialSubject.allowedActions.includes(request.requestedAction)) {
+    logger.debug(
+      {
+        allowedActions: safe.credentialSubject.allowedActions,
+        requestedAction: request.requestedAction,
+      },
+      "action scope failed",
+    );
+    return {
+      status: "rejected",
+      agentDid,
+      reason: "action_not_allowed",
+    };
+  }
+  logger.debug("action scope passed");
 
   // Revocation list.
   if (revokedAuthorityRefs?.has(authorityRefFor(safe))) {

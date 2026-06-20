@@ -315,6 +315,7 @@ export type RedactedErrorCode =
 export type RequestedAction =
   | "agent.admit"
   | "intent.submit"
+  | "intent.cancel"
   | "settlement.execute"
   | "negotiation.open"
   | "negotiation.move"

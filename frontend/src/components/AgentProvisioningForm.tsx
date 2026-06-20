@@ -58,7 +58,7 @@ export function AgentProvisioningForm({
         label: form.label.trim(),
         policy: {
           maxSpendUsd: Number(form.maxSpendUsd),
-          allowedActions: ['agent.admit', 'intent.submit', 'negotiation.open', 'negotiation.move', 'negotiation.disclose', 'negotiation.settle'],
+          allowedActions: ['agent.admit', 'intent.submit', 'intent.cancel', 'negotiation.open', 'negotiation.move', 'negotiation.disclose', 'negotiation.settle'],
         },
       });
 

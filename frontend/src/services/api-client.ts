@@ -104,7 +104,7 @@ export interface Agent {
 
 export interface ProvisionAgentPolicy {
   maxSpendUsd: number;
-  allowedActions: ('agent.admit' | 'intent.submit' | 'settlement.execute' | 'negotiation.open' | 'negotiation.move' | 'negotiation.disclose' | 'negotiation.settle')[];
+  allowedActions: ('agent.admit' | 'intent.submit' | 'intent.cancel' | 'settlement.execute' | 'negotiation.open' | 'negotiation.move' | 'negotiation.disclose' | 'negotiation.settle')[];
   approverEmail?: string;
   purpose?: string;
   validityMonths?: number;

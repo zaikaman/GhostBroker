@@ -259,7 +259,7 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
         allowedActions: string[];
       } = {
         maxSpendUsd,
-        allowedActions: ['agent.admit', 'intent.submit', 'negotiation.open', 'negotiation.move', 'negotiation.disclose', 'negotiation.settle'],
+        allowedActions: ['agent.admit', 'intent.submit', 'intent.cancel', 'negotiation.open', 'negotiation.move', 'negotiation.disclose', 'negotiation.settle'],
       };
       await apiClient.mintDelegation(editingAgent.id, policy);
       setEditingAgent(null);

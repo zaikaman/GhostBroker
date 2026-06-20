@@ -81,6 +81,7 @@ import { z } from "zod";
 const delegationActionScopeSchema = z.enum([
   "agent.admit",
   "intent.submit",
+  "intent.cancel",
   "settlement.execute",
   "negotiation.open",
   "negotiation.move",
