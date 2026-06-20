@@ -214,6 +214,15 @@ const envSchema = z.object({
    */
   SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC: z.coerce.number().int().positive().optional(),
   /**
+   * WS4: how often the settlement reconciler sweeps
+   * `completed_trades` for unreconciled rows and verifies the
+   * chain state via `rail.status(railTradeRef)`. Defaults to
+   * 10 minutes (production cadence). Set lower in tests; the
+   * web process restarts on every Heroku dyno cycle, so a
+   * smaller value reduces drift-window exposure on cold boot.
+   */
+  SETTLEMENT_RECONCILER_INTERVAL_MS: z.coerce.number().int().min(1000).optional(),
+  /**
    * WS6: master seed used to deterministically derive each
    * institution's server-owned deposit wallet.
    */

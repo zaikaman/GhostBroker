@@ -1306,33 +1306,158 @@ round-trips.
 
 ## Deployment
 
+GhostBroker deploys as two independent services with no shared runtime:
+
+| Tier      | Host    | Process                  | Responsibilities                                                                                |
+| --------- | ------- | ------------------------ | ----------------------------------------------------------------------------------------------- |
+| Frontend  | Vercel  | Vite build (static)      | React 19 Observatory Console. SPA with React Router; all data fetched from the Heroku backend. |
+| Backend   | Heroku  | Node.js web dyno         | REST API, WebSocket telemetry, matching orchestrator (in-memory queue), intent-lock janitor (30s sweep), settlement reconciler (10-min sweep), hosted-agent supervisor (negotiator child processes), Terminal 3 enclave bridge, Sepolia settlement rail. |
+
+The **web dyno runs every background system task in-process**. The settlement
+reconciler (`backend/src/services/settlement-reconciler.ts`) is scheduled by
+`backend/src/server.ts` on a `setInterval` (default 10 minutes, configurable
+via `SETTLEMENT_RECONCILER_INTERVAL_MS`). The intent-lock janitor and the
+matching orchestrator's cleanup timer are constructed in
+`createDefaultServices` and share the web process's lifecycle. The hosted-agent
+supervisor (`ChildProcessHostedAgentService`) spawns negotiator child
+processes from the same web process; those children are tied to the web
+dyno's lifetime and are restarted by the operator via
+`POST /api/hosted-agents/start` after each Heroku dyno cycle.
+
+> **v1 trade-off**: Heroku cycles web dynos every 24 hours, which terminates
+> all running hosted-agent child processes. Operators must restart any
+> active hosted agents after each cycle. A v2 supervisor pattern (running
+> hosted agents in a dedicated worker dyno with Supabase-backed state) is
+> the production fix; it is out of scope for this deploy.
+
 ### Frontend (Vercel)
 
-The frontend is a standard Vite build deployable to Vercel:
+The frontend is a Vite + React 19 SPA. Deploy from the `frontend/`
+directory:
 
-```sh
-cd frontend
-npm run build    # tsc --noEmit && vite build
-```
+1. **Import the repo into Vercel** (https://vercel.com/new).
+2. In **Project Settings → General → Root Directory**, set the value to
+   `frontend`. Vercel reads `frontend/vercel.json` from there.
+3. Vercel auto-detects Vite. No build command or output-directory override
+   is required.
+4. In **Project Settings → Environment Variables**, set the following
+   keys for the Production environment (and Preview if you want preview
+   deploys to talk to a real backend):
 
-Set `VITE_API_URL` to the backend URL in Vercel environment variables.
+   | Variable                 | Example value                                              |
+   | ------------------------ | ---------------------------------------------------------- |
+   | `VITE_API_BASE_URL`      | `https://<your-heroku-app>.herokuapp.com`                  |
+   | `VITE_WS_TELEMETRY_URL`  | `wss://<your-heroku-app>.herokuapp.com/ws/telemetry`        |
+
+   Vite bakes `VITE_*` values into the bundle at build time, so changing
+   these requires a redeploy.
+
+`frontend/vercel.json` configures the SPA rewrite (every unknown path
+falls back to `/index.html` for React Router) and adds an
+`immutable, max-age=31536000` cache header to the built JS/CSS/font
+assets. Static files in `frontend/public/` are served with the default
+Vercel cache policy.
+
+For local development, copy `frontend/.env.example` to `frontend/.env`
+and use the `http://localhost:3001` defaults.
 
 ### Backend (Heroku)
 
-The backend includes a `Procfile` for Heroku deployment:
+The backend is a Node.js 20 + TypeScript 6 Express service. Deploy from
+the **repo root** (Heroku uses the `app.json` manifest to discover the
+backend layout).
 
-```
-web: npm start
-```
+1. **Create the Heroku app**:
+
+   ```sh
+   heroku create <your-heroku-app>
+   heroku stack:set heroku-22   # Node 20.19 requires heroku-22+
+   ```
+
+2. **Add the Heroku Postgres add-on is NOT required** — GhostBroker
+   uses Supabase (managed Postgres) as its data store. The backend
+   talks to Supabase over HTTPS using the service-role key.
+
+3. **Set the environment variables** listed in `app.json`. The
+   minimum required set is:
+
+   ```sh
+   heroku config:set \
+     NODE_ENV=production \
+     AUTH_SESSION_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") \
+     CORS_ALLOWED_ORIGINS=https://<your-vercel-app>.vercel.app \
+     SUPABASE_URL=https://<project-ref>.supabase.co \
+     SUPABASE_SERVICE_ROLE_KEY=<supabase-service-role-key> \
+     T3N_API_KEY=<developer-key-from-terminal3-claim-page> \
+     T3N_ENV=testnet \
+     T3_ADK_ENV=testnet \
+     T3_SANDBOX_TOKEN_ACCOUNT=<sandbox-token-account-or-did> \
+     TENANT_SIGNING_PRIVATE_KEY=0x<64-hex-private-key> \
+     T3_TENANT_DID=did:t3n:<tenant-id> \
+     SETTLEMENT_ASSET_CODE=USDC \
+     SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/<key> \
+     SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY=0x<64-hex-relayer-key> \
+     SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS=0x<deployed-relayer-address> \
+     SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED=0x<64-hex-deposit-wallet-seed> \
+     SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS=0x29f2D40B0605204364af54EC677bD022dA425d03 \
+     SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS=0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8
+   ```
+
+   The `CORS_ALLOWED_ORIGINS` value must include the Vercel production
+   URL (and optionally the preview pattern,
+   `https://<your-vercel-app>-*.vercel.app`). The settlement rail
+   variables are **required** — GhostBroker ships a single rail
+   (`chain:sepolia:erc20`) and refuses to boot without them. See
+   `backend/.env.example` and the "Settlement Rail Setup" section
+   earlier in this README for the full walkthrough.
+
+4. **Deploy**:
+
+   ```sh
+   git push heroku main
+   ```
+
+   Heroku's `heroku/nodejs` buildpack runs `npm install` at the repo
+   root, then `npm run heroku-postbuild` (defined in the root
+    `package.json`) which delegates to
+    `npm run build:backend` → `npm run build --workspace @ghostbroker/backend`
+    → `tsc -p tsconfig.json`. The `Procfile` at the repo root runs
+    `cd backend && npm start` → `node dist/server.js`.
+
+5. **Verify**:
+
+   ```sh
+   heroku logs --tail
+   curl https://<your-heroku-app>.herokuapp.com/api/health
+   ```
+
+   The `/api/health` endpoint should return 200 with the T3 sandbox
+   status payload.
+
+The `Procfile` at the repo root declares a single `web` process type
+(`web: cd backend && npm start`). The matching orchestrator, intent-lock
+janitor, and settlement reconciler all run inside this single process.
+`app.json` (at the repo root) declares the buildpack, formation, and
+full env-var contract for one-click deploys and Heroku review apps.
+
+### Local end-to-end verification
+
+To validate the full Vercel → Heroku → Supabase → Sepolia stack locally
+before pushing:
 
 ```sh
+# Terminal 1: backend
 cd backend
-npm run build    # tsc -p tsconfig.json
-npm start        # node dist/server.js
+npm run dev    # tsx watch src/server.ts on :3001
+
+# Terminal 2: frontend
+cd frontend
+npm run dev    # vite dev server on :5173
 ```
 
-Configure all environment variables from `backend/.env.example` in the
-Heroku dashboard.
+Open http://localhost:5173, complete the wallet DID challenge, and
+confirm the Observatory Console's connection rail lights up across
+Backend / WebSocket / Supabase / T3 sandbox / per-agent.
 
 ---
 

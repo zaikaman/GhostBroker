@@ -20,6 +20,7 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "build:backend": "npm run build --workspace @ghostbroker/backend",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
@@ -30,6 +31,9 @@
     "buyer": "npm run agent:buyer --workspace @ghostbroker/backend",
     "seller": "npm run agent:seller --workspace @ghostbroker/backend",
     "hosted": "npm run agent:hosted --workspace @ghostbroker/backend",
-    "sandbox:check": "npm run sandbox:check --workspace @ghostbroker/backend"
+    "sandbox:check": "npm run sandbox:check --workspace @ghostbroker/backend",
+    "heroku-postbuild": "npm run build:backend",
+    "sync:heroku-env": "node scripts/sync-heroku-env.mjs",
+    "sync:heroku-env:dry-run": "node scripts/sync-heroku-env.mjs --dry-run"
   }
 }

@@ -1,0 +1,220 @@
+{
+  "name": "GhostBroker Backend",
+  "description": "GhostBroker dark-pool backend: Express REST API, WebSocket telemetry, Terminal 3 enclave bridge, settlement rails, and hosted-agent supervisor. The matching orchestrator, intent-lock janitor, and 10-minute settlement reconciler timer run in-process inside the web dyno.",
+  "repository": "https://github.com/zaikaman/GhostBroker",
+  "keywords": ["node", "typescript", "express", "websocket", "dark-pool", "tee", "terminal3", "supabase", "sepolia"],
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ],
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "standard-1x"
+    }
+  },
+  "scripts": {
+    "postdeploy": "echo 'GhostBroker backend deployed. Configure env vars via: heroku config:set KEY=value'"
+  },
+  "env": {
+    "NODE_ENV": {
+      "description": "Node environment. Must be 'production' on Heroku so the T3 enclave startup check runs in strict mode.",
+      "value": "production",
+      "required": true
+    },
+    "PORT": {
+      "description": "HTTP server port. Heroku sets this automatically via the platform; do not override.",
+      "required": false
+    },
+    "LOG_LEVEL": {
+      "description": "Pino log level (trace, debug, info, warn, error, fatal). Defaults to info.",
+      "value": "info",
+      "required": false
+    },
+    "AUTH_SESSION_SECRET": {
+      "description": "32+ char hex secret used to sign operator session JWTs and HMAC API-key lookup keys. Generate with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+      "generator": "secret",
+      "required": true
+    },
+    "CORS_ALLOWED_ORIGINS": {
+      "description": "Comma-separated list of CORS origins the dashboard may call from. For Vercel, this is the production frontend URL plus any preview deployment pattern, e.g. https://ghostbroker.vercel.app,https://ghostbroker-*.vercel.app",
+      "required": true
+    },
+    "SUPABASE_URL": {
+      "description": "Supabase project URL (https://<project-ref>.supabase.co).",
+      "required": true
+    },
+    "SUPABASE_SERVICE_ROLE_KEY": {
+      "description": "Supabase service role key. The backend uses this to bypass RLS for server-owned writes; treat as a secret.",
+      "generator": "secret",
+      "required": true
+    },
+    "T3N_API_KEY": {
+      "description": "Terminal 3 developer key from https://www.terminal3.io/claim-page. This is the T3N bearer API key (separate from the tenant signing key below).",
+      "generator": "secret",
+      "required": true
+    },
+    "T3N_ENV": {
+      "description": "T3 environment. 'testnet' for development; 'production' for billable mainnet.",
+      "value": "testnet",
+      "required": true
+    },
+    "T3_ADK_ENV": {
+      "description": "T3 ADK environment: 'sandbox' (offline), 'testnet' (default), or 'production'.",
+      "value": "testnet",
+      "required": false
+    },
+    "T3_SANDBOX_TOKEN_ACCOUNT": {
+      "description": "Sandbox token account DID used by the T3 sandbox mode (see T3_ADK_ENV).",
+      "required": false
+    },
+    "T3_MINIMUM_TOKEN_BALANCE": {
+      "description": "Minimum T3 token balance required at boot; the server refuses to start below this.",
+      "value": "1",
+      "required": false
+    },
+    "T3_PRIVATE_MAP_PREFIX": {
+      "description": "Namespace prefix for T3 private key/value maps. Use a unique value per deployment.",
+      "value": "ghostbroker-prod",
+      "required": false
+    },
+    "TENANT_SIGNING_PRIVATE_KEY": {
+      "description": "0x-prefixed 64-hex secp256k1 private key the backend uses to sign server-minted delegation VCs. SEPARATE from T3N_API_KEY (rotating this invalidates every issued VC). In production, load from KMS/Vault/HSM and inject at boot. Omit to fall back to a CSPRNG-generated keypair persisted in the Supabase tenant_identities table.",
+      "generator": "secret",
+      "required": false
+    },
+    "T3_TENANT_DID": {
+      "description": "T3 tenant DID returned by the T3N handshake at boot. Required for production.",
+      "required": false
+    },
+    "T3_MATCHING_CONTRACT_VERSION": {
+      "description": "Matching contract version the T3N adapter routes evaluate-match / seal-ticket / evaluate-pair calls to. Defaults to 0.7.0.",
+      "value": "0.7.0",
+      "required": false
+    },
+    "SETTLEMENT_ASSET_CODE": {
+      "description": "Settlement denomination (defaults to USDC).",
+      "value": "USDC",
+      "required": false
+    },
+    "SETTLEMENT_RECONCILER_INTERVAL_MS": {
+      "description": "How often the settlement reconciler sweeps completed_trades for chain-state drift. Defaults to 600000 (10 minutes). Min 1000.",
+      "value": "600000",
+      "required": false
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL": {
+      "description": "Sepolia RPC endpoint URL (Infura, Alchemy, or public RPC). REQUIRED — GhostBroker ships a single settlement rail (chain:sepolia:erc20) and refuses to boot without it.",
+      "required": true
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY": {
+      "description": "0x-prefixed 64-hex private key for the relayer account that broadcasts settle() transactions. Must be funded with ~0.05 Sepolia ETH for gas. In production, load from KMS/Vault/HSM.",
+      "generator": "secret",
+      "required": true
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS": {
+      "description": "Deployed GhostBrokerSettlementRelayer contract address on Sepolia. Deploy with: cd backend/contracts/relayer && forge build && node deploy.mjs",
+      "required": true
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED": {
+      "description": "0x-prefixed 64-hex master seed used to deterministically derive each institution's server-owned Sepolia deposit wallet. In production, load from KMS/Vault/HSM.",
+      "generator": "secret",
+      "required": true
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS": {
+      "description": "Canonical WBTC token address on Sepolia (default 0x29f2D40B0605204364af54EC677bD022dA425d03).",
+      "required": true
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS": {
+      "description": "Canonical USDC token address on Sepolia (default 0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8).",
+      "required": true
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID": {
+      "description": "Sepolia chain id (11155111). Override only for Anvil forks (31337).",
+      "value": "11155111",
+      "required": false
+    },
+    "SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC": {
+      "description": "Maximum seconds the chain rail will wait for tx confirmation before declaring dispatch failed. Defaults to 90.",
+      "value": "90",
+      "required": false
+    },
+    "SEPOLIA_WBTC_CONTRACT_ADDRESS": {
+      "description": "Sepolia WBTC contract address. Defaults match SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS if unset.",
+      "required": false
+    },
+    "SEPOLIA_USDC_CONTRACT_ADDRESS": {
+      "description": "Sepolia USDC contract address. Defaults match SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS if unset.",
+      "required": false
+    },
+    "ETHERSCAN_API_KEY": {
+      "description": "Etherscan API key for the Sepolia portfolio sync service. Optional; if unset, portfolio sync is disabled.",
+      "required": false
+    },
+    "PORTFOLIO_SYNC_TOKEN": {
+      "description": "32+ char token protecting the portfolio-sync webhook. Optional; sync is disabled if unset.",
+      "required": false
+    },
+    "GEMINI_API_KEY": {
+      "description": "Google Gemini API key for the hosted LLM negotiator (highest priority in the fallback chain).",
+      "generator": "secret",
+      "required": false
+    },
+    "GEMINI_MODEL": {
+      "description": "Gemini model name. Defaults to gemini-3.1-flash-lite.",
+      "value": "gemini-3.1-flash-lite",
+      "required": false
+    },
+    "GEMINI_BASE_URL": {
+      "description": "Gemini API base URL (e.g. https://generativelanguage.googleapis.com/v1beta). REQUIRED when GEMINI_API_KEY is set — the LLM clients no longer ship implicit defaults.",
+      "required": false
+    },
+    "OPENAI_API_KEY": {
+      "description": "OpenAI API key (second priority in the hosted-agent fallback chain).",
+      "generator": "secret",
+      "required": false
+    },
+    "OPENAI_MODEL": {
+      "description": "OpenAI model name. Defaults to gpt-5-nano.",
+      "value": "gpt-5-nano",
+      "required": false
+    },
+    "OPENAI_BASE_URL": {
+      "description": "OpenAI API base URL (e.g. https://api.openai.com/v1 or your Azure OpenAI deployment URL). REQUIRED when OPENAI_API_KEY is set.",
+      "required": false
+    },
+    "GROQ_API_KEY": {
+      "description": "Groq API key (third priority in the hosted-agent fallback chain).",
+      "generator": "secret",
+      "required": false
+    },
+    "GROQ_MODEL": {
+      "description": "Groq model name. Defaults to qwen/qwen3-32b.",
+      "value": "qwen/qwen3-32b",
+      "required": false
+    },
+    "GROQ_BASE_URL": {
+      "description": "Groq API base URL (e.g. https://api.groq.com/openai/v1). REQUIRED when GROQ_API_KEY is set.",
+      "required": false
+    },
+    "LLM_PROVIDER_CHAIN": {
+      "description": "Comma-separated priority order for the hosted-agent LLM fallback chain. Defaults to gemini,openai,groq.",
+      "value": "gemini,openai,groq",
+      "required": false
+    },
+    "T3N_API_URL": {
+      "description": "T3N API URL override. Optional; the T3N client picks the right endpoint per T3N_ENV unless this is set.",
+      "required": false
+    },
+    "AGENT_IDENTITY_CONFIG_PATH": {
+      "description": "Path (relative to backend CWD) where the agent identity JSON is persisted. Defaults to output/identities/agent_identity.json. On Heroku the file-backed store is wiped on every dyno cycle, so production should use the Supabase tenant_identities table (set TENANT_SIGNING_PRIVATE_KEY instead).",
+      "value": "output/identities/agent_identity.json",
+      "required": false
+    },
+    "AGENTS_WORKSPACE_DIR": {
+      "description": "Workspace directory (relative to backend CWD) where the hosted-agent supervisor spawns the negotiator child processes. Defaults to the backend directory itself on Heroku.",
+      "value": ".",
+      "required": false
+    }
+  }
+}
