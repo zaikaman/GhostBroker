@@ -1037,12 +1037,11 @@ npm run typecheck
 
 ## Testing
 
-GhostBroker ships with a comprehensive test suite: **509 tests passing,
-36 failing, 8 skipped across 113 test files** (the 8 skipped tests live in the
-on-chain settlement suite behind `WS2_ANVIL_INTEGRATION=1`; the 36 failing
-tests are isolated to the frontend test environment and are tracked under
-the C2 work item — they do not affect backend correctness, contract tests,
-verifier behaviour, or the production deploy path).
+GhostBroker ships with a comprehensive test suite: **577 tests passing,
+8 skipped across 110 test files** (the 8 skipped tests live in the
+on-chain settlement suite behind `WS2_ANVIL_INTEGRATION=1`; the 1 skipped
+test file is the root-level Playwright E2E spec which runs under
+`npm run test:e2e` instead of `npm test`).
 
 ### Running Tests
 
@@ -1064,14 +1063,9 @@ npm run test:e2e
 
 | Module | Test files | Tests passing | Tests skipped |
 |---|---|---|---|
-| **backend** (workspace) | **89** | **489** | **8** (chain-sepolia, gated) |
-| &nbsp;&nbsp;backend/src/tests/ | 57 | 194 | 8 |
-| &nbsp;&nbsp;backend/src/enclave/tests/ | 16 | 79 | 0 |
-| &nbsp;&nbsp;backend/src/negotiation-core/ | 1 | 27 | 0 |
-| &nbsp;&nbsp;backend/src/sdk/agent-client/ | 9 | 56 | 0 |
-| &nbsp;&nbsp;backend/src/cli/agents/ | 8 | 133 | 0 |
-| **frontend** (workspace) | **17** | **71** | **0** |
-| **Total** | **106** | **560** | **8** |
+| **frontend** (workspace, jsdom) | **17** | **69** | **0** |
+| **backend** (workspace, node) | **92** passed + **1** skipped | **508** | **8** (chain-sepolia, gated) |
+| **Total** | **110** (109 passed + 1 skipped) | **577** | **8** |
 
 ### Test Categories
 
@@ -1200,8 +1194,8 @@ classes of friction:
   is unit-tested against an explicit deny list; the schema and API
   response shapes are built around the boundary.
 
-- **The code is production-ready and tested.** 509 tests passing, 36 failing
-  (frontend test-env only — see C2), 8 skipped across 113 test files;
+- **The code is production-ready and tested.** 577 tests passing, 8 skipped
+  across 110 test files;
   `tsc --noEmit` clean on both workspaces; the verifier has its own test
   file with positive and negative cases; the session and authority layers
   are independently exercised.
