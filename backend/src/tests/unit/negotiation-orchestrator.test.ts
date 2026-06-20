@@ -1044,3 +1044,70 @@ describe("NegotiationOrchestrator — TEE pair authority", () => {
     expect(call?.sellCompatibilityToken).toBe(sellToken);
   });
 });
+
+describe("NegotiationOrchestrator — privacy boundary on logs", () => {
+  it("does not emit plaintext trading parameters to stdout during a priced move cycle", async () => {
+    const harness = await buildHarness({ approvalMode: "auto_settle" });
+    const sessionId = await openSession(harness);
+    await harness.repository.appendDisclosure({
+      sessionId,
+      fromDid: SELL_AGENT_DID,
+      fromSide: "sell",
+      claimType: "accredited_institution",
+      claimAssertionCiphertext: "ct-stub",
+      verified: true,
+      t3AttestationRef: "att-stub",
+    });
+    harnessState.crossed = true;
+    harnessState.nextExecutionPrice = 70_050;
+    harnessState.nextMatchedQuantity = 1;
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await harness.orchestrator.submitMove({
+        institutionId: BUY_INSTITUTION,
+        sessionId,
+        agentId: "00000000-0000-4000-8000-00000000a001",
+        agentDid: BUY_AGENT_DID,
+        authorityRef: "auth-stub",
+        move: {
+          action: "propose",
+          price: 70_020,
+          quantity: 1,
+          reasoning: "Open",
+        },
+        correlationRef: "test:privacy:buyer",
+      });
+      await harness.orchestrator.submitMove({
+        institutionId: SELL_INSTITUTION,
+        sessionId,
+        agentId: "00000000-0000-4000-8000-00000000a002",
+        agentDid: SELL_AGENT_DID,
+        authorityRef: "auth-stub",
+        move: {
+          action: "counter",
+          price: 70_050,
+          quantity: 1,
+          reasoning: "Meet",
+        },
+        correlationRef: "test:privacy:seller",
+      });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    const allCalls = consoleSpy.mock.calls
+      .map((call) => call.map((part) => String(part)).join(" "))
+      .join("\n");
+    // The orchestrator must never print plaintext trading
+    // parameters on stdout. Any of these tokens leaking would be
+    // a P0 privacy regression per plan.md §Constraints.
+    expect(allCalls).not.toMatch(/\b70020\b/);
+    expect(allCalls).not.toMatch(/\b70050\b/);
+    expect(allCalls).not.toMatch(/\bprice=/u);
+    expect(allCalls).not.toMatch(/\bqty=/u);
+    expect(allCalls).not.toMatch(/\bexecPrice=/u);
+    expect(allCalls).not.toMatch(/\bmatchedQty=/u);
+  });
+});

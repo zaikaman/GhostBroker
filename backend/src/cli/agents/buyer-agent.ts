@@ -51,7 +51,24 @@ async function main(): Promise<void> {
   });
 
   console.log("\n[BUYER ] run finished:");
-  console.log(JSON.stringify(result, null, 2));
+  // The structured result carries `lastDecision` with `price` and
+  // `quantity` populated. Those plaintext trading parameters must
+  // never reach the operator's terminal (or a downstream log
+  // scraper) — strip them before serializing. The structured
+  // envelope on the wire is the canonical record.
+  const sanitizedResult = {
+    ...result,
+    lastDecision:
+      result.lastDecision !== undefined
+        ? (() => {
+            const { price: _price, quantity: _quantity, ...rest } = result.lastDecision;
+            void _price;
+            void _quantity;
+            return rest;
+          })()
+        : undefined,
+  };
+  console.log(JSON.stringify(sanitizedResult, null, 2));
   process.exit(result.outcome === "aborted" || result.outcome === "admit_failed" ? 2 : 0);
 }
 

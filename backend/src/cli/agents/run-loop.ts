@@ -222,7 +222,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     lastDecision = decision;
     log(
       side,
-      `Decision ${decision.action} qty=${decision.quantity} price=${decision.price} (${decision.reasoning})`,
+      `Decision ${decision.action} (${decision.reasoning})`,
     );
 
     if (decision.action === "abort") {
@@ -239,7 +239,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
 
     if (decision.action === "wait" || dryRun) {
       lastOutcome = dryRun
-        ? `DRY_RUN: would submit ${decision.quantity} ${assetCode} @ ${decision.price}`
+        ? `DRY_RUN: would submit ${decision.action} intent`
         : "wait chosen by LLM";
       await sleep(LEGACY_TICK_INTERVAL_MS);
       continue;
@@ -256,7 +256,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     });
     log(
       side,
-      `Submitting ${side} ${decision.quantity} ${assetCode} @ ${decision.price} ${quoteAssetCode} (envelope ${envelope.length}B, handle ${envelope.handle})`,
+      `Submitting ${side} sealed intent (envelope ${envelope.length}B, handle ${envelope.handle})`,
     );
 
     try {

@@ -40,7 +40,23 @@ async function main(): Promise<void> {
   });
 
   console.log("\n[SELLER] run finished:");
-  console.log(JSON.stringify(result, null, 2));
+  // Mirror of buyer-agent.ts: the structured `result` carries
+  // `lastDecision.price` and `lastDecision.quantity`, which must
+  // never reach an operator's terminal as plaintext. Strip them
+  // before serializing.
+  const sanitizedResult = {
+    ...result,
+    lastDecision:
+      result.lastDecision !== undefined
+        ? (() => {
+            const { price: _price, quantity: _quantity, ...rest } = result.lastDecision;
+            void _price;
+            void _quantity;
+            return rest;
+          })()
+        : undefined,
+  };
+  console.log(JSON.stringify(sanitizedResult, null, 2));
   process.exit(result.outcome === "aborted" || result.outcome === "admit_failed" ? 2 : 0);
 }
 

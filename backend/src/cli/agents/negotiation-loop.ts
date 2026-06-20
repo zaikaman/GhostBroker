@@ -422,7 +422,7 @@ let admission: AgentAdmission;
     priorMoveRationale = decision.reasoning;
     log(
       side,
-      `[${decision.strategicIntent ?? "?"}] ${decision.action} qty=${decision.quantity ?? 0} price=${decision.price ?? 0} conf=${decision.confidence?.toFixed(2) ?? "?"} escalate=${decision.escalationRequested} ready=${decision.settlementReadiness ?? "?"} (${decision.reasoning.slice(0, 120)})`,
+      `[${decision.strategicIntent ?? "?"}] ${decision.action} conf=${decision.confidence?.toFixed(2) ?? "?"} escalate=${decision.escalationRequested} ready=${decision.settlementReadiness ?? "?"} (${decision.reasoning.slice(0, 120)})`,
     );
 
     // The LLM owns every action decision; the loop forwards its
@@ -491,7 +491,7 @@ let admission: AgentAdmission;
       if (err instanceof GhostBrokerApiError) {
         log(
           side,
-          `Move rejected: ${err.status} ${err.code} ${message} (action=${moveToSubmit.action} price=${moveToSubmit.price} qty=${moveToSubmit.quantity})`,
+          `Move rejected: ${err.status} ${err.code} ${message} (action=${moveToSubmit.action})`,
         );
         if (err.status === 409 || err.status === 403) {
           lastOutcome = `move rejected ${err.status}`;

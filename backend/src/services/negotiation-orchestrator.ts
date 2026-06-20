@@ -645,11 +645,16 @@ export class NegotiationOrchestrator {
     claimCredential?: unknown;
     correlationRef: string;
   }): Promise<{ status: NegotiationSessionRecord["status"] }> {
-    console.log(
-      `[ORCHESTRATOR] submitMove ENTER: session=${input.sessionId} ` +
-      `agentId=${input.agentId} agentDid=${input.agentDid.slice(0, 30)} ` +
-      `action=${input.move.action} price=${input.move.price} qty=${input.move.quantity} ` +
-      `inst=${input.institutionId}`
+    logger.debug(
+      {
+        event: "negotiation.move.received",
+        sessionId: input.sessionId,
+        agentId: input.agentId,
+        agentDidPrefix: input.agentDid.slice(0, 30),
+        action: input.move.action,
+        institutionId: input.institutionId,
+      },
+      "received negotiation move",
     );
     const verification = await this.authorization.loadAndVerify({
       institutionId: input.institutionId,
@@ -1077,19 +1082,31 @@ export class NegotiationOrchestrator {
         sellPrice: decimalString(sellSide.price),
         sellQuantity: decimalString(sellSide.quantity),
       });
-      console.log(
-        `[ORCHESTRATOR] ${session.id} eval: status=${evaluation.status} ` +
-        `crossed=${evaluation.status === "crossed"} ` +
-        `execPrice=${evaluation.executionPrice} matchedQty=${evaluation.matchedQuantity} ` +
-        `buy=${buySide.price}@${buySide.quantity} sell=${sellSide.price}@${sellSide.quantity}`
+      logger.debug(
+        {
+          event: "negotiation.round.evaluated",
+          sessionId: session.id,
+          actorSide,
+          status: evaluation.status,
+          crossed: evaluation.status === "crossed",
+          assetCode: session.asset_code,
+        },
+        "round evaluator returned a verdict",
       );
       opaqueSignal = actorSide === "buy" ? evaluation.buyerSignal : evaluation.sellerSignal;
       crossed = evaluation.status === "crossed";
       executionPrice = evaluation.executionPrice;
       matchedQuantity = evaluation.matchedQuantity;
     } else {
-      console.log(
-        `[ORCHESTRATOR] ${session.id} cannot evaluate: buySide=${!!buySide} sellSide=${!!sellSide}`
+      logger.debug(
+        {
+          event: "negotiation.round.evaluate_skipped",
+          sessionId: session.id,
+          actorSide,
+          hasBuySide: buySide !== undefined && buySide !== null,
+          hasSellSide: sellSide !== undefined && sellSide !== null,
+        },
+        "round evaluator not invoked; counterpart proposal absent",
       );
     }
 
@@ -1171,14 +1188,24 @@ export class NegotiationOrchestrator {
     }
 
     if (crossed && executionPrice > 0 && matchedQuantity > 0) {
-      console.log(
-        `[ORCHESTRATOR] ${session.id} CROSSED! Checking disclosure gate...`
+      logger.debug(
+        {
+          event: "negotiation.round.crossed",
+          sessionId: session.id,
+          actorSide,
+        },
+        "priced cross detected; running disclosure gate",
       );
       // Disclosure gate: a price cross is not enough if either side
       // still requires a verified claim it has not received.
       const gateOk = await this.disclosureGateSatisfiedFor(session);
-      console.log(
-        `[ORCHESTRATOR] ${session.id} disclosureGateSatisfiedFor=${gateOk}`
+      logger.debug(
+        {
+          event: "negotiation.disclosure_gate.evaluated",
+          sessionId: session.id,
+          gateSatisfied: gateOk,
+        },
+        "disclosure gate evaluated",
       );
       if (!gateOk) {
         // Hold the cross pending disclosure; surface a trust-building
@@ -1389,8 +1416,12 @@ export class NegotiationOrchestrator {
 
     const view = await this.repository.getSession(session.id, session.buy_institution_id);
     if (!view) {
-      console.log(
-        `[ORCHESTRATOR] ${session.id} disclosureGate: no view, gate=true`
+      logger.debug(
+        {
+          event: "negotiation.disclosure_gate.no_session_view",
+          sessionId: session.id,
+        },
+        "no session view available; legacy gate treated as satisfied",
       );
       return true;
     }
@@ -1404,12 +1435,16 @@ export class NegotiationOrchestrator {
     const buyerRequired = requiredClaimsFor(buyMandate);
     const sellerRequired = requiredClaimsFor(sellMandate);
 
-    console.log(
-      `[ORCHESTRATOR] ${session.id} disclosure gate: ` +
-      `buyerRequired=[${buyerRequired.join(",")}] ` +
-      `buyerReceived=[${buyerReceivedVerifiedClaims.join(",")}] ` +
-      `sellerRequired=[${sellerRequired.join(",")}] ` +
-      `sellerReceived=[${sellerReceivedVerifiedClaims.join(",")}]`
+    logger.debug(
+      {
+        event: "negotiation.disclosure_gate.check",
+        sessionId: session.id,
+        buyerRequired,
+        buyerReceived: buyerReceivedVerifiedClaims,
+        sellerRequired,
+        sellerReceived: sellerReceivedVerifiedClaims,
+      },
+      "disclosure gate membership evaluated",
     );
 
     // Each side's required claims must have been disclosed AND verified

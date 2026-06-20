@@ -61,7 +61,28 @@ async function main(): Promise<void> {
     llm,
   });
 
-  console.log(JSON.stringify(result, null, 2));
+  // The runtime stdout is streamed verbatim into the backend's
+  // `state.logTail`, surfaced through `GET /api/hosted-agents/:id`,
+  // and rendered in the dashboard's AgentDeploymentGuide logTail
+  // panel. The structured `result` carries `lastDecision` with
+  // `price` and `quantity` populated — strip those fields before
+  // dumping the JSON so a plaintext bid/ask never escapes the
+  // TEE-boundary into an operator's dashboard. This is the source
+  // fix; the wire-side guarantee is `redactLogTail` inside the
+  // backend's `attachLogTail`.
+  const sanitizedResult = {
+    ...result,
+    lastDecision:
+      result.lastDecision !== undefined
+        ? (() => {
+            const { price: _price, quantity: _quantity, ...rest } = result.lastDecision;
+            void _price;
+            void _quantity;
+            return rest;
+          })()
+        : undefined,
+  };
+  console.log(JSON.stringify(sanitizedResult, null, 2));
   process.exit(result.outcome === "admit_failed" ? 2 : 0);
 }
 

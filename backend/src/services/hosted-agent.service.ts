@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { issueOperatorSessionToken } from "../auth/session-token.js";
 import { PublicError } from "../errors/public-error.js";
+import { redactLogTail } from "../logging/logger.js";
 import { logger } from "../logging/logger.js";
 import {
   type CreateHostedAgentRequest,
@@ -568,7 +569,19 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
 
   private attachLogTail(proc: ChildProcess, state: HostedAgentRuntimeState): void {
     const append = (chunk: Buffer | string): void => {
-      state.logTail = (state.logTail + chunk.toString("utf8")).slice(-LOG_TAIL_BYTES);
+      // Defensive privacy scrub: the child runtime is outside the
+      // backend's structured-logging boundary, so any plaintext trading
+      // parameter emitted on its stdout/stderr would otherwise leak
+      // through the dashboard's AgentDeploymentGuide logTail panel.
+      // `redactLogTail` parses the chunk as JSON first (catches the
+      // hosted-agent.ts `console.log(JSON.stringify(result, ...))`
+      // dump) and falls back to a regex scrub for free-form text
+      // (catches `qty=`, `price=` style fragments). The redactor is
+      // best-effort — the source-of-truth fix is to never log
+      // forbidden fields in the child — but this is the wire-side
+      // guarantee that no plaintext reaches an operator.
+      const scrubbed = redactLogTail(chunk);
+      state.logTail = (state.logTail + scrubbed).slice(-LOG_TAIL_BYTES);
     };
     proc.stdout?.on("data", append);
     proc.stderr?.on("data", append);
