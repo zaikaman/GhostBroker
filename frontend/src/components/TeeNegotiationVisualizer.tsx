@@ -35,7 +35,6 @@ export function TeeNegotiationVisualizer({
   institutionDid,
   compact = false
 }: TeeNegotiationVisualizerProps): React.JSX.Element {
-  console.log('[DEBUG TeeNegotiationVisualizer]: rendering with props', { agents, intents, institutionName, institutionDid, compact });
   const [messages, setMessages] = useState<DialogueMessage[]>([]);
   const processedPhasesRef = useRef<Set<string>>(new Set());
 
