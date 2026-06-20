@@ -1069,9 +1069,6 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                       readOnly
                       aria-readonly="true"
                       title="The agent automatically tries gemini-3.1-flash-lite first, then gpt-5-nano, then qwen/qwen3-32b on Groq. Configure credentials in the agent's environment (.env)."
-                      onChange={() => {
-                        /* read-only: chain is hardcoded in the agent runtime */
-                      }}
                     />
                   </div>
                   <label 
@@ -1357,7 +1354,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                   </button>
                 </div>
                 <div className="sec-terminal-body">
-                  {selectedHostedRecord.runtime.logTail ? selectedHostedRecord.runtime.logTail.split('\n').map((line, idx) => <div key={idx} className="sec-terminal-line">{line}</div>) : <div className="sec-terminal-line text-muted">No execution logs streamed yet.</div>}
+                  {selectedHostedRecord.runtime.logTail ? selectedHostedRecord.runtime.logTail.split('\n').map((line, idx) => <div key={`tail-${idx}-${line}`} className="sec-terminal-line">{line}</div>) : <div className="sec-terminal-line text-muted">No execution logs streamed yet.</div>}
                 </div>
               </div>
 
