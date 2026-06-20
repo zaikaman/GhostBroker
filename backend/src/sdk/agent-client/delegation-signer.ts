@@ -594,3 +594,97 @@ export function mintAndSignDelegationCredential(
   });
 }
 
+export interface SignEcdsaVcBodyOptions {
+  /**
+   * The W3C VC v1.1 body to sign. MUST use `validFrom` /
+   * `validUntil` (not `issuanceDate` / `expirationDate`) and
+   * MUST NOT carry a `proof` field — the signer computes the
+   * proof from this body and the caller is responsible for
+   * attaching it. Mirrors `buildDelegationSigningBody`'s
+   * contract so the bytes the signer hashes are byte-identical
+   * to the bytes the T3 SDK's `verifyEcdsaVcSig` hashes.
+   */
+  body: Record<string, unknown>;
+  /** Issuer DID — embedded into the `verificationMethod`. */
+  issuerDid: string;
+  /** 0x-prefixed 32-byte secp256k1 private key (66 chars). */
+  signerPrivateKey: string;
+  /** 0x-prefixed 33-byte compressed secp256k1 public key (68 chars). */
+  signerPublicKey: string;
+  /** ISO-8601 timestamp the SDK embeds in `proof.created`. */
+  created: string;
+  /**
+   * Optional additional signer reference (a DID-like string
+   * embedding the signer's address). When the signing keypair's
+   * address does NOT match the `issuerDid`'s embedded address,
+   * the verifier needs the extra ref to find the recovered
+   * address inside `proof.verificationMethod`.
+   */
+  additionalSignerVerificationMethod?: string;
+}
+
+export interface SignedEcdsaVcProof {
+  type: "EcdsaSecp256k1Signature2019";
+  proofPurpose: "assertionMethod";
+  verificationMethod: string;
+  created: string;
+  jws: string;
+}
+
+/**
+ * Sign a W3C VC v1.1 body with the
+ * `EcdsaSecp256k1Signature2019` proof that
+ * `@terminal3/verify_vc`'s `verifyEcdsaVc` accepts.
+ *
+ * This is the generic ECDSA-VC signer reused by both the
+ * delegation flow (delegation VCs are signed through
+ * `signDelegationCredential` above) and the disclosure claim
+ * flow (`backend/src/cli/agents/claim-credential.ts` mints
+ * signed claim VCs through this helper). Centralizing the
+ * canonicalization + keccak + EIP-191 chain here means there
+ * is exactly one place where the byte-level JSON layout the
+ * signer produces must match the byte-level JSON layout the
+ * SDK's `verifyEcdsaVcSig` recovers from — see the long
+ * comment on `eip191SignDelegation` above for the full
+ * rationale on the hex-string EIP-191 quirk.
+ */
+export function signEcdsaVcBody(
+  options: SignEcdsaVcBodyOptions,
+): SignedEcdsaVcProof {
+  if (typeof options.body !== "object" || options.body === null) {
+    throw new Error("signEcdsaVcBody: body must be a non-null object.");
+  }
+  if ("proof" in options.body) {
+    throw new Error(
+      "signEcdsaVcBody: body must NOT carry a `proof` field — strip it before signing so the bytes the SDK hashes match what the signer hashes.",
+    );
+  }
+  // IMPORTANT: use standard JSON.stringify (insertion order)
+  // — see the matching comment in `signDelegationCredential`.
+  // The SDK's `verifyEcdsaVcSig` uses JSON.stringify to
+  // serialize the proof-stripped VC before hashing; any drift
+  // in the byte-level JSON (sorted keys, whitespace, etc.)
+  // produces a different keccak256 digest and the SDK reports
+  // `isValid: false`.
+  const serializedJson = JSON.stringify(options.body);
+  const keccakOfJson = keccak_256(new TextEncoder().encode(serializedJson));
+  const jws = eip191SignDelegation(
+    keccakOfJson,
+    options.signerPrivateKey,
+    options.signerPublicKey,
+  );
+
+  const primaryMethod = `${options.issuerDid}#key-1`;
+  const verificationMethod = options.additionalSignerVerificationMethod
+    ? `${primaryMethod} ${options.additionalSignerVerificationMethod}`
+    : primaryMethod;
+
+  return {
+    type: "EcdsaSecp256k1Signature2019",
+    proofPurpose: "assertionMethod",
+    verificationMethod,
+    created: options.created,
+    jws,
+  };
+}
+

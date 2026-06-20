@@ -18,7 +18,7 @@ import {
   type NegotiationLlmClient,
 } from "./negotiation-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
-import { buildSelfAttestedClaimCredential } from "./claim-credential.js";
+import { buildSignedClaimCredential } from "./claim-credential.js";
 
 /**
  * The expanded runtime mandate as returned by the hosted-mandate
@@ -439,16 +439,39 @@ let admission: AgentAdmission;
         });
         lastOutcome = `walkaway -> ${result.status}`;
       } else {
-        // Build a self-attested W3C-style credential for reveal moves so
-        // the orchestrator's disclosure verifier returns `verified: true`
-        // and the claim advances the trust-level filter. This lets the
-        // hosted agent actually progress the disclosure gate (and stop
-        // looping on `request_disclosure`) even when running outside a
-        // T3-enclave attestation pipeline.
+        // Build a real W3C Verifiable Credential signed with the
+        // agent's secp256k1 keypair so the backend's
+        // `T3NegotiationDisclosureVerifier` can hand it to
+        // `@terminal3/verify_vc`'s `verifyVc` and confirm the JWS.
+        // The verifier's `t3_attestation_ref` derivation is bound
+        // to the JWS the SDK recovered a signer from, so the
+        // recorded attestation ref is anchored to real
+        // cryptographic evidence — not to a local UUID. The
+        // previous `buildSelfAttestedClaimCredential` shape was
+        // not ECDSA-signed and the verifier returned a synthesized
+        // `Date.now() + randomUUID()` attestation ref (the P0
+        // disclosure-verifier bug).
+        //
+        // When the agent process was launched with a forced DID
+        // (no keypair — `AGENT_IDENTITY_DID` env var path) we
+        // cannot mint a signed VC; we omit the credential entirely
+        // so the backend records the disclosure as `verified: false`
+        // rather than crashing the agent loop. The trust-level
+        // filter excludes unverified disclosures from the
+        // settlement gate.
+        const hasSigningKey =
+          typeof identity.privateKey === "string" &&
+          identity.privateKey.length > 0 &&
+          typeof identity.publicKey === "string" &&
+          identity.publicKey.length > 0;
         const claimCredential =
-          moveToSubmit.action === "reveal" && moveToSubmit.claimType
-            ? buildSelfAttestedClaimCredential({
+          moveToSubmit.action === "reveal" &&
+          moveToSubmit.claimType &&
+          hasSigningKey
+            ? buildSignedClaimCredential({
                 issuerDid: identity.did,
+                privateKey: identity.privateKey,
+                publicKey: identity.publicKey,
                 subjectId: session.institution.displayName,
                 claimType: moveToSubmit.claimType,
               })
