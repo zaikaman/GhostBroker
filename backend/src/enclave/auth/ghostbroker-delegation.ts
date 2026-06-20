@@ -4,6 +4,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ethers } from "ethers";
 import { verifyVc } from "@terminal3/verify_vc";
 import type { SignedCredential } from "@terminal3/vc_core";
+import { logger } from "../../logging/logger.js";
 
 /**
  * The action an agent is attempting on the backend. Used as the
@@ -439,22 +440,28 @@ type SdkVerifyOutcome = "verified" | "rejected" | "sdk-error";
 async function trySdkVerify(
   credential: GhostbrokerDelegationCredential,
 ): Promise<SdkVerifyOutcome> {
-  console.log("[DEBUG] trySdkVerify entered");
+  logger.debug("trySdkVerify entered");
   try {
     const signed = toSignedCredential(credential);
     const result = await verifyVc(signed, {
       debug: process.env.VC_VERIFY_DEBUG === "true",
     });
-    // DEBUG
-    console.log("[DEBUG] trySdkVerify signed.issuer:", signed.issuer);
-    console.log(
-      "[DEBUG] trySdkVerify signed.verificationMethod:",
-      signed.proof.verificationMethod,
+    logger.debug(
+      {
+        issuer: signed.issuer,
+        verificationMethod: signed.proof.verificationMethod,
+        sdkResult: result,
+      },
+      "trySdkVerify SDK verification outcome",
     );
-    console.log("[DEBUG] trySdkVerify SDK result:", JSON.stringify(result));
     return result.isValid ? "verified" : "rejected";
   } catch (error) {
-    console.log("[DEBUG] trySdkVerify caught error:", error instanceof Error ? error.message : error);
+    logger.debug(
+      {
+        err: error instanceof Error ? error.message : String(error),
+      },
+      "trySdkVerify caught error",
+    );
     // The T3 SDK's `verifyEcdsaVcSig` only knows `did:ethr:`
     // and throws "Unsupported DID method: t3n" for our
     // `did:t3n:0x<addr>` issuers. That is a known SDK
@@ -591,8 +598,7 @@ function tryManualMultiSignerVerify(
 export async function verifyGhostbrokerDelegationCredential(
   request: GhostbrokerVerificationRequest,
 ): Promise<GhostbrokerVerificationResult> {
-  // DEBUG
-  console.log("[DEBUG] verifier called");
+  logger.debug("verifier called");
   const {
     credential,
     agentDid,
@@ -604,7 +610,10 @@ export async function verifyGhostbrokerDelegationCredential(
   // Shape check (defensive — caller should have parsed already).
   const parsed = ghostbrokerDelegationSchema.safeParse(credential);
   if (!parsed.success) {
-    console.log("[DEBUG] shape check failed:", parsed.error.issues);
+    logger.debug(
+      { issues: parsed.error.issues },
+      "shape check failed",
+    );
     return {
       status: "rejected",
       agentDid,
@@ -612,22 +621,23 @@ export async function verifyGhostbrokerDelegationCredential(
     };
   }
   const safe = parsed.data;
-  console.log("[DEBUG] shape check passed");
+  logger.debug("shape check passed");
 
   // Time window.
   if (!isDelegationActive(safe, now)) {
-    console.log("[DEBUG] time window failed");
+    logger.debug("time window failed");
     return { status: "rejected", agentDid, reason: "expired" };
   }
-  console.log("[DEBUG] time window passed");
+  logger.debug("time window passed");
 
   // DID binding.
   if (safe.credentialSubject.agentDid !== agentDid) {
-    console.log(
-      "[DEBUG] DID binding failed:",
-      safe.credentialSubject.agentDid,
-      "!==",
-      agentDid,
+    logger.debug(
+      {
+        vcAgentDid: safe.credentialSubject.agentDid,
+        requestAgentDid: agentDid,
+      },
+      "DID binding failed",
     );
     return {
       status: "rejected",
@@ -635,14 +645,14 @@ export async function verifyGhostbrokerDelegationCredential(
       reason: "agent_mismatch",
     };
   }
-  console.log("[DEBUG] DID binding passed");
+  logger.debug("DID binding passed");
 
   // Revocation list.
   if (revokedAuthorityRefs?.has(authorityRefFor(safe))) {
-    console.log("[DEBUG] revocation failed");
+    logger.debug("revocation failed");
     return { status: "rejected", agentDid, reason: "revoked" };
   }
-  console.log("[DEBUG] revocation passed");
+  logger.debug("revocation passed");
 
   // Cryptographic verification — primary path is the T3 SDK.
   const sdkResult = await trySdkVerify(safe);
