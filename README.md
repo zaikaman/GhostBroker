@@ -37,9 +37,8 @@ Built for the **Terminal 3 Agent Dev Kit Bounty** (June 9--22, 2026).
 17. [Running the Platform](#running-the-platform)
 18. [Testing](#testing)
 19. [Deployment](#deployment)
-20. [Documentation Inventory](#documentation-inventory)
-21. [Terminal 3 ADK Onboarding Gaps Filed](#terminal-3-adk-onboarding-gaps-filed)
-22. [License](#license)
+20. [Terminal 3 ADK Onboarding Gaps Filed](#terminal-3-adk-onboarding-gaps-filed)
+21. [License](#license)
 
 ---
 
@@ -148,24 +147,11 @@ ghostbroker/
 |   |-- functions/                     Database functions
 |   +-- seed/                          Development seed data
 |
-|-- docs/
-|   |-- agent-integration/             8-file agent developer documentation
-|   |   |-- OVERVIEW.md
-|   |   |-- AUTHENTICATION.md
-|   |   |-- DEPLOY_YOUR_AGENT.md
-|   |   |-- API_REFERENCE.md
-|   |   |-- INTENT_SUBMISSION.md
-|   |   |-- SETTLEMENT_AND_RECEIPTS.md
-|   |   |-- WEBSOCKET_TELEMETRY.md
-|   |   +-- ERROR_REFERENCE.md
-|   |-- settlement-rails.md            Settlement rail operator runbook
-|   |-- terminal3-adk-onboarding-doc-gaps.md
-|   +-- infrastructure-gaps.md
-|
 |-- tests/                             Playwright E2E test configuration
 |-- scripts/                           Build, publish, and verification scripts
 |-- DESIGN.md                          Design system specification
 |-- PRODUCT.md                         Product brief and brand personality
+|-- terminal3-adk-onboarding-doc-gaps.md  T3 ADK onboarding gaps filed
 +-- package.json                       Root workspace orchestrator
 ```
 
@@ -484,8 +470,7 @@ and `pairingCompatibility`.
 ## Settlement Rails
 
 GhostBroker ships a pluggable settlement rail layer that moves assets when a
-match settles. The layer is defined in `backend/src/services/settlement-rails/`
-and documented in `docs/settlement-rails.md`.
+match settles. The layer is defined in `backend/src/services/settlement-rails/`.
 
 ### Rail Registry
 
@@ -827,8 +812,7 @@ schema consists of 11 tables:
 
 ## API Reference
 
-The backend exposes 13 route modules. Complete documentation is at
-`docs/agent-integration/API_REFERENCE.md`.
+The backend exposes 13 route modules listed below.
 
 ### Authentication Routes (`/api/auth`)
 
@@ -1052,17 +1036,18 @@ npm run test:watch
 npm run test:e2e
 ```
 
-### Test Breakdown by Workspace
+### Test Distribution by Module
 
-| Workspace          | Test Files | Tests Passing | Tests Skipped |
-| ------------------ | ---------- | ------------- | ------------- |
-| `negotiation-core` | 1          | 27            | 0             |
-| `t3-enclave`       | 12         | 79            | 0             |
-| `backend`          | 57         | 194           | 8 (chain-sepolia, gated) |
-| `frontend`         | 17         | 72            | 0             |
-| `agent-client`     | 9          | 56            | 0             |
-| `agents`           | 8          | 126           | 0             |
-| **Total**          | **104**    | **554**       | **8**         |
+| Module | Test files | Tests passing | Tests skipped |
+|---|---|---|---|
+| **backend** (workspace) | **87** | **482** | **8** (chain-sepolia, gated) |
+| &nbsp;&nbsp;backend/src/tests/ | 57 | 194 | 8 |
+| &nbsp;&nbsp;backend/src/enclave/tests/ | 12 | 79 | 0 |
+| &nbsp;&nbsp;backend/src/negotiation-core/ | 1 | 27 | 0 |
+| &nbsp;&nbsp;backend/src/sdk/agent-client/ | 9 | 56 | 0 |
+| &nbsp;&nbsp;backend/src/cli/agents/ | 8 | 126 | 0 |
+| **frontend** (workspace) | **17** | **72** | **0** |
+| **Total** | **104** | **554** | **8** |
 
 ### Test Categories
 
@@ -1135,25 +1120,13 @@ Heroku dashboard.
 
 ---
 
-## Documentation Inventory
+## Design & Product Documents
 
 | Document                                     | Description                         |
 | -------------------------------------------- | ----------------------------------- |
-| `docs/agent-integration/OVERVIEW.md`         | Agent developer getting started     |
-| `docs/agent-integration/AUTHENTICATION.md`   | Auth flow for agents                |
-| `docs/agent-integration/DEPLOY_YOUR_AGENT.md`| Step-by-step agent deployment       |
-| `docs/agent-integration/API_REFERENCE.md`    | Complete REST API reference         |
-| `docs/agent-integration/INTENT_SUBMISSION.md`| Hidden intent submission guide      |
-| `docs/agent-integration/SETTLEMENT_AND_RECEIPTS.md` | Settlement and receipt flow  |
-| `docs/agent-integration/WEBSOCKET_TELEMETRY.md` | WebSocket event reference        |
-| `docs/agent-integration/ERROR_REFERENCE.md`  | Error code reference                |
-| `docs/settlement-rails.md`                   | Settlement rail operator runbook    |
-| `docs/terminal3-adk-onboarding-doc-gaps.md`  | T3 ADK documentation gaps filed     |
-| `docs/infrastructure-gaps.md`                | Infrastructure gap analysis         |
-| `backend/contracts/README.md`                | TEE contract build and publish guide|
 | `DESIGN.md`                                  | Design system specification         |
 | `PRODUCT.md`                                 | Product brief and brand personality |
-| `SUBMISSION.md`                              | Hackathon submission narrative       |
+| `terminal3-adk-onboarding-doc-gaps.md`       | T3 ADK onboarding gaps filed        |
 
 ---
 
@@ -1161,7 +1134,7 @@ Heroku dashboard.
 
 Per the bounty criteria, the Terminal 3 ADK documentation gaps and onboarding
 friction points encountered during development are comprehensively tracked in
-`docs/terminal3-adk-onboarding-doc-gaps.md` (62,166 bytes). The largest
+`terminal3-adk-onboarding-doc-gaps.md` (62,166 bytes). The largest
 classes of friction:
 
 1. **Programmatic AI agent delegation is undocumented.** The T3N Dashboard
@@ -1204,7 +1177,7 @@ classes of friction:
   response shapes are built around the boundary.
 
 - **The code is production-ready and tested.** 554 tests passing across
-  104 test files; `tsc --noEmit` clean on every workspace; the verifier
+  104  test files; `tsc --noEmit` clean on both workspaces; the verifier
   has its own test file with positive and negative cases; the session
   and authority layers are independently exercised.
 
