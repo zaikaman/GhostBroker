@@ -1,8 +1,9 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHmac } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-import { createHash } from "node:crypto";
+import bcrypt from "bcryptjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -32,17 +33,23 @@ function loadBackendEnv(path: string): Record<string, string> {
   return out;
 }
 
-function hashApiKey(key: string): string {
-  return createHash("sha256").update(key).digest("hex");
+function hashApiKey(key: string, secret: string): { keyBcrypt: string; lookupKey: string } {
+  const keyBcrypt = bcrypt.hashSync(key, 12);
+  const lookupKey = createHmac("sha256", secret).update(key).digest("hex");
+  return { keyBcrypt, lookupKey };
 }
 
 async function main() {
   const env = loadBackendEnv(BACKEND_ENV_PATH);
   const supabaseUrl = env.SUPABASE_URL;
   const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  const authSessionSecret = env.AUTH_SESSION_SECRET;
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in backend/.env");
+  }
+  if (!authSessionSecret) {
+    throw new Error("Missing AUTH_SESSION_SECRET in backend/.env; required to derive api_keys.lookup_key");
   }
 
   console.log("Connecting to Supabase...");
@@ -131,19 +138,23 @@ async function main() {
   }
 
   console.log("Seeding API keys...");
+  const buyerHash = hashApiKey(buyerKey, authSessionSecret);
+  const sellerHash = hashApiKey(sellerKey, authSessionSecret);
   const apiKeys = [
     {
       institution_id: buyerInstId,
       label: "e2e-buyer-key",
       prefix: "DnOR8QnB",
-      key_hash: hashApiKey(buyerKey),
+      key_bcrypt: buyerHash.keyBcrypt,
+      lookup_key: buyerHash.lookupKey,
       scopes: "agent:operate"
     },
     {
       institution_id: sellerInstId,
       label: "e2e-seller-key",
       prefix: "RfylFnE0",
-      key_hash: hashApiKey(sellerKey),
+      key_bcrypt: sellerHash.keyBcrypt,
+      lookup_key: sellerHash.lookupKey,
       scopes: "agent:operate"
     }
   ];

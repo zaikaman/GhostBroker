@@ -312,8 +312,15 @@ Agent Auth SDK's design intent:
 
 ### Session Layer
 
-- API keys are minted per institution via `POST /api/api-keys` and stored as
-  `bcrypt` hashes in the `api_keys` table.
+- API keys are minted per institution via `POST /api/api-keys` and stored in
+  the `api_keys` table as:
+  - `key_bcrypt` — `bcrypt(token, cost=12)` of the full key. Constant-time
+    verified at request time via `bcrypt.compare`. Plaintext cannot be
+    recovered within the threat model.
+  - `lookup_key` — `HMAC-SHA256(AUTH_SESSION_SECRET, token)`, hex. Unique,
+    indexed, the equality lookup key on every request. Keyed by the same
+    server secret that signs operator session JWTs, so a database breach
+    alone is insufficient to enumerate valid tokens.
 - Agents exchange the key at `POST /api/auth/api-key` for an 8-hour JWT.
 - The JWT identifies the institution; the backend looks up the agent and its
   persisted VC from there.
@@ -753,7 +760,10 @@ schema consists of 13 tables:
 - `policy_hash` -- SHA-256 fingerprint of the delegation VC
 
 **`api_keys`** -- Per-institution API keys for agent authentication.
-- `key_hash` (unique) -- bcrypt hash of the full key
+- `key_bcrypt` -- bcrypt(token, cost=12) of the full key. NOT unique
+  (per-call salt). Constant-time verified at request time.
+- `lookup_key` (unique while active) -- HMAC-SHA256(AUTH_SESSION_SECRET, token),
+  hex. The equality lookup key on the request path.
 - `prefix` -- Display prefix for identification
 - `scopes` -- Permission scopes (default: `agent:operate`)
 

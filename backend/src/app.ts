@@ -580,7 +580,10 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     { telemetryBus },
   );
 
-  const apiKeyService = new ApiKeyService(apiKeyRepository);
+  const apiKeyService = new ApiKeyService(
+    apiKeyRepository,
+    env.AUTH_SESSION_SECRET,
+  );
   const institutionService = new InstitutionService(
     institutionRepository,
     new AdkTenantDidRegistry(t3NetworkClient),

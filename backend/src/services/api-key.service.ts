@@ -4,8 +4,9 @@ import {
   type ApiKeyCreatedResponse,
   type ApiKeyRecord,
   apiKeyFromRecord,
+  deriveLookupKey,
   generateApiKey,
-  hashApiKey,
+  verifyBcryptApiKey,
 } from "../models/api-key.js";
 
 // ─── Supabase Query Type Declarations ────────────────────────────────────
@@ -72,10 +73,11 @@ export interface ApiKeyRepository {
     institutionId: string;
     label: string;
     prefix: string;
-    keyHash: string;
+    keyBcrypt: string;
+    lookupKey: string;
     scopes: string;
   }): Promise<ApiKey>;
-  findByHash(hash: string): Promise<ApiKey | null>;
+  findByLookupKey(lookupKey: string): Promise<ApiKeyRecord | null>;
   listActive(institutionId: string): Promise<ApiKey[]>;
   revoke(id: string, institutionId: string): Promise<void>;
 }
@@ -91,7 +93,8 @@ export class SupabaseApiKeyRepository implements ApiKeyRepository {
     institutionId: string;
     label: string;
     prefix: string;
-    keyHash: string;
+    keyBcrypt: string;
+    lookupKey: string;
     scopes: string;
   }): Promise<ApiKey> {
     const { data, error } = await this.client
@@ -100,7 +103,8 @@ export class SupabaseApiKeyRepository implements ApiKeyRepository {
         institution_id: params.institutionId,
         label: params.label,
         prefix: params.prefix,
-        key_hash: params.keyHash,
+        key_bcrypt: params.keyBcrypt,
+        lookup_key: params.lookupKey,
         scopes: params.scopes,
       })
       .select("*")
@@ -113,11 +117,11 @@ export class SupabaseApiKeyRepository implements ApiKeyRepository {
     return apiKeyFromRecord(data);
   }
 
-  public async findByHash(hash: string): Promise<ApiKey | null> {
+  public async findByLookupKey(lookupKey: string): Promise<ApiKeyRecord | null> {
     const { data, error } = await this.client
       .from("api_keys")
       .select("*")
-      .eq("key_hash", hash)
+      .eq("lookup_key", lookupKey)
       .is("revoked_at", null)
       .single();
 
@@ -125,7 +129,7 @@ export class SupabaseApiKeyRepository implements ApiKeyRepository {
       return null;
     }
 
-    return apiKeyFromRecord(data);
+    return data;
   }
 
   public async listActive(institutionId: string): Promise<ApiKey[]> {
@@ -171,9 +175,14 @@ export interface ApiKeyManagementService {
 
 export class ApiKeyService implements ApiKeyManagementService {
   private readonly repository: ApiKeyRepository;
+  private readonly serverSecret: string;
 
-  public constructor(repository: ApiKeyRepository) {
+  public constructor(
+    repository: ApiKeyRepository,
+    serverSecret: string,
+  ) {
     this.repository = repository;
+    this.serverSecret = serverSecret;
   }
 
   public async createKey(
@@ -181,13 +190,16 @@ export class ApiKeyService implements ApiKeyManagementService {
     label: string,
     scopes: string[],
   ): Promise<ApiKeyCreatedResponse> {
-    const { prefix, keyHash, fullKey } = generateApiKey();
+    const { prefix, keyBcrypt, lookupKey, fullKey } = await generateApiKey(
+      this.serverSecret,
+    );
 
     const apiKey = await this.repository.create({
       institutionId,
       label,
       prefix,
-      keyHash,
+      keyBcrypt,
+      lookupKey,
       scopes: scopes.join(","),
     });
 
@@ -205,8 +217,30 @@ export class ApiKeyService implements ApiKeyManagementService {
     await this.repository.revoke(id, institutionId);
   }
 
+  /**
+   * Resolve a bearer token to its stored API key.
+   *
+   * Two-step verification:
+   *  1. Compute `lookup_key = HMAC-SHA256(serverSecret, token)`.
+   *     Equality lookup against the indexed `lookup_key` column
+   *     yields at most one active row.
+   *  2. `bcrypt.compare(token, row.key_bcrypt)` — constant-time
+   *     verification. Returns `false` if either the lookup misses
+   *     or the bcrypt check fails. Errors during bcrypt verify
+   *     (malformed hash) are swallowed and surfaced as `false`
+   *     so they cannot be used as a side-channel to probe DB
+   *     corruption.
+   */
   public async findKeyByToken(token: string): Promise<ApiKey | null> {
-    const keyHash = hashApiKey(token);
-    return this.repository.findByHash(keyHash);
+    const lookupKey = deriveLookupKey(token, this.serverSecret);
+    const row = await this.repository.findByLookupKey(lookupKey);
+    if (!row) {
+      return null;
+    }
+    const valid = await verifyBcryptApiKey(token, row.key_bcrypt);
+    if (!valid) {
+      return null;
+    }
+    return apiKeyFromRecord(row);
   }
 }
