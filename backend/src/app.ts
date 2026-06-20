@@ -277,24 +277,38 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   );
 
   // Phase 1: tenant identity. The T3N handshake returned
-  // an authenticated tenant DID; we use it as the issuer
-  // of every server-minted delegation VC. The signing
-  // keypair is generated locally on first boot and
-  // persisted to `output/identities/tenant_identity.json`
-  // so a backend restart re-uses the same identity and
-  // existing VCs stay valid.
+  // an authenticated tenant DID. The signing keypair is
+  // SEPARATE from the T3N bearer API key — the API key is the
+  // operator's claim-page secret and may be rotated on a
+  // schedule independent of the institution's VC lifecycle
+  // (rotating it would invalidate every issued VC, so it must
+  // not be conflated with the signing key).
   //
-  // The T3N API key itself is used as the signing private
-  // key (it is the secp256k1 key that corresponds to the
-  // T3N DID's on-chain address). This ensures the ECDSA
-  // signature produced by `signDelegationCredential` can
-  // be verified against the issuer DID — previously the
-  // identity was a random keypair whose address never
-  // matched the DID, causing all delegation VC verifications
-  // to fail with "unverified" in live verification mode.
+  // Resolution order:
+  //
+  //   1. `TENANT_SIGNING_PRIVATE_KEY` env var (production):
+  //      operators load a long-lived secp256k1 key from a
+  //      secret manager (KMS / Vault / HSM) and inject it at
+  //      boot. The same key is reused across restarts; existing
+  //      VCs stay valid.
+  //
+  //   2. File-backed identity store (dev / test fallback):
+  //      `loadOrCreateTenantIdentity` reads the on-disk
+  //      keypair from `output/identities/tenant_identity.json`,
+  //      creating a fresh CSPRNG-generated keypair on first
+  //      boot and reusing it on subsequent boots.
+  //
+  // The resulting keypair's derived address is the canonical
+  // VC issuer DID (`did:ethr:0x<address>`), and the same
+  // address is registered as the facade's trusted signer so
+  // the T3 SDK's `verifyEcdsaVcSig` can match the issuer
+  // against the recovered signer directly — no multi-signer
+  // fallback path is needed for the server-minted VCs.
   const tenantIdentity = loadOrCreateTenantIdentity({
     tenantDid: t3NetworkClient.tenantDidValue,
-    signingPrivateKey: env.T3N_API_KEY,
+    ...(env.TENANT_SIGNING_PRIVATE_KEY
+      ? { signingPrivateKey: env.TENANT_SIGNING_PRIVATE_KEY }
+      : {}),
   });
   const tenantDelegationSigner = new BackendTenantDelegationSigner(
     tenantIdentity,
@@ -307,13 +321,13 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // up the persisted VC; the agent service needs the
   // facade for `verifyAgentAuthority` at admit time).
   const authorizationFacade = new T3AgentAuthorizationFacade();
-  // The production signer (`tenant-delegation.ts`) signs with
-  // the institution's T3 SDK API key. The T3 SDK authenticates
-  // with the API key's derived address and the server returns
-  // a tenant DID whose embedded address is different. Pass
-  // the API key's derived address to the verifier as an
-  // additional trusted signer so the cryptographic check
-  // (`recoveredAddress === trustedSigner`) passes.
+  // The signing keypair's derived address is the canonical
+  // VC issuer DID. Register it as the facade's trusted
+  // signer so the T3 SDK's `verifyEcdsaVcSig` can match the
+  // issuer against the recovered signer directly (signer ==
+  // issuer). This is the only trusted signer the production
+  // flow needs; the multi-signer fallback path is reserved
+  // for hand-crafted VCs with legacy `did:t3n:` issuers.
   authorizationFacade.setTrustedSignerAddresses(
     new Set([tenantIdentity.address.toLowerCase()]),
   );

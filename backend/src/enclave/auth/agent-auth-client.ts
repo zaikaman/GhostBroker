@@ -68,16 +68,23 @@ export interface AgentDelegationVerificationRequest {
    * as a valid signer of `delegationCredential`, in addition
    * to the address derived from `delegationCredential.issuer`.
    *
-   * The production signer uses the institution's T3 SDK API
-   * key as its `privateKey`. The T3 SDK authenticates with
-   * the API key's derived address and the server returns a
-   * `did:t3n:0x<addr>` whose embedded address does NOT match
-   * the API key's derived address. The signature still has
-   * to be cryptographically valid — `recoveredAddress` must
-   * equal the API key's derived address — but the verifier
-   * cannot derive that address from the issuer DID alone.
-   * Callers that own the API key pass its derived address
-   * here.
+   * Production server-minted VCs have `signer == issuer` (the
+   * same keypair), so the T3 SDK's `verifyEcdsaVcSig` matches
+   * the issuer against the recovered signer and returns
+   * `isValid: true`. This set is unused on the happy path.
+   *
+   * The set is also the escape hatch for hand-crafted VCs with
+   * legacy `did:t3n:0x<addr>` issuers — see
+   * `ghostbroker-delegation.ts` for the multi-signer fallback
+   * rationale.
+   *
+   * Historical note: this parameter was originally added so the
+   * verifier could accept signatures from the institution's T3
+   * SDK API key (which authenticated with one address while the
+   * T3 server returned a tenant DID with a different embedded
+   * address). That dual-use path is the C1 fix — the T3N bearer
+   * API key is no longer used as the tenant signing key. The
+   * parameter is retained as a defense-in-depth measure.
    */
   additionalTrustedSignerAddresses?: ReadonlySet<string>;
 }

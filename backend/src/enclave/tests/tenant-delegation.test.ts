@@ -159,18 +159,25 @@ describe("tenant-delegation signer", () => {
   it("accepts a freshly-minted VC in live mode when an explicit signing key is provided", async () => {
     // Production case: the institution has both a T3N tenant
     // identity (`did:t3n:0x<addr>`, recorded for display) and
-    // an API key whose derived address is the canonical signer.
-    // The signer mints VCs with the API key's
-    // `did:ethr:0x<derived>` as the issuer. The verifier's
-    // `verifyEcdsaVcSig` matches the issuer against the
-    // recovered signer; no additional trusted signer is needed.
-    const apiKeyLikePrivateKey =
+    // a dedicated secp256k1 signing key loaded from a secret
+    // manager via `TENANT_SIGNING_PRIVATE_KEY`. The signer
+    // mints VCs with the signing key's `did:ethr:0x<derived>`
+    // as the issuer. The verifier's `verifyEcdsaVcSig`
+    // matches the issuer against the recovered signer; no
+    // additional trusted signer is needed.
+    //
+    // This test pins the C1 fix: the T3N bearer API key MUST
+    // NOT be used as the signing key. The signing key is a
+    // separate, dedicated secp256k1 keypair — in production,
+    // a fresh CSPRNG-generated keypair persisted to the file
+    // store, or loaded from a secret manager.
+    const dedicatedSigningKey =
       "0x96bfcbce2e97420b356695ebd8987b6d9a5658d7221ed9bed9e3b7da6b7d45f6";
 
     const identity = loadOrCreateTenantIdentity({
       tenantDid: "did:t3n:a07f5f528c01e22dfd229a027c4b4afa4514e952",
       path: join(tmp, "tenant-mismatch.json"),
-      signingPrivateKey: apiKeyLikePrivateKey,
+      signingPrivateKey: dedicatedSigningKey,
     });
     // The VC's issuer is the keypair's did:ethr form, NOT
     // the T3N tenant DID — that's the whole point of the
@@ -222,40 +229,93 @@ describe("tenant-delegation signer", () => {
     );
   });
 
-  it("rejects a freshly-minted VC in live mode when the API-key signer's address is NOT passed as an additional trusted signer", async () => {
-    // In the new `did:ethr:` issuer flow, signer == issuer
-    // (both derived from the same keypair), so the SDK path
-    // succeeds without a multi-signer fallback. The test
-    // verifies the SDK round-trip succeeds end-to-end.
-    const apiKeyLikePrivateKey =
-      "0x96bfcbce2e97420b356695ebd8987b6d9a5658d7221ed9bed9e3b7da6b7d45f6";
-
+  it("verifies a VC minted by a CSPRNG-generated signing key without additional trusted signers", async () => {
+    // Production case (file-backed identity store): no
+    // explicit signing key is provided to
+    // `loadOrCreateTenantIdentity`, so it generates a fresh
+    // secp256k1 keypair from a CSPRNG and persists it to
+    // disk. The signer mints VCs with the keypair's
+    // `did:ethr:0x<derived>` as the issuer. The verifier's
+    // `verifyEcdsaVcSig` matches the issuer against the
+    // recovered signer; no additional trusted signer is
+    // needed and the multi-signer fallback never runs.
     const identity = loadOrCreateTenantIdentity({
-      tenantDid: "did:t3n:a07f5f528c01e22dfd229a027c4b4afa4514e952",
-      path: join(tmp, "tenant-mismatch-no-trust.json"),
-      signingPrivateKey: apiKeyLikePrivateKey,
+      tenantDid: "did:t3n:0x00000000000000000000000000000000000000aa",
+      path: join(tmp, "tenant-csprng.json"),
     });
+    expect(identity.did.startsWith("did:ethr:0x")).toBe(true);
+    expect(identity.did).toBe(`did:ethr:${getAddress(identity.address)}`);
 
     const { credential } = mintTenantDelegation(
       {
-        agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
-        institutionId: "00000000-4000-8000-000000000101",
-        maxSpendUsd: 50_000,
+        agentDid: "did:t3n:agent:us1-authorized",
+        institutionId: "00000000-0000-4000-8000-000000000101",
+        maxSpendUsd: 1_000,
         allowedActions: ["agent.admit", "intent.submit"],
       },
       identity,
     );
 
-    // Without `additionalTrustedSignerAddresses` the verifier
-    // still succeeds because signer == issuer (the VC's
-    // issuer is the keypair's did:ethr, not the tenantDid).
     const result = await verifyGhostbrokerDelegationCredential({
       credential,
-      institutionId: "00000000-4000-8000-000000000101",
-      agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
+      institutionId: "00000000-0000-4000-8000-000000000101",
+      agentDid: "did:t3n:agent:us1-authorized",
       requestedAction: "agent.admit",
     });
 
     expect(result.status).toBe("verified");
+    if (result.status !== "verified") {
+      throw new Error(
+        `expected verified, got ${JSON.stringify(result)}`,
+      );
+    }
+  });
+
+  it("rejects a T3N bearer API key passed as the signing key (C1 dual-use guard)", () => {
+    // Regression test for the C1 architecture flaw: the T3N
+    // bearer API key (a separate secret that authenticates the
+    // T3 SDK to T3N REST/WS calls) MUST NOT be used as the
+    // tenant's secp256k1 signing key. Conflating the two would
+    // couple the institution's VC lifecycle to the bearer
+    // secret's rotation cadence (rotating the API key would
+    // invalidate every issued VC).
+    //
+    // The T3N API key has a different shape from a secp256k1
+    // private key (the SDK's `metamask_sign` accepts a wider
+    // variety of inputs than the canonical 32-byte private
+    // key). `normalizeSigningPrivateKey` rejects the
+    // dual-use path with a descriptive error so any future
+    // caller wiring `T3N_API_KEY` here fails fast.
+    expect(() =>
+      loadOrCreateTenantIdentity({
+        tenantDid: "did:t3n:0x00000000000000000000000000000000000000aa",
+        path: join(tmp, "tenant-rejected.json"),
+        signingPrivateKey: "not-a-valid-private-key",
+      }),
+    ).toThrow(/Tenant signing private key must be a 32-byte secp256k1 key/u);
+
+    // A key with the wrong length (e.g. 31 bytes, or 33) is
+    // also rejected. The T3 SDK tolerates some of these on
+    // the bearer-auth side; the signer-side validator is
+    // intentionally stricter.
+    expect(() =>
+      loadOrCreateTenantIdentity({
+        tenantDid: "did:t3n:0x00000000000000000000000000000000000000aa",
+        path: join(tmp, "tenant-rejected-2.json"),
+        signingPrivateKey: "0x" + "ab".repeat(31),
+      }),
+    ).toThrow(/32-byte secp256k1 key/u);
+
+    // A key with only whitespace (truthy but invalid shape)
+    // is rejected. `normalizeSigningPrivateKey` strips
+    // whitespace before validating, so a single space yields
+    // an empty post-strip string and fails the regex.
+    expect(() =>
+      loadOrCreateTenantIdentity({
+        tenantDid: "did:t3n:0x00000000000000000000000000000000000000aa",
+        path: join(tmp, "tenant-rejected-3.json"),
+        signingPrivateKey: " ",
+      }),
+    ).toThrow(/32-byte secp256k1 key/u);
   });
 });

@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sandbox:check": "tsx src/enclave/sandbox/check.ts",
+    "bootstrap:tenant-signing-key": "tsx scripts/bootstrap-tenant-signing-key.ts",
     "agent:buyer": "tsx src/cli/agents/buyer-agent.ts",
     "agent:seller": "tsx src/cli/agents/seller-agent.ts",
     "agent:hosted": "tsx src/cli/agents/hosted-agent.ts",

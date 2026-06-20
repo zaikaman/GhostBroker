@@ -12,13 +12,24 @@ import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
 /**
  * Server-side W3C VC delegation signer.
  *
- * The institution's tenant identity (secp256k1 keypair +
- * `did:t3n:0x...`) is the issuer of every delegation
- * credential the backend writes. The user (the
- * institution's operator) never holds or sees the
- * signing key — it lives in
- * `output/identities/tenant_identity.json`, owned by the
- * backend process.
+ * The institution's tenant identity (a dedicated secp256k1
+ * keypair) is the issuer of every delegation credential the
+ * backend writes. The institution's separate T3 tenant
+ * identity (`did:t3n:0x<addr>` returned by the T3N handshake)
+ * is recorded on the institution row for display; it is NOT
+ * the VC issuer. The user (the institution's operator) never
+ * holds or sees the signing key — it lives in the file-backed
+ * identity store at `output/identities/tenant_identity.json`
+ * (dev/test fallback) or is loaded from a secret manager via
+ * `TENANT_SIGNING_PRIVATE_KEY` (production).
+ *
+ * IMPORTANT: the tenant signing keypair is a SEPARATE secret
+ * from the T3N bearer API key (`T3N_API_KEY`). Conflating the
+ * two was the C1 architecture flaw — see
+ * `tenant-identity-store.ts` for the full rationale. The
+ * `loadOrCreateTenantIdentity` validator rejects any value
+ * that is not a canonical 32-byte secp256k1 key, so wiring
+ * `T3N_API_KEY` here fails fast at backend boot.
  *
  * This is the production target the plan calls for:
  *
@@ -105,13 +116,14 @@ export function mintTenantDelegation(
     ...(parsed.validityMonths ? { validityMonths: parsed.validityMonths } : {}),
   });
 
-  // When the signing keypair's address differs from the
-  // `issuerDid`'s embedded address (the T3 SDK API key
-  // authenticates with an address that does not match the
-  // tenant DID the server returns), embed the signing
-  // keypair's address as an additional `verificationMethod`
-  // entry. The verifier extracts both addresses and accepts
-  // a recovered signature that matches either.
+  // Embed the signing keypair's address as an additional
+  // `verificationMethod` entry when it differs from the
+  // `issuerDid`'s embedded address. Production server-minted
+  // VCs derive the issuer DID from the keypair (so the two
+  // addresses match and the SDK path succeeds directly);
+  // this branch fires for hand-crafted VCs that pre-set a
+  // different `issuerDid` (e.g. legacy `did:t3n:0x<addr>`
+  // issuers the verifier normalizes on the read side).
   const didAddress = identity.did.toLowerCase().match(/0x[0-9a-f]{40}/u)?.[0];
   const includeExtraSigner = didAddress !== identity.address.toLowerCase();
 

@@ -6,10 +6,17 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
  * Agent identity for the GhostBroker Ghostbroker-style credential flow.
  *
  * Post-Phase 1: the agent no longer needs a T3N handshake or a long-lived
- * keypair. The backend derives the tenant identity from the T3N_API_KEY
- * at boot. The agent process only needs a unique DID for admission — it
- * generates an ephemeral keypair at process boot and derives a synthetic
- * `did:t3n:demo-<pubkey>` from it. The private key never leaves the process.
+ * keypair. The backend derives the tenant signing identity from
+ * `TENANT_SIGNING_PRIVATE_KEY` (production: loaded from a secret manager)
+ * or generates a fresh CSPRNG keypair on first boot (dev/test: persisted
+ * to `output/identities/tenant_identity.json`). The agent process only
+ * needs a unique DID for admission — it generates an ephemeral keypair at
+ * process boot and derives a synthetic `did:t3n:demo-<pubkey>` from it.
+ * The private key never leaves the process.
+ *
+ * The T3N bearer API key (`T3N_API_KEY`) is a SEPARATE concern that
+ * authenticates the T3 SDK to T3N REST/WS calls; it is NOT used as the
+ * tenant signing key (see `tenant-identity-store.ts` for the C1 fix).
  */
 
 const DEFAULT_IDENTITY_PATH = "output/identities/agent_identity.json";

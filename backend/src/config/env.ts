@@ -55,6 +55,41 @@ const envSchema = z.object({
   T3N_ENV: z.enum(["testnet", "production"]).default("testnet"),
   T3_NETWORK_URL: z.string().url().optional(),
   T3_TENANT_DID: z.string().min(1).optional(),
+  /**
+   * Dedicated secp256k1 signing private key the backend uses to
+   * sign server-minted delegation VCs. This is a SEPARATE secret
+   * from `T3N_API_KEY` (which is the T3N bearer API secret used
+   * to authenticate to the T3N network).
+   *
+   * The two secrets MUST NOT be conflated:
+   *
+   *   - `T3N_API_KEY` is a bearer secret the T3 SDK uses to
+   *     authenticate REST/WS calls. It is intended to be rotated
+   *     on a normal schedule (and may be rotated by the T3
+   *     claim-page operator without coordinating with the
+   *     institution's VC lifecycle).
+   *   - `TENANT_SIGNING_PRIVATE_KEY` is the institution's long-
+   *     lived signing identity. Rotating it INVALIDATES every
+   *     previously-issued delegation VC, so the rotation cadence
+   *     is much slower (or zero — production target is to load it
+   *     once from a KMS / Vault / HSM and never rotate).
+   *
+   * If unset, the backend generates a fresh secp256k1 keypair
+   * from a CSPRNG on first boot and persists it to the file-
+   * backed identity store at
+   * `output/identities/tenant_identity.json` so subsequent
+   * boots reuse the same identity. In production this env var
+   * is the recommended path: load the key from a secret manager
+   * (KMS, Vault, HSM) and inject it at boot.
+   *
+   * Format: `0x`-prefixed 64-hex characters (the standard secp256k1
+   * private-key encoding).
+   */
+  TENANT_SIGNING_PRIVATE_KEY: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{64}$/iu)
+    .optional(),
   T3_MATCH_CONTRACT_ID: z.string().min(1).optional(),
   /**
    * Explicit matching contract version the backend requests from

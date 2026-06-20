@@ -38,13 +38,28 @@ import { getAddress } from "ethers";
  * API key:
  *
  *   The T3N claim-page key is the operator's bearer secret for
- *   the T3N network. The tenant identity is a separate
- *   long-lived signing identity — the same shape the
- *   agent-side `setup:identity` CLI mints. Deriving the signing
- *   key from the bearer secret would couple the tenant's
- *   authority to the lifetime of the claim key (claim keys can
- *   be rotated independently of the tenant DID, and rotating
- *   one should not invalidate the institution's signed VCs).
+ *   the T3N network. It is intended to be rotated on a normal
+ *   schedule by the claim-page operator (the T3 SDK authenticates
+ *   REST/WS calls with it via `eth_get_address` + `metamask_sign`).
+ *   It MUST NOT be conflated with the tenant's signing identity
+ *   for two reasons:
+ *
+ *     1. Rotating the bearer secret would invalidate every VC
+ *        the institution has issued (the VC's ECDSA proof is
+ *        a function of the signing key, not the bearer secret).
+ *
+ *     2. The T3 SDK returns a `did:t3n:0x<addr>` whose embedded
+ *        address is derived from the API key, but T3's host-side
+ *        address derivation may not match a direct
+ *        `eth_get_address(apiKey)` round-trip in every SDK
+ *        version — coupling the issuer to the bearer secret
+ *        would inherit that mismatch into the VC layer.
+ *
+ *   The signing keypair is generated independently from a CSPRNG
+ *   and persisted to a file-backed identity store (or injected
+ *   via the `TENANT_SIGNING_PRIVATE_KEY` env var when operators
+ *   load it from a secret manager). A backend restart re-reads
+ *   the same keypair so existing VCs stay valid.
  *
  * Production target: load from a secret manager (KMS, Vault,
  * etc.) and skip the on-disk write entirely. The file-backed
@@ -68,6 +83,47 @@ function generateKeypair(): { privateKey: string; publicKey: string } {
     privateKey: `0x${Buffer.from(privateKeyBytes).toString("hex")}`,
     publicKey: `0x${Buffer.from(publicKeyBytes).toString("hex")}`,
   };
+}
+
+/**
+ * Validate and normalize an externally-supplied secp256k1
+ * signing private key. The input must be either:
+ *
+ *   - `0x`-prefixed 64 lowercase or uppercase hex characters
+ *     (the canonical secp256k1 private-key encoding), or
+ *   - an unprefixed 64-hex-character string.
+ *
+ * Anything else — a T3N bearer API key (which is a different
+ * shape — see the T3 SDK's `metamask_sign` contract), a key
+ * with the wrong length, a non-hex string, etc. — is rejected
+ * with a descriptive error. This is the single chokepoint
+ * that prevents the C1 dual-use path from ever being
+ * reinstated: any future caller wiring `T3N_API_KEY` here
+ * gets a hard failure rather than a silently-overwritten
+ * identity.
+ *
+ * The T3 SDK's `metamask_sign` accepts a wider variety of
+ * inputs (it supports both raw hex strings and a hex pair),
+ * so the shape validation here is intentionally stricter than
+ * the T3 SDK's — we need the canonical 32-byte private key,
+ * not whatever the bearer-auth side tolerates.
+ */
+function normalizeSigningPrivateKey(raw: string): `0x${string}` {
+  const trimmed = raw.trim();
+  const stripped = trimmed.startsWith("0x")
+    ? trimmed.slice(2)
+    : trimmed;
+  if (!/^[0-9a-fA-F]{64}$/u.test(stripped)) {
+    throw new Error(
+      "Tenant signing private key must be a 32-byte secp256k1 key " +
+        "(0x-prefixed or unprefixed 64 hex characters). " +
+        "The T3N bearer API key MUST NOT be used as the tenant signing key — " +
+        "load a dedicated signing key from a secret manager and pass it via " +
+        "TENANT_SIGNING_PRIVATE_KEY, or omit the option to generate a fresh " +
+        "keypair on first boot.",
+    );
+  }
+  return `0x${stripped.toLowerCase()}` as `0x${string}`;
 }
 
 function readRecord(path: string): TenantIdentityRecord {
@@ -96,13 +152,28 @@ export interface LoadOrCreateTenantIdentityOptions {
    */
   path?: string;
   /**
-   * Optional explicit signing private key (the T3N API key
-   * when called from the backend composition root).
+   * Optional explicit signing private key. The production
+   * path loads this from a secret manager via the
+   * `TENANT_SIGNING_PRIVATE_KEY` env var and passes it
+   * through `app.ts`. The dev/test path omits this option
+   * and lets `loadOrCreateTenantIdentity` generate a fresh
+   * CSPRNG keypair on first boot (persisted to disk so
+   * subsequent boots reuse the same identity).
    *
    * When provided, this key is used as the tenant identity's
    * signing key instead of generating a random secp256k1
    * keypair. The env-supplied key is the ground truth; the
    * on-disk file is overwritten.
+   *
+   * SECURITY: this option MUST NOT be wired to the T3N bearer
+   * API key. The API key is a separate concern (it
+   * authenticates the T3 SDK to T3N REST/WS calls, and is
+   * rotated on a different cadence from the institution's
+   * long-lived signing identity). Conflating the two would
+   * cause a normal API-key rotation to invalidate every VC
+   * the institution has issued. Callers must pass a
+   * dedicated secp256k1 key — typically loaded from KMS /
+   * Vault via `TENANT_SIGNING_PRIVATE_KEY`.
    *
    * The VC's issuer DID is always derived from the keypair's
    * address (`did:ethr:0x<address>`) so the T3 SDK's
@@ -195,10 +266,12 @@ function didForKeypairFromPrivateKey(privateKey: `0x${string}`): string {
  * SDK's `verifyEcdsaVcSig` can match the issuer against the
  * recovered signer.
  *
- * When `signingPrivateKey` is provided (the T3N API key from
- * the backend env), it is used as the signing key instead of
- * generating a random keypair. The env-supplied key is the
- * ground truth; the on-disk file is overwritten.
+ * When `signingPrivateKey` is provided (production: loaded from
+ * a secret manager via `TENANT_SIGNING_PRIVATE_KEY`; the value
+ * MUST be a dedicated secp256k1 signing key — NOT the T3N bearer
+ * API key), it is used as the signing key instead of generating
+ * a random keypair. The env-supplied key is the ground truth;
+ * the on-disk file is overwritten.
  *
  * Idempotent: a backend restart reads the same keypair and
  * re-uses the existing VCs. A new keypair (rotating the
@@ -209,14 +282,17 @@ export function loadOrCreateTenantIdentity(
 ): TenantIdentity {
   const path = resolve(options.path ?? DEFAULT_TENANT_IDENTITY_PATH);
 
-  // When an explicit signing key is provided (T3N API key),
+  // When an explicit signing key is provided (production: a
+  // dedicated secp256k1 key loaded from a secret manager via
+  // `TENANT_SIGNING_PRIVATE_KEY`; never the T3N bearer API key —
+  // see the SECURITY note on `LoadOrCreateTenantIdentityOptions`),
   // always use it. The env-supplied key is the ground truth
   // for the tenant identity; it overwrites any stale file
   // from a previous run that may have had a random keypair.
   if (options.signingPrivateKey) {
-    const normalizedKey = options.signingPrivateKey.startsWith("0x")
-      ? (options.signingPrivateKey as `0x${string}`)
-      : (`0x${options.signingPrivateKey}` as `0x${string}`);
+    const normalizedKey = normalizeSigningPrivateKey(
+      options.signingPrivateKey,
+    );
 
     const keyBytes = new Uint8Array(Buffer.from(normalizedKey.slice(2), "hex"));
     const pubKeyBytes = secp256k1.getPublicKey(keyBytes, true);
