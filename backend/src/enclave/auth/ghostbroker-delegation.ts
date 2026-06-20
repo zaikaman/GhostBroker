@@ -439,13 +439,22 @@ type SdkVerifyOutcome = "verified" | "rejected" | "sdk-error";
 async function trySdkVerify(
   credential: GhostbrokerDelegationCredential,
 ): Promise<SdkVerifyOutcome> {
+  console.log("[DEBUG] trySdkVerify entered");
   try {
     const signed = toSignedCredential(credential);
     const result = await verifyVc(signed, {
       debug: process.env.VC_VERIFY_DEBUG === "true",
     });
+    // DEBUG
+    console.log("[DEBUG] trySdkVerify signed.issuer:", signed.issuer);
+    console.log(
+      "[DEBUG] trySdkVerify signed.verificationMethod:",
+      signed.proof.verificationMethod,
+    );
+    console.log("[DEBUG] trySdkVerify SDK result:", JSON.stringify(result));
     return result.isValid ? "verified" : "rejected";
   } catch (error) {
+    console.log("[DEBUG] trySdkVerify caught error:", error instanceof Error ? error.message : error);
     // The T3 SDK's `verifyEcdsaVcSig` only knows `did:ethr:`
     // and throws "Unsupported DID method: t3n" for our
     // `did:t3n:0x<addr>` issuers. That is a known SDK
@@ -478,7 +487,16 @@ async function trySdkVerify(
  *   1. JSON.stringify the proof-stripped body
  *      (insertion order, the same bytes the signer hashed),
  *   2. keccak256 the UTF-8 bytes,
- *   3. ethers.verifyMessage(hash, jws) → recovered address.
+ *   3. ethers.verifyMessage("0x" + hashHex, jws) → recovered address.
+ *      The T3 SDK passes the HEX STRING of the keccak hash to
+ *      `verifyMessage` (a 66-char `0x`-prefixed string), so we
+ *      mirror that exact form — passing a 32-byte Uint8Array
+ *      would compute the canonical EIP-191 over a 32-byte
+ *      payload and yield a *different* digest that the SDK's
+ *      recovery path never produces. See
+ *      `sdkRecoveryDigestForHashedJson` in
+ *      `t3-enclave/src/sdk/agent-client/delegation-signer.ts`
+ *      for the full rationale.
  *
  * The fallback differs from the SDK only in the address-
  * matching policy: the SDK accepts only the issuer DID's
@@ -500,9 +518,28 @@ function tryManualMultiSignerVerify(
   const json = JSON.stringify(body);
   const hash = keccak_256(new TextEncoder().encode(json));
 
+  // The T3 SDK's `verifyEcdsaVcSig` calls
+  // `ethers.verifyMessage(hashHexString, sig)` where `hashHexString`
+  // is the `0x`-prefixed hex of the 32-byte `hash`. Because
+  // `verifyMessage` always treats its input as a generic message
+  // (UTF-8 bytes for a string, raw bytes for a Uint8Array), it
+  // applies EIP-191 to the HEX STRING's UTF-8 bytes — not to the
+  // raw 32-byte payload. The recovered-address digest is therefore
+  //
+  //   keccak256("\x19Ethereum Signed Message:\n" + "66" + "0x<hash>")
+  //
+  // To mirror the SDK byte-for-byte (so the signer and this fallback
+  // agree), we use `ethers.hashMessage("0x" + hashHex)` directly
+  // instead of `ethers.verifyMessage(hash, sig)` over the raw
+  // 32-byte digest. `hashMessage` for a 32-byte Uint8Array would
+  // produce a *different* digest — the canonical EIP-191 over a
+  // 32-byte payload — and that mismatch is what was causing the
+  // SDK to throw "Signature does not correspond to verificationMethod
+  // in the proof" before this fallback ever ran.
+  const hashHex = `0x${Buffer.from(hash).toString("hex")}`;
   let recoveredAddress: string;
   try {
-    recoveredAddress = ethers.verifyMessage(hash, credential.proof.jws);
+    recoveredAddress = ethers.verifyMessage(hashHex, credential.proof.jws);
   } catch {
     return false;
   }
@@ -554,6 +591,8 @@ function tryManualMultiSignerVerify(
 export async function verifyGhostbrokerDelegationCredential(
   request: GhostbrokerVerificationRequest,
 ): Promise<GhostbrokerVerificationResult> {
+  // DEBUG
+  console.log("[DEBUG] verifier called");
   const {
     credential,
     agentDid,
@@ -565,6 +604,7 @@ export async function verifyGhostbrokerDelegationCredential(
   // Shape check (defensive — caller should have parsed already).
   const parsed = ghostbrokerDelegationSchema.safeParse(credential);
   if (!parsed.success) {
+    console.log("[DEBUG] shape check failed:", parsed.error.issues);
     return {
       status: "rejected",
       agentDid,
@@ -572,25 +612,37 @@ export async function verifyGhostbrokerDelegationCredential(
     };
   }
   const safe = parsed.data;
+  console.log("[DEBUG] shape check passed");
 
   // Time window.
   if (!isDelegationActive(safe, now)) {
+    console.log("[DEBUG] time window failed");
     return { status: "rejected", agentDid, reason: "expired" };
   }
+  console.log("[DEBUG] time window passed");
 
   // DID binding.
   if (safe.credentialSubject.agentDid !== agentDid) {
+    console.log(
+      "[DEBUG] DID binding failed:",
+      safe.credentialSubject.agentDid,
+      "!==",
+      agentDid,
+    );
     return {
       status: "rejected",
       agentDid,
       reason: "agent_mismatch",
     };
   }
+  console.log("[DEBUG] DID binding passed");
 
   // Revocation list.
   if (revokedAuthorityRefs?.has(authorityRefFor(safe))) {
+    console.log("[DEBUG] revocation failed");
     return { status: "rejected", agentDid, reason: "revoked" };
   }
+  console.log("[DEBUG] revocation passed");
 
   // Cryptographic verification — primary path is the T3 SDK.
   const sdkResult = await trySdkVerify(safe);

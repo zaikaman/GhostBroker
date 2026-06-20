@@ -72,6 +72,110 @@ Playwright runs have no Web3 wallet; no convention for E2E operator bypass marke
 ### T3-ONB-017 — TEE contract inputs are strictly snake_case; the SDK does not translate (P1)
 Host dispatch reads the `input` field of the `generic-input` envelope and JSON-parses it against the Rust `Deserialize` derive's default field names. No implicit camelCase → snake_case translation. The orchestrator originally posted camelCase, causing `seal-intent: invalid JSON input: missing field 'institution_id'`, which the typed error path misclassified as a contract-not-registered cause. Fix: translate to snake_case at the network boundary in `t3-enclave/src/matching/blind-intent.ts` and `t3-enclave/src/matching/match-contract-client.ts`; keep the public TS interface camelCase.
 
+### T3-ONB-018 — `verifyEcdsaVcSig` calls `verifyMessage` with a hex string, producing a non-canonical EIP-191 digest (P1)
+
+`@terminal3/ecdsa_vc/dist/verifyEcdsaVc.js:50-54` calls
+
+```js
+const hash = ethers.solidityPackedKeccak256(["string"], [json]);   // 0x-prefixed hex, 66 chars
+const recoveredAddress = ethers.verifyMessage(hash, signature);
+```
+
+`ethers.verifyMessage(message, sig)` always treats `message` as a generic message and applies EIP-191 to its UTF-8 bytes:
+
+```
+digest = keccak256("\x19Ethereum Signed Message:\n"
+                 + toUtf8Bytes(String(message.length))
+                 + toUtf8Bytes(message))
+```
+
+Because the SDK passes the hex string (length 66), the digest the SDK actually recovers from is
+
+```
+keccak256("\x19Ethereum Signed Message:\n" + "66" + "0x<64 hex>")
+```
+
+— NOT the canonical EIP-191 over the 32-byte payload:
+
+```
+keccak256("\x19Ethereum Signed Message:\n32" || hash)
+```
+
+A signer that produces the canonical digest (the obvious shape given `ethers.verifyMessage` is documented to be `personal_sign`) generates a signature whose recovered address does not appear in `proof.verificationMethod`. The SDK then throws `Signature does not correspond to verificationMethod in the proof` and `verifyVc` returns `isValid: false`. There is no doc, no release note, and no source comment warning that the digest layout diverges from the canonical EIP-191 — the only signal is the throw on line 56 and a passing `isValid: address === recoveredAddress` check on line 78 that happens to be case-sensitive (see T3-ONB-019).
+
+**Reproduction** (minimal, no T3 network needed):
+
+```js
+// signer-side (what the docs imply)
+const json = JSON.stringify(body);
+const keccakOfJson = keccak256(jsonBytes);                 // 32 bytes
+const digest = keccak256("\x19Ethereum Signed Message:\n32" + keccakOfJson);
+const sig = eip191Sign(digest, privateKey);
+
+// SDK-side (what verifyEcdsaVcSig actually does)
+const hash = solidityPackedKeccak256(["string"], [json]); // 66-char hex string
+const recovered = ethers.verifyMessage(hash, sig);         // wrong digest
+// recovered !== expectedSignerAddress -> "Signature does not correspond..."
+```
+
+**Fix shipped (workaround in the signer)**:
+- `backend/src/sdk/agent-client/delegation-signer.ts` — `sdkRecoveryDigestForHashedJson` computes `keccak256("\x19Ethereum Signed Message:\n" + "66" + "0x<hash>")` directly, mirroring what `ethers.verifyMessage(hashHex, sig)` produces. The signer signs that digest.
+- `backend/src/enclave/auth/ghostbroker-delegation.ts` — `tryManualMultiSignerVerify` uses the same hex-string-then-`verifyMessage` shape so the manual fallback and the SDK path agree byte-for-byte.
+- `auth-agent-client.test.ts > accepts a freshly-minted VC end-to-end via the T3 SDK path` exercises the real SDK (not a mock) on a freshly-minted VC; without the workaround this test fails with `Signature does not correspond to verificationMethod in the proof`.
+
+**Upstream fix proposal**: change `verifyEcdsaVcSig` to pass raw bytes:
+
+```js
+const recoveredAddress = ethers.verifyMessage(ethers.getBytes(hash), signature);
+```
+
+That makes the SDK recover from the canonical EIP-191 digest, which is what every signer in the ecosystem produces. With this fix the signer-side workaround becomes redundant and should be removed.
+
+**Risk if upstream fixes it**: our workaround will silently start producing signatures the SDK can no longer recover. Pin a T3 SDK version (`@terminal3/verify_vc` or `@terminal3/ecdsa_vc`) in `package.json` and add a guard test that fails loud when `verifyMessage` recovers from the canonical digest rather than the hex-string digest. Treat the workaround as a T3-SDK-versioned capability, not a permanent shape.
+
+### T3-ONB-019 — `verifyEcdsaVcSig` does case-sensitive `address === recoveredAddress`; issuer DID must be EIP-55 (P1)
+
+`verifyEcdsaVc.js:53,78`:
+
+```js
+const address = getWalletAddress(data.issuer);                  // whatever case the DID carries
+const recoveredAddress = ethers.verifyMessage(hash, signature); // always EIP-55 checksummed
+...
+return { isValid: address === recoveredAddress, ... };
+```
+
+`getWalletAddress` (in `utils.js`) returns the address substring as-is. `ethers.verifyMessage` always returns the EIP-55 checksummed form. The equality check is byte-exact and case-sensitive, so:
+
+- `did:ethr:0x<lowercase>` → `address` is lowercase → `address === recoveredAddress` is **false** → `isValid: false` with message `Signature mismatch`.
+- `did:ethr:0x<EIP-55>` → `address` is EIP-55 → matches → `isValid: true`.
+
+The same case-sensitivity bites `verificationMethod.includes(recoveredAddress)` on line 55: a lowercase `verificationMethod` would never `includes()` an EIP-55 recovered address, producing `Signature does not correspond to verificationMethod in the proof` (T3-ONB-018's outer symptom).
+
+There is no doc, release note, or fixture in the SDK showing the required casing. The only on-path signal is the throw on `verificationMethod.includes(...)` and the silent `isValid: false` from the equality check.
+
+**Reproduction** (minimal):
+
+```js
+const wallet = ethers.Wallet.createRandom();
+const did = `did:ethr:${wallet.address.toLowerCase()}`;  // lowercase DID
+const signedVc = { ..., issuer: did, ... };
+const result = await verifyVc(signedVc);
+// -> { isValid: false, message: "Signature mismatch" }
+const didEip55 = `did:ethr:${ethers.getAddress(wallet.address)}`;
+const signedVc2 = { ..., issuer: didEip55, ... };
+const result2 = await verifyVc(signedVc2);
+// -> { isValid: true, message: "Verification successful" }
+```
+
+**Fix shipped (workaround in the issuer)**:
+- `backend/src/enclave/sandbox/tenant-identity-store.ts` — `didForKeypairFromPrivateKey` wraps the address with `ethers.getAddress(...)` so the tenant signing DID is `did:ethr:0x<EIP-55>` from the moment the keypair is created.
+- `backend/src/enclave/auth/ghostbroker-delegation.ts` — `toSignedCredential` normalizes every space-separated `verificationMethod` entry through `toEip55Did` so the SDK's `includes(recoveredAddress)` substring check always sees EIP-55.
+- `auth-agent-client.test.ts` + `tenant-delegation.test.ts` + `agent-auth-sdk-integration.test.ts` pin the EIP-55 invariant on the issuer and the credential.
+
+**Upstream fix proposal**: lowercase `address` and `verificationMethod` before comparing (or use `ethers.getAddress(...)` on both sides). With that, both casings would be accepted and the case-sensitivity would no longer be load-bearing.
+
+**Risk if upstream fixes it**: the SDK would accept lowercase DID inputs. Our workaround produces an EIP-55 DID today; if the SDK later rejects EIP-55 (e.g. canonicalizes to lowercase), the issuer normalization would need to flip. Pin the SDK version and add a regression test that asserts both casings produce `isValid: true`.
+
 ## Addenda
 
 **T3-ONB-007a — Live `matching` contract registration is required** (Jun 15)

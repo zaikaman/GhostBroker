@@ -21,15 +21,21 @@ import { z } from "zod";
  *      digest, where `body` is the VC with `proof` stripped
  *      and `issuanceDate`/`expirationDate` renamed to
  *      `validFrom`/`validUntil`),
- *   2. calls `ethers.verifyMessage(digest, signature)`,
- *      which applies the EIP-191 personal_sign prefix
- *      internally, keccak256s the result, and recovers an
- *      Ethereum address,
+ *   2. calls `ethers.verifyMessage(hashHexString, signature)`
+ *      where `hashHexString` is the `0x`-prefixed hex of that
+ *      32-byte digest. Because `verifyMessage` always applies
+ *      EIP-191 to its input as a UTF-8 message, the actual
+ *      digest the SDK recovers from is
+ *      `keccak256("\x19Ethereum Signed Message:\n" + "66" +
+ *      "0x<64 hex>")` — NOT the canonical EIP-191 over the
+ *      32-byte payload. See `sdkRecoveryDigestForHashedJson`
+ *      for the full rationale.
  *   3. checks `proof.verificationMethod.includes(recoveredAddress)`.
  *
- * So we sign exactly the same digest with the EIP-191 prefix
- * pre-applied, and emit the standard 65-byte `r || s || v` blob
- * (with `v = 27 + recid`) in `proof.proofValue`.
+ * So we sign exactly the same digest the SDK recovers from
+ * (with EIP-191 pre-applied to the hex-string hash), and emit
+ * the standard 65-byte `r || s || v` blob (with `v = 27 + recid`)
+ * in `proof.proofValue`.
  *
  * The proof type is `EcdsaSecp256k1Signature2019`, the
  * standard EVM-compatible W3C VC proof format that
@@ -244,8 +250,84 @@ export function canonicalizeDelegationJson(value: unknown): string {
 }
 
 /**
- * Sign a 32-byte keccak256 hash with EIP-191 personal_sign
- * and return the 65-byte `r || s || v` blob (`v = 27 + recid`).
+ * Build the 32-byte digest the T3 SDK's
+ * `@terminal3/verify_vc → @terminal3/ecdsa_vc → verifyEcdsaVcSig`
+ * pipeline recovers from our `proof.proofValue`.
+ *
+ * The SDK computes:
+ *   ```js
+ *   const json = JSON.stringify(body);                // body = vc with proof stripped
+ *   const hash = ethers.solidityPackedKeccak256(["string"], [json]);  // 0x-prefixed hex
+ *   const recoveredAddress = ethers.verifyMessage(hash, signature);
+ *   ```
+ *
+ * `ethers.verifyMessage(message, sig)` always treats `message` as a
+ * generic message that needs the EIP-191 prefix applied:
+ *   digest = keccak256("\x19Ethereum Signed Message:\n" +
+ *                      toUtf8Bytes(String(message.length)) +
+ *                      messageBytes)
+ *
+ * The SDK passes the HEX STRING of the keccak hash (66 chars:
+ * `"0x" + 64 hex chars`). ethers then treats that hex string as
+ * the message to hash — so the digest the SDK actually recovers
+ * from is:
+ *
+ *   digest = keccak256("\x19Ethereum Signed Message:\n" +
+ *                      toUtf8Bytes("66") +
+ *                      toUtf8Bytes("0x<64 hex>"))
+ *
+ * NOT the canonical EIP-191 over the 32-byte hash:
+ *   keccak256("\x19Ethereum Signed Message:\n32" || hash)
+ *
+ * If the signer produced the canonical digest, `verifyMessage` in
+ * the SDK would still recover a valid signer address — but a
+ * different one than the issuer DID's address, so the SDK's
+ * `verificationMethod.includes(recoveredAddress)` substring check
+ * fails with `"Signature does not correspond to verificationMethod
+ * in the proof"`. We sign the same digest the SDK recovers from so
+ * the recovered address matches `verificationMethod` exactly.
+ *
+ * This function is the no-`ethers` pure-JS equivalent of
+ * `ethers.hashMessage("0x" + bytesToHex(keccakOfJson))`. The byte
+ * layout must stay byte-identical to `ethers.hashMessage` — any
+ * drift is a verifier regression caught by the integration test.
+ */
+function sdkRecoveryDigestForHashedJson(keccakOfJson: Uint8Array): Uint8Array {
+  if (keccakOfJson.length !== 32) {
+    throw new Error(
+      `sdkRecoveryDigestForHashedJson: expected 32-byte keccak digest, got ${keccakOfJson.length} bytes.`,
+    );
+  }
+  // ethers.hashMessage(string) builds:
+  //   messagePrefix || toUtf8Bytes(String(message.length)) || messageBytes
+  // For our hex-string hash (`"0x" + 64 hex chars`, 66 chars):
+  //   messagePrefix = "\x19Ethereum Signed Message:\n"
+  //   lengthBytes   = toUtf8Bytes("66") = [0x36, 0x36]
+  //   messageBytes  = toUtf8Bytes("0x<64 hex>") = 66 ASCII bytes
+  const messagePrefix = new TextEncoder().encode(
+    "\x19Ethereum Signed Message:\n",
+  );
+  const messageHex = `0x${bytesToHex(keccakOfJson)}`;
+  if (messageHex.length !== 66) {
+    throw new Error(
+      `sdkRecoveryDigestForHashedJson: 0x-prefixed hex string must be 66 chars, got ${messageHex.length}.`,
+    );
+  }
+  const lengthBytes = new TextEncoder().encode(String(messageHex.length));
+  const messageBytes = new TextEncoder().encode(messageHex);
+  const buf = new Uint8Array(
+    messagePrefix.length + lengthBytes.length + messageBytes.length,
+  );
+  buf.set(messagePrefix, 0);
+  buf.set(lengthBytes, messagePrefix.length);
+  buf.set(messageBytes, messagePrefix.length + lengthBytes.length);
+  return keccak_256(buf);
+}
+
+/**
+ * Sign the SDK-compatibility digest (see `sdkRecoveryDigestForHashedJson`)
+ * with EIP-191 personal_sign and return the 65-byte `r || s || v`
+ * blob (`v = 27 + recid`).
  *
  * The function probes both Ethereum-style parities (0, 1)
  * using `recoverPublicKey` to find the one whose recovered
@@ -282,15 +364,13 @@ function eip191SignDelegation(
     throw new Error("signing key must decode to exactly 32 bytes.");
   }
 
-  // EIP-191 personal_sign over a 32-byte payload:
-  //   digest = keccak256("\x19Ethereum Signed Message:\n32" || payload)
-  const prefix = new TextEncoder().encode(
-    "\x19Ethereum Signed Message:\n32",
-  );
-  const prefixed = new Uint8Array(prefix.length + keccakOfJson.length);
-  prefixed.set(prefix, 0);
-  prefixed.set(keccakOfJson, prefix.length);
-  const digest = keccak_256(prefixed);
+  // The digest the T3 SDK's `verifyEcdsaVcSig` will actually
+  // recover from. See `sdkRecoveryDigestForHashedJson` for the
+  // full rationale; the short version is that the SDK passes
+  // the keccak hash as a HEX STRING to `ethers.verifyMessage`,
+  // which then applies EIP-191 to that hex string's UTF-8
+  // bytes (not to the raw 32-byte hash). We mirror that.
+  const digest = sdkRecoveryDigestForHashedJson(keccakOfJson);
 
   // `@noble/curves` v2 supports a `'recovered'` sign format
   // that returns the 65-byte form. Note the v2 layout: the

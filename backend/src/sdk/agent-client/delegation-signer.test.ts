@@ -74,7 +74,7 @@ describe("delegation-signer", () => {
     expect(() => delegationCredentialSchema.parse(signed)).not.toThrow();
   });
 
-  it("signed JWS is verifiable by ethers (EIP-191 personal_sign)", () => {
+  it("signed JWS is verifiable by ethers (matches the T3 SDK's recovery path)", () => {
     const credential = mintDelegationCredentialBody({
       agentDid: "did:t3n:0xagent",
       maxSpendUsd: 5_000,
@@ -90,17 +90,25 @@ describe("delegation-signer", () => {
     //   1. JSON.stringify body (insertion order, same as the
     //      signer now uses — NOT canonicalizeDelegationJson which
     //      sorts keys alphabetically)
-    //   2. solidityPackedKeccak256(['string'], [json])  →  32-byte
-    //   3. ethers.verifyMessage(hash, sig)  →  recovered address
-    // The address must equal the wallet address derived from
-    // the signing key.
+    //   2. solidityPackedKeccak256(['string'], [json])  →  hex string
+    //   3. ethers.verifyMessage(hashHexString, sig)  →  recovered address
+    //      (the SDK passes the HEX STRING, not the raw 32-byte
+    //      hash; ethers.verifyMessage then applies EIP-191 to the
+    //      hex string's UTF-8 bytes — see
+    //      `sdkRecoveryDigestForHashedJson` in the signer source
+    //      for the full rationale).
+    // The recovered address must equal the wallet address
+    // derived from the signing key.
     const body = buildDelegationSigningBody(credential);
     const serialized = JSON.stringify(body);
-    const hash = keccak_256(new TextEncoder().encode(serialized));
+    const hashBytes = keccak_256(new TextEncoder().encode(serialized));
+    const hashHex = `0x${Array.from(hashBytes)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")}`;
     const sig = signed.proof?.jws as `0x${string}`;
 
     const wallet = new Wallet(FIXED_PRIVATE_KEY);
-    const recovered = verifyMessage(new Uint8Array(hash), sig);
+    const recovered = verifyMessage(hashHex, sig);
     expect(recovered.toLowerCase()).toBe(wallet.address.toLowerCase());
   });
 
