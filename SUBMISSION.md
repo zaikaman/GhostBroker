@@ -23,7 +23,7 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 | Test suite | **577 tests passing, 8 skipped across 110 test files** (8 are gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
 | Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, shared `database/`, `tests/` |
 | Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 29 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
-| Frontend | React 19 + Vite 8 + Three.js + hls.js, 28 components, dedicated Observatory Console |
+| Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
 | Smart contracts | **Real Rust WASI P2 matching contract** (`backend/contracts/matching-policy/`, 952 LOC, compiled to `matching_policy.wasm` 214,548 bytes, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
 | Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 56 tests) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
 | Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); ciphertext-only `completed_trades` |
@@ -188,8 +188,6 @@ Each finding follows the structure: **Reproduction → SDK behavior → Expected
 - **T3-ONB-001, -002, -003 (P0)** — `did-registry`, `agent-auth`, and `agent-delegations` Host APIs documented as "Coming soon" prevent a programmatic agent delegation flow. We worked around by reusing the SDK's authenticated session APIs.
 - 14 additional findings covering token metering, contract publish flow, map ACL semantics, error taxonomy, and example completeness.
 
-The full report will be submitted to `devrel@terminal3.io` at the close of the bounty window.
-
 ---
 
 ## Repository Layout
@@ -214,7 +212,7 @@ README.md                          Full architecture + API reference
 ## Why This Submission Wins on the Specific Bounty Criteria
 
 - **SDK integration is the strongest part.** The verifier on every privileged action is real, fail-closed, and the only cryptographic authority — exactly the property the bounty brief rewards.
-- **Completeness is structural, not theatrical.** Two real on-chain or on-TEE surfaces (WASM matching contract + Solidity settlement relayer), 13 tables with RLS, an SDK with 56 tests, 28 frontend components, hosted multi-provider LLM agents. Nothing is mocked.
+- **Completeness is structural, not theatrical.** Two real on-chain or on-TEE surfaces (WASM matching contract + Solidity settlement relayer), 15 tables with RLS, an SDK with 56 tests, 23 frontend components, hosted multi-provider LLM agents. Nothing is mocked.
 - **Creativity is the dark pool itself.** The hidden-intent + turn-based negotiation + selective-disclosure pattern would be unsafe or impossible without the SDK's privacy guarantees, so the application is structurally an advertisement for the SDK's value proposition.
 
 ---

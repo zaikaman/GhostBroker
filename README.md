@@ -141,7 +141,7 @@ ghostbroker/
 |   +-- package.json                   @ghostbroker/backend workspace
 |
 |-- database/
-|   |-- schema.sql                     Supabase schema (13 tables, RLS)
+|   |-- schema.sql                     Supabase schema (15 tables, RLS)
 |   |-- migrations/                    Incremental Supabase migrations
 |   |-- policies/                      Row-level security policies
 |   |-- functions/                     Database functions
@@ -738,7 +738,7 @@ The interface follows the "Attested Enclave" design language documented in
 ## Database Schema
 
 GhostBroker uses Supabase (managed PostgreSQL) with Row-Level Security. The
-schema consists of 13 tables:
+schema consists of 15 tables:
 
 ### Core Tables
 
@@ -813,6 +813,20 @@ schema consists of 13 tables:
 - `balance` -- Current balance (check >= 0)
 - `locked` -- Amount locked by active intents
 - `change_type` -- `settlement_buy`, `settlement_sell`, `adjustment`, `import`
+
+### Runtime State Tables
+
+**`published_contracts`** -- Records of every matching TEE contract the backend has successfully published to the T3N tenant. The Settings ? Enclave Connection panel reads this so operators see ground truth about what is actually registered, rather than relying on env vars alone. Replaces the previous `backend/output/contracts/matching.json` file-based store; this row survives Heroku dyno restarts.
+- `tail` (`matching`), `contract_version`, `network_env` (`testnet` | `production`), `tenant_did`
+- `wasm_size` -- Published WASM artifact size in bytes
+- `handle` (nullable) -- T3N-assigned contract handle (informational; the orchestrator resolves contracts by tail + version)
+- `published_at` -- When `publish-matching.ts` recorded the publish
+
+**`tenant_identities`** -- The institution's dedicated secp256k1 signing keypair. Replaces the previous `backend/output/identities/tenant_identity.json` file-based store. The `signing_private_key` column is the canonical issuer key for every delegation VC the backend signs; in production, prefer injecting the key from a KMS / Vault / HSM via `TENANT_SIGNING_PRIVATE_KEY`, which takes precedence over the row.
+- `tenant_did` (PK) -- The T3 tenant identifier (from `T3_TENANT_DID`)
+- `signing_private_key` / `signing_public_key` -- The keypair
+- `signing_address` -- The keccak256-derived Ethereum address
+- `issuer_did` -- The `did:ethr:0x<address>` form (the only issuer format the T3 SDK's `verifyEcdsaVcSig` accepts; lowercased DIDs would silently fail verification -- see `terminal3-adk-onboarding-doc-gaps.md` T3-ONB-019)
 
 ---
 
@@ -1141,10 +1155,20 @@ npm run sandbox:check
 npm run contract:build:matching --workspace @ghostbroker/backend
 
 # Publish the matching contract to T3N
-npx tsx scripts/publish-matching.ts
+npm run contract:publish:matching --workspace @ghostbroker/backend
 
 # Verify the published contract
-npx tsx scripts/verify-matching-contract.ts
+npm run contract:verify:matching --workspace @ghostbroker/backend
+
+# Backfill the published_contracts row when T3N already has the
+# contract but the DB row is missing (e.g. a previous publish
+# script crashed between T3N success and DB write). Use this when
+# `npm run contract:publish:matching` returns
+# `contract version invalid: version X is not higher than current version X`
+# — T3N has the version; the script's idempotency path wasn't matched,
+# so the DB row is missing. This script writes the row only, with no
+# T3N call.
+npx tsx backend/scripts/record-published-contract.ts
 
 # Build the settlement relayer contract (Solidity)
 npm run contract:build:relayer --workspace @ghostbroker/backend
@@ -1268,6 +1292,7 @@ Heroku dashboard.
 | -------------------------------------------- | ----------------------------------- |
 | `DESIGN.md`                                  | Design system specification         |
 | `PRODUCT.md`                                 | Product brief and brand personality |
+| `SUBMISSION.md`                              | Bounty-criteria-mapped judge-facing submission |
 | `terminal3-adk-onboarding-doc-gaps.md`       | T3 ADK onboarding gaps filed        |
 
 ---
