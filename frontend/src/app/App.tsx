@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Hls from 'hls.js';
 import '../styles/theme.css';
 import '../styles/dashboard.css';
@@ -9,7 +9,6 @@ import { useConnectionTelemetry } from '../hooks/useConnectionTelemetry';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { useReceipt } from '../hooks/useReceipt';
 import { apiClient, type AuthSession } from '../services/api-client';
-import { AGENTS_UPDATED_EVENT } from '../services/agent-events';
 
 // Lazy-loaded tab-exclusive components — each becomes a separate chunk
 // loaded only on first navigation to the corresponding tab.
@@ -27,7 +26,6 @@ const PortfolioHistory = React.lazy(async () => ({ default: (await import('../co
 const EnclaveHealthMonitor = React.lazy(async () => ({ default: (await import('../components/EnclaveHealthMonitor')).EnclaveHealthMonitor }));
 const AgentsPanel = React.lazy(async () => ({ default: (await import('../components/AgentsPanel')).AgentsPanel }));
 const SettingsPanel = React.lazy(async () => ({ default: (await import('../components/SettingsPanel')).SettingsPanel }));
-const MandateConfigForm = React.lazy(async () => ({ default: (await import('../components/MandateConfigForm')).MandateConfigForm }));
 const NegotiationRoomPanel = React.lazy(async () => ({ default: (await import('../components/NegotiationRoomPanel')).NegotiationRoomPanel }));
 const TeeNegotiationVisualizer = React.lazy(async () => ({ default: (await import('../components/TeeNegotiationVisualizer')).TeeNegotiationVisualizer }));
 
@@ -47,160 +45,6 @@ const GearIcon = ({ size = 16, style = {} }: { size?: number; style?: React.CSSP
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
   </svg>
 );
-
-export function NegotiationMandateWrapper(): React.JSX.Element {
-  const [agents, setAgents] = useState<{ id: string; label: string | null; agentDid: string }[]>([]);
-  const [agentId, setAgentId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const { navigate } = useRouter();
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadAgents = async (showLoading = false) => {
-      if (showLoading) {
-        setLoading(true);
-      }
-      try {
-        const listed = await apiClient.listAgents('admitted');
-        if (cancelled) {
-          return;
-        }
-        setAgents(listed);
-        setAgentId((current) => {
-          if (current && listed.some((agent) => agent.id === current)) {
-            return current;
-          }
-          return listed.length === 1 ? listed[0]?.id ?? null : null;
-        });
-      } catch {
-        if (cancelled) {
-          return;
-        }
-        setAgents([]);
-        setAgentId(null);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void loadAgents(true);
-
-    const handleVisibilityOrFocus = () => {
-      void loadAgents(false);
-    };
-
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    window.addEventListener(AGENTS_UPDATED_EVENT, handleVisibilityOrFocus);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      window.removeEventListener(AGENTS_UPDATED_EVENT, handleVisibilityOrFocus);
-    };
-  }, []);
-
-  const selectedAgent = useMemo(
-    () => agents.find((agent) => agent.id === agentId) ?? null,
-    [agentId, agents],
-  );
-
-  if (loading) {
-    return <div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading agents…</div>;
-  }
-  if (agents.length === 0) {
-    return (
-      <div className="card" style={{ padding: '24px' }}>
-        <h3 style={{ margin: '0 0 8px', fontSize: '0.85rem', fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}>
-          NO ADMITTED AGENT
-        </h3>
-        <p style={{ margin: '0 0 12px', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-          Provision an agent first, then bind a mandate and launch the hosted negotiator.
-        </p>
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-primary" onClick={() => navigate('/deploy')}>
-            Provision Agent
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'grid', gap: 'var(--spacing-lg)' }}>
-      <div className="card" style={{ padding: '24px', display: 'grid', gap: '12px' }}>
-        <div style={{ display: 'grid', gap: '4px' }}>
-          <h3 style={{ margin: 0, fontSize: '0.85rem', fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)', letterSpacing: '0.05em' }}>
-            MANDATE TARGETING
-          </h3>
-          <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.78rem', maxWidth: '64ch' }}>
-            Negotiation mandates are scoped per admitted agent. Choose the exact agent before editing or replacing its strategy bounds.
-          </p>
-        </div>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label className="form-label" htmlFor="negotiation-agent-select">Admitted Agent</label>
-          <select
-            id="negotiation-agent-select"
-            className="form-select"
-            value={agentId ?? ''}
-            onChange={(event) => setAgentId(event.target.value || null)}
-          >
-            <option value="">Select agent…</option>
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.label ?? agent.agentDid}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '10px 12px',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-border)',
-            background: 'rgba(255, 255, 255, 0.02)',
-          }}
-        >
-          <div style={{ display: 'grid', gap: '2px' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.64rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
-              Selected Agent
-            </span>
-            <span style={{ color: 'var(--color-text-primary)', fontSize: '0.78rem' }}>
-              {selectedAgent ? (selectedAgent.label ?? selectedAgent.agentDid) : 'Choose an admitted agent to continue'}
-            </span>
-          </div>
-          {selectedAgent ? (
-            <span className="status-badge secure" style={{ fontSize: '0.62rem', padding: '2px 8px' }}>
-              ADMITTED
-            </span>
-          ) : (
-            <span className="status-badge processing" style={{ fontSize: '0.62rem', padding: '2px 8px' }}>
-              ACTION REQUIRED
-            </span>
-          )}
-        </div>
-      </div>
-
-      {agentId ? (
-        <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading mandate form…</div>}>
-          <MandateConfigForm agentId={agentId} />
-        </React.Suspense>
-      ) : (
-        <div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-          Select an admitted agent to edit its negotiation mandate.
-        </div>
-      )}
-    </div>
-  );
-}
 
 import {
   Robot01Icon,
@@ -517,8 +361,7 @@ function DashboardView({
         );
       case 'negotiations':
         return (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 420px) 1fr', gap: 'var(--spacing-lg)', animation: 'fadeIn 0.3s ease' }}>
-            <NegotiationMandateWrapper />
+          <div style={{ display: 'grid', gap: 'var(--spacing-lg)', animation: 'fadeIn 0.3s ease' }}>
             <React.Suspense fallback={<div className="card" style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading negotiation room…</div>}>
               <NegotiationRoomPanel />
             </React.Suspense>

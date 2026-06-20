@@ -2,9 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentDeploymentGuide } from '../components/AgentDeploymentGuide';
-import { NegotiationMandateWrapper } from '../app/App';
 import { apiClient } from '../services/api-client';
-import { AGENTS_UPDATED_EVENT } from '../services/agent-events';
 import type * as ApiClientModule from '../services/api-client';
 
 const navigateMock = vi.fn();
@@ -1261,53 +1259,5 @@ describe('AgentDeploymentGuide', () => {
 
     expect(await screen.findByText(/Poll interval must be between/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Launch Hosted Negotiator/i })).toBeDisabled();
-  });
-});
-
-describe('NegotiationMandateWrapper', () => {
-  beforeEach(() => {
-    navigateMock.mockReset();
-    mockedListAgents.mockReset();
-  });
-
-  it('requires an explicit agent selection when multiple admitted agents exist', async () => {
-    const user = userEvent.setup();
-    mockedListAgents.mockResolvedValue([
-      { id: 'agent-1', institutionId: 'institution-1', agentDid: 'did:t3:agent-1', status: 'admitted', authorityRef: 'authority-1', label: 'Agent One', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
-      { id: 'agent-2', institutionId: 'institution-1', agentDid: 'did:t3:agent-2', status: 'admitted', authorityRef: 'authority-2', label: 'Agent Two', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
-    ]);
-
-    render(<NegotiationMandateWrapper />);
-
-    expect(await screen.findByText('MANDATE TARGETING')).toBeInTheDocument();
-    expect(screen.getByText('Select an admitted agent to edit its negotiation mandate.')).toBeInTheDocument();
-
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Admitted Agent' }), 'agent-2');
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mandate-form-agent')).toHaveTextContent('Mandate form for agent-2');
-    });
-  });
-
-  it('refreshes admitted agents when the shared agent update event fires', async () => {
-    mockedListAgents
-      .mockResolvedValueOnce([
-        { id: 'agent-1', institutionId: 'institution-1', agentDid: 'did:t3:agent-1', status: 'admitted', authorityRef: 'authority-1', label: 'Agent One', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
-      ])
-      .mockResolvedValueOnce([
-        { id: 'agent-1', institutionId: 'institution-1', agentDid: 'did:t3:agent-1', status: 'admitted', authorityRef: 'authority-1', label: 'Agent One', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
-        { id: 'agent-2', institutionId: 'institution-1', agentDid: 'did:t3:agent-2', status: 'admitted', authorityRef: 'authority-2', label: 'Agent Two', instrumentScope: null, directionScope: null, maxNotional: null, limitReference: null, policyHash: null, metadata: {}, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
-      ]);
-
-    render(<NegotiationMandateWrapper />);
-
-    expect(await screen.findByRole('combobox', { name: 'Admitted Agent' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Agent Two' })).not.toBeInTheDocument();
-
-    window.dispatchEvent(new CustomEvent(AGENTS_UPDATED_EVENT));
-
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Agent Two' })).toBeInTheDocument();
-    });
   });
 });
