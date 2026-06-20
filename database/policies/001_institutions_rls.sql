@@ -14,8 +14,5 @@ on institutions
 for select
 to authenticated
 using (
-  id::text = coalesce(
-    nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'institution_id',
-    ''
-  )
+  id::text = auth.jwt() ->> 'institution_id'
 );

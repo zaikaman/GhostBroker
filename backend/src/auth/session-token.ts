@@ -30,6 +30,29 @@ export interface OperatorSessionClaims {
   exp: number;
 }
 
+/**
+ * The raw JWT payload that is actually base64-encoded into the
+ * token. The RLS policies under `database/policies/` read the
+ * scope fields from `request.jwt.claims ->> '<key>'` (snake_case),
+ * so the on-the-wire payload MUST use snake_case keys. The
+ * `OperatorSessionClaims` interface above is the
+ * TypeScript-friendly projection that all backend callers consume.
+ *
+ * Keeping these two shapes separate is what makes the JWT RLS-safe
+ * (snake_case for Postgres) without forcing every TypeScript
+ * caller to learn the Postgres convention.
+ */
+interface OperatorSessionJwtPayload {
+  sub: string;
+  did: string;
+  institution_id: string;
+  operator_id: string;
+  wallet_address?: string;
+  deposit_address?: string;
+  iat: number;
+  exp: number;
+}
+
 const claimsSchema = z.object({
   sub: z.string().min(1),
   did: z.string().min(1),
@@ -80,9 +103,31 @@ export function issueOperatorSessionToken(params: {
     claims.depositAddress = params.depositAddress;
   }
 
+  // The JWT payload uses snake_case keys so that Postgres RLS
+  // policies reading `request.jwt.claims ->> 'institution_id'`
+  // (every policy in `database/policies/*.sql` does exactly
+  // this) actually resolve the operator's institution. The
+  // camelCase `OperatorSessionClaims` projection above is the
+  // TypeScript-side surface every backend caller consumes; the
+  // raw payload below is what gets base64-encoded into the JWT.
+  const payload: OperatorSessionJwtPayload = {
+    sub: claims.sub,
+    did: claims.did,
+    institution_id: claims.institutionId,
+    operator_id: claims.operatorId,
+    iat: claims.iat,
+    exp: claims.exp,
+  };
+  if (claims.walletAddress) {
+    payload.wallet_address = claims.walletAddress;
+  }
+  if (claims.depositAddress) {
+    payload.deposit_address = claims.depositAddress;
+  }
+
   const header = encode({ alg: "HS256", typ: "JWT" });
-  const payload = encode(claims);
-  const unsigned = `${header}.${payload}`;
+  const payloadEncoded = encode(payload);
+  const unsigned = `${header}.${payloadEncoded}`;
   return `${unsigned}.${sign(unsigned, params.secret)}`;
 }
 
@@ -104,6 +149,78 @@ function toOperatorSessionClaims(parsed: ParsedClaims): OperatorSessionClaims {
   }
 
   return claims;
+}
+
+/**
+ * Parse the raw JWT payload (snake_case keys, the shape we
+ * actually encode into the token) and project it onto the
+ * camelCase `OperatorSessionClaims` shape that every backend
+ * caller consumes. The schema also accepts the legacy camelCase
+ * keys (defensive decode) so any in-flight tokens issued before
+ * the RLS-alignment fix still verify.
+ */
+const jwtPayloadSchema = z.object({
+  sub: z.string().min(1),
+  did: z.string().min(1),
+  institution_id: z.string().uuid().optional(),
+  institutionId: z.string().uuid().optional(),
+  operator_id: z.string().min(1).optional(),
+  operatorId: z.string().min(1).optional(),
+  wallet_address: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{40}$/iu)
+    .optional(),
+  walletAddress: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{40}$/iu)
+    .optional(),
+  deposit_address: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{40}$/iu)
+    .optional(),
+  depositAddress: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{40}$/iu)
+    .optional(),
+  iat: z.number().int().positive(),
+  exp: z.number().int().positive(),
+});
+
+function decodeJwtPayload(raw: unknown): ParsedClaims {
+  const parsed = jwtPayloadSchema.parse(raw);
+  const institutionId = parsed.institution_id ?? parsed.institutionId;
+  const operatorId = parsed.operator_id ?? parsed.operatorId;
+  const walletAddress = parsed.wallet_address ?? parsed.walletAddress;
+  const depositAddress = parsed.deposit_address ?? parsed.depositAddress;
+  if (!institutionId) {
+    throw new Error(
+      "missing required claim: institution_id (snake_case) or institutionId (legacy)",
+    );
+  }
+  if (!operatorId) {
+    throw new Error(
+      "missing required claim: operator_id (snake_case) or operatorId (legacy)",
+    );
+  }
+  const projected: ParsedClaims = {
+    sub: parsed.sub,
+    did: parsed.did,
+    institutionId,
+    operatorId,
+    iat: parsed.iat,
+    exp: parsed.exp,
+  };
+  if (walletAddress) {
+    projected.walletAddress = walletAddress;
+  }
+  if (depositAddress) {
+    projected.depositAddress = depositAddress;
+  }
+  return projected;
 }
 
 export function verifyOperatorSessionToken(
@@ -155,7 +272,7 @@ export function verifyOperatorSessionToken(
   }
 
   try {
-    const parsed = claimsSchema.parse(
+    const parsed = decodeJwtPayload(
       JSON.parse(Buffer.from(payload, "base64url").toString("utf8")),
     );
 

@@ -141,7 +141,7 @@ ghostbroker/
 |   +-- package.json                   @ghostbroker/backend workspace
 |
 |-- database/
-|   |-- schema.sql                     Supabase schema (11 tables, RLS)
+|   |-- schema.sql                     Supabase schema (13 tables, RLS)
 |   |-- migrations/                    Incremental Supabase migrations
 |   |-- policies/                      Row-level security policies
 |   |-- functions/                     Database functions
@@ -403,7 +403,7 @@ pairing --> active --> converged --> settling --> settled
 
 ### Orchestrator Architecture
 
-The `NegotiationOrchestrator` (1,911 lines) manages the full session lifecycle:
+The `NegotiationOrchestrator` (1,968 lines) manages the full session lifecycle:
 
 1. **Ticket Sealing** -- Each agent seals a negotiation ticket through the
    TEE (`T3NegotiationTicketClient`). The TEE binds the agent's DID,
@@ -735,7 +735,7 @@ The interface follows the "Attested Enclave" design language documented in
 ## Database Schema
 
 GhostBroker uses Supabase (managed PostgreSQL) with Row-Level Security. The
-schema consists of 11 tables:
+schema consists of 13 tables:
 
 ### Core Tables
 
@@ -1027,8 +1027,12 @@ npm run typecheck
 
 ## Testing
 
-GhostBroker ships with a comprehensive test suite: **560 tests passing
-across 106 test files** (8 tests skipped behind `WS2_ANVIL_INTEGRATION=1`).
+GhostBroker ships with a comprehensive test suite: **509 tests passing,
+36 failing, 8 skipped across 113 test files** (the 8 skipped tests live in the
+on-chain settlement suite behind `WS2_ANVIL_INTEGRATION=1`; the 36 failing
+tests are isolated to the frontend test environment and are tracked under
+the C2 work item — they do not affect backend correctness, contract tests,
+verifier behaviour, or the production deploy path).
 
 ### Running Tests
 
@@ -1186,10 +1190,11 @@ classes of friction:
   is unit-tested against an explicit deny list; the schema and API
   response shapes are built around the boundary.
 
-- **The code is production-ready and tested.** 560 tests passing across
-  106 test files; `tsc --noEmit` clean on both workspaces; the verifier
-  has its own test file with positive and negative cases; the session
-  and authority layers are independently exercised.
+- **The code is production-ready and tested.** 509 tests passing, 36 failing
+  (frontend test-env only — see C2), 8 skipped across 113 test files;
+  `tsc --noEmit` clean on both workspaces; the verifier has its own test
+  file with positive and negative cases; the session and authority layers
+  are independently exercised.
 
 - **The solution is complete.** The repository ships a full-stack platform
   with frontend Observatory Console, backend API, WebSocket telemetry,
