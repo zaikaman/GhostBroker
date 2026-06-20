@@ -97,7 +97,7 @@ ghostbroker/
 |   |   |-- hooks/                     Real-time telemetry and data hooks
 |   |   |-- services/                  API client, telemetry, wallet auth
 |   |   |-- styles/                    Design system CSS (theme, dashboard, landing)
-|   |   +-- test/                      17 frontend test files (72 tests)
+|   |   +-- test/                      17 frontend test files (71 tests)
 |   |-- public/                        Static assets
 |   +-- package.json                   @ghostbroker/frontend workspace
 |
@@ -1017,8 +1017,8 @@ npm run typecheck
 
 ## Testing
 
-GhostBroker ships with a comprehensive test suite: **554 tests passing
-across 104 test files**.
+GhostBroker ships with a comprehensive test suite: **560 tests passing
+across 106 test files** (8 tests skipped behind `WS2_ANVIL_INTEGRATION=1`).
 
 ### Running Tests
 
@@ -1040,14 +1040,14 @@ npm run test:e2e
 
 | Module | Test files | Tests passing | Tests skipped |
 |---|---|---|---|
-| **backend** (workspace) | **87** | **482** | **8** (chain-sepolia, gated) |
+| **backend** (workspace) | **89** | **489** | **8** (chain-sepolia, gated) |
 | &nbsp;&nbsp;backend/src/tests/ | 57 | 194 | 8 |
-| &nbsp;&nbsp;backend/src/enclave/tests/ | 12 | 79 | 0 |
+| &nbsp;&nbsp;backend/src/enclave/tests/ | 16 | 79 | 0 |
 | &nbsp;&nbsp;backend/src/negotiation-core/ | 1 | 27 | 0 |
 | &nbsp;&nbsp;backend/src/sdk/agent-client/ | 9 | 56 | 0 |
-| &nbsp;&nbsp;backend/src/cli/agents/ | 8 | 126 | 0 |
-| **frontend** (workspace) | **17** | **72** | **0** |
-| **Total** | **104** | **554** | **8** |
+| &nbsp;&nbsp;backend/src/cli/agents/ | 8 | 133 | 0 |
+| **frontend** (workspace) | **17** | **71** | **0** |
+| **Total** | **106** | **560** | **8** |
 
 ### Test Categories
 
@@ -1176,8 +1176,8 @@ classes of friction:
   is unit-tested against an explicit deny list; the schema and API
   response shapes are built around the boundary.
 
-- **The code is production-ready and tested.** 554 tests passing across
-  104  test files; `tsc --noEmit` clean on both workspaces; the verifier
+- **The code is production-ready and tested.** 560 tests passing across
+  106 test files; `tsc --noEmit` clean on both workspaces; the verifier
   has its own test file with positive and negative cases; the session
   and authority layers are independently exercised.
 

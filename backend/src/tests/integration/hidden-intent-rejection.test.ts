@@ -39,7 +39,6 @@ describe("hidden intent rejection", () => {
       blindIntentClient,
       new TelemetryBus(),
       undefined,
-      undefined,
       new FakeAgentRepository(),
     );
 

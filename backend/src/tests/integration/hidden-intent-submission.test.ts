@@ -30,6 +30,7 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
   }
 
   public async loadAndVerify(input: {
+    institutionId: string;
     agentId: string;
     agentDid: string;
     requestedAction: AgentDelegationVerificationRequest["requestedAction"];
@@ -73,7 +74,6 @@ describe("hidden intent submission", () => {
       new StaticBlindIntentClient(),
       new TelemetryBus(),
       undefined,
-      undefined,
       new FakeAgentRepository(),
     );
 
@@ -88,21 +88,30 @@ describe("hidden intent submission", () => {
   });
 
   it("rejects the submit with authorization_failed when the agent's persisted VC cannot be loaded", async () => {
-    // Reproduces the production hole where `agentRepository.findByAgentDid`
+    // Reproduces the production hole where `agentRepository.findById`
     // returns null (Supabase transient error, agent record missing,
     // or `metadata.delegation_credential` not populated). The
-    // submit-time check in `HiddenIntentService.submitIntent` must
-    // refuse the intent rather than queue it with a null
-    // credential — a queued intent with null VC would die at
-    // the next match and the operator would have no way to
-    // recover the locked balance short of TTL eviction.
+    // submit-time check in `HiddenIntentService.submitIntent` runs
+    // through `loadAndVerify`, which fails closed on a missing
+    // persisted VC — refuses the intent rather than queueing it
+    // with a null credential. A queued intent with null VC would
+    // die at the next match and the operator would have no way
+    // to recover the locked balance short of TTL eviction.
     const repository = new FakeAgentRepository();
     repository.disableAutoRegister();
+    const failingAuthz: AgentAuthorizationFacade = {
+      verifyAgentAuthority: () => Promise.reject(new Error("not used")),
+      loadAndVerify: () =>
+        Promise.resolve({
+          status: "rejected",
+          agentDid: "did:t3n:0xmissing",
+          reason: "revoked",
+        }),
+    };
     const service = new HiddenIntentService(
-      new VerifiedAuthorization(),
+      failingAuthz,
       new StaticBlindIntentClient(),
       new TelemetryBus(),
-      undefined,
       undefined,
       repository,
     );

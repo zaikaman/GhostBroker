@@ -6,6 +6,10 @@ import {
   type OpaqueMatchOutcome,
   type SettlementAuthorityVerifier,
 } from "../matching/index.js";
+import type {
+  AgentDelegationVerificationResult,
+  RequestedAgentAction,
+} from "../auth/agent-auth-client.js";
 
 const outcome: OpaqueMatchOutcome = {
   outcomeRef: "match_outcome_us3",
@@ -23,30 +27,30 @@ const outcome: OpaqueMatchOutcome = {
   sellerLockedAmount: 4,
 };
 
-const buyerVc = { id: "buyer-vc", issuer: "did:t3n:buyer" };
-const sellerVc = { id: "seller-vc", issuer: "did:t3n:seller" };
-
 class Verifier implements SettlementAuthorityVerifier {
   public constructor(private readonly status: "verified" | "rejected") {}
 
-  public async verifyAgentAuthority(
-    request: Parameters<SettlementAuthorityVerifier["verifyAgentAuthority"]>[0],
-  ) {
+  public loadAndVerify(input: {
+    institutionId: string;
+    agentId: string;
+    agentDid: string;
+    requestedAction: RequestedAgentAction;
+  }): Promise<AgentDelegationVerificationResult> {
     if (this.status === "verified") {
-      return {
-        status: "verified" as const,
-        agentDid: request.agentDid,
-        authorityRef: request.authorityRef,
+      return Promise.resolve({
+        status: "verified",
+        agentDid: input.agentDid,
+        authorityRef: `ghostbroker-delegation:${input.agentDid}`,
         policyHash: "policy:us3",
-        delegationCredential: request.delegationCredential,
-      };
+        delegationCredential: { id: `vc-${input.agentDid}` },
+      });
     }
 
-    return {
-      status: "rejected" as const,
-      agentDid: request.agentDid,
-      reason: "revoked" as const,
-    };
+    return Promise.resolve({
+      status: "rejected",
+      agentDid: input.agentDid,
+      reason: "revoked",
+    });
   }
 }
 
@@ -57,10 +61,10 @@ describe("settlement command builder", () => {
     await expect(
       builder.build({
         matchOutcome: outcome,
+        buyerAgentId: "00000000-0000-4000-8000-000000000a01",
+        sellerAgentId: "00000000-0000-4000-8000-000000000a02",
         buyerAgentDid: "did:t3n:agent:buyer-us3",
         sellerAgentDid: "did:t3n:agent:seller-us3",
-        buyerDelegationCredential: buyerVc,
-        sellerDelegationCredential: sellerVc,
         now: new Date("2026-06-12T00:00:00.000Z"),
       }),
     ).resolves.toMatchObject({
@@ -82,10 +86,10 @@ describe("settlement command builder", () => {
     await expect(
       builder.build({
         matchOutcome: outcome,
+        buyerAgentId: "00000000-0000-4000-8000-000000000a01",
+        sellerAgentId: "00000000-0000-4000-8000-000000000a02",
         buyerAgentDid: "did:t3n:agent:buyer-us3",
         sellerAgentDid: "did:t3n:agent:seller-us3",
-        buyerDelegationCredential: buyerVc,
-        sellerDelegationCredential: sellerVc,
         now: new Date("2026-06-12T00:00:00.000Z"),
       }),
     ).rejects.toBeInstanceOf(SettlementAuthorityError);
@@ -97,10 +101,10 @@ describe("settlement command builder", () => {
     await expect(
       builder.build({
         matchOutcome: outcome,
+        buyerAgentId: "00000000-0000-4000-8000-000000000a01",
+        sellerAgentId: "00000000-0000-4000-8000-000000000a02",
         buyerAgentDid: "did:t3n:agent:buyer-us3",
         sellerAgentDid: "did:t3n:agent:seller-us3",
-        buyerDelegationCredential: buyerVc,
-        sellerDelegationCredential: sellerVc,
         now: new Date("2026-06-14T00:00:00.000Z"),
       }),
     ).rejects.toBeInstanceOf(SettlementExpiredIntentError);

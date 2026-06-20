@@ -458,27 +458,29 @@ export class MatchingOrchestrator {
       }
 
       // Defense in depth: refuse to push a settlement request
-      // with a null credential. The submit-time check in
-      // `HiddenIntentService.submitIntent` already rejects null
-      // VCs at admission, so a null here means a legacy intent
-      // slipped through (admitted before the check landed) or
-      // the metadata was wiped after admit. Logging a
-      // structured error and skipping the match is the only
-      // safe option — the settlement command builder would
-      // throw `SettlementAuthorityError` on null and the fill
-      // would die without any observable signal.
-      if (!buyIntent.delegationCredential || !sellIntent.delegationCredential) {
+      // when we don't have the agent's record UUID for either
+      // side. The settlement command builder needs `agentId`
+      // (not just `agentDid`) to run `loadAndVerify` against
+      // the persisted VC. A missing agentId here is a data-
+      // integrity issue (legacy intent admitted before this
+      // field landed, or an intent queued by a path that
+      // didn't capture the UUID). Logging a structured error
+      // and skipping the match is the only safe option — the
+      // settlement command builder would throw on a null
+      // agentId lookup and the fill would die without any
+      // observable signal.
+      if (!buyIntent.agentId || !sellIntent.agentId) {
         logger.error(
           {
-            event: "matching_orchestrator.settle.missing_intent_delegation",
+            event: "matching_orchestrator.settle.missing_intent_agent_id",
             buyIntentHandle: buyIntent.intentHandle,
             sellIntentHandle: sellIntent.intentHandle,
-            hasBuyerCredential: buyIntent.delegationCredential !== null,
-            hasSellerCredential: sellIntent.delegationCredential !== null,
+            hasBuyerAgentId: buyIntent.agentId !== null && buyIntent.agentId !== undefined,
+            hasSellerAgentId: sellIntent.agentId !== null && sellIntent.agentId !== undefined,
             buyerInstitutionId: buyIntent.institutionId,
             sellerInstitutionId: sellIntent.institutionId,
           },
-          "Intent queue has a null delegation credential; refusing to push to settlement.",
+          "Intent queue is missing one or both agentId UUIDs; refusing to push to settlement.",
         );
         this.telemetryBus.publish({
           institutionId: buyIntent.institutionId,
@@ -499,10 +501,10 @@ export class MatchingOrchestrator {
 
       const request: SettlementExecutionRequest = {
         matchOutcome: normalizedOutcome,
+        buyerAgentId: buyIntent.agentId,
+        sellerAgentId: sellIntent.agentId,
         buyerAgentDid: buyIntent.agentDid,
         sellerAgentDid: sellIntent.agentDid,
-        buyerDelegationCredential: buyIntent.delegationCredential,
-        sellerDelegationCredential: sellIntent.delegationCredential,
         encryptedTradeFields: {
           assetCodeCiphertext: buyIntent.encryptedEnvelope,
           quantityCiphertext: buyIntent.encryptedEnvelope,

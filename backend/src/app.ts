@@ -622,6 +622,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     telemetryBus,
     portfolioService,
     settlementAssetCode: env.SETTLEMENT_ASSET_CODE,
+    agentRepository: new SupabaseAgentRepository(supabase as never),
   });
   const negotiationService = new NegotiationService({
     repository: negotiationRepository,
@@ -639,7 +640,6 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       authorizationFacade,
       blindIntentClient,
       telemetryBus,
-      authorityRevocationRepository,
       matchingOrchestrator,
       new SupabaseAgentRepository(supabase as never),
       portfolioService,

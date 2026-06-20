@@ -24,6 +24,7 @@ import {
   buildHiddenIntentRequest,
   buildHiddenIntentRequestForSide,
   us2AgentDid,
+  us2AgentId,
   us2AuthorityRef,
   us2InstitutionId,
 } from "../data/us2-encrypted-intent-builders.js";
@@ -195,7 +196,6 @@ function buildHiddenIntentService(
     new VerifiedAuthorization(),
     new StaticBlindIntentClient(),
     new TelemetryBus(),
-    undefined,
     orchestrator,
     agentRepository,
     portfolioService,
@@ -323,6 +323,7 @@ describe("matching orchestrator — balance reservations", () => {
 
     await service.cancelIntent({
       institutionId: us2InstitutionId,
+      agentId: us2AgentId,
       agentDid: us2AgentDid,
       intentHandle: accepted.intentHandle,
       authorityRef: us2AuthorityRef,

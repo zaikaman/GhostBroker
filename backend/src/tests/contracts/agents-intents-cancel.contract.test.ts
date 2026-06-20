@@ -9,6 +9,7 @@ import {
   buildBackendTestEnv,
   TEST_AUTH_SESSION_SECRET,
   us2AgentDid,
+  us2AgentId,
   us2AuthorityRef,
   us2InstitutionId,
 } from "../data/us2-encrypted-intent-builders.js";
@@ -67,6 +68,7 @@ describe("POST /api/agents/intents/cancel contract", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({
         institutionId: us2InstitutionId,
+        agentId: us2AgentId,
         agentDid: us2AgentDid,
         intentHandle: "intent_abc",
         authorityRef: us2AuthorityRef,
@@ -96,6 +98,7 @@ describe("POST /api/agents/intents/cancel contract", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({
         institutionId: us2InstitutionId,
+        agentId: us2AgentId,
         agentDid: us2AgentDid,
         intentHandle: "intent_does_not_exist",
         authorityRef: us2AuthorityRef,
@@ -148,6 +151,7 @@ describe("POST /api/agents/intents/cancel contract", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({
         institutionId: "00000000-0000-4000-8000-000000000999",
+        agentId: us2AgentId,
         agentDid: us2AgentDid,
         intentHandle: "intent_abc",
         authorityRef: us2AuthorityRef,

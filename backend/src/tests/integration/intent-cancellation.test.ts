@@ -19,6 +19,7 @@ import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import {
   buildHiddenIntentRequest,
   us2AgentDid,
+  us2AgentId,
   us2AuthorityRef,
   us2InstitutionId,
 } from "../data/us2-encrypted-intent-builders.js";
@@ -39,6 +40,7 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
   }
 
   public async loadAndVerify(input: {
+    institutionId: string;
     agentId: string;
     agentDid: string;
     requestedAction: AgentDelegationVerificationRequest["requestedAction"];
@@ -137,7 +139,6 @@ describe("intent cancellation", () => {
       new VerifiedAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator,
       new FakeAgentRepository(),
     );
@@ -150,6 +151,7 @@ describe("intent cancellation", () => {
 
     const result = await service.cancelIntent({
       institutionId: us2InstitutionId,
+      agentId: us2AgentId,
       agentDid: us2AgentDid,
       intentHandle: accepted.intentHandle,
       authorityRef: us2AuthorityRef,
@@ -183,7 +185,6 @@ describe("intent cancellation", () => {
       new VerifiedAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator,
       new FakeAgentRepository(),
     );
@@ -193,6 +194,7 @@ describe("intent cancellation", () => {
     });
     await service.cancelIntent({
       institutionId: us2InstitutionId,
+      agentId: us2AgentId,
       agentDid: us2AgentDid,
       intentHandle: accepted.intentHandle,
       authorityRef: us2AuthorityRef,
@@ -216,13 +218,13 @@ describe("intent cancellation", () => {
       new VerifiedAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator,
       new FakeAgentRepository(),
     );
 
     const result = await service.cancelIntent({
       institutionId: us2InstitutionId,
+      agentId: us2AgentId,
       agentDid: us2AgentDid,
       intentHandle: "intent_does_not_exist",
       authorityRef: us2AuthorityRef,
@@ -244,7 +246,6 @@ describe("intent cancellation", () => {
       new VerifiedAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator,
       new FakeAgentRepository(),
     );
@@ -254,6 +255,7 @@ describe("intent cancellation", () => {
     });
     const result = await service.cancelIntent({
       institutionId: us2InstitutionId,
+      agentId: us2AgentId,
       agentDid: "did:t3n:agent:different-agent",
       intentHandle: accepted.intentHandle,
       authorityRef: us2AuthorityRef,
@@ -278,7 +280,6 @@ describe("intent cancellation", () => {
       new FailingAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator,
       new FakeAgentRepository(),
     );
@@ -286,6 +287,7 @@ describe("intent cancellation", () => {
     await expect(
       service.cancelIntent({
         institutionId: us2InstitutionId,
+        agentId: us2AgentId,
         agentDid: us2AgentDid,
         intentHandle: "intent_anything",
         authorityRef: us2AuthorityRef,

@@ -21,6 +21,7 @@ function buildServices(
     } satisfies InstitutionManagementService,
     agentService: {
       admitAgent: async () => ({
+        id: "00000000-0000-4000-8000-000000000401",
         agentDid: "did:t3:0x0000000000000000000000000000000000000301",
         status: "admitted",
         authorityRef: "authority:test",

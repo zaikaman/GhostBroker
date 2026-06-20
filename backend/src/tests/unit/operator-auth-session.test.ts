@@ -37,6 +37,7 @@ describe("operator auth bearer sessions", () => {
       },
       buildServices({
         admitAgent: async () => ({
+          id: "00000000-0000-4000-8000-000000000401",
           agentDid: "did:t3n:agent:us1-authorized",
           status: "admitted",
           authorityRef: "authority:session:test",
@@ -68,6 +69,7 @@ describe("operator auth bearer sessions", () => {
       },
       buildServices({
         admitAgent: async () => ({
+          id: "00000000-0000-4000-8000-000000000401",
           agentDid: "did:t3n:agent:unexpected",
           status: "admitted",
           authorityRef: "authority:unexpected",

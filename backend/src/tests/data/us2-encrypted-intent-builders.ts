@@ -5,6 +5,7 @@ import { TEST_AUTH_SESSION_SECRET } from "./us1-seed-builders.js";
 export { TEST_AUTH_SESSION_SECRET };
 
 export const us2InstitutionId = "00000000-0000-4000-8000-000000000201";
+export const us2AgentId = "00000000-0000-4000-8000-000000000a01";
 export const us2AgentDid = "did:t3n:agent:us2-authorized";
 export const us2AuthorityRef = "authority:us2:intent-submit";
 export const us2EncryptedEnvelope =
@@ -66,6 +67,7 @@ export function buildHiddenIntentRequest(
 ): HiddenIntentRequest {
   return {
     institutionId: us2InstitutionId,
+    agentId: us2AgentId,
     agentDid: us2AgentDid,
     encryptedIntentEnvelope: us2EncryptedEnvelope,
     authorityRef: us2AuthorityRef,
@@ -82,6 +84,10 @@ export function buildHiddenIntentRequestForSide(
       side === "buy"
         ? "00000000-0000-4000-8000-000000000211"
         : "00000000-0000-4000-8000-000000000212",
+    agentId:
+      side === "buy"
+        ? "00000000-0000-4000-8000-000000000b01"
+        : "00000000-0000-4000-8000-000000000b02",
     agentDid:
       side === "buy"
         ? "did:t3n:agent:buyer-us2"

@@ -11,6 +11,7 @@ import type {
   NegotiationDisclosureVerifier,
 } from "../../enclave/index.js";
 import { InMemoryNegotiationRepository } from "../data/in-memory-negotiation-repository.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import type { NegotiationMandateRecord } from "../../models/negotiation.js";
 
 const stubAuth: AgentAuthorizationFacade = {
@@ -267,6 +268,7 @@ async function buildHarness(options: {
     settlementAssetCode: "USDC",
     maxRounds: 12,
     deadlineMs: 60 * 60 * 1000,
+    agentRepository: new FakeAgentRepository(),
   });
   return { orchestrator, repository, telemetry };
 }

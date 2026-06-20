@@ -1,7 +1,4 @@
-import type {
-  BlindIntentClient,
-  AgentDelegationVerificationRequest,
-} from "../enclave/index.js";
+import type { BlindIntentClient } from "../enclave/index.js";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
 import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
@@ -14,10 +11,6 @@ import type {
 } from "../models/hidden-intent.js";
 import type { TelemetryBus } from "./telemetry-bus.js";
 import type { MatchingOrchestrator } from "./matching-orchestrator.js";
-import {
-  EmptyAuthorityRevocationRepository,
-  type AuthorityRevocationRepository,
-} from "./authority-revocation.service.js";
 import type { AgentRepository } from "./agent-repository.js";
 import {
   InsufficientBalanceError,
@@ -56,7 +49,6 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
   private readonly authorization: AgentAuthorizationFacade;
   private readonly blindIntentClient: BlindIntentClient;
   private readonly telemetryBus: TelemetryBus;
-  private readonly revocations: AuthorityRevocationRepository;
   private readonly matchingOrchestrator: MatchingOrchestrator | undefined;
   private readonly agentRepository: AgentRepository | undefined;
   private readonly portfolioService: PortfolioService | undefined;
@@ -66,7 +58,6 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     authorization: AgentAuthorizationFacade,
     blindIntentClient: BlindIntentClient,
     telemetryBus: TelemetryBus,
-    revocations: AuthorityRevocationRepository = new EmptyAuthorityRevocationRepository(),
     matchingOrchestrator?: MatchingOrchestrator,
     agentRepository?: AgentRepository,
     portfolioService?: PortfolioService,
@@ -75,7 +66,6 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     this.authorization = authorization;
     this.blindIntentClient = blindIntentClient;
     this.telemetryBus = telemetryBus;
-    this.revocations = revocations;
     this.matchingOrchestrator = matchingOrchestrator;
     this.agentRepository = agentRepository;
     this.portfolioService = portfolioService;
@@ -87,29 +77,25 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     context: HiddenIntentSubmissionContext,
   ): Promise<HiddenIntentAccepted> {
     this.publish(request, context.correlationRef, "intent_received");
-    const delegationCredential = await this.loadDelegationCredential(
-      request.institutionId,
-      request.agentDid,
-    );
-    if (!delegationCredential) {
-      // The settlement command builder re-verifies the
-      // delegation W3C VC at match time and fails closed on
-      // null. If we cannot load the VC now — Supabase
-      // transient error, agent record missing, or the
-      // `metadata.delegation_credential` JSONB was never
-      // populated — refuse to queue the intent at all. A
-      // queued intent with a null VC would die at the next
-      // match, and the operator would have no way to recover
-      // the locked balance short of TTL eviction. The
-      // admit-time check at `agentService.admitAgent` already
-      // requires a VC to be present and persisted, so a null
-      // here is a data-integrity issue (replication lag,
-      // metadata wiped, or a re-admit that dropped the
-      // credential) — surface it as a 403, not a silent
-      // queued intent.
+
+    // Server-side authority check. `loadAndVerify` looks up the
+    // persisted Ghostbroker delegation W3C VC on the agent
+    // record by `(institutionId, agentId)` and runs the same
+    // verifier the admit-time path runs. The agent process never
+    // sends the VC itself — the backend owns it end-to-end. If
+    // no persisted VC exists, the facade throws
+    // `authorization_failed` (a null VC is a data-integrity
+    // issue: replication lag, metadata wiped, or a re-admit
+    // that dropped the credential).
+    const verification = await this.authorization.loadAndVerify({
+      institutionId: request.institutionId,
+      agentId: request.agentId,
+      agentDid: request.agentDid,
+      requestedAction: "intent.submit",
+    });
+    if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }
-    await this.assertAuthority(request, delegationCredential);
 
     const sealed = await this.blindIntentClient.sealIntent({
       institutionId: request.institutionId,
@@ -122,16 +108,20 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     this.publish(request, context.correlationRef, "intent_sealed");
     this.publish(request, sealed.intentHandle, "encrypted_evaluation");
 
-    // Look up agent limits for pre-match authorization enforcement
+    // Look up agent limits for pre-match authorization
+    // enforcement. The agentRepository stays in the
+    // constructor for this single optional read; the
+    // authority check above no longer needs it (that's now
+    // `loadAndVerify`'s job).
     let instrumentScope: string[] | undefined;
     let directionScope: string[] | undefined;
     let maxNotional: string | undefined;
 
     if (this.agentRepository) {
       try {
-        const agent = await this.agentRepository.findByAgentDid(
+        const agent = await this.agentRepository.findById(
+          request.agentId,
           request.institutionId,
-          request.agentDid,
         );
         if (agent) {
           instrumentScope = agent.instrumentScope ?? undefined;
@@ -150,20 +140,19 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     // those values. The reservation is taken from the TEE's seal
     // response, not from any plaintext on the wire.
     //
-    // `delegationCredential` is the verified Ghostbroker W3C VC
-    // the orchestrator will re-verify at settlement time. The
-    // submit-time null check above guarantees this is non-null
-    // here — TypeScript still sees `unknown` so we narrow
-    // explicitly.
+    // `agentId` (the UUID) is captured here so the settlement
+    // command builder can run `loadAndVerify` for each side
+    // against the persisted VC — no VC snapshot on the intent
+    // anymore, just the agentId the facade uses to look it up.
     const pendingIntent: PendingIntent = {
       correlationRef: context.correlationRef,
       institutionId: request.institutionId,
+      agentId: request.agentId,
       agentDid: request.agentDid,
       intentHandle: sealed.intentHandle,
       executionRef: sealed.executionRef,
       encryptedEnvelope: request.encryptedIntentEnvelope,
       authorityRef: request.authorityRef,
-      delegationCredential,
       opaqueLockDescriptor: sealed.lockDescriptor,
       sealedAt: sealed.sealedAt,
     };
@@ -339,127 +328,30 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
     };
   }
 
-  private async assertAuthority(
-    request: HiddenIntentRequest,
-    delegationCredential: unknown,
-  ): Promise<void> {
-    const revokedAuthorityRefs =
-      await this.revocations.listRevokedAuthorityRefs(
-        request.institutionId,
-        request.agentDid,
-      );
-
-    // Re-verify the Ghostbroker delegation VC the agent was admitted with.
-    // The VC is persisted in the agent record's metadata at admit
-    // time (see `AgentService.admitAgent` and
-    // `SupabaseAgentRepository.create`). Without this, the intent
-    // submit path would try to JCS-parse the opaque `authorityRef`
-    // string and reject the agent on every submit.
-    const verificationRequest: AgentDelegationVerificationRequest = {
-      institutionId: request.institutionId,
-      agentDid: request.agentDid,
-      authorityRef: request.authorityRef,
-      delegationCredential,
-      requestedAction: "intent.submit",
-      revokedAuthorityRefs,
-    };
-    const verification =
-      await this.authorization.verifyAgentAuthority(verificationRequest);
-
-    if (verification.status !== "verified") {
-      throw new PublicError("authorization_failed", 403);
-    }
-  }
-
-  /**
-   * Look up the Ghostbroker delegation VC persisted at admit time. Returns
-   * `null` if the agent record is missing or has no credential --
-   * the submit-time check in `submitIntent` then refuses the
-   * intent. The method used to swallow DB errors silently here;
-   * it now logs a structured warning so a Supabase transient
-   * error is observable to operators instead of being
-   * indistinguishable from "no VC exists".
-   */
-  private async loadDelegationCredential(
-    institutionId: string,
-    agentDid: string,
-  ): Promise<unknown> {
-    if (!this.agentRepository) {
-      return null;
-    }
-    try {
-      const agent = await this.agentRepository.findByAgentDid(
-        institutionId,
-        agentDid,
-      );
-      if (!agent) {
-        return null;
-      }
-      const credential = (
-        agent.metadata as Record<string, unknown> | null
-      )?.["delegation_credential"];
-      return credential ?? null;
-    } catch (error) {
-      logger.error(
-        {
-          event: "hidden_intent.load_delegation_credential_failed",
-          institutionId,
-          agentDid,
-          err: redactForbiddenOrderFields({
-            name: error instanceof Error ? error.name : "Error",
-            message:
-              error instanceof Error
-                ? error.message
-                : "non-Error thrown from agentRepository.findByAgentDid",
-          }),
-        },
-        "agentRepository.findByAgentDid threw; refusing to queue an intent without a verified VC.",
-      );
-      return null;
-    }
-  }
-
   public async cancelIntent(
     request: CancelIntentRequest,
   ): Promise<IntentCancelled | null> {
-    // Re-verify the agent's Ghostbroker delegation VC is still valid for this
-    // institution/agent pair. This catches the case where the
-    // delegation was revoked after the intent was submitted.
+    // Re-verify the agent's Ghostbroker delegation W3C VC is still
+    // valid for the institution/agent pair before tearing down
+    // any state. This catches the case where the delegation was
+    // revoked after the intent was submitted. `loadAndVerify` runs
+    // the same verifier the admit-time path runs against the
+    // persisted VC on the agent record.
     //
-    // Note: we do NOT also look up the agent's DB record for the
-    // revocations list (that's already fetched below). The
-    // revocation flow already cascades through
+    // Note: the revocation flow already cascades through
     // `MatchingOrchestrator.removeIntentsByAgent`, which removes
-    // revoked agents' pending intents from the queue. By the time a
-    // cancel request arrives for a revoked agent, the intent will
-    // already be gone and the orchestrator will return undefined
-    // (mapped to 404). Adding a DB lookup here would be redundant
-    // and would also fail for agents that were admitted via the
-    // cryptographic layer but never persisted to the agents table
-    // (e.g. legacy admissions).
-    const revokedAuthorityRefs =
-      await this.revocations.listRevokedAuthorityRefs(
-        request.institutionId,
-        request.agentDid,
-      );
-
-    const delegationCredential = await this.loadDelegationCredential(
-      request.institutionId,
-      request.agentDid,
-    );
-
-    const verification =
-      await this.authorization.verifyAgentAuthority({
-        institutionId: request.institutionId,
-        agentDid: request.agentDid,
-        authorityRef: request.authorityRef,
-        delegationCredential,
-        // Same requested action as submission -- the proof is
-        // for the same scope of capabilities.
-        requestedAction: "intent.submit",
-        revokedAuthorityRefs,
-      });
-
+    // revoked agents' pending intents from the queue. By the time
+    // a cancel request arrives for a revoked agent, the intent
+    // will already be gone and the orchestrator will return null
+    // (mapped to 404). The verifier call below also enforces the
+    // shape + time-window + DID-binding + revocation checks on
+    // every cancel attempt.
+    const verification = await this.authorization.loadAndVerify({
+      institutionId: request.institutionId,
+      agentId: request.agentId,
+      agentDid: request.agentDid,
+      requestedAction: "intent.submit",
+    });
     if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }

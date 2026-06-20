@@ -9,6 +9,13 @@ export interface AuthSession {
 }
 
 export interface AgentAdmission {
+  /**
+   * The admitted agent's record UUID (`agents.id`). Always present
+   * in the `admitted` path; the agent SDK echoes it back on every
+   * privileged call so the backend can run `loadAndVerify` against
+   * the persisted Ghostbroker delegation VC.
+   */
+  id: string;
   agentDid: string;
   status: "admitted" | "rejected";
   authorityRef: string;
@@ -41,6 +48,15 @@ export interface AdmitAgentRequest {
 
 export interface EncryptedIntentRequest {
   institutionId: string;
+  /**
+   * The admitted agent's record UUID (`agents.id`). The agent
+   * learns its own `agentId` from the admit response and echoes it
+   * back on every privileged call. The backend uses `agentId` to
+   * look up the persisted Ghostbroker delegation VC by
+   * `(institutionId, agentId)` and run the verifier via
+   * `loadAndVerify` — the agent never has to send the VC itself.
+   */
+  agentId: string;
   agentDid: string;
   encryptedIntentEnvelope: string;
   authorityRef: string;

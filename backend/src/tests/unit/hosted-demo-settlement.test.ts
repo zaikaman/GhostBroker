@@ -9,6 +9,7 @@ import type {
   NegotiationDisclosureVerifier,
 } from "../../enclave/index.js";
 import { InMemoryNegotiationRepository } from "../data/in-memory-negotiation-repository.js";
+import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import type { NegotiationMandateRecord } from "../../models/negotiation.js";
 
 /**
@@ -225,6 +226,14 @@ async function buildDemoHarness(): Promise<DemoHarness> {
     ),
   );
   const telemetry = new TelemetryBus();
+  // The settle path now resolves each side's `agentId` via the
+  // agent repository and runs `loadAndVerify` against the
+  // persisted Ghostbroker delegation VC. The `FakeAgentRepository`
+  // auto-registers missing agents on `findByAgentDid`, so the
+  // settle path resolves both sides to synthetic admitted
+  // agents and the demo's negotiation-to-settlement flow
+  // completes end-to-end.
+  const agentRepository = new FakeAgentRepository();
   const orchestrator = new NegotiationOrchestrator({
     ticketClient,
     roundEvaluator: crossEvaluator,
@@ -236,6 +245,7 @@ async function buildDemoHarness(): Promise<DemoHarness> {
     settlementAssetCode: "USDC",
     maxRounds: 12,
     deadlineMs: 60 * 60 * 1000,
+    agentRepository,
   });
   return { orchestrator, repository, telemetry, ticketClient };
 }
@@ -566,6 +576,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       settlementAssetCode: "USDC",
       maxRounds: 12,
       deadlineMs: 60 * 60 * 1000,
+      agentRepository: new FakeAgentRepository(),
     });
     const session = await repository.createSession({
       assetCode: ASSET,
@@ -683,6 +694,35 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       settlementAssetCode: "USDC",
       maxRounds: 12,
       deadlineMs: 60 * 60 * 1000,
+      // The legacy fail-closed test deliberately wipes the
+      // session's `delegation_credentials` snapshot and now
+      // also depends on the orchestrator's agent-repo lookup
+      // resolving both sides. We wire a `FakeAgentRepository`
+      // that returns null agents for the lookup, so the
+      // settle path trips the new fail-closed branch instead
+      // of the legacy snapshot branch — the operator-visible
+      // behavior is identical (session → `expired`,
+      // settlement service never called).
+      agentRepository: {
+        findByAgentDid: async () => null,
+        findById: async () => null,
+        listByInstitution: async () => [],
+        create: async () => {
+          throw new Error("not used");
+        },
+        updateLabel: async () => {
+          throw new Error("not used");
+        },
+        revoke: async () => {
+          throw new Error("not used");
+        },
+        updateMetadata: async () => {
+          throw new Error("not used");
+        },
+        updateAuthorityRef: async () => {
+          throw new Error("not used");
+        },
+      },
     });
     await orchestrator.submitMove({
       institutionId: BUY_INSTITUTION,

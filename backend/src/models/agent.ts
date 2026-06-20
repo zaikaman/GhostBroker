@@ -54,7 +54,13 @@ export interface AgentAuthorityLimits {
 }
 
 export interface AgentAdmission {
-  id?: string;
+  /**
+   * The admitted agent's record UUID (`agents.id`). Always present
+   * in the `admitted` path; the agent SDK echoes it back on every
+   * privileged call so the backend can run `loadAndVerify` against
+   * the persisted Ghostbroker delegation VC.
+   */
+  id: string;
   agentDid: string;
   status: AgentAdmissionStatus;
   authorityRef: string;

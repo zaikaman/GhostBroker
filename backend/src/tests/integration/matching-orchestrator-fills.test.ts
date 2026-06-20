@@ -267,7 +267,6 @@ function buildStack(
     new VerifiedAuthorization(),
     new StaticBlindIntentClient(),
     new TelemetryBus(),
-    undefined,
     orchestrator,
     agentRepository,
     portfolioService,
@@ -442,8 +441,12 @@ describe("matching orchestrator - fills and crossing", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(settlement.requests).toHaveLength(1);
-    expect(settlement.requests[0]?.buyerDelegationCredential).toEqual(buyerCredential);
-    expect(settlement.requests[0]?.sellerDelegationCredential).toEqual(sellerCredential);
+    // Settlement now routes through `loadAndVerify` on the
+    // authorization facade; the orchestrator forwards each side's
+    // agentId so the facade can look up the persisted VC. The
+    // VC is no longer snapshotted on the request.
+    expect(settlement.requests[0]?.buyerAgentId).toBeDefined();
+    expect(settlement.requests[0]?.sellerAgentId).toBeDefined();
   });
 
   it("uses the enclave-decided matched_quantity and execution_price, not local calculations", async () => {

@@ -5,6 +5,7 @@ import type { EncryptedIntentRequest, IntentAccepted } from "./types.js";
 
 const SAMPLE_REQUEST: EncryptedIntentRequest = {
   institutionId: "00000000-0000-4000-8000-000000000101",
+  agentId: "00000000-0000-4000-8000-000000000001",
   agentDid: "did:t3n:0xAgentAddress",
   encryptedIntentEnvelope: "t3cipher.sealed.envelope.base64url",
   authorityRef: "t3-delegation:abc",

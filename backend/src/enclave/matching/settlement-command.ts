@@ -1,30 +1,51 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentDelegationVerificationRequest,
   AgentDelegationVerificationResult,
+  RequestedAgentAction,
 } from "../auth/agent-auth-client.js";
 import type { OpaqueMatchOutcome } from "./match-contract-client.js";
 
+/**
+ * The settlement command builder's authority facade. The
+ * production facade (`T3AgentAuthorizationFacade`) implements
+ * this directly; tests inject a stub.
+ *
+ * Both entrypoints route the call through `loadAndVerify`, which
+ * looks up the persisted Ghostbroker delegation W3C VC by
+ * `(institutionId, agentId)` and runs the same verifier the
+ * admit-time path runs. The settlement path never relies on a
+ * VC snapshot from the caller — the backend owns the VC
+ * end-to-end.
+ */
 export interface SettlementAuthorityVerifier {
-  /**
-   * Re-verify the agent's Ghostbroker delegation W3C VC for the action the
-   * settlement is about to perform. The verifier needs the
-   * `delegationCredential` (the Ghostbroker delegation VC persisted at admit
-   * time) and the `authorityRef` the agent echoed back on submit,
-   * to confirm the agent is presenting the same credential it
-   * was admitted with.
-   */
-  verifyAgentAuthority(
-    request: AgentDelegationVerificationRequest,
-  ): Promise<AgentDelegationVerificationResult>;
+  loadAndVerify(input: {
+    institutionId: string;
+    agentId: string;
+    agentDid: string;
+    requestedAction: RequestedAgentAction;
+  }): Promise<AgentDelegationVerificationResult>;
 }
 
 export interface SettlementCommandRequest {
   matchOutcome: OpaqueMatchOutcome;
+  /**
+   * The admitted agent's record UUIDs for both sides. The
+   * settlement command builder uses these to look up each side's
+   * persisted Ghostbroker delegation VC and re-verify it for
+   * `settlement.execute` before issuing the command.
+   */
+  buyerAgentId: string;
+  sellerAgentId: string;
   buyerAgentDid: string;
   sellerAgentDid: string;
-  buyerDelegationCredential: unknown;
-  sellerDelegationCredential: unknown;
+  /**
+   * Optional caller-supplied revocations list for either side.
+   * Currently unused (the facade's `loadAndVerify` runs the
+   * verifier without a revocations arg), but kept on the request
+   * shape so future hardening (e.g. session-scoped revocations
+   * for negotiation sessions) can pass it without another
+   * signature break.
+   */
   revokedBuyerAuthorityRefs?: ReadonlySet<string>;
   revokedSellerAuthorityRefs?: ReadonlySet<string>;
   now?: Date;
@@ -70,30 +91,25 @@ export class SettlementCommandBuilder {
       throw new SettlementExpiredIntentError();
     }
 
-    if (!request.buyerDelegationCredential || !request.sellerDelegationCredential) {
-      throw new SettlementAuthorityError();
-    }
-
+    // Re-verify both sides' persisted Ghostbroker delegation
+    // VCs in parallel via the authorization facade's
+    // `loadAndVerify`. The facade looks the VC up by
+    // `(institutionId, agentId)` and runs the same verifier
+    // the admit-time path runs. The settlement path no longer
+    // takes a VC snapshot from the caller — the backend is
+    // the single source of truth on the agent's authority.
     const [buyerAuthority, sellerAuthority] = await Promise.all([
-      this.authorityVerifier.verifyAgentAuthority({
+      this.authorityVerifier.loadAndVerify({
         institutionId: request.matchOutcome.buyerInstitutionId,
+        agentId: request.buyerAgentId,
         agentDid: request.buyerAgentDid,
-        authorityRef: request.matchOutcome.buyerAuthorityRef,
-        delegationCredential: request.buyerDelegationCredential,
         requestedAction: "settlement.execute",
-        ...(request.revokedBuyerAuthorityRefs !== undefined
-          ? { revokedAuthorityRefs: request.revokedBuyerAuthorityRefs }
-          : {}),
       }),
-      this.authorityVerifier.verifyAgentAuthority({
+      this.authorityVerifier.loadAndVerify({
         institutionId: request.matchOutcome.sellerInstitutionId,
+        agentId: request.sellerAgentId,
         agentDid: request.sellerAgentDid,
-        authorityRef: request.matchOutcome.sellerAuthorityRef,
-        delegationCredential: request.sellerDelegationCredential,
         requestedAction: "settlement.execute",
-        ...(request.revokedSellerAuthorityRefs !== undefined
-          ? { revokedAuthorityRefs: request.revokedSellerAuthorityRefs }
-        : {}),
       }),
     ]);
 

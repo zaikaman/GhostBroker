@@ -319,7 +319,7 @@ function validateMandateDeadline(mandate: NegotiationMandateSummary | null, now:
 }
 
 export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuideProps): React.JSX.Element {
-  const { agents, intents } = useConnectionTelemetry(session.institution.id);
+  const { agents, intents, clearTelemetryState } = useConnectionTelemetry(session.institution.id);
   const [hostedAgents, setHostedAgents] = useState<HostedAgentRecord[]>([]);
   const [admittedAgents, setAdmittedAgents] = useState<Agent[]>([]);
   const [mandatesByAgentId, setMandatesByAgentId] = useState<Record<string, NegotiationMandateSummary[]>>({});
@@ -663,12 +663,17 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       await apiClient.stopHostedAgent(id);
       await loadState();
       setSelectedAgentId(id);
+      // Clear the runtime telemetry view (agents, intents, enclave
+      // status) back to its idle defaults so the negotiator
+      // visualizer returns to the offline state immediately instead
+      // of continuing to process stale WebSocket events.
+      clearTelemetryState();
     } catch (err) {
       setError(deriveErrorMessage(err, 'Failed to stop hosted negotiator.'));
     } finally {
       setBusyAgentId(null);
     }
-  }, [loadState]);
+  }, [loadState, clearTelemetryState]);
 
   const handleCopyLogs = useCallback(() => {
     if (!selectedHostedRecord?.runtime.logTail) return;

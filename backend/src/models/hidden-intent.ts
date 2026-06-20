@@ -21,6 +21,15 @@ export const encryptedIntentEnvelopeSchema = z
  */
 export const hiddenIntentRequestSchema = z.object({
   institutionId: z.string().uuid(),
+  /**
+   * The admitted agent's record UUID (`agents.id`). Required so the
+   * backend can run `loadAndVerify` against the persisted
+   * Ghostbroker delegation W3C VC on `agents.metadata.delegation_credential`.
+   * The agent learns its own `agentId` from the admit response and
+   * echoes it back on every privileged call; the backend never
+   * has to trust agent-supplied DID strings alone.
+   */
+  agentId: z.string().uuid(),
   agentDid: agentDidSchema,
   encryptedIntentEnvelope: encryptedIntentEnvelopeSchema,
   authorityRef: z.string().trim().min(8).max(512),
@@ -49,6 +58,13 @@ export interface HiddenIntentAccepted {
  */
 export const cancelIntentRequestSchema = z.object({
   institutionId: z.string().uuid(),
+  /**
+   * The admitted agent's record UUID. Required for the backend to
+   * run `loadAndVerify` against the persisted delegation VC.
+   * Cancel must be authorized as `intent.submit` (same VC scope);
+   * the agentId is what the facade looks the VC up by.
+   */
+  agentId: z.string().uuid(),
   agentDid: agentDidSchema,
   intentHandle: z.string().trim().min(1).max(256),
   authorityRef: z.string().trim().min(8).max(512),
@@ -73,20 +89,14 @@ export interface IntentCancelled {
 export interface PendingIntent {
   correlationRef: string;
   institutionId: string;
+  /** The admitted agent's record UUID. The settlement command builder
+   *  uses this to run `loadAndVerify` against the persisted VC. */
+  agentId: string;
   agentDid: string;
   intentHandle: string;
   executionRef: string;
   encryptedEnvelope: string;
   authorityRef: string;
-  /**
-   * The Ghostbroker delegation W3C VC the agent was admitted with, snapshotted
-   * at submit time. The settlement command builder re-verifies
-   * both the buyer and seller VCs from this field on every match.
-   * The VC is also re-fetchable from the agent record by
-   * `institutionId` + `agentDid`, but storing it on the intent
-   * lets the orchestrator settle without an extra DB round-trip.
-   */
-  delegationCredential: unknown;
   /**
    * TEE-attested lock descriptor produced by the seal call. The T3
    * enclave decrypts the envelope, derives the per-intent

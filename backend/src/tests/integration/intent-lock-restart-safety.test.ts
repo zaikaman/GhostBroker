@@ -19,6 +19,7 @@ import type { SettlementService } from "../../services/settlement.service.js";
 import {
   buildHiddenIntentRequest,
   us2AgentDid,
+  us2AgentId,
   us2AuthorityRef,
   us2InstitutionId,
 } from "../data/us2-encrypted-intent-builders.js";
@@ -173,7 +174,6 @@ describe("orphan-lock restart safety", () => {
       new VerifiedAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator1,
       new FakeAgentRepository(),
       portfolioService1,
@@ -279,7 +279,6 @@ describe("orphan-lock restart safety", () => {
       new VerifiedAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator,
       new FakeAgentRepository(),
       portfolioService,
@@ -338,7 +337,6 @@ describe("orphan-lock restart safety", () => {
       new VerifiedAuthorization(),
       new StaticBlindIntentClient(),
       telemetry,
-      undefined,
       orchestrator,
       new FakeAgentRepository(),
       portfolioService,
@@ -353,6 +351,7 @@ describe("orphan-lock restart safety", () => {
 
     await service.cancelIntent({
       institutionId: us2InstitutionId,
+      agentId: us2AgentId,
       agentDid: us2AgentDid,
       intentHandle: accepted.intentHandle,
       authorityRef: us2AuthorityRef,

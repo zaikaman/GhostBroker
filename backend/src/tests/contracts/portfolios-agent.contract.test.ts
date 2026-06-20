@@ -66,7 +66,7 @@ const buyIntent: PendingIntent = {
   executionRef: "t3exec_buy_1",
   encryptedEnvelope: "t3env.ciphertext.buy",
   authorityRef: "authority:buy:1",
-  delegationCredential: { id: "vc-buy-1", issuer: "did:t3n:buy" },
+  agentId: "00000000-0000-4000-8000-000000000a01",
   opaqueLockDescriptor: {
     tradedAssetCode: "WBTC",
     assetCode: "USDC",
@@ -85,7 +85,7 @@ const sellIntent: PendingIntent = {
   executionRef: "t3exec_sell_1",
   encryptedEnvelope: "t3env.ciphertext.sell",
   authorityRef: "authority:sell:1",
-  delegationCredential: { id: "vc-sell-1", issuer: "did:t3n:sell" },
+  agentId: "00000000-0000-4000-8000-000000000a02",
   opaqueLockDescriptor: {
     tradedAssetCode: "WBTC",
     assetCode: "WBTC",

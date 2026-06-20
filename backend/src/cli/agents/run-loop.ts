@@ -262,6 +262,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     try {
       const accepted = await client.submitEncryptedIntent({
         institutionId: session.institution.id,
+        agentId: admission.id,
         agentDid: identity.did,
         encryptedIntentEnvelope: envelope.envelope,
         authorityRef: admission.authorityRef,

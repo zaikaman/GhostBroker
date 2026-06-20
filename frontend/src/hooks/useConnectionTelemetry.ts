@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { telemetryClient } from '../services/telemetry-client';
 import type { TelemetryEvent, ConnectionStatus, TelemetryPhase } from '../services/telemetry-client';
 
@@ -26,13 +26,24 @@ export interface ConnectionTelemetry {
   errorAlert: string | null;
 }
 
-export function useConnectionTelemetry(token?: string): ConnectionTelemetry {
+export function useConnectionTelemetry(token?: string): ConnectionTelemetry & { clearTelemetryState: () => void } {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [enclaveStatus, setEnclaveStatus] = useState<'secure' | 'processing' | 'error'>('secure');
   const [sandboxStatus, setSandboxStatus] = useState<'connected' | 'disconnected'>('disconnected');
   const [agents, setAgents] = useState<AgentState[]>([]);
   const [intents, setIntents] = useState<ProcessingIntent[]>([]);
   const [errorAlert, setErrorAlert] = useState<string | null>(null);
+
+  // Expose a clear function so callers (e.g. the deploy page's STOP
+  // handler) can reset the telemetry view back to its idle defaults
+  // without tearing down the WebSocket connection.
+  const clearTelemetryState = useCallback(() => {
+    setAgents([]);
+    setIntents([]);
+    setEnclaveStatus('secure');
+    setSandboxStatus('disconnected');
+    setErrorAlert(null);
+  }, []);
 
   useEffect(() => {
     // Update local connection status when telemetryClient status changes
@@ -197,6 +208,7 @@ export function useConnectionTelemetry(token?: string): ConnectionTelemetry {
     agents,
     intents,
     errorAlert,
+    clearTelemetryState,
   };
 }
 export default useConnectionTelemetry;

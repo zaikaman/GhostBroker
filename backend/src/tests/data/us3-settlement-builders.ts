@@ -61,10 +61,10 @@ export function buildSettlementExecutionRequest(
       buyerLockedAmount: 4_500_000,
       sellerLockedAmount: 100,
     },
+    buyerAgentId: "00000000-0000-4000-8000-000000000a01",
+    sellerAgentId: "00000000-0000-4000-8000-000000000a02",
     buyerAgentDid: "did:t3n:agent:buyer-us3",
     sellerAgentDid: "did:t3n:agent:seller-us3",
-    buyerDelegationCredential: { id: "buyer-vc", issuer: "did:t3n:buyer" },
-    sellerDelegationCredential: { id: "seller-vc", issuer: "did:t3n:seller" },
     encryptedTradeFields: {
       assetCodeCiphertext: "t3cipher.asset.us3",
       quantityCiphertext: "t3cipher.quantity.us3",

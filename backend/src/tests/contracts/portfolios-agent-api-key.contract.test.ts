@@ -79,7 +79,7 @@ const buyIntent: PendingIntent = {
   executionRef: "t3exec_buy_apikey_1",
   encryptedEnvelope: "t3env.ciphertext.buy.apikey",
   authorityRef: "authority:buy:apikey:1",
-  delegationCredential: { id: "vc-buy-apikey", issuer: "did:t3n:apikey" },
+  agentId: "00000000-0000-4000-8000-000000000a01",
   opaqueLockDescriptor: {
     tradedAssetCode: "WBTC",
     assetCode: "USDC",

@@ -8,6 +8,7 @@ import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
 import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
 import type { NegotiationRepository } from "./negotiation-repository.js";
+import type { AgentRepository } from "./agent-repository.js";
 import type {
   NegotiationMandate,
   NegotiationMove,
@@ -263,6 +264,7 @@ export class NegotiationOrchestrator {
   private readonly settlementAssetCode: string;
   private readonly maxRounds: number;
   private readonly deadlineMs: number;
+  private readonly agentRepository: AgentRepository | undefined;
 
   private pendingTickets: PendingTicket[] = [];
   private readonly standingProposals = new Map<string, StandingProposal>();
@@ -286,6 +288,17 @@ export class NegotiationOrchestrator {
     settlementAssetCode?: string;
     maxRounds?: number;
     deadlineMs?: number;
+    /**
+     * Optional agent lookup. Used at settle time to resolve the
+     * persisted VC for each side via `loadAndVerify`. Optional
+     * because the orchestrator is exercised in tests that don't
+     * wire an AgentRepository — when absent, settle falls back
+     * to the legacy "snapshotted VC on the session" path (the
+     * older `verifyAgentAuthority` direct call is no longer
+     * used; tests that exercise settle without an agent repo
+     * short-circuit at the `lookupAgent` boundary instead).
+     */
+    agentRepository?: AgentRepository;
   }) {
     this.ticketClient = input.ticketClient;
     this.roundEvaluator = input.roundEvaluator;
@@ -298,6 +311,36 @@ export class NegotiationOrchestrator {
     this.settlementAssetCode = input.settlementAssetCode ?? "USDC";
     this.maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS;
     this.deadlineMs = input.deadlineMs ?? DEFAULT_DEADLINE_MS;
+    this.agentRepository = input.agentRepository;
+  }
+
+  /**
+   * Resolve a side's agent record UUID from its institution + DID.
+   * The settlement command builder uses `agentId` to look up the
+   * persisted Ghostbroker delegation VC via `loadAndVerify`.
+   * Returns `null` when the agent repo isn't wired or the agent
+   * record is missing — the caller (settle path) treats that as a
+   * fail-closed "expire the session" outcome.
+   */
+  private async lookupAgent(
+    institutionId: string,
+    agentDid: string,
+  ): Promise<{ id: string; agentDid: string } | null> {
+    if (!this.agentRepository) {
+      return null;
+    }
+    try {
+      const agent = await this.agentRepository.findByAgentDid(
+        institutionId,
+        agentDid,
+      );
+      if (!agent) {
+        return null;
+      }
+      return { id: agent.id, agentDid: agent.agentDid };
+    } catch {
+      return null;
+    }
   }
 
   private standingKey(sessionId: string, side: "buy" | "sell"): string {
@@ -1381,25 +1424,34 @@ export class NegotiationOrchestrator {
       "sell",
     );
 
-    // Defense in depth: if either side's snapshotted VC is
-    // missing, refuse to push a settlement request with a null
-    // credential. The settlement command builder would throw
-    // `SettlementAuthorityError` on null and the whole fill
-    // would die; better to abort here with a clear log so an
-    // operator can re-mint the agent's VC and re-open the
-    // session. The session transitions to `expired` so the
-    // in-memory queue and the durable row agree on the state.
-    if (!buyerCredential || !sellerCredential) {
+    // Resolve each side's agent record UUID from the snapshotted
+    // agent DID. The settlement command builder needs `agentId`
+    // (not just `agentDid`) to run `loadAndVerify` against the
+    // persisted VC. If either side's agent record is missing,
+    // refuse to settle — better to fail closed here than to have
+    // the settlement service throw `SettlementAuthorityError`
+    // without an observable signal. The session transitions to
+    // `expired` so the in-memory queue and the durable row
+    // agree on the state.
+    const buyerAgentRecord = await this.lookupAgent(
+      session.buy_institution_id,
+      session.buy_agent_did,
+    );
+    const sellerAgentRecord = await this.lookupAgent(
+      session.sell_institution_id,
+      session.sell_agent_did,
+    );
+    if (!buyerAgentRecord || !sellerAgentRecord) {
       logger.error(
         {
-          event: "negotiation.settle.missing_session_delegation",
+          event: "negotiation.settle.missing_session_agent",
           sessionId: session.id,
-          buyAgentDid: session.buy_agent_did,
-          sellAgentDid: session.sell_agent_did,
-          hasBuyerCredential: buyerCredential !== null,
-          hasSellerCredential: sellerCredential !== null,
+          hasBuyerAgent: buyerAgentRecord !== null,
+          hasSellerAgent: sellerAgentRecord !== null,
+          buyInstitutionId: session.buy_institution_id,
+          sellInstitutionId: session.sell_institution_id,
         },
-        "Session is missing one or both snapshotted delegation VCs; refusing to settle.",
+        "Session is missing one or both agent records; refusing to settle.",
       );
       await this.repository.updateSession({
         sessionId: session.id,
@@ -1417,16 +1469,22 @@ export class NegotiationOrchestrator {
       );
       return;
     }
-    // Note: the buyer and seller delegation credentials were
-    // resolved above and snapshotted into the settlement request
-    // (`buyerDelegationCredential`, `sellerDelegationCredential`).
-    // The previous `console.log("[CONVERGE] ... getSessionDelegation")`
-    // truncated and emitted the credential IDs to stdout; that is
-    // removed here. The structured logger would carry too much
-    // sensitive material even at a truncated length, so we do
-    // not log the IDs at all. Operators that need to inspect
-    // the per-side delegation state should query the
-    // `audit_receipts` table after settlement completes.
+
+    // The buyer/seller snapshotted credentials are still loaded
+    // by the orchestrator above for legacy reasons (the VC id
+    // may end up in audit_receipts for traceability); the
+    // settlement command builder no longer consumes them — it
+    // looks the VC up by `(institutionId, agentId)` via
+    // `loadAndVerify`. The previous `console.log("[CONVERGE]
+    // ... getSessionDelegation")` truncated and emitted the
+    // credential IDs to stdout; that is removed here. The
+    // structured logger would carry too much sensitive material
+    // even at a truncated length, so we do not log the IDs at
+    // all. Operators that need to inspect the per-side
+    // delegation state should query the `audit_receipts` table
+    // after settlement completes.
+    void buyerCredential;
+    void sellerCredential;
 
     await this.repository.updateSession({
       sessionId: session.id,
@@ -1465,10 +1523,10 @@ export class NegotiationOrchestrator {
         buyerLockedAmount: input.matchedQuantity * input.executionPrice,
         sellerLockedAmount: input.matchedQuantity,
       },
+      buyerAgentId: buyerAgentRecord.id,
+      sellerAgentId: sellerAgentRecord.id,
       buyerAgentDid: session.buy_agent_did,
       sellerAgentDid: session.sell_agent_did,
-      buyerDelegationCredential: buyerCredential,
-      sellerDelegationCredential: sellerCredential,
       encryptedTradeFields: {
         assetCodeCiphertext: transcriptRef,
         quantityCiphertext: transcriptRef,

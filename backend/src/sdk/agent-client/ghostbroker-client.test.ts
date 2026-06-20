@@ -156,6 +156,7 @@ describe("GhostBrokerClient", () => {
         .mockResolvedValueOnce(mockJsonResponse(SAMPLE_SESSION))
         .mockResolvedValueOnce(
           mockJsonResponse({
+            id: "00000000-0000-4000-8000-000000000001",
             agentDid: "did:t3n:0xAgentAddress",
             status: "admitted",
             authorityRef: "ghostbroker-delegation:urn:uuid:server-minted",
@@ -171,6 +172,7 @@ describe("GhostBrokerClient", () => {
       });
 
       expect(admission).toEqual({
+        id: "00000000-0000-4000-8000-000000000001",
         agentDid: "did:t3n:0xAgentAddress",
         status: "admitted",
         authorityRef: "ghostbroker-delegation:urn:uuid:server-minted",
@@ -203,6 +205,7 @@ describe("GhostBrokerClient", () => {
         .mockResolvedValueOnce(mockJsonResponse(SAMPLE_SESSION))
         .mockResolvedValueOnce(
           mockJsonResponse({
+            id: "00000000-0000-4000-8000-000000000001",
             agentDid: "did:t3n:0xAgentAddress",
             status: "admitted",
             authorityRef: "ghostbroker-delegation:urn:uuid:legacy",
@@ -242,6 +245,7 @@ describe("GhostBrokerClient", () => {
 
       const intent: EncryptedIntentRequest = {
         institutionId: SAMPLE_SESSION.institution.id,
+        agentId: "00000000-0000-0000-0000-000000000001",
         agentDid: "did:t3n:0xAgentAddress",
         encryptedIntentEnvelope: "t3cipher.sealed",
         authorityRef: "t3-delegation:xyz",

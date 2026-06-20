@@ -151,15 +151,17 @@ export interface SettlementReconciliationRepository {
 
 export interface SettlementExecutionRequest {
   matchOutcome: OpaqueMatchOutcome;
+  /**
+   * The admitted agent's record UUIDs for both sides. The
+   * settlement command builder runs `loadAndVerify` on each
+   * side's persisted Ghostbroker delegation VC before issuing
+   * the settlement command — the caller never has to send the
+   * VC itself.
+   */
+  buyerAgentId: string;
+  sellerAgentId: string;
   buyerAgentDid: string;
   sellerAgentDid: string;
-  /**
-   * Ghostbroker delegation W3C VCs for the buyer and seller agents. The
-   * settlement command builder re-verifies both with the Ghostbroker delegation
-   * verifier before issuing the settlement instruction.
-   */
-  buyerDelegationCredential: unknown;
-  sellerDelegationCredential: unknown;
   encryptedTradeFields: {
     assetCodeCiphertext: string;
     quantityCiphertext: string;
@@ -382,10 +384,10 @@ export class SettlementService {
     try {
       const command = await this.commandBuilder.build({
         matchOutcome: request.matchOutcome,
+        buyerAgentId: request.buyerAgentId,
+        sellerAgentId: request.sellerAgentId,
         buyerAgentDid: request.buyerAgentDid,
         sellerAgentDid: request.sellerAgentDid,
-        buyerDelegationCredential: request.buyerDelegationCredential,
-        sellerDelegationCredential: request.sellerDelegationCredential,
       });
       await this.emitAudit("match", command, correlationRef);
 

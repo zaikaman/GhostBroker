@@ -28,6 +28,7 @@ describe("POST /api/agents/admit contract", () => {
   it("admits a verified agent and returns only the authority reference", async () => {
     const agentService: AgentManagementService = {
       admitAgent: async () => ({
+        id: "00000000-0000-4000-8000-000000000401",
         agentDid: "did:t3n:agent:us1-authorized",
         status: "admitted",
         authorityRef: "authority:verified:test",
@@ -54,6 +55,7 @@ describe("POST /api/agents/admit contract", () => {
       .expect(200);
 
     expect(response.body).toEqual({
+      id: "00000000-0000-4000-8000-000000000401",
       agentDid: "did:t3n:agent:us1-authorized",
       status: "admitted",
       authorityRef: "authority:verified:test",
@@ -65,6 +67,7 @@ describe("POST /api/agents/admit contract", () => {
       buildBackendTestEnv(),
       buildServices({
         admitAgent: async () => ({
+          id: "00000000-0000-4000-8000-000000000401",
           agentDid: "did:t3n:agent:unexpected",
           status: "admitted",
           authorityRef: "authority:unexpected",
