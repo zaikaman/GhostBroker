@@ -9,6 +9,13 @@ import {
   verifyBcryptApiKey,
 } from "../models/api-key.js";
 
+// Re-export the row-record type so consumers can construct
+// `ApiKeyRecord` instances (e.g. test fixtures, repository
+// implementations) without reaching into the model layer.
+// The service module is the canonical public surface; the
+// model is an implementation detail.
+export type { ApiKeyRecord };
+
 // ─── Supabase Query Type Declarations ────────────────────────────────────
 
 interface InsertQuery<TResult> {

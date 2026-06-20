@@ -72,8 +72,11 @@ describe("tenant-delegation signer", () => {
     expect(credential.credentialSubject.agentDid).toBe("did:t3n:0xagent");
     expect(credential.credentialSubject.maxSpendUsd).toBe(50_000);
 
-    // No `additionalTrustedSignerAddresses` needed: the SDK
-    // path succeeds directly because signer == issuer.
+    // The SDK path succeeds directly because signer == issuer:
+    // the T3 SDK's `verifyEcdsaVcSig` matches the issuer's
+    // embedded address against the recovered signer and
+    // returns `isValid: true`. There is no multi-signer
+    // fallback path.
     const result = await verifyGhostbrokerDelegationCredential({
       credential,
       institutionId: "00000000-0000-4000-8000-000000000101",
@@ -182,7 +185,7 @@ describe("tenant-delegation signer", () => {
     // The VC's issuer is the keypair's did:ethr form, NOT
     // the T3N tenant DID — that's the whole point of the
     // production case: signer == issuer so the SDK verifies
-    // without a multi-signer fallback.
+    // the VC directly with no fallback.
     expect(identity.did.startsWith("did:ethr:0x")).toBe(true);
     expect(identity.did).toBe(`did:ethr:${getAddress(identity.address)}`);
 
@@ -204,18 +207,14 @@ describe("tenant-delegation signer", () => {
     );
 
     // Round-trip: the verifier accepts the VC via the SDK
-    // path (signer == issuer, no fallback needed). The
-    // additionalTrustedSignerAddresses parameter is
-    // documented and accepted for backward compat with the
-    // dev flow but is not needed here.
+    // path (signer == issuer). The T3 SDK's `verifyEcdsaVcSig`
+    // matches the issuer's embedded address against the
+    // recovered signer and returns `isValid: true` directly.
     const result = await verifyGhostbrokerDelegationCredential({
       credential,
       institutionId: "00000000-0000-4000-8000-000000000101",
       agentDid: "did:t3n:0xd46daba8762b02fd056ff3f2707915e049c075c1",
       requestedAction: "agent.admit",
-      additionalTrustedSignerAddresses: new Set([
-        identity.address.toLowerCase(),
-      ]),
     });
 
     expect(result.status).toBe("verified");
@@ -237,8 +236,8 @@ describe("tenant-delegation signer", () => {
     // disk. The signer mints VCs with the keypair's
     // `did:ethr:0x<derived>` as the issuer. The verifier's
     // `verifyEcdsaVcSig` matches the issuer against the
-    // recovered signer; no additional trusted signer is
-    // needed and the multi-signer fallback never runs.
+    // recovered signer; the SDK verifies the VC directly
+    // and returns `isValid: true`.
     const identity = loadOrCreateTenantIdentity({
       tenantDid: "did:t3n:0x00000000000000000000000000000000000000aa",
       path: join(tmp, "tenant-csprng.json"),

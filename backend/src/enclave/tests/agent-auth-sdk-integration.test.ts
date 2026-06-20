@@ -18,10 +18,10 @@
  *      custom parallel implementation.
  *   3. When the SDK throws the "Unsupported DID method" error
  *      (for hand-crafted VCs that still use the legacy
- *      `did:t3n:` issuer), the verifier falls back to the
- *      multi-signer path instead of failing closed.
- *   4. When the SDK throws any OTHER error, the verifier fails
- *      closed (does NOT silently downgrade to a non-SDK path).
+ *      `did:t3n:` issuer), the verifier fails closed — there
+ *      is no multi-signer fallback.
+ *   4. When the SDK throws any OTHER error, the verifier also
+ *      fails closed (no silent structural downgrade).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -221,12 +221,15 @@ describe("Terminal 3 Agent Auth SDK integration", () => {
     expect(result.status).toBe("verified");
   });
 
-  it("falls back to the multi-signer path when verifyVc throws 'Unsupported DID method' (known SDK limitation)", async () => {
+  it("fails closed when verifyVc throws 'Unsupported DID method' (no multi-signer fallback)", async () => {
     // The T3 SDK's `verifyEcdsaVcSig` only knows `did:ethr:`
     // and throws `Unsupported DID method: t3n` for the legacy
-    // `did:t3n:0x<addr>` issuer format. We catch that specific
-    // error and fall back to a multi-signer manual check; any
-    // OTHER error fails closed.
+    // `did:t3n:0x<addr>` issuer format. Production server-minted
+    // VCs use `did:ethr:0x<keypair>` issuers (see
+    // `tenant-identity-store.ts`), so this case does not occur
+    // on the happy path. The verifier fails closed on it: no
+    // multi-signer fallback is allowed (the verifier is a single-
+    // mode, SDK-only cryptographic authority).
     const verifyVcSpy = vi.fn().mockRejectedValue(
       new Error("Unsupported DID method: t3n"),
     );
@@ -266,21 +269,17 @@ describe("Terminal 3 Agent Auth SDK integration", () => {
       institutionId: "00000000-4000-8000-000000000101",
       agentDid: "did:t3n:agent:us1-authorized",
       requestedAction: "agent.admit",
-      additionalTrustedSignerAddresses: new Set([
-        "0x0000000000000000000000000000000000000099",
-      ]),
     });
 
     expect(verifyVcSpy).toHaveBeenCalledTimes(1);
     // The SDK threw the known "Unsupported DID method" error.
-    // The verifier should NOT fail closed on this — it falls
-    // back to the multi-signer path. The fallback uses the same
-    // ECDSA math, so it returns `unverified` only because the
-    // placeholder JWS doesn't actually verify.
+    // The verifier fails closed with reason `unverified` —
+    // there is no multi-signer fallback path to silently
+    // downgrade to.
     expect(result.status).toBe("rejected");
     if (result.status !== "rejected") {
       throw new Error(
-        `expected rejected (fallback ran), got ${JSON.stringify(result)}`,
+        `expected rejected (fail closed), got ${JSON.stringify(result)}`,
       );
     }
     expect(result.reason).toBe("unverified");
@@ -325,13 +324,6 @@ describe("Terminal 3 Agent Auth SDK integration", () => {
       institutionId: "00000000-4000-8000-000000000101",
       agentDid: "did:t3n:agent:us1-authorized",
       requestedAction: "agent.admit",
-      // Additional trusted signer would normally let the
-      // fallback succeed, but the SDK error is not the known
-      // "Unsupported DID method" so the verifier must fail
-      // closed and NOT fall back.
-      additionalTrustedSignerAddresses: new Set([
-        "0x0000000000000000000000000000000000000099",
-      ]),
     });
 
     expect(verifyVcSpy).toHaveBeenCalledTimes(1);

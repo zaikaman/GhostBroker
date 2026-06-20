@@ -299,11 +299,11 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   //      boot and reusing it on subsequent boots.
   //
   // The resulting keypair's derived address is the canonical
-  // VC issuer DID (`did:ethr:0x<address>`), and the same
-  // address is registered as the facade's trusted signer so
-  // the T3 SDK's `verifyEcdsaVcSig` can match the issuer
-  // against the recovered signer directly — no multi-signer
-  // fallback path is needed for the server-minted VCs.
+  // VC issuer DID (`did:ethr:0x<address>`). Server-minted VCs
+  // have `signer == issuer`, so the T3 SDK's `verifyEcdsaVcSig`
+  // matches the issuer against the recovered signer and
+  // returns `isValid: true` directly. There is no manual
+  // fallback path — the verifier is SDK-only.
   const tenantIdentity = loadOrCreateTenantIdentity({
     tenantDid: t3NetworkClient.tenantDidValue,
     ...(env.TENANT_SIGNING_PRIVATE_KEY
@@ -321,16 +321,6 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // up the persisted VC; the agent service needs the
   // facade for `verifyAgentAuthority` at admit time).
   const authorizationFacade = new T3AgentAuthorizationFacade();
-  // The signing keypair's derived address is the canonical
-  // VC issuer DID. Register it as the facade's trusted
-  // signer so the T3 SDK's `verifyEcdsaVcSig` can match the
-  // issuer against the recovered signer directly (signer ==
-  // issuer). This is the only trusted signer the production
-  // flow needs; the multi-signer fallback path is reserved
-  // for hand-crafted VCs with legacy `did:t3n:` issuers.
-  authorizationFacade.setTrustedSignerAddresses(
-    new Set([tenantIdentity.address.toLowerCase()]),
-  );
   const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
   const portfolioService = new PortfolioService(
     supabase as never,

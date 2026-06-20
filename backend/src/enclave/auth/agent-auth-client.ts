@@ -63,30 +63,6 @@ export interface AgentDelegationVerificationRequest {
   revokedAuthorityRefs?: ReadonlySet<string>;
   /** Ghostbroker delegation W3C VC persisted at admit time. */
   delegationCredential: unknown;
-  /**
-   * Additional Ethereum addresses the verifier should accept
-   * as a valid signer of `delegationCredential`, in addition
-   * to the address derived from `delegationCredential.issuer`.
-   *
-   * Production server-minted VCs have `signer == issuer` (the
-   * same keypair), so the T3 SDK's `verifyEcdsaVcSig` matches
-   * the issuer against the recovered signer and returns
-   * `isValid: true`. This set is unused on the happy path.
-   *
-   * The set is also the escape hatch for hand-crafted VCs with
-   * legacy `did:t3n:0x<addr>` issuers — see
-   * `ghostbroker-delegation.ts` for the multi-signer fallback
-   * rationale.
-   *
-   * Historical note: this parameter was originally added so the
-   * verifier could accept signatures from the institution's T3
-   * SDK API key (which authenticated with one address while the
-   * T3 server returned a tenant DID with a different embedded
-   * address). That dual-use path is the C1 fix — the T3N bearer
-   * API key is no longer used as the tenant signing key. The
-   * parameter is retained as a defense-in-depth measure.
-   */
-  additionalTrustedSignerAddresses?: ReadonlySet<string>;
 }
 
 export type AgentDelegationRejectionReason =
@@ -155,12 +131,6 @@ export class GhostbrokerDelegationAgentAuthClient
       requestedAction: request.requestedAction,
       ...(request.revokedAuthorityRefs !== undefined
         ? { revokedAuthorityRefs: request.revokedAuthorityRefs }
-        : {}),
-      ...(request.additionalTrustedSignerAddresses !== undefined
-        ? {
-            additionalTrustedSignerAddresses:
-              request.additionalTrustedSignerAddresses,
-          }
         : {}),
     };
 

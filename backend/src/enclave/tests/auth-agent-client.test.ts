@@ -12,16 +12,13 @@ import { loadOrCreateTenantIdentity } from "../sandbox/tenant-identity-store.js"
  * cryptographically verifies every VC with the T3 SDK's
  * `verifyVc` (which uses the standard EIP-191 personal_sign
  * over `keccak256(JSON.stringify(body))`). There is no
- * `sandbox` demo surface and no `T3_MODE` env var to opt into
- * a structural-only check.
+ * `sandbox` demo surface, no `T3_MODE` env var to opt into
+ * a structural-only check, and no multi-signer fallback.
  *
  * For production-style VCs, the SDK path succeeds directly:
  * the signer derives the issuer DID from its keypair's address
  * as `did:ethr:0x<keypair>` so the SDK's `verifyEcdsaVcSig`
- * can match the issuer against the recovered signer. The
- * multi-signer fallback is a safety net for the dev flow
- * (where a hand-crafted VC uses a `did:t3n:` issuer that the
- * SDK rejects as `Unsupported DID method: t3n`); see
+ * matches the issuer against the recovered signer. See
  * `agent-auth-sdk-integration.test.ts` for the SDK contract.
  *
  * Tests that exercise a pre-crypto rejection (malformed /
@@ -35,9 +32,9 @@ const PLACEHOLDER_PROOF_JWS = "0x" + "ab".repeat(64) + "1b";
  * pre-crypto-rejection tests (malformed / expired / wrong
  * scope). The T3 SDK's `verifyEcdsaVcSig` only knows
  * `did:ethr:` and throws `Unsupported DID method: t3n` on
- * this VC, so the verifier's multi-signer fallback path runs.
- * Because the placeholder JWS does not actually verify, the
- * fallback rejects the VC with `unverified`.
+ * this VC, so the verifier fails closed with reason
+ * `unverified`. Because the placeholder JWS does not actually
+ * verify, the SDK call would also fail on its own merits.
  */
 const placeholderJwsVc = {
   id: "urn:uuid:ghostbroker-delegation-test",
@@ -155,9 +152,9 @@ describe("T3 agent delegation adapter (production-style round-trip)", () => {
     // returns isValid:true. The verifier reports
     // verificationMode: "live".
     //
-    // The test pins the end-to-end SDK round-trip: the agent
-    // does NOT need to pass `additionalTrustedSignerAddresses`
-    // because the SDK can verify the credential directly.
+    // The test pins the end-to-end SDK round-trip: the SDK
+    // matches the issuer against the recovered signer
+    // directly (signer == issuer).
     const tmp = mkdtempSync(join(tmpdir(), "ghostbroker-sdk-roundtrip-"));
     try {
       const identity = loadOrCreateTenantIdentity({

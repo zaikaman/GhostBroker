@@ -194,8 +194,9 @@ export interface TenantIdentity {
    * SDK's `verifyEcdsaVcSig` accepts this format and matches
    * the issuer's embedded address against the recovered
    * signer; a `did:t3n:0x<addr>` issuer would make the SDK
-   * throw `Unsupported DID method: t3n` and force the
-   * verifier to use the multi-signer fallback path.
+   * throw `Unsupported DID method: t3n` and the verifier
+   * would fail closed with reason `unverified` (no multi-
+   * signer fallback path).
    */
   did: string;
   publicKey: string;
@@ -231,14 +232,14 @@ function addressFromPrivateKey(privateKey: `0x${string}`): string {
  * address derived from the private key's uncompressed public
  * key (keccak256 of the X||Y bytes, last 20 bytes), normalized
  * to the EIP-55 checksum-cased form. This is the format the T3
- * SDK's `verifyEcdsaVcSig` accepts; `did:t3n:0x<addr>` would
- * throw `Unsupported DID method: t3n` and force the verifier to
- * use the multi-signer fallback.
+ * SDK's `verifyEcdsaVcSig` accepts; a `did:t3n:0x<addr>` issuer
+ * would make the SDK throw `Unsupported DID method: t3n` and
+ * the verifier would fail closed.
  *
  * The same address is produced by `addressFromPrivateKey` —
  * the VC's issuer DID and the signer-derived address are
  * always equal so the SDK can match the issuer against the
- * recovered signer without a multi-signer fallback.
+ * recovered signer directly (the SDK is the only crypto path).
  *
  * The EIP-55 casing matters: `verifyEcdsaVcSig` compares
  * `getWalletAddress(issuer) === recoveredAddress` with a
