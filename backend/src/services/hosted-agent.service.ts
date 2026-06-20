@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { issueOperatorSessionToken } from "../auth/session-token.js";
 import { PublicError } from "../errors/public-error.js";
 import {
@@ -426,6 +427,24 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     return Math.max(sessionWindowMs, HOSTED_SESSION_MINIMUM_SECONDS * 1000);
   }
 
+  /**
+   * Whether the hosted agent's `loadDotEnv()` will find a `.env` file
+   * at the spawn cwd (i.e. `<agentsDir>/.env`). When this returns true
+   * the local file is treated as the canonical source of LLM
+   * credentials and `spawnHostedAgent` strips stale parent env before
+   * the child starts. When false — Heroku and any other deployment
+   * where the slug has no .env — the parent's LLM env (config vars)
+   * is the only source and must be allowed to pass through.
+   *
+   * Note: `loadDotEnv` also checks a second candidate
+   * (`<source>/src/cli/.env`) for direct `tsx` invocations. That
+   * fallback is irrelevant to the spawn path we control here, so we
+   * only mirror the primary cwd candidate.
+   */
+  private hasLocalAgentEnv(): boolean {
+    return existsSync(join(this.agentsDir, ".env"));
+  }
+
   private spawnHostedAgent(
     runtime: {
       agentDid: string;
@@ -441,6 +460,16 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
     },
   ): ChildProcess {
     const isScriptMode = this.hostedScript !== undefined;
+    // The agent's loadDotEnv() reads .env from process.cwd() (which
+    // equals agentsDir at spawn time) before the parent's env vars.
+    // When a local .env exists, treat IT as the canonical source of
+    // LLM credentials — strip any stale parent env first so the
+    // agent never silently inherits a wrong base URL from the
+    // backend's shell. When no local .env exists (e.g. on Heroku,
+    // where the slug has no .env files and config vars are the only
+    // source), inherit LLM env from the parent so `heroku config:set
+    // GEMINI_API_KEY=...` actually reaches the spawned agent.
+    const hasLocalEnv = this.hasLocalAgentEnv();
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       GHOSTBROKER_URL: this.backendUrl,
@@ -455,27 +484,27 @@ export class ChildProcessHostedAgentService implements HostedAgentManagementServ
       POLL_INTERVAL_MS: String(runtime.config.pollIntervalMs),
       MAX_TICKS: String(runtime.config.maxTicks),
       DRY_RUN: runtime.config.dryRun ? "true" : "false",
-      // LLM provider credentials are deliberately NOT forwarded from
-      // the backend's environment. The hosted agent reads them from
-      // agents/.env via loadDotEnv(). This ensures a fresh dev setup
-      // works without needing to set these vars in the backend's shell
-      // or worry about stale backend env vars overriding the agent's
-      // .env (which is the canonical source for agent LLM keys).
-      // We also clear any *_BASE_URL the backend may have set so the
-      // hosted agent can never silently inherit a stale third-party
-      // proxy — agents MUST ship an explicit *_BASE_URL in their own
-      // .env (the agent env loader treats .env values as defaults that
-      // do not override anything already set; clearing them here
-      // forces a fresh read from agents/.env on every spawn).
-      GEMINI_API_KEY: undefined,
-      GEMINI_MODEL: undefined,
-      GEMINI_BASE_URL: undefined,
-      OPENAI_API_KEY: undefined,
-      OPENAI_MODEL: undefined,
-      OPENAI_BASE_URL: undefined,
-      GROQ_API_KEY: undefined,
-      GROQ_MODEL: undefined,
-      GROQ_BASE_URL: undefined,
+      ...(hasLocalEnv
+        ? {
+            // Strip LLM provider credentials + base URLs from the
+            // parent so the spawned agent re-reads them from the
+            // canonical local .env (loadDotEnv only fills vars
+            // that are undefined in process.env).
+            GEMINI_API_KEY: undefined,
+            GEMINI_MODEL: undefined,
+            GEMINI_BASE_URL: undefined,
+            OPENAI_API_KEY: undefined,
+            OPENAI_MODEL: undefined,
+            OPENAI_BASE_URL: undefined,
+            GROQ_API_KEY: undefined,
+            GROQ_MODEL: undefined,
+            GROQ_BASE_URL: undefined,
+          }
+        : {
+            // No local .env — the parent's LLM env (typically
+            // Heroku config vars) is the only source. Pass them
+            // through unchanged.
+          }),
     };
     const isWin = process.platform === "win32";
     const shell = isWin && this.runner[0] === "npm";
