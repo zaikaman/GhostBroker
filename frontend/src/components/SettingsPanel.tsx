@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { apiClient, type Agent, type Institution } from '../services/api-client';
+import { useState, useEffect, useCallback } from 'react';
+import { apiClient, type Agent, type Institution, type EnclaveIdentity } from '../services/api-client';
 import {
   Robot01Icon,
   CheckmarkCircle01Icon,
@@ -10,8 +10,8 @@ import {
   Key01Icon,
   Refresh01Icon,
   Shield01Icon,
+  Cancel01Icon,
 } from 'hugeicons-react';
-import { EnclaveHealthMonitor } from './EnclaveHealthMonitor';
 import { PortfolioCard } from './PortfolioCard';
 import { SettlementProfileCard } from './SettlementProfileCard';
 import { Pagination } from './Pagination';
@@ -45,6 +45,86 @@ interface SettingsPanelProps {
   };
 }
 
+interface DetailRowProps {
+  label: string;
+  value: string | null;
+  isLoading?: boolean;
+  isLoadingLabel?: string;
+  accent?: string;
+  testId?: string;
+}
+
+function DetailRow({
+  label,
+  value,
+  isLoading = false,
+  isLoadingLabel,
+  accent,
+  testId,
+}: DetailRowProps): React.JSX.Element {
+  return (
+    <div
+      data-testid={testId}
+      style={{
+        background: 'var(--color-input-bg)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-sm)',
+        padding: 'var(--spacing-sm)',
+      }}
+    >
+      <div
+        style={{
+          color: 'var(--color-text-muted)',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '0.6rem',
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </div>
+      {isLoading ? (
+        <div style={{ marginTop: '4px' }}>
+          <Skeleton variant="text" />
+          {isLoadingLabel && (
+            <div
+              style={{
+                marginTop: '2px',
+                fontSize: '0.6rem',
+                color: 'var(--color-text-muted)',
+                fontStyle: 'italic',
+              }}
+            >
+              {isLoadingLabel}
+            </div>
+          )}
+        </div>
+      ) : value === null || value === '' ? (
+        <div
+          style={{
+            marginTop: '2px',
+            color: 'var(--color-text-muted)',
+            fontStyle: 'italic',
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          Not configured
+        </div>
+      ) : (
+        <div
+          style={{
+            color: accent ?? 'var(--color-text-primary)',
+            wordBreak: 'break-all',
+            fontFamily: 'var(--font-mono)',
+            marginTop: '2px',
+          }}
+        >
+          {value}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Element {
   const [activeSubTab, setActiveSubTab] = useState<'mandates' | 'keys' | 'connections' | 'settlement'>('mandates');
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -69,6 +149,11 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   // Pagination State for Mandates
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
+
+  // Enclave identity (lazy-loaded when the Connections tab opens)
+  const [enclaveIdentity, setEnclaveIdentity] = useState<EnclaveIdentity | null>(null);
+  const [isEnclaveLoading, setIsEnclaveLoading] = useState(false);
+  const [enclaveError, setEnclaveError] = useState<string | null>(null);
 
   const loadAgents = useCallback(async () => {
     setIsAgentsLoading(true);
@@ -96,6 +181,19 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
     }
   }, [session.institution.id]);
 
+  const loadEnclaveIdentity = useCallback(async () => {
+    setIsEnclaveLoading(true);
+    setEnclaveError(null);
+    try {
+      const data = await apiClient.getEnclaveIdentity();
+      setEnclaveIdentity(data);
+    } catch (err) {
+      setEnclaveError(err instanceof Error ? err.message : 'Failed to load enclave identity.');
+    } finally {
+      setIsEnclaveLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
 
@@ -110,6 +208,17 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
 
     return () => { active = false; };
   }, [loadAgents, loadInstitution]);
+
+  useEffect(() => {
+    if (activeSubTab !== 'connections' || enclaveIdentity !== null || isEnclaveLoading) {
+      return;
+    }
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void loadEnclaveIdentity();
+    });
+    return () => { active = false; };
+  }, [activeSubTab, enclaveIdentity, isEnclaveLoading, loadEnclaveIdentity]);
 
   const handleRevoke = async (id: string, label: string) => {
     if (!window.confirm(`Are you sure you want to suspend agent "${label || id}"? All active intents from this agent will be cancelled immediately.`)) {
@@ -549,48 +658,95 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                 <Shield01Icon size={18} style={{ color: 'var(--color-accent)' }} /> Enclave Connection & Health
               </h2>
               <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-                Real-time connection details, Intel SGX hardware health status, and attestation digests.
+                Real-time connection details and attestation digests for this operator session.
               </p>
             </div>
-            
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 'var(--spacing-lg)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                <EnclaveHealthMonitor />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                <h3 style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
-                  Secure Connection Details
-                </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)', fontSize: '0.7rem' }}>
-                  <div style={{ background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--spacing-sm)' }}>
-                    <div style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.6rem', textTransform: 'uppercase' }}>Enclave DID</div>
-                    <div style={{ color: 'var(--color-accent)', wordBreak: 'break-all', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                      {session.institution.t3TenantDid}
-                    </div>
-                  </div>
 
-                  <div style={{ background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--spacing-sm)' }}>
-                    <div style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.6rem', textTransform: 'uppercase' }}>Intel SGX Measurement (MRENCLAVE)</div>
-                    <div style={{ color: 'var(--color-text-primary)', wordBreak: 'break-all', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                      b38c20d7f2a33fbcde029bbdf20182cc783d8ffba02e3810f384aee0028a38c2
-                    </div>
-                  </div>
-
-                  <div style={{ background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--spacing-sm)' }}>
-                    <div style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.6rem', textTransform: 'uppercase' }}>Attestation Signer (MRSIGNER)</div>
-                    <div style={{ color: 'var(--color-text-primary)', wordBreak: 'break-all', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                      fa038d103ecda7b38cdae381029cba8374d83ee01aeeab382cd029bbdf83d2cc
-                    </div>
-                  </div>
-
-                  <div style={{ background: 'var(--color-input-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: 'var(--spacing-sm)' }}>
-                    <div style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.6rem', textTransform: 'uppercase' }}>Sandbox Matching Contract Address</div>
-                    <div style={{ color: 'var(--color-text-primary)', wordBreak: 'break-all', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                      0x8c783D8FFba02e3810F384aEE0028a38C2d7f2A3
-                    </div>
-                  </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+              <h3 style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                Secure Connection Details
+              </h3>
+              {enclaveError && (
+                <div
+                  role="alert"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: 'var(--spacing-sm)',
+                    color: 'var(--color-text-secondary)',
+                    fontSize: '0.75rem',
+                  }}
+                >
+                  <AlertCircleIcon size={12} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                  {enclaveError}
                 </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)', fontSize: '0.7rem' }}>
+                <DetailRow
+                  label="Tenant DID"
+                  value={session.institution.t3TenantDid}
+                  accent="var(--color-accent)"
+                  testId="enclave-tenant-did"
+                />
+                <DetailRow
+                  label="VC Issuer DID"
+                  value={enclaveIdentity?.tenantIssuerDid ?? null}
+                  isLoading={isEnclaveLoading}
+                  isLoadingLabel="Resolving from TENANT_SIGNING_PRIVATE_KEY"
+                  testId="enclave-issuer-did"
+                />
+                <DetailRow
+                  label="Tenant Signing Address"
+                  value={enclaveIdentity?.tenantSigningAddress ?? null}
+                  isLoading={isEnclaveLoading}
+                  testId="enclave-signing-address"
+                />
+                <DetailRow
+                  label="Matching Contract"
+                  value={
+                    enclaveIdentity?.publishedMatchingContract
+                      ? `v${enclaveIdentity.publishedMatchingContract.contractVersion} · ${enclaveIdentity.publishedMatchingContract.wasmSize.toLocaleString()} bytes · published ${new Date(enclaveIdentity.publishedMatchingContract.publishedAt).toLocaleString()}`
+                      : enclaveIdentity
+                        ? enclaveIdentity.matchingContractId
+                          ? `${enclaveIdentity.matchingContractId} @ v${enclaveIdentity.matchingContractVersion} (env-declared; no publish record)`
+                          : `not published (default v${enclaveIdentity.matchingContractVersion}; run scripts/publish-matching.ts)`
+                        : null
+                  }
+                  {...(enclaveIdentity?.publishedMatchingContract
+                    ? { accent: 'var(--color-accent)' }
+                    : {})}
+                  isLoading={isEnclaveLoading}
+                  testId="enclave-matching-contract"
+                />
+                <DetailRow
+                  label="T3 Network"
+                  value={enclaveIdentity?.t3NetworkEnv ?? null}
+                  isLoading={isEnclaveLoading}
+                  testId="enclave-network-env"
+                />
+                <DetailRow
+                  label="Attestation Handle Prefix"
+                  value={enclaveIdentity?.attestationHandlePrefix ?? null}
+                  isLoading={isEnclaveLoading}
+                  testId="enclave-attestation-prefix"
+                />
               </div>
+              <p
+                style={{
+                  margin: 'var(--spacing-xs) 0 0 0',
+                  fontSize: '0.7rem',
+                  color: 'var(--color-text-muted)',
+                  lineHeight: 1.5,
+                }}
+              >
+                Tenant VC issuer DID is the <code>did:ethr:0x&hellip;</code> address derived from
+                the configured <code>TENANT_SIGNING_PRIVATE_KEY</code>. The T3 SDK's
+                <code> verifyEcdsaVcSig </code>
+                matches this against the signer recovered from each delegation VC's
+                <code> EcdsaSecp256k1Signature2019 </code>
+                proof; a mismatch fails closed (see <code>terminal3-adk-onboarding-doc-gaps.md</code> T3-ONB-019).
+              </p>
             </div>
           </div>
         )}
@@ -655,10 +811,11 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
               <button
                 type="button"
                 className="btn-grid-header-deploy"
-                style={{ padding: '2px 6px' }}
+                style={{ padding: '2px 6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                 onClick={() => setEditingAgent(null)}
+                aria-label="Close"
               >
-                âœ•
+                <Cancel01Icon size={14} />
               </button>
             </div>
             

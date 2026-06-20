@@ -3,6 +3,25 @@ export interface HealthResponse {
   services: Record<string, 'ok' | 'degraded' | 'unavailable'>;
 }
 
+export interface EnclaveIdentity {
+  t3NetworkEnv: 'testnet' | 'production';
+  t3TenantDid: string | null;
+  matchingContractId: string | null;
+  matchingContractVersion: string;
+  tenantSigningAddress: string | null;
+  tenantIssuerDid: string | null;
+  attestationHandlePrefix: 't3attest:';
+  publishedMatchingContract: {
+    tail: 'matching';
+    contractVersion: string;
+    publishedAt: string;
+    tenantDid: string;
+    networkEnv: 'testnet' | 'production';
+    wasmSize: number;
+    handle?: string;
+  } | null;
+}
+
 export interface CreateInstitutionRequest {
   legalName: string;
   displayName: string;
@@ -557,6 +576,13 @@ export const apiClient = {
       headers: { Accept: 'application/json' },
     });
     return handleResponse<HealthResponse>(res);
+  },
+
+  async getEnclaveIdentity(): Promise<EnclaveIdentity> {
+    const res = await fetch(`${API_BASE_URL}/api/health/enclave`, {
+      headers: { Accept: 'application/json' },
+    });
+    return handleResponse<EnclaveIdentity>(res);
   },
 
   async createInstitution(req: CreateInstitutionRequest): Promise<Institution> {

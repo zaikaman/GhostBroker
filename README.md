@@ -181,8 +181,6 @@ ghostbroker/
 | Layer              | Technology                                      |
 | ------------------ | ----------------------------------------------- |
 | Framework          | React 19.2, Vite 8.0                            |
-| 3D Rendering       | Three.js 0.184 (SecureCore3D enclave viz)       |
-| Video Streaming    | hls.js 1.6 (attested enclave canvas)            |
 | Icons              | hugeicons-react 0.4, lucide-react 1.18          |
 | Testing            | Vitest 4.1, Testing Library, Playwright 1.60    |
 | Typography         | Cinzel (display), Plus Jakarta Sans (body),     |
@@ -686,17 +684,17 @@ The interface follows the "Attested Enclave" design language documented in
 - **Components**: Glassmorphic cards with `backdrop-filter: blur(12px)`,
   double-mask composited borders, pill-shaped buttons.
 
-### Component Inventory (25 components)
+### Component Inventory (23 components)
 
 | Component                    | Purpose                                    |
 | ---------------------------- | ------------------------------------------ |
-| `LandingPage`                | HUD-style entry with SecureCore3D enclave visualization |
+| `LandingPage`                | HUD-style entry with streaming background video |
 | `AuthGateway`                | DID challenge-response wallet authentication |
 | `AgentsPanel`                | Agent status monitoring and management      |
 | `AgentConnectionGrid`        | Per-agent connectivity status grid          |
 | `AgentDeploymentGuide`       | Interactive 8-step agent deployment walkthrough |
 | `AgentProvisioningForm`      | Agent creation and configuration            |
-| `AgentLogEntry`              | Individual agent activity log entries       |
+| `AgentLogEntry`              | Individual agent activity log entries        |
 | `MandateConfigForm`          | Negotiation mandate policy editor           |
 | `NegotiationRoomPanel`       | Live negotiation session monitoring         |
 | `TeeNegotiationVisualizer`   | Real-time TEE negotiation pipeline visualization |
@@ -707,9 +705,7 @@ The interface follows the "Attested Enclave" design language documented in
 | `PortfolioHistory`           | Historical balance changes and movements    |
 | `SettlementProfileCard`      | Settlement rail configuration display       |
 | `DepositWalletOverviewCard`  | Chain deposit wallet status and balances    |
-| `EnclaveHealthMonitor`       | TEE health and connectivity dashboard       |
 | `ProcessingStatusRail`       | Multi-phase processing status indicator     |
-| `SecureCore3D`               | Three.js 3D enclave visualization           |
 | `SecureMetric`               | Single secure metric display                |
 | `SettingsPanel`              | Operator settings and configuration         |
 | `DisclosureTimeline`         | Negotiation disclosure history timeline     |
@@ -889,6 +885,13 @@ The backend exposes 13 route modules listed below.
 - A Terminal 3 developer key (claim at https://www.terminal3.io/claim-page)
 - A Supabase project (free tier is sufficient for development)
 - At least one LLM provider API key (Gemini, OpenAI, or Groq)
+- **Sepolia testnet setup for the settlement rail** (REQUIRED — the backend
+  refuses to boot without a deployed `GhostBrokerSettlementRelayer`):
+  - A Sepolia RPC endpoint URL (free tier: Infura, Alchemy, or any public RPC)
+  - A relayer Ethereum account funded with ~0.05 Sepolia ETH for gas
+    (faucet: https://sepoliafaucet.com or https://cloud.google.com/application/web3/faucet/ethereum/sepolia)
+  - Foundry (`curl -L https://foundry.paradigm.xyz | bash`) for compiling
+    and deploying the relayer contract
 
 ### Installation
 
@@ -911,15 +914,31 @@ workspaces plus all shared dependencies.
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 
-# 2. Fill in backend/.env with your credentials (see Environment Configuration)
+# 2. Fill in the non-Sepolia half of backend/.env (see Environment
+#    Configuration). At minimum you need:
+#      AUTH_SESSION_SECRET        (32+ char hex; see line 16 of .env.example)
+#      SUPABASE_URL + SERVICE_ROLE_KEY
+#      T3N_API_KEY                (from the Terminal 3 claim page)
+#      GEMINI_API_KEY + GEMINI_BASE_URL (or OpenAI/Groq equivalents)
+#    Leave every SETTLEMENT_RAIL_CHAIN_SEPOLIA_* variable empty for now.
 
-# 3. Start the backend API server
+# 3. (REQUIRED) Bring up the Sepolia settlement rail.
+#    GhostBroker ships a single rail (`chain:sepolia:erc20`) and refuses
+#    to boot without it. See "Settlement Rail Setup" below for the full
+#    walkthrough; the condensed version:
+cd backend/contracts/relayer
+forge build                       # compile the relayer
+node deploy.mjs                   # prints RELAYER_CONTRACT_ADDRESS
+cd ../../..
+# ...paste the printed addresses into backend/.env ...
+
+# 4. Start the backend API server
 npm run dev:backend
 
-# 4. In a separate terminal, start the frontend dev server
+# 5. In a separate terminal, start the frontend dev server
 npm run dev:frontend
 
-# 5. Open http://localhost:5173 in your browser
+# 6. Open http://localhost:5173 in your browser
 ```
 
 ---
@@ -963,18 +982,123 @@ Azure OpenAI, Groq Cloud, or a sanctioned self-hosted proxy). Missing
 | `GROQ_MODEL`         | Groq model (default: `qwen/qwen3-32b`)                |
 | `GROQ_BASE_URL`      | Required when `GROQ_API_KEY` is set (e.g. `https://api.groq.com/openai/v1`) |
 
-### Chain Rail Variables (opt-in)
+### Settlement Rail Setup (REQUIRED — Sepolia ERC-20)
 
-| Variable                                             | Description           |
-| ---------------------------------------------------- | --------------------- |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL`              | Sepolia RPC endpoint  |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`   | Relayer signing key   |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` | Deployed relayer   |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED`  | HMAC deposit seed     |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID`             | Chain ID (default: 11155111) |
+GhostBroker ships a single settlement rail (`chain:sepolia:erc20`). The
+backend refuses to boot without it (`backend/src/app.ts:347-360` throws
+hard if any of the three `SETTLEMENT_RAIL_CHAIN_SEPOLIA_*` env vars is
+missing). This section walks through the full one-time setup.
 
-The chain rail is fully opt-in: omitting any of the first three variables
-disables on-chain settlement without breaking existing flows.
+#### Step 1 — Fund a relayer account
+
+Pick any Ethereum account that will hold the relayer key. The relayer
+broadcasts the atomic `settle(...)` call on Sepolia, so it must hold
+gas. Fund it with at least 0.05 Sepolia ETH from any standard faucet:
+
+- https://sepoliafaucet.com
+- https://cloud.google.com/application/web3/faucet/ethereum/sepolia
+- https://www.alchemy.com/faucets/ethereum-sepolia
+
+Export the private key as a `0x`-prefixed 64-hex string and set it as:
+
+```sh
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY=0x...
+```
+
+#### Step 2 — Get a Sepolia RPC URL
+
+Free tier from any provider works:
+
+- Infura: https://infura.io (Sepolia endpoint URL)
+- Alchemy: https://www.alchemy.com (Sepolia endpoint URL)
+- Public: https://rpc.sepolia.org
+- Public: https://ethereum-sepolia-rpc.publicnode.com
+
+```sh
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/<your-key>
+```
+
+#### Step 3 — Compile and deploy the relayer contract
+
+```sh
+cd backend/contracts/relayer
+forge build                        # ~10 seconds; writes out/
+node deploy.mjs                    # reads RPC_URL + RELAYER_PRIVATE_KEY from backend/.env
+```
+
+`deploy.mjs` prints:
+
+```
+Contract deployed!
+Address: 0x<your-relayer-contract-address>
+Block:   <n>
+
+Add this to your backend/.env:
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS=0x<your-relayer-contract-address>
+```
+
+Paste the printed address into `backend/.env`. Go back to the repo root
+(`cd ../../..`).
+
+#### Step 4 — Fill in the remaining chain rail variables
+
+```sh
+# HMAC seed used to deterministically derive each institution's
+# server-owned deposit wallet. Use any 32-byte hex; rotate only at
+# great cost (every institution's deposit address changes).
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED=0x<64-hex>
+
+# Canonical ERC-20 token addresses on Sepolia used by the chain rail
+# and the funding / withdrawal flows. The defaults in backend/.env.example
+# point at the standard Sepolia WBTC and USDC test tokens; override only
+# if you fork your own.
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS=0x29f2D40B0605204364af54EC677bD022dA425d03
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS=0x94a9D9AC8a22534E3FaCa9F4e7F2E2cf85d5E4C8
+
+# Optional tuning — defaults shown
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID=11155111
+SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC=90
+
+# Production-only: T3 secret-ref for the TEE-attested relayer signer.
+# Leave unset for the demo; the env-var signer is used.
+# SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF=t3_secret:...
+```
+
+#### Step 5 — Verify
+
+```sh
+# Backend should now boot without throwing
+npm run dev:backend
+# Expected: "settlement-rail: chain:sepolia:erc20 registered"
+
+# Smoke-test the relayer
+curl -s http://localhost:3001/api/health | jq
+```
+
+After the backend boots, each institution's deposit wallet must
+`approve(relayer, MAX)` for both WBTC and USDC before any settlement
+can execute. The frontend walks operators through this in the
+**Institutions → Approve Relayer** flow, which signs an ERC-20
+`approve(relayer, max)` from each deposit wallet. Approval is
+idempotent and may be repeated.
+
+### Chain Rail Variables
+
+| Variable                                             | Required | Description           |
+| ---------------------------------------------------- | -------- | --------------------- |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL`              | YES      | Sepolia RPC endpoint  |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY`   | YES      | Relayer signing key (funded with Sepolia ETH for gas) |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` | YES   | Deployed relayer (Step 3) |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED`  | YES      | HMAC deposit seed (64-hex) |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS`         | YES      | Sepolia WBTC ERC-20 address |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS`         | YES      | Sepolia USDC ERC-20 address |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID`             | no       | Chain ID (default 11155111) |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC`  | no       | Tx confirmation timeout (default 90s) |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF`       | no       | Production T3 secret-ref for TEE-attested signer |
+
+For a sandbox / unit-test run that does not exercise the rail, see the
+`SettlementRailChainSepolia.test.ts` integration test which deploys
+against a local Anvil node behind `WS2_ANVIL_INTEGRATION=1`.
 
 ---
 

@@ -45,6 +45,11 @@ import {
   setEnvironment,
   setNodeUrl,
 } from "@terminal3/t3n-sdk";
+import {
+  SupabasePublishedContractRepository,
+  type PublishedMatchingContractRecord,
+} from "../src/services/published-contract.repository.js";
+import { createSupabaseServiceClient } from "../src/services/supabase-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
@@ -203,12 +208,27 @@ async function main(): Promise<void> {
     if (result !== undefined && result !== null) {
       console.log(`  Result: ${JSON.stringify(result)}`);
     }
+    const handle = extractPublishHandle(result);
+    const record = await persistPublishedRecord({
+      tenantDid,
+      networkEnv: networkEnv as "testnet" | "production",
+      contractVersion: version,
+      wasmSize: wasm.length,
+      ...(handle ? { handle } : {}),
+    });
+    console.log();
+    console.log("── Persisted publish record ──");
+    console.log(`  Table: public.published_contracts`);
+    console.log(`  ${JSON.stringify(record)}`);
     console.log();
     console.log("── Next steps ──");
     console.log(`  The orchestrator will now find contracts at`);
     console.log(`  /contracts/${tail}/blind-intents, /contracts/${tail}/evaluate,`);
     console.log(`  /contracts/negotiation/tickets, and /contracts/negotiation/pairs`);
     console.log(`  and stop returning "matching not registered" on submit.`);
+    console.log(
+      `  The Settings → Enclave Connection panel now reflects the live publish.`,
+    );
     console.log(
       `  Restart the backend (npm run dev) so the new T3 contract cache takes effect.`,
     );
@@ -223,9 +243,17 @@ async function main(): Promise<void> {
         message,
       )
     ) {
+      const record = await persistPublishedRecord({
+        tenantDid,
+        networkEnv: networkEnv as "testnet" | "production",
+        contractVersion: version,
+        wasmSize: wasm.length,
+      });
       console.log(
         `✓ Contract "${tail}" v${version} already registered on tenant.`,
       );
+      console.log(`  Recorded publish to public.published_contracts`);
+      console.log(`  ${JSON.stringify(record)}`);
       console.log(
         "  (Re-run with T3_MATCHING_CONTRACT_VERSION bumped to publish a new version.)",
       );
@@ -234,6 +262,72 @@ async function main(): Promise<void> {
     console.error(`✗ Publish FAILED: ${message}`);
     process.exit(2);
   }
+}
+
+async function persistPublishedRecord(input: {
+  tenantDid: string;
+  networkEnv: "testnet" | "production";
+  contractVersion: string;
+  wasmSize: number;
+  handle?: string;
+}): Promise<PublishedMatchingContractRecord> {
+  const env = loadBackendEnv(BACKEND_ENV_PATH);
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in backend/.env " +
+        "so publish-matching can record the result in the published_contracts table.",
+    );
+  }
+  const supabase = createSupabaseServiceClient({
+    SUPABASE_URL: supabaseUrl,
+    SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+  });
+  const repository = new SupabasePublishedContractRepository(
+    supabase as never,
+  );
+  const record: PublishedMatchingContractRecord = {
+    tail: "matching",
+    contractVersion: input.contractVersion,
+    publishedAt: new Date().toISOString(),
+    tenantDid: input.tenantDid,
+    networkEnv: input.networkEnv,
+    wasmSize: input.wasmSize,
+    ...(input.handle ? { handle: input.handle } : {}),
+  };
+  await repository.upsertMatching(record);
+  return record;
+}
+
+/**
+ * Best-effort extraction of a string handle from the T3N publish result.
+ * The SDK's return shape is not strictly typed in the public docs; we
+ * probe the common fields. If none match, we persist without a handle
+ * (the orchestrator resolves contracts by `tail` + `version`, not by
+ * handle — the handle is informational for the Settings panel).
+ */
+function extractPublishHandle(result: unknown): string | undefined {
+  if (typeof result === "string" && result.length > 0) {
+    return result;
+  }
+  if (typeof result === "object" && result !== null) {
+    const candidate = result as Record<string, unknown>;
+    for (const key of ["handle", "id", "contractId", "contract_id"]) {
+      const value = candidate[key];
+      if (typeof value === "string" && value.length > 0) {
+        return value;
+      }
+    }
+    const nested = candidate["contract"];
+    if (typeof nested === "object" && nested !== null) {
+      const id = (nested as Record<string, unknown>)["id"];
+      if (typeof id === "string" && id.length > 0) {
+        return id;
+      }
+    }
+  }
+  return undefined;
 }
 
 main().catch((err: unknown) => {

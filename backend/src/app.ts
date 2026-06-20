@@ -108,12 +108,14 @@ import {
   T3NegotiationRoundEvaluator,
   T3NegotiationTicketClient,
   createAuthenticatedT3NetworkClient,
-  loadOrCreateTenantIdentity,
+  loadOrCreateTenantIdentityFromRepository,
   readT3EnclaveConfig,
   runStartupCheck,
   T3EnclaveConfigError,
   type AuthenticatedT3NetworkClientOptions,
 } from "./enclave/index.js";
+import { SupabasePublishedContractRepository, type PublishedContractRepository } from "./services/published-contract.repository.js";
+import { SupabaseTenantIdentityRepository } from "./services/tenant-identity.repository.js";
 
 function createCorsMiddleware(env: BackendEnv): RequestHandler {
   const allowedOrigins = getCorsAllowedOrigins(env);
@@ -180,6 +182,17 @@ export interface BackendServices {
    * need to share a closure with `createDefaultServices`.
    */
   railDispatcher?: SettlementRailDispatcher;
+  /**
+   * Supabase-backed repository of every matching TEE contract the
+   * backend has successfully published to the T3N tenant. The
+   * Settings → Enclave Connection panel reads this so operators
+   * see ground truth about what is actually registered, rather
+   * than relying on env vars alone. Survives Heroku dyno restarts.
+   * Optional so test compositions can omit it; the enclave
+   * identity endpoint falls back to an empty repository that
+   * always reports `publishedMatchingContract: null`.
+   */
+  publishedContractRepository?: PublishedContractRepository;
   tradeHistoryService?: TradeHistoryService;
   receiptService?: ReceiptService;
   authService?: AuthSessionService;
@@ -249,6 +262,12 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   const institutionRepository = new SupabaseInstitutionRepository(
     supabase as never,
   );
+  const tenantIdentityRepository = new SupabaseTenantIdentityRepository(
+    supabase as never,
+  );
+  const publishedContractRepository = new SupabasePublishedContractRepository(
+    supabase as never,
+  );
   const depositWalletService =
     env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED
       ? new HmacDepositWalletService(
@@ -292,11 +311,14 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   //      boot. The same key is reused across restarts; existing
   //      VCs stay valid.
   //
-  //   2. File-backed identity store (dev / test fallback):
-  //      `loadOrCreateTenantIdentity` reads the on-disk
-  //      keypair from `output/identities/tenant_identity.json`,
-  //      creating a fresh CSPRNG-generated keypair on first
-  //      boot and reusing it on subsequent boots.
+  //   2. Supabase `tenant_identities` row (Heroku-safe dev /
+  //      production fallback): the keypair persists in the
+  //      `tenant_identities` table so Heroku dyno restarts do
+  //      NOT regenerate the keypair and silently invalidate
+  //      every previously issued delegation VC. This replaces
+  //      the previous `output/identities/tenant_identity.json`
+  //      file-based store, which was wiped on every Heroku
+  //      dyno cycle.
   //
   // The resulting keypair's derived address is the canonical
   // VC issuer DID (`did:ethr:0x<address>`). Server-minted VCs
@@ -304,12 +326,15 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // matches the issuer against the recovered signer and
   // returns `isValid: true` directly. There is no manual
   // fallback path — the verifier is SDK-only.
-  const tenantIdentity = loadOrCreateTenantIdentity({
-    tenantDid: t3NetworkClient.tenantDidValue,
-    ...(env.TENANT_SIGNING_PRIVATE_KEY
-      ? { signingPrivateKey: env.TENANT_SIGNING_PRIVATE_KEY }
-      : {}),
-  });
+  const tenantIdentity = await loadOrCreateTenantIdentityFromRepository(
+    tenantIdentityRepository,
+    {
+      tenantDid: t3NetworkClient.tenantDidValue,
+      ...(env.TENANT_SIGNING_PRIVATE_KEY
+        ? { signingPrivateKey: env.TENANT_SIGNING_PRIVATE_KEY }
+        : {}),
+    },
+  );
   const tenantDelegationSigner = new BackendTenantDelegationSigner(
     tenantIdentity,
   );
@@ -389,18 +414,17 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   let tenantPrivateKeyForRail: `0x${string}` | undefined;
   if (useTeeSigner) {
     // Production: the relayer's tenant key is the T3
-    // tenant identity. `loadOrCreateTenantIdentity`
-    // reads the file-backed keypair that
-    // `t3-enclave` already produces; in the
-    // production T3-tenant-TEE the same call returns
-    // a TEE-held key.
-    const { loadOrCreateTenantIdentity } = await import(
-      "./enclave/index.js"
+    // tenant identity. `loadOrCreateTenantIdentityFromRepository`
+    // reads the Supabase-backed keypair so the relayer's
+    // signer is consistent with the backend's tenant
+    // identity across Heroku dyno restarts.
+    const tenantIdentity = await loadOrCreateTenantIdentityFromRepository(
+      tenantIdentityRepository,
+      {
+        tenantDid:
+          env.T3_TENANT_DID ?? "did:t3n:tenant:default-relayer",
+      },
     );
-    const tenantIdentity = loadOrCreateTenantIdentity({
-      tenantDid:
-        env.T3_TENANT_DID ?? "did:t3n:tenant:default-relayer",
-    });
     tenantPrivateKeyForRail = tenantIdentity.privateKey as `0x${string}`;
   }
 
@@ -691,6 +715,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         : {}),
       sessionSecret: env.AUTH_SESSION_SECRET,
     }),
+    publishedContractRepository,
   };
 }
 
@@ -728,7 +753,7 @@ export function createApp(
   app.use(createCorsMiddleware(env));
   app.use(express.json({ limit: "1mb" }));
   app.use(correlationIdMiddleware());
-  app.use("/api", createHealthRouter(env));
+  app.use("/api", createHealthRouter(env, services?.publishedContractRepository));
   if (services.authService) {
     app.use("/api", createAuthRouter(services.authService));
   }

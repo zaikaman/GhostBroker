@@ -23,7 +23,6 @@ const LandingPage = React.lazy(async () => ({ default: (await import('../compone
 const AgentDeploymentGuide = React.lazy(async () => ({ default: (await import('../components/AgentDeploymentGuide')).AgentDeploymentGuide }));
 const DepositWalletOverviewCard = React.lazy(async () => ({ default: (await import('../components/DepositWalletOverviewCard')).DepositWalletOverviewCard }));
 const PortfolioHistory = React.lazy(async () => ({ default: (await import('../components/PortfolioHistory')).PortfolioHistory }));
-const EnclaveHealthMonitor = React.lazy(async () => ({ default: (await import('../components/EnclaveHealthMonitor')).EnclaveHealthMonitor }));
 const AgentsPanel = React.lazy(async () => ({ default: (await import('../components/AgentsPanel')).AgentsPanel }));
 const SettingsPanel = React.lazy(async () => ({ default: (await import('../components/SettingsPanel')).SettingsPanel }));
 const NegotiationRoomPanel = React.lazy(async () => ({ default: (await import('../components/NegotiationRoomPanel')).NegotiationRoomPanel }));
@@ -328,11 +327,6 @@ function DashboardView({
               </React.Suspense>
             </div>
             <div className="enclaves-side" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-              <div className="card enclave-health-card" style={{ display: 'flex', flexDirection: 'column' }}>
-                <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading health monitor…</div>}>
-                  <EnclaveHealthMonitor />
-                </React.Suspense>
-              </div>
               <div className="card">
                 <React.Suspense fallback={<div style={{ padding: '24px', color: 'var(--color-text-secondary)' }}>Loading connections…</div>}>
                   <AgentConnectionGrid agents={agents} onDeploy={() => handleTabChange('deploy')} />

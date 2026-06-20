@@ -232,3 +232,24 @@ CREATE TABLE public.negotiation_disclosures (
   CONSTRAINT negotiation_disclosures_pkey PRIMARY KEY (id),
   CONSTRAINT negotiation_disclosures_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.negotiation_sessions(id)
 );
+CREATE TABLE public.published_contracts (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tail text NOT NULL CHECK (tail <> ''::text),
+  contract_version text NOT NULL CHECK (contract_version <> ''::text),
+  network_env text NOT NULL CHECK (network_env = ANY (ARRAY['testnet'::text, 'production'::text])),
+  tenant_did text NOT NULL CHECK (tenant_did <> ''::text),
+  wasm_size integer NOT NULL CHECK (wasm_size > 0),
+  handle text,
+  published_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT published_contracts_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.tenant_identities (
+  tenant_did text NOT NULL CHECK (tenant_did <> ''::text),
+  signing_private_key text NOT NULL CHECK (signing_private_key ~ '^0x[0-9a-fA-F]{64}$'::text),
+  signing_public_key text NOT NULL CHECK (signing_public_key ~ '^0x[0-9a-fA-F]{66}$'::text),
+  signing_address text NOT NULL CHECK (signing_address ~ '^0x[0-9a-fA-F]{40}$'::text),
+  issuer_did text NOT NULL CHECK (issuer_did ~~ 'did:ethr:0x%'::text),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT tenant_identities_pkey PRIMARY KEY (tenant_did)
+);

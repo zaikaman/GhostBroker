@@ -4,6 +4,10 @@ import { randomBytes } from "node:crypto";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { getAddress } from "ethers";
+import type {
+  TenantIdentityRepository,
+  TenantIdentityRow,
+} from "../../services/tenant-identity.repository.js";
 
 /**
  * File-backed tenant identity store.
@@ -218,7 +222,7 @@ export interface TenantIdentity {
 /**
  * Derive the Ethereum address from a secp256k1 private key.
  */
-function addressFromPrivateKey(privateKey: `0x${string}`): string {
+export function addressFromPrivateKey(privateKey: `0x${string}`): string {
   const hex = privateKey.startsWith("0x") ? privateKey.slice(2) : privateKey;
   const keyBytes = new Uint8Array(Buffer.from(hex, "hex"));
   const pubKey = secp256k1.getPublicKey(keyBytes, false);
@@ -253,6 +257,10 @@ function addressFromPrivateKey(privateKey: `0x${string}`): string {
 function didForKeypairFromPrivateKey(privateKey: `0x${string}`): string {
   const address = addressFromPrivateKey(privateKey);
   return `did:ethr:${getAddress(address)}`;
+}
+
+export function didEthrForPrivateKey(privateKey: `0x${string}`): string {
+  return didForKeypairFromPrivateKey(privateKey);
 }
 
 /**
@@ -374,3 +382,131 @@ export function loadOrCreateTenantIdentity(
     path,
   };
 }
+
+export interface LoadOrCreateTenantIdentityFromRepositoryOptions {
+  /**
+   * The institution's T3 tenant identifier (the
+   * `did:t3n:0x<addr>` returned by the T3N handshake at
+   * backend boot). Used as the primary key of the
+   * `tenant_identities` row. Optional because some dev/test
+   * paths generate a fresh keypair before the T3N identity
+   * has been resolved.
+   */
+  tenantDid?: string;
+  /**
+   * Optional explicit signing private key. Production target:
+   * load from KMS / Vault / HSM via the
+   * `TENANT_SIGNING_PRIVATE_KEY` env var and pass it through
+   * `app.ts`. When provided, the env-supplied key is the
+   * ground truth and is upserted into the repository,
+   * overwriting any stale row.
+   *
+   * SECURITY: this MUST NOT be wired to the T3N bearer API
+   * key. The API key authenticates the T3 SDK to T3N REST/WS
+   * calls and is rotated on a different cadence from the
+   * institution's long-lived signing identity. Conflating the
+   * two would invalidate every VC the institution has issued
+   * on a normal API-key rotation.
+   */
+  signingPrivateKey?: string;
+}
+
+/**
+ * Production-path tenant identity loader. Reads the persisted
+ * secp256k1 keypair from the Supabase `tenant_identities` row
+ * (creating a fresh keypair on first boot when no row exists).
+ *
+ * This is the Heroku-safe replacement for the file-based
+ * `loadOrCreateTenantIdentity` below — Heroku's dyno filesystem
+ * is ephemeral (every restart wipes disk), so a file-backed
+ * signing key would force a fresh CSPRNG keypair on every
+ * restart and silently invalidate every previously issued
+ * delegation VC. The Supabase row survives restarts and
+ * Heroku dyno cycling.
+ *
+ * When `signingPrivateKey` is provided, it is treated as the
+ * ground truth and upserted into the repository (the row is
+ * overwritten with the env-supplied keypair's derived fields).
+ * This matches the production target: load the key from a
+ * secret manager, inject it at boot, persist it to the
+ * repository so subsequent reads hit the same row.
+ */
+export async function loadOrCreateTenantIdentityFromRepository(
+  repository: TenantIdentityRepository,
+  options: LoadOrCreateTenantIdentityFromRepositoryOptions,
+): Promise<TenantIdentity> {
+  const tenantDid = options.tenantDid;
+
+  // Explicit signing key: derive every field, upsert, return.
+  if (options.signingPrivateKey) {
+    const normalizedKey = normalizeSigningPrivateKey(
+      options.signingPrivateKey,
+    );
+    const identity = deriveIdentityFromPrivateKey(normalizedKey);
+    if (tenantDid) {
+      await repository.upsert({
+        tenantDid,
+        signingPrivateKey: identity.privateKey,
+        signingPublicKey: identity.publicKey,
+        signingAddress: identity.address,
+        issuerDid: identity.did,
+      });
+    }
+    return identity;
+  }
+
+  // No explicit key: read existing row for this tenant, or
+  // generate a fresh keypair if missing.
+  if (tenantDid) {
+    const existing = await repository.load(tenantDid);
+    if (
+      existing &&
+      typeof existing.signingPrivateKey === "string" &&
+      typeof existing.signingPublicKey === "string" &&
+      typeof existing.signingAddress === "string" &&
+      typeof existing.issuerDid === "string"
+    ) {
+      return {
+        did: existing.issuerDid,
+        publicKey: existing.signingPublicKey,
+        privateKey: existing.signingPrivateKey,
+        address: existing.signingAddress,
+        path: `<tenant_identities row tenant_did=${tenantDid}>`,
+      };
+    }
+  }
+
+  const keypair = generateKeypair();
+  const identity = deriveIdentityFromPrivateKey(
+    keypair.privateKey as `0x${string}`,
+  );
+  if (tenantDid) {
+    await repository.upsert({
+      tenantDid,
+      signingPrivateKey: identity.privateKey,
+      signingPublicKey: identity.publicKey,
+      signingAddress: identity.address,
+      issuerDid: identity.did,
+    });
+  }
+  return identity;
+}
+
+function deriveIdentityFromPrivateKey(
+  privateKey: `0x${string}`,
+): TenantIdentity {
+  const keyBytes = new Uint8Array(Buffer.from(privateKey.slice(2), "hex"));
+  const pubKeyBytes = secp256k1.getPublicKey(keyBytes, true);
+  const publicKey = `0x${Buffer.from(pubKeyBytes).toString("hex")}`;
+  const address = addressFromPrivateKey(privateKey);
+  const did = didForKeypairFromPrivateKey(privateKey);
+  return {
+    did,
+    publicKey,
+    privateKey,
+    address,
+    path: "<derived from explicit signingPrivateKey>",
+  };
+}
+
+void ((): TenantIdentityRow | null => null)();
