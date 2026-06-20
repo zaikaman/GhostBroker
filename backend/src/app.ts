@@ -5,6 +5,8 @@ import express, {
   type RequestHandler,
 } from "express";
 import helmet from "helmet";
+import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import {
   getCorsAllowedOrigins,
   loadEnv,
@@ -691,47 +693,81 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     negotiationService,
     ...(institutionApprovalService ? { institutionApprovalService } : {}),
     ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),
-    hostedAgentService: new ChildProcessHostedAgentService({
-      // Default to the backend's own directory (where package.json
-      // with the "agent:hosted" script lives). On Heroku the app
-      // is deployed from a single directory, so "." works there too.
-      // Override via AGENTS_WORKSPACE_DIR env var if needed.
-      agentsDir: env.AGENTS_WORKSPACE_DIR ?? ".",
-      backendUrl: `http://localhost:${env.PORT}`,
-      authSessionSecret: env.AUTH_SESSION_SECRET,
-      agentService,
-      institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
-      negotiationService,
-      ...(institutionApprovalService ? { institutionApprovalService } : {}),
-      // Hosted agents need the institution's tenant signing keypair
-      // (whose derived `did:ethr:0x<address>` is the only issuer
-      // format `@terminal3/verify_vc`'s `verifyEcdsaVcSig` accepts)
-      // to mint W3C claim VCs the disclosure verifier can hand to
-      // the SDK without it throwing "Unsupported DID method: t3n".
-      // The agent process gets the private key + derived DID as
-      // env vars at spawn time; it uses the env-supplied values
-      // for claim VCs while keeping the backend-assigned
-      // `AGENT_IDENTITY_DID` (`did:t3n:...`) for admit / ticket
-      // calls — those are bound to the institution's T3 identity,
-      // not to the signing keypair.
-      //
-      // The single-tenant dev / demo path uses the backend-wide
-      // tenant identity (`tenantIdentity`, loaded once at boot
-      // from `T3_TENANT_DID` / `TENANT_SIGNING_PRIVATE_KEY`) for
-      // every institution's hosted agent. The institution's own
-      // `t3_tenant_did` field uses the `did:t3:0x<wallet>` format
-      // — a different shape than the `tenant_identities` primary
-      // key (`did:t3n:0x<addr>`, the T3N handshake identifier) —
-      // so a per-institution lookup against the table would miss
-      // in the dev path. The shared backend-wide row is the
-      // authoritative keypair for claim VC signing until the
-      // table is partitioned per-institution.
-      tenantIdentityLookup: async () => ({
-        signingPrivateKey: tenantIdentity.privateKey,
-        signingPublicKey: tenantIdentity.publicKey,
-        issuerDid: tenantIdentity.did,
-      }),
-    }),
+    hostedAgentService: (() => {
+      // The `agent:hosted` npm script is `tsx src/cli/agents/hosted-agent.ts`.
+      // `tsx` is a devDependency, so on Heroku (NODE_ENV=production → npm
+      // skips devDependencies) it is never installed and the child exits
+      // with code 127 (`tsx: not found`) — the dashboard's hosted-agent
+      // logTail shows "Runtime exited code=127" and the negotiator never
+      // polls. In production we therefore spawn the compiled
+      // `dist/src/cli/agents/hosted-agent.js` directly with node, the
+      // same way the Procfile boots the backend (`node dist/src/server.js`).
+      // In development the default `npm run hosted` path is preserved so
+      // a developer iterating on `src/cli/agents/hosted-agent.ts` still
+      // gets tsx on-the-fly.
+      const COMPILED_HOSTED_AGENT = "dist/src/cli/agents/hosted-agent.js";
+      const productionRunner =
+        env.NODE_ENV === "production"
+          ? ({
+              runner: ["node"] as const,
+              hostedScript: COMPILED_HOSTED_AGENT,
+            } as const)
+          : ({} as const);
+      if (env.NODE_ENV === "production") {
+        const compiledAbsolute = resolvePath(
+          env.AGENTS_WORKSPACE_DIR ?? ".",
+          COMPILED_HOSTED_AGENT,
+        );
+        if (!existsSync(compiledAbsolute)) {
+          throw new Error(
+            `Refusing to boot in NODE_ENV=production: compiled hosted-agent entrypoint not found at ${compiledAbsolute}. ` +
+              "Heroku should run `npm run build:backend` via the `heroku-postbuild` script in the root package.json before the Procfile boots the server; verify the build step completed and that AGENTS_WORKSPACE_DIR matches the deployed tree.",
+          );
+        }
+      }
+      return new ChildProcessHostedAgentService({
+        // Default to the backend's own directory (where package.json
+        // with the "agent:hosted" script lives). On Heroku the app
+        // is deployed from a single directory, so "." works there too.
+        // Override via AGENTS_WORKSPACE_DIR env var if needed.
+        agentsDir: env.AGENTS_WORKSPACE_DIR ?? ".",
+        backendUrl: `http://localhost:${env.PORT}`,
+        authSessionSecret: env.AUTH_SESSION_SECRET,
+        agentService,
+        institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
+        negotiationService,
+        ...(institutionApprovalService ? { institutionApprovalService } : {}),
+        ...productionRunner,
+        // Hosted agents need the institution's tenant signing keypair
+        // (whose derived `did:ethr:0x<address>` is the only issuer
+        // format `@terminal3/verify_vc`'s `verifyEcdsaVcSig` accepts)
+        // to mint W3C claim VCs the disclosure verifier can hand to
+        // the SDK without it throwing "Unsupported DID method: t3n".
+        // The agent process gets the private key + derived DID as
+        // env vars at spawn time; it uses the env-supplied values
+        // for claim VCs while keeping the backend-assigned
+        // `AGENT_IDENTITY_DID` (`did:t3n:...`) for admit / ticket
+        // calls — those are bound to the institution's T3 identity,
+        // not to the signing keypair.
+        //
+        // The single-tenant dev / demo path uses the backend-wide
+        // tenant identity (`tenantIdentity`, loaded once at boot
+        // from `T3_TENANT_DID` / `TENANT_SIGNING_PRIVATE_KEY`) for
+        // every institution's hosted agent. The institution's own
+        // `t3_tenant_did` field uses the `did:t3:0x<wallet>` format
+        // — a different shape than the `tenant_identities` primary
+        // key (`did:t3n:0x<addr>`, the T3N handshake identifier) —
+        // so a per-institution lookup against the table would miss
+        // in the dev path. The shared backend-wide row is the
+        // authoritative keypair for claim VC signing until the
+        // table is partitioned per-institution.
+        tenantIdentityLookup: async () => ({
+          signingPrivateKey: tenantIdentity.privateKey,
+          signingPublicKey: tenantIdentity.publicKey,
+          issuerDid: tenantIdentity.did,
+        }),
+      });
+    })(),
     authService: new DidAuthService({
       institutions: institutionRepository,
       identityVerifier: new T3AgentIdentityVerifier(t3NetworkClient),
