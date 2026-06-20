@@ -9,7 +9,6 @@ import {
   Clock01Icon,
 } from 'hugeicons-react';
 import { apiClient, type NegotiationSession } from '../services/api-client';
-import { DisclosureTimeline } from './DisclosureTimeline';
 import { Skeleton } from './Skeleton';
 
 const STATUS_COLORS: Record<NegotiationSession['status'], string> = {
@@ -54,40 +53,9 @@ const TRUST_LABELS: Record<NegotiationSession['trustLevel'], { label: string; co
   established: { label: 'Trust threshold met', color: 'var(--color-accent)' },
 };
 
-const STRATEGY_SIGNAL_LABELS: Record<string, string> = {
-  open_patiently: 'Opened patiently',
-  test_patience: 'Testing patience',
-  concede: 'Made a concession',
-  hold_for_better_terms: 'Held for better terms',
-  build_trust: 'Building trust',
-  request_proof: 'Requested proof',
-  accelerate_for_deadline: 'Accelerated due to deadline',
-  accept: 'Accepted terms',
-  walkaway: 'Walked away',
-};
-
-function strategyLabel(intent: string | null): string | null {
-  if (!intent) return null;
-  return STRATEGY_SIGNAL_LABELS[intent] ?? intent.replace(/_/gu, ' ');
-}
-
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
-}
-
-function disclosureRationaleByClaim(
-  session: NegotiationSession,
-): Record<string, string> {
-  const rationale: Record<string, string> = {};
-  for (const round of session.rounds) {
-    if (round.moveType !== 'reveal') continue;
-    if (!round.reasoning) continue;
-    for (const ref of round.disclosedClaimRefs ?? []) {
-      rationale[ref] = round.reasoning;
-    }
-  }
-  return rationale;
 }
 
 function deadlineCountdown(deadline: string): string {
@@ -243,11 +211,12 @@ export function NegotiationRoomPanel(): React.JSX.Element {
       {sessions.map((session) => {
         const isExpanded = expandedId === session.id;
         const trust = TRUST_LABELS[session.trustLevel];
-        const strategy = strategyLabel(session.latestStrategySignal);
         const pendingProofs = session.disclosureProgress.pendingRequiredClaims.length;
+        const verifiedDisclosureCount = session.disclosureProgress.receivedVerifiedClaims.length;
         const statusLabel = STATUS_LABELS[session.status];
         const showEscalationControls =
           session.status === 'awaiting_approval' && session.escalationPending;
+        const sessionHandle = `session_${session.id.slice(0, 8)}`;
         return (
           <article
             key={session.id}
@@ -263,7 +232,7 @@ export function NegotiationRoomPanel(): React.JSX.Element {
             tabIndex={0}
             role="button"
             aria-expanded={isExpanded}
-            aria-label={`Negotiation session ${session.assetCode} — ${session.status}`}
+            aria-label={`Negotiation ${sessionHandle} — ${session.status}`}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -283,8 +252,8 @@ export function NegotiationRoomPanel(): React.JSX.Element {
                 >
                   {statusLabel}
                 </span>
-                <span style={{ color: 'var(--color-text-primary)', fontSize: '0.85rem', fontWeight: 600 }}>
-                  {session.assetCode}
+                <span style={{ color: 'var(--color-text-primary)', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                  {sessionHandle}
                 </span>
               </div>
 
@@ -301,16 +270,11 @@ export function NegotiationRoomPanel(): React.JSX.Element {
               </div>
             </div>
 
-            {/* Strategic AI visibility row — opaque labels only, no live terms */}
+            {/* Aggregate session metadata only — no per-round strategy, no counterparty side, no reasoning, no claim contents */}
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '4px', border: `1px solid ${trust.color}40`, background: `${trust.color}10`, color: trust.color, fontSize: '0.66rem', fontFamily: 'var(--font-mono)' }}>
                 <Link01Icon size={11} /> {trust.label}
               </span>
-              {strategy && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(94, 210, 156, 0.2)', background: 'rgba(94, 210, 156, 0.06)', color: 'var(--color-accent)', fontSize: '0.66rem', fontFamily: 'var(--font-mono)' }}>
-                  {strategy}
-                </span>
-              )}
               {(session.escalationStatus !== 'none' || session.escalationPending) && (
                 <span
                   title={session.escalationReason ?? undefined}
@@ -333,6 +297,11 @@ export function NegotiationRoomPanel(): React.JSX.Element {
               {pendingProofs > 0 && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.02)', color: 'var(--color-text-secondary)', fontSize: '0.66rem', fontFamily: 'var(--font-mono)' }}>
                   <LockIcon size={11} /> {pendingProofs} proof{pendingProofs === 1 ? '' : 's'} pending
+                </span>
+              )}
+              {verifiedDisclosureCount > 0 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(94, 210, 156, 0.25)', background: 'rgba(94, 210, 156, 0.08)', color: 'var(--color-accent)', fontSize: '0.66rem', fontFamily: 'var(--font-mono)' }}>
+                  <CheckmarkCircle01Icon size={11} /> {verifiedDisclosureCount} verified
                 </span>
               )}
             </div>
@@ -425,51 +394,33 @@ export function NegotiationRoomPanel(): React.JSX.Element {
               >
                 {session.rounds.length > 0 && (
                   <div style={{ marginBottom: '16px' }}>
-                    <h4 style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>STRATEGIC MOVES</h4>
+                    <h4 style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>ROUND TIMELINE</h4>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      {session.rounds.map((round) => {
-                        const moveStrategy = strategyLabel(round.strategicIntent);
-                        return (
-                          <div
-                            key={round.id}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '10px',
-                              padding: '8px 12px',
-                              background: 'rgba(255,255,255,0.02)',
-                              borderRadius: '8px',
-                              border: '1px solid rgba(255,255,255,0.04)',
-                              fontSize: '0.75rem',
-                            }}
-                          >
-                            <span style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', minWidth: '24px' }}>
-                              #{round.roundNumber}
-                            </span>
-                            <span style={{ color: 'var(--color-text-primary)', fontWeight: 500, minWidth: '36px' }}>
-                              {round.actorSide.toUpperCase()}
-                            </span>
-                            <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                              {round.moveType}
-                            </span>
-                            {moveStrategy && (
-                              <span style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
-                                {moveStrategy}
-                              </span>
-                            )}
-                            {round.opaqueSignal && (
-                              <span style={{ color: '#d6a94c', marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
-                                {round.opaqueSignal}
-                              </span>
-                            )}
-                            {round.reasoning && (
-                              <span style={{ color: 'var(--color-text-secondary)', marginLeft: 'auto', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {round.reasoning}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {session.rounds.map((round) => (
+                        <div
+                          key={round.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            padding: '8px 12px',
+                            background: 'rgba(255,255,255,0.02)',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(255,255,255,0.04)',
+                            fontSize: '0.75rem',
+                          }}
+                        >
+                          <span style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', minWidth: '32px' }}>
+                            #{round.roundNumber}
+                          </span>
+                          <span style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+                            {new Date(round.createdAt).toLocaleString()}
+                          </span>
+                          <span style={{ marginLeft: 'auto', color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+                            completed
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -477,10 +428,10 @@ export function NegotiationRoomPanel(): React.JSX.Element {
                 {session.disclosedClaims.length > 0 && (
                   <div>
                     <h4 style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>DISCLOSURES</h4>
-                    <DisclosureTimeline
-                      disclosures={session.disclosedClaims}
-                      rationaleByClaim={disclosureRationaleByClaim(session)}
-                    />
+                    <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)' }}>{session.disclosedClaims.length}</span>{' '}
+                      verified disclosure{session.disclosedClaims.length === 1 ? '' : 's'} on record. Claim contents are held inside the TEE; the operator view shows the aggregate count only.
+                    </p>
                   </div>
                 )}
 

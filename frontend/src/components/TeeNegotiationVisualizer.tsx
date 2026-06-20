@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type { AgentState, ProcessingIntent } from '../hooks/useConnectionTelemetry';
 import {
   Shield01Icon,
@@ -95,22 +95,12 @@ export function TeeNegotiationVisualizer({
   const [forceIdle, setForceIdle] = useState(false);
   const isEnclaveActive = (agents.length > 0 || intents.length > 0 || localAgent !== null) && !forceIdle;
 
-  // Determine counterparty display name
-  const getCounterpartyName = (did: string | null) => {
+  // Determine counterparty display handle. The counterparty is shown as
+  // an opaque DID-derived handle — never resolved to a real institution
+  // name. (Operators see the local institution's display name in the
+  // LOCAL pane; the counterparty side is anonymous.)
+  const getCounterpartyHandle = (did: string | null) => {
     if (!did) return 'Counterparty';
-    const lowerDid = did.toLowerCase();
-    if (lowerDid.includes('goldman') || lowerDid.includes('gs')) {
-      return 'Goldman Sachs';
-    }
-    if (lowerDid.includes('jpmorgan') || lowerDid.includes('jpm')) {
-      return 'JPMorgan';
-    }
-    if (lowerDid.includes('citibank') || lowerDid.includes('citi')) {
-      return 'Citibank';
-    }
-    if (lowerDid.includes('morgan') || lowerDid.includes('ms')) {
-      return 'Morgan Stanley';
-    }
     return `Counterparty (${did.slice(0, 8)})`;
   };
 
@@ -196,7 +186,7 @@ export function TeeNegotiationVisualizer({
 
     const time = new Date().toTimeString().split(' ')[0] || '';
     const localName = institutionName || 'Local Agent';
-    const peerName = getCounterpartyName(counterpartyAgent?.agentDid ?? null);
+    const peerName = getCounterpartyHandle(counterpartyAgent?.agentDid ?? null);
 
     let newMessages: Omit<DialogueMessage, 'id'>[] = [];
 
@@ -337,7 +327,7 @@ export function TeeNegotiationVisualizer({
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg) return;
     const localName = institutionName || 'Local Agent';
-    const peerName = getCounterpartyName(counterpartyAgent?.agentDid ?? null);
+    const peerName = getCounterpartyHandle(counterpartyAgent?.agentDid ?? null);
 
     if (lastMsg.isSystem) {
       // The synchronous setLatestHubBubble + setTimeout-clearing
@@ -564,7 +554,7 @@ export function TeeNegotiationVisualizer({
           x: (Math.random() - 0.5) * 800,
           y: (Math.random() - 0.5) * 450,
           z: Math.random() * 600 + 50,
-          color: Math.random() > 0.65 ? 'rgba(94, 210, 156, 0.25)' : 'rgba(156, 39, 176, 0.18)'
+          color: Math.random() > 0.65 ? 'rgba(94, 210, 156, 0.25)' : 'rgba(255, 255, 255, 0.12)'
         });
       }
     }
@@ -751,7 +741,7 @@ export function TeeNegotiationVisualizer({
       if (peerOpacity.current > 0.02) {
         // Peer to Hub link
         ctx.save();
-        ctx.strokeStyle = `rgba(255, 170, 0, ${peerOpacity.current * 0.18})`;
+        ctx.strokeStyle = `rgba(245, 158, 11, ${peerOpacity.current * 0.18})`;
         ctx.lineWidth = 1.8;
         ctx.setLineDash([4, 6]);
         ctx.lineDashOffset = time * 0.4;
@@ -762,7 +752,7 @@ export function TeeNegotiationVisualizer({
         ctx.restore();
 
         // Glowing peer packets
-        ctx.fillStyle = `rgba(255, 170, 0, ${peerOpacity.current})`;
+        ctx.fillStyle = `rgba(245, 158, 11, ${peerOpacity.current})`;
         const packets = 3;
         for (let p = 0; p < packets; p++) {
           const offset = (time * 0.0025 + p / packets) % 1.0;
@@ -770,7 +760,7 @@ export function TeeNegotiationVisualizer({
           const py = peerPos.current.y - 15 + (hubPos.current.y - (peerPos.current.y - 15)) * offset;
           ctx.beginPath();
           ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-          ctx.shadowColor = 'rgba(255, 170, 0, 0.8)';
+          ctx.shadowColor = 'rgba(245, 158, 11, 0.8)';
           ctx.shadowBlur = 10;
           ctx.fill();
           ctx.shadowBlur = 0;
@@ -801,7 +791,7 @@ export function TeeNegotiationVisualizer({
           peerPos.current.x,
           peerPos.current.y + (isTheaterMode ? 10 : 0),
           robotScale,
-          '#ffaa00',
+          '#F59E0B',
           time,
           peerIsWalking,
           latestPeerBubble !== null
@@ -841,7 +831,7 @@ export function TeeNegotiationVisualizer({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', flex: 1, minHeight: 0 }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&family=Outfit:wght@300;400;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
 
         body.theater-mode-enabled {
           overflow: hidden !important;
@@ -921,15 +911,10 @@ export function TeeNegotiationVisualizer({
           display: flex;
           flex-direction: column;
           gap: var(--spacing-md);
-          background: #030408;
-          border: 1px solid rgba(94, 210, 156, 0.15);
-          border-radius: var(--radius-lg);
-          padding: var(--spacing-lg);
-          box-shadow: 0 0 30px rgba(94, 210, 156, 0.05), inset 0 0 15px rgba(94, 210, 156, 0.03);
           flex: 1;
           position: relative;
           overflow: hidden;
-          transition: all 0.3s ease-in-out;
+          transition: all var(--transition-normal);
         }
 
         /* Full page theater mode overrides covering sidebar completely */
@@ -947,32 +932,13 @@ export function TeeNegotiationVisualizer({
           background: #000;
         }
 
-        .match-arena-title-3d {
-          font-family: 'Orbitron', var(--font-mono), sans-serif;
-          font-size: 0.8rem;
-          font-weight: 700;
-          letter-spacing: 0.08em;
-          color: #5ed29c;
-          text-shadow: 0 0 10px rgba(94, 210, 156, 0.5);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          border-bottom: 1px solid rgba(94, 210, 156, 0.15);
-          padding-bottom: var(--spacing-sm);
-          margin: 0;
-        }
-
-        .theater-active .match-arena-title-3d {
-          display: none !important; /* Hide title bar in pure canvas fullscreen */
-        }
-
         .match-diagram-container-3d {
           position: relative;
           height: 250px;
-          border: 1px solid rgba(94, 210, 156, 0.1);
+          border: 1px solid var(--color-border);
           border-radius: var(--radius-md);
           overflow: hidden;
-          background: #000;
+          background: #020305;
           transition: height 0.3s ease;
         }
 
@@ -1039,16 +1005,16 @@ export function TeeNegotiationVisualizer({
 
         /* TEE core remains an HTML hologram */
         .node-3d.hub {
-          background: radial-gradient(circle, rgba(186, 104, 200, 0.15) 0%, rgba(0, 0, 0, 0.85) 75%);
-          border: 1.5px solid #ba68c8;
-          box-shadow: 0 0 20px rgba(186, 104, 200, 0.3), inset 0 0 10px rgba(186, 104, 200, 0.15);
+          background: radial-gradient(circle, rgba(94, 210, 156, 0.1) 0%, rgba(0, 0, 0, 0.85) 75%);
+          border: 1.5px solid var(--color-accent);
+          box-shadow: 0 0 20px rgba(var(--color-accent-rgb), 0.25), inset 0 0 10px rgba(var(--color-accent-rgb), 0.15);
         }
 
         /* Holographic Orbits */
         .orbit-spin-3d {
           position: absolute;
           inset: -6px;
-          border: 1px dashed rgba(186, 104, 200, 0.4);
+          border: 1px dashed rgba(var(--color-accent-rgb), 0.35);
           border-radius: 50%;
           animation: spin 6s linear infinite;
         }
@@ -1059,7 +1025,7 @@ export function TeeNegotiationVisualizer({
         }
 
         .node-icon-3d {
-          color: #ba68c8;
+          color: var(--color-accent);
           filter: drop-shadow(0 0 4px currentColor);
         }
 
@@ -1068,15 +1034,15 @@ export function TeeNegotiationVisualizer({
           position: absolute;
           bottom: -46px;
           text-align: center;
-          font-family: 'Share Tech Mono', var(--font-mono), monospace;
+          font-family: var(--font-mono), monospace;
           font-size: 0.55rem;
           letter-spacing: 0.05em;
           text-transform: uppercase;
           width: 140px;
         }
-        .local-tag { color: #5ed29c; text-shadow: 0 0 4px rgba(94,210,156,0.4); }
-        .peer-tag { color: #ffaa00; text-shadow: 0 0 4px rgba(255,170,0,0.4); }
-        .hub-tag { color: #ba68c8; text-shadow: 0 0 4px rgba(186,104,200,0.4); }
+        .local-tag { color: var(--color-accent); text-shadow: 0 0 4px rgba(var(--color-accent-rgb),0.4); }
+        .peer-tag { color: var(--color-warning); text-shadow: 0 0 4px rgba(245, 158, 11,0.4); }
+        .hub-tag { color: var(--color-accent); text-shadow: 0 0 4px rgba(var(--color-accent-rgb),0.4); }
 
         .node-hud-tag strong {
           display: block;
@@ -1093,16 +1059,16 @@ export function TeeNegotiationVisualizer({
           bottom: 74px; /* sits nicely above the robot head */
           left: 50%;
           transform: translate(-50%, 0);
-          background: rgba(4, 7, 13, 0.94);
+          background: rgba(11, 15, 25, 0.94);
           backdrop-filter: blur(8px);
           -webkit-backdrop-filter: blur(8px);
-          border: 1px solid #5ed29c;
+          border: 1px solid var(--color-accent);
           color: #fff;
-          font-family: 'Share Tech Mono', var(--font-mono), monospace;
+          font-family: var(--font-mono), monospace;
           font-size: 0.65rem;
           padding: 8px 12px;
           border-radius: 6px;
-          box-shadow: 0 0 20px rgba(94, 210, 156, 0.25), inset 0 0 10px rgba(94, 210, 156, 0.1);
+          box-shadow: 0 0 20px rgba(var(--color-accent-rgb), 0.25), inset 0 0 10px rgba(var(--color-accent-rgb), 0.1);
           width: max-content;
           max-width: 220px;
           text-align: center;
@@ -1128,22 +1094,22 @@ export function TeeNegotiationVisualizer({
           transform: translateX(-50%);
           border-width: 6px 6px 0;
           border-style: solid;
-          border-color: #5ed29c transparent;
+          border-color: var(--color-accent) transparent;
           display: block;
           width: 0;
         }
 
         .hologram-bubble.peer-bubble {
-          border-color: #ffaa00;
-          box-shadow: 0 0 20px rgba(255, 170, 0, 0.25), inset 0 0 10px rgba(255, 170, 0, 0.1);
+          border-color: var(--color-warning);
+          box-shadow: 0 0 20px rgba(245, 158, 11, 0.25), inset 0 0 10px rgba(245, 158, 11, 0.1);
         }
         .hologram-bubble.peer-bubble::after {
-          border-color: #ffaa00 transparent;
+          border-color: var(--color-warning) transparent;
         }
 
         .hologram-bubble.hub-bubble {
-          border-color: #ba68c8;
-          box-shadow: 0 0 20px rgba(186, 104, 200, 0.25), inset 0 0 10px rgba(186, 104, 200, 0.1);
+          border-color: var(--color-accent);
+          box-shadow: 0 0 20px rgba(var(--color-accent-rgb), 0.25), inset 0 0 10px rgba(var(--color-accent-rgb), 0.1);
           bottom: 84px; /* higher offset for Hub circle */
         }
         
@@ -1152,7 +1118,7 @@ export function TeeNegotiationVisualizer({
         }
 
         .hologram-bubble.hub-bubble::after {
-          border-color: #ba68c8 transparent;
+          border-color: var(--color-accent) transparent;
         }
 
         @keyframes bubblePulse {
@@ -1171,22 +1137,22 @@ export function TeeNegotiationVisualizer({
           top: 24px;
           right: 24px;
           z-index: 9999999;
-          background: rgba(255, 170, 0, 0.12);
-          border: 1.5px solid #ffaa00;
+          background: rgba(245, 158, 11, 0.12);
+          border: 1.5px solid var(--color-warning);
           border-radius: 6px;
-          color: #ffaa00;
-          font-family: 'Share Tech Mono', monospace;
+          color: var(--color-warning);
+          font-family: var(--font-mono), monospace;
           font-size: 0.75rem;
           letter-spacing: 0.05em;
           padding: 8px 18px;
           cursor: pointer;
-          text-shadow: 0 0 5px rgba(255, 170, 0, 0.5);
-          box-shadow: 0 0 15px rgba(255, 170, 0, 0.2);
+          text-shadow: 0 0 5px rgba(245, 158, 11, 0.5);
+          box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
           transition: all 0.2s;
         }
         .theater-close-btn:hover {
-          background: rgba(255, 170, 0, 0.25);
-          box-shadow: 0 0 22px rgba(255, 170, 0, 0.45);
+          background: rgba(245, 158, 11, 0.25);
+          box-shadow: 0 0 22px rgba(245, 158, 11, 0.45);
         }
 
         .theater-status-hud {
@@ -1194,12 +1160,12 @@ export function TeeNegotiationVisualizer({
           top: 24px;
           left: 24px;
           z-index: 9999999;
-          color: #5ed29c;
-          font-family: 'Orbitron', sans-serif;
+          color: var(--color-accent);
+          font-family: var(--font-display), sans-serif;
           font-size: 0.8rem;
           font-weight: 700;
           letter-spacing: 0.08em;
-          text-shadow: 0 0 10px rgba(94, 210, 156, 0.4);
+          text-shadow: 0 0 10px rgba(var(--color-accent-rgb), 0.4);
           text-transform: uppercase;
         }
 
@@ -1209,8 +1175,8 @@ export function TeeNegotiationVisualizer({
           justify-content: space-between;
           align-items: center;
           padding: 10px var(--spacing-sm);
-          background: rgba(94, 210, 156, 0.02);
-          border: 1px solid rgba(94, 210, 156, 0.1);
+          background: var(--color-input-bg);
+          border: 1px solid var(--color-border);
           border-radius: var(--radius-md);
           margin-top: 4px;
         }
@@ -1230,22 +1196,22 @@ export function TeeNegotiationVisualizer({
           left: 50%;
           width: 100%;
           height: 1px;
-          background: rgba(255, 255, 255, 0.08);
+          background: var(--color-border);
           z-index: 1;
         }
 
         .stage-node-item-3d.completed:not(:last-child)::after {
-          background: linear-gradient(90deg, #5ed29c, rgba(255, 255, 255, 0.08));
+          background: linear-gradient(90deg, var(--color-accent), var(--color-border));
         }
 
         .stage-circle-3d {
           width: 26px;
           height: 26px;
           border-radius: 50%;
-          background: #080c14;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          color: rgba(255, 255, 255, 0.4);
-          font-family: 'Orbitron', sans-serif;
+          background: var(--color-bg);
+          border: 1px solid var(--color-border);
+          color: var(--color-text-muted);
+          font-family: var(--font-mono), monospace;
           font-size: 0.65rem;
           font-weight: 700;
           display: flex;
@@ -1257,28 +1223,28 @@ export function TeeNegotiationVisualizer({
         }
 
         .stage-node-item-3d.active .stage-circle-3d {
-          border-color: #5ed29c;
-          color: #5ed29c;
-          box-shadow: 0 0 10px rgba(94, 210, 156, 0.4);
+          border-color: var(--color-accent);
+          color: var(--color-accent);
+          box-shadow: 0 0 10px rgba(var(--color-accent-rgb), 0.4);
         }
 
         .stage-node-item-3d.completed .stage-circle-3d {
-          border-color: #ba68c8;
-          background: rgba(186, 104, 200, 0.15);
-          color: #ba68c8;
+          border-color: var(--color-accent);
+          background: rgba(var(--color-accent-rgb), 0.15);
+          color: var(--color-accent);
         }
 
         .stage-label-text-3d {
-          font-family: 'Share Tech Mono', monospace;
+          font-family: var(--font-mono), monospace;
           font-size: 0.58rem;
           letter-spacing: 0.05em;
-          color: rgba(255, 255, 255, 0.4);
+          color: var(--color-text-muted);
           margin-top: 6px;
           text-transform: uppercase;
         }
 
         .stage-node-item-3d.active .stage-label-text-3d {
-          color: #5ed29c;
+          color: var(--color-accent);
         }
 
         /* 3D Scope & Dialogue Details */
@@ -1294,8 +1260,8 @@ export function TeeNegotiationVisualizer({
         }
 
         .oscilloscope-box-3d {
-          border: 1px solid rgba(94, 210, 156, 0.1);
-          background: rgba(94, 210, 156, 0.01);
+          border: 1px solid var(--color-border);
+          background: var(--color-input-bg);
           border-radius: var(--radius-md);
           position: relative;
           height: 140px;
@@ -1309,18 +1275,18 @@ export function TeeNegotiationVisualizer({
           position: absolute;
           top: 6px;
           left: 8px;
-          font-family: 'Share Tech Mono', monospace;
+          font-family: var(--font-mono), monospace;
           font-size: 0.55rem;
           letter-spacing: 0.05em;
           text-transform: uppercase;
-          color: rgba(94, 210, 156, 0.6);
+          color: rgba(var(--color-accent-rgb), 0.6);
           z-index: 2;
         }
 
         /* Scrolling dialogue logs CRT style */
         .dialogue-stream-3d {
-          border: 1px solid rgba(94, 210, 156, 0.1);
-          background: #020306;
+          border: 1px solid var(--color-border);
+          background: var(--color-input-bg);
           border-radius: var(--radius-md);
           padding: 10px;
           height: 160px;
@@ -1335,32 +1301,35 @@ export function TeeNegotiationVisualizer({
           width: 4px;
         }
         .dialogue-stream-3d::-webkit-scrollbar-thumb {
-          background: rgba(94, 210, 156, 0.2);
+          background: var(--color-border);
           border-radius: 2px;
+        }
+        .dialogue-stream-3d::-webkit-scrollbar-thumb:hover {
+          background: var(--color-accent);
         }
 
         .dialogue-bubble-3d {
-          border-left: 2px solid rgba(255, 255, 255, 0.15);
+          border-left: 2px solid var(--color-border);
           padding-left: 8px;
           margin-bottom: 2px;
-          font-family: 'Share Tech Mono', monospace;
+          font-family: var(--font-mono), monospace;
           font-size: 0.65rem;
-          color: rgba(255, 255, 255, 0.85);
+          color: var(--color-text-primary);
         }
 
         .dialogue-bubble-3d.system {
-          border-color: #ba68c8;
-          color: rgba(186, 104, 200, 0.9);
+          border-color: var(--color-accent);
+          color: rgba(var(--color-accent-rgb), 0.95);
         }
 
         .dialogue-bubble-3d.agent {
-          border-color: #5ed29c;
-          color: rgba(94, 210, 156, 0.9);
+          border-color: var(--color-accent);
+          color: rgba(var(--color-accent-rgb), 0.95);
         }
 
         .dialogue-bubble-3d.peer {
-          border-color: #ffaa00;
-          color: rgba(255, 170, 0, 0.9);
+          border-color: var(--color-warning);
+          color: rgba(245, 158, 11, 0.95);
         }
 
         .dialogue-header-3d {
@@ -1377,22 +1346,28 @@ export function TeeNegotiationVisualizer({
         }
       `}</style>
 
-      <div className={`match-arena-card-3d ${isTheaterMode ? 'theater-active' : ''}`}>
-        <h3 className="match-arena-title-3d">
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Shield01Icon size={16} /> SECURE CRYPTOGRAPHIC WORKSPACE
+      <div className={`card match-arena-card-3d ${isTheaterMode ? 'theater-active' : ''}`}>
+        <h2 className="card-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: 0 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Shield01Icon size={18} style={{ color: 'var(--color-accent)' }} /> SECURE CRYPTOGRAPHIC WORKSPACE
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '0.62rem', opacity: 0.8, color: isEnclaveActive ? '#5ed29c' : 'var(--color-text-muted)' }}>
-              {isEnclaveActive ? '● ENCLAVE ACTIVE' : '○ OFFLINE'}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isEnclaveActive ? (
+              <span className="status-badge secure" style={{ fontSize: '0.65rem', padding: '2px 8px', textShadow: 'none' }}>
+                <span className="pulse-dot" style={{ width: '6px', height: '6px', backgroundColor: 'var(--color-success)' }} /> ACTIVE
+              </span>
+            ) : (
+              <span className="status-badge" style={{ fontSize: '0.65rem', padding: '2px 8px', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)', background: 'rgba(255,255,255,0.02)', textShadow: 'none' }}>
+                OFFLINE
+              </span>
+            )}
           </div>
-        </h3>
+        </h2>
 
         {!isEnclaveActive ? (
-          <div style={{ display: 'flex', height: '250px', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '8px', border: '1px dashed rgba(255, 255, 255, 0.05)', borderRadius: 'var(--radius-md)' }}>
-            <CpuIcon size={32} style={{ color: 'rgba(255, 255, 255, 0.15)', animation: 'pulse 2s infinite' }} />
-            <span style={{ fontFamily: 'Share Tech Mono', fontSize: '0.75rem', color: 'var(--color-text-secondary)', letterSpacing: '0.05em' }}>
+          <div style={{ display: 'flex', flex: 1, minHeight: '250px', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '8px', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+            <CpuIcon size={32} style={{ color: 'var(--color-text-muted)', animation: 'pulse 2s infinite' }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: 'var(--color-text-muted)', letterSpacing: '0.05em' }}>
               Awaiting agent connections...
             </span>
           </div>
@@ -1446,7 +1421,7 @@ export function TeeNegotiationVisualizer({
                   className="node-3d"
                 >
                   <div className="node-hud-tag peer-tag">
-                    <strong>{counterpartyAgent ? getCounterpartyName(counterpartyAgent.agentDid) : 'Counterparty'}</strong>
+                    <strong>{counterpartyAgent ? getCounterpartyHandle(counterpartyAgent.agentDid) : 'Counterparty'}</strong>
                     <span>{counterpartyAgent ? truncateDid(counterpartyAgent.agentDid) : 'did:t3:confidential...'}</span>
                   </div>
 
@@ -1487,12 +1462,12 @@ export function TeeNegotiationVisualizer({
               {/* Dialogue Box showing secure event updates */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontFamily: 'Share Tech Mono', fontSize: '0.6rem', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Secure Enclave Dialogue Transcript</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Secure Enclave Dialogue Transcript</span>
                   {messages.length > 0 && (
                     <button 
                       type="button" 
                       onClick={handleClearDialogue}
-                      style={{ background: 'none', border: 'none', color: 'rgba(94, 210, 156, 0.5)', cursor: 'pointer', fontFamily: 'Share Tech Mono', fontSize: '0.58rem', letterSpacing: '0.05em' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.58rem', letterSpacing: '0.05em' }}
                     >
                       CLEAR
                     </button>
@@ -1500,7 +1475,7 @@ export function TeeNegotiationVisualizer({
                 </div>
                 <div className="dialogue-stream-3d">
                   {messages.length === 0 ? (
-                    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'rgba(255, 255, 255, 0.3)', fontFamily: 'Share Tech Mono', fontSize: '0.65rem' }}>
+                    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
                       No dialogue logs generated.
                     </div>
                   ) : (

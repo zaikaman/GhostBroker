@@ -70,9 +70,11 @@ describe('LiveAgentActivityStream Component', () => {
       />
     );
 
-    // Verify pane titles
+    // Verify pane titles — LOCAL pane uses the institution name
+    // passed in as a prop; COUNTERPARTY pane uses an opaque
+    // DID-derived handle (never a real institution name).
     expect(screen.getByText(/LOCAL AGENT LOGS \(JPMorgan\)/)).toBeInTheDocument();
-    expect(screen.getByText(/COUNTERPARTY AGENT LOGS \(Goldman Sachs\)/)).toBeInTheDocument();
+    expect(screen.getByText(/COUNTERPARTY AGENT LOGS \(Counterparty \(did:t3:g\)\)/)).toBeInTheDocument();
 
     // Verify center column title
     expect(screen.getByText(/GhostBroker TEE/i)).toBeInTheDocument();

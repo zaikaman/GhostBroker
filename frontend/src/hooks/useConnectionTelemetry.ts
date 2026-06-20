@@ -53,7 +53,6 @@ export function useConnectionTelemetry(token?: string): ConnectionTelemetry & { 
 
     // Process incoming telemetry events
     const unsubscribeMessages = telemetryClient.onMessage((event: TelemetryEvent) => {
-      console.log('[Telemetry WS Message Received]:', event);
       const { type, phase, correlationRef, agentId, severity } = event;
       const parsedAgentDid = agentId || correlationRef || '';
 

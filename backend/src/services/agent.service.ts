@@ -121,8 +121,6 @@ export class AgentService implements AgentManagementService {
   }
 
   public async admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission> {
-    console.log("[ADMIT.SERVICE] admitAgent called, delegationCredential:", request.delegationCredential === undefined ? "absent" : "present");
-    console.log("[ADMIT.SERVICE] institutionId:", request.institutionId, "agentDid:", request.agentDid);
     const revokedAuthorityRefs =
       await this.revocations.listRevokedAuthorityRefs(
         request.institutionId,
@@ -136,23 +134,16 @@ export class AgentService implements AgentManagementService {
         request.agentDid,
       );
       if (existingAgent) {
-        console.log("[ADMIT.SERVICE] found existing agent by DID:", existingAgent.id, "status:", existingAgent.status, "has delegation_credential:", "delegation_credential" in (existingAgent.metadata as Record<string, unknown>));
         const persistedVc = (
           existingAgent.metadata as Record<string, unknown> | null
         )?.delegation_credential;
         if (persistedVc) {
-          console.log("[ADMIT.SERVICE] loaded persisted delegation VC from agent metadata");
           delegationCredential = persistedVc;
-        } else {
-          console.log("[ADMIT.SERVICE] existing agent has no delegation_credential in metadata");
         }
-      } else {
-        console.log("[ADMIT.SERVICE] no existing agent found by DID");
       }
     }
 
     if (!delegationCredential) {
-      console.log("[ADMIT.SERVICE] delegation credential not available — throwing authorization_failed");
       throw new PublicError(
         "authorization_failed",
         403,
@@ -160,7 +151,6 @@ export class AgentService implements AgentManagementService {
       );
     }
 
-    console.log("[ADMIT.SERVICE] verifying delegation credential via authorization facade...");
     const verification = await this.authorization.verifyAgentAuthority({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
@@ -170,7 +160,6 @@ export class AgentService implements AgentManagementService {
       revokedAuthorityRefs,
     });
 
-    console.log("[ADMIT.SERVICE] verification result:", verification.status);
     if (verification.status !== "verified") {
       throw new PublicError("authorization_failed", 403);
     }
@@ -180,7 +169,6 @@ export class AgentService implements AgentManagementService {
       request.agentDid,
     );
     if (alreadyAdmitted) {
-      console.log("[ADMIT.SERVICE] agent already admitted, returning existing admission");
       return {
         id: alreadyAdmitted.id,
         agentDid: alreadyAdmitted.agentDid,
@@ -189,7 +177,6 @@ export class AgentService implements AgentManagementService {
       };
     }
 
-    console.log("[ADMIT.SERVICE] persisting new admitted agent...");
     return this.persistAdmittedAgent({
       request,
       authorityRef: verification.authorityRef,

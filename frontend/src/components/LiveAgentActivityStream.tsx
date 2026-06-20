@@ -179,22 +179,13 @@ export function LiveAgentActivityStream({
     }
   }, [getTargetPane]);
 
-  // Derive plausible counterparty names
-  const getCounterpartyName = (did: string | null) => {
+  // Derive a counterparty handle from the DID. The counterparty is
+  // shown as an opaque DID-derived handle — never resolved to a
+  // real institution name. (Operators see the local institution's
+  // display name in the LOCAL pane; the counterparty side is
+  // anonymous.)
+  const getCounterpartyHandle = (did: string | null) => {
     if (!did) return 'Counterparty Agent';
-    const lowerDid = did.toLowerCase();
-    if (lowerDid.includes('goldman') || lowerDid.includes('gs')) {
-      return 'Goldman Sachs';
-    }
-    if (lowerDid.includes('jpmorgan') || lowerDid.includes('jpm')) {
-      return 'JPMorgan';
-    }
-    if (lowerDid.includes('citibank') || lowerDid.includes('citi')) {
-      return 'Citibank';
-    }
-    if (lowerDid.includes('morgan') || lowerDid.includes('ms')) {
-      return 'Morgan Stanley';
-    }
     return `Counterparty (${did.slice(0, 8)})`;
   };
 
@@ -730,7 +721,7 @@ export function LiveAgentActivityStream({
           <div className="agent-log-panel" tabIndex={0}>
             <div className="agent-log-header">
               <div className="agent-log-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span className="pulse-dot" style={{ background: 'var(--color-warning)', boxShadow: '0 0 8px var(--color-warning)' }}></span> COUNTERPARTY AGENT LOGS ({getCounterpartyName(rightAgentDid)})
+                <span className="pulse-dot" style={{ background: 'var(--color-warning)', boxShadow: '0 0 8px var(--color-warning)' }}></span> COUNTERPARTY AGENT LOGS ({getCounterpartyHandle(rightAgentDid)})
               </div>
               <div className="agent-log-did">
                 DID: {rightAgentDid ? truncateDid(rightAgentDid) : 'did:t3:pending...'}

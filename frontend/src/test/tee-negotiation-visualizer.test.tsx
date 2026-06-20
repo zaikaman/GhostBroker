@@ -59,9 +59,11 @@ describe('TeeNegotiationVisualizer Component', () => {
       />
     );
 
-    // Verify institution names/labels
+    // Verify institution names/labels — local institution's name
+    // is shown for the LOCAL pane, counterparty side is an
+    // opaque DID-derived handle (never a real institution name).
     expect(screen.getAllByText(mockInstitutionName).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Goldman Sachs').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Counterparty \(did:t3:g\)/i).length).toBeGreaterThan(0);
 
     // Verify pipeline stages
     expect(screen.getByText('Attest')).toBeInTheDocument();
