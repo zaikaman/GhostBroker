@@ -210,6 +210,16 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   }, [loadAgents, loadInstitution]);
 
   useEffect(() => {
+    const override = localStorage.getItem('settings-active-subtab');
+    if (override === 'mandates' || override === 'keys' || override === 'connections' || override === 'settlement') {
+      queueMicrotask(() => {
+        setActiveSubTab(override as 'mandates' | 'keys' | 'connections' | 'settlement');
+      });
+      localStorage.removeItem('settings-active-subtab');
+    }
+  }, []);
+
+  useEffect(() => {
     if (activeSubTab !== 'connections' || enclaveIdentity !== null || isEnclaveLoading) {
       return;
     }

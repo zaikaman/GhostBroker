@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { apiClient, type Institution, type RelayerApprovalResponse } from "../services/api-client";
 import { usePortfolioTelemetry } from "../hooks/usePortfolioTelemetry";
+import { useRouter } from "../app/use-router";
 import {
   AlertCircleIcon,
   CheckmarkCircle01Icon,
@@ -24,6 +25,12 @@ export function DepositWalletOverviewCard({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const { refreshKey, refresh } = usePortfolioTelemetry();
+  const { navigate } = useRouter();
+
+  const handleNavigateToSettlementSettings = (): void => {
+    localStorage.setItem("settings-active-subtab", "settlement");
+    navigate("/settings");
+  };
 
   const loadData = useCallback(async (signal: AbortSignal): Promise<void> => {
     try {
@@ -347,7 +354,41 @@ export function DepositWalletOverviewCard({
               }}
             >
               <Shield01Icon size={12} style={{ color: "var(--color-accent)" }} />
-              Manage deposits, withdrawals, and approvals in Settings
+              <span>
+                Manage deposits, withdrawals, and approvals in{" "}
+                <button
+                  type="button"
+                  onClick={handleNavigateToSettlementSettings}
+                  className="settings-redirect-btn"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    margin: 0,
+                    color: "var(--color-accent)",
+                    textDecoration: "underline",
+                    textDecorationColor: "rgba(94, 210, 156, 0.4)",
+                    textUnderlineOffset: "3px",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    transition: "color var(--transition-fast), text-decoration-color var(--transition-fast)",
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.color = "var(--color-text-primary)";
+                    e.currentTarget.style.textDecorationColor = "var(--color-text-primary)";
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.color = "var(--color-accent)";
+                    e.currentTarget.style.textDecorationColor = "rgba(94, 210, 156, 0.4)";
+                  }}
+                >
+                  Settings
+                </button>
+              </span>
             </div>
           </div>
         </>

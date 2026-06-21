@@ -16,6 +16,13 @@ vi.mock("../hooks/usePortfolioTelemetry", () => ({
   }),
 }));
 
+vi.mock("../app/use-router", () => ({
+  useRouter: () => ({
+    navigate: vi.fn(),
+    currentPath: "/dashboard",
+  }),
+}));
+
 import { apiClient } from "../services/api-client";
 
 const mockedGetInstitution = vi.mocked(apiClient.getInstitution);
