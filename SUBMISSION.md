@@ -52,6 +52,8 @@ return result.isValid ? "verified" : "rejected";
 
 **Privileged actions protected** — `agent.admit`, `intent.submit`, `intent.cancel`, `settlement.execute`, `negotiation.open`, `negotiation.move`, `negotiation.disclose`, `negotiation.settle`. Every one re-runs `verifyGhostbrokerDelegationCredential` on each call, not just at admission.
 
+**`T3NegotiationDisclosureVerifier` is a second, independent SDK-backed verifier on the negotiation hot path.** `backend/src/enclave/negotiation/disclosure-verifier.ts:2` imports `verifyVc` from `@terminal3/verify_vc` and calls it at `disclosure-verifier.ts:350` inside `trySdkVerify` to cryptographically check the `EcdsaSecp256k1Signature2019` JWS on every counterparty claim disclosure that feeds the disclosure gate. The SDK is the sole cryptographic authority on a claim — there is no manual ECDSA fallback and no `structural` mode the verifier could silently downgrade to when the SDK throws (e.g. on a `did:t3n:` issuer, or a transient SDK outage); both branches fail closed with `verified: false` and a domain-separated SHA-256 `t3_attestation_ref` over (claimType, policyHash, issuer, JWS, SDK message). `disclosure-verifier-roundtrip.test.ts` imports the **real** `@terminal3/verify_vc` and runs the verifier end-to-end against a freshly-minted claim VC, asserting `verifyVc` is called once and that the structurally-correct `SignedCredential` shape (`validFrom`/`validUntil`, `proof.proofValue`, EIP-55 `verificationMethod`) reaches the SDK's `verifyEcdsaVc` path — mirroring the same transformation `ghostbroker-delegation.ts:323-350` performs for the agent admission VC.
+
 **Server-side VC persistence** — at admission the dashboard mints and signs the VC via `BackendTenantDelegationSigner`; the backend persists it on the `agents` row; every subsequent privileged action loads it via `loadAndVerify` and runs the same verifier. The VC is not echoed by agents on every call.
 
 **Two-key separation enforced** — `backend/src/enclave/sandbox/tenant-identity-store.ts:111-127` rejects any `signingPrivateKey` that is not a canonical 32-byte secp256k1 hex, explicitly preventing the T3N bearer API key from being conflated with the tenant signing key (one of the SDK onboarding gaps we documented as T3-ONB-014).
@@ -166,7 +168,6 @@ Honest disclosure (any of these would surface quickly during a code walkthrough)
 
 **Deliberately scoped for the bounty demo (v1):**
 
-- `backend/src/enclave/negotiation/disclosure-verifier.ts` — shape-only verification of the counterparty claim credential. The docstring documents the production target of a T3-backed verifier; the disclosure gate still excludes unverified claims from settlement.
 - `backend/src/cli/agents/sealed-envelope.ts` — for loop agents that do not have a TEE in front of them, the envelope is a deterministic base64url JSON blob. The production path (`backend/src/enclave/matching/blind-intent.ts:332-418` via `T3BlindIntentClient.sealIntent`) is real TEE encryption.
 - `backend/src/enclave/negotiation/evaluate-round.ts` — turn-by-turn negotiation crosses are computed inline because both sides' prices are already visible to the agents by design; the TEE still seals tickets and validates pair compatibility. The cross is a *transcript outcome*, not a settlement authority.
 
