@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiClient, type Agent, type Institution, type EnclaveIdentity } from '../services/api-client';
+import { apiClient, type Agent, type Institution, type EnclaveIdentity, type EnclaveAttestation } from '../services/api-client';
 import {
   Robot01Icon,
   CheckmarkCircle01Icon,
@@ -155,6 +155,15 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
   const [isEnclaveLoading, setIsEnclaveLoading] = useState(false);
   const [enclaveError, setEnclaveError] = useState<string | null>(null);
 
+  // Live TEE attestation quote (fetched on demand when the operator
+  // clicks "Verify TEE Attestation"). A real enclave returns an
+  // opaque intent handle + execution ref + attestation ref bound to
+  // the published matching contract version; a stubbed or
+  // unregistered contract surfaces as verified=false with an error.
+  const [attestation, setAttestation] = useState<EnclaveAttestation | null>(null);
+  const [isAttestationLoading, setIsAttestationLoading] = useState(false);
+  const [attestationError, setAttestationError] = useState<string | null>(null);
+
   const loadAgents = useCallback(async () => {
     setIsAgentsLoading(true);
     setAgentsError(null);
@@ -297,6 +306,20 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
       alert(err instanceof Error ? err.message : 'Failed to rotate envelope keys.');
     } finally {
       setRotatingKeys(false);
+    }
+  };
+
+  const handleVerifyAttestation = async () => {
+    setIsAttestationLoading(true);
+    setAttestationError(null);
+    try {
+      const quote = await apiClient.getEnclaveAttestation();
+      setAttestation(quote);
+    } catch (err) {
+      setAttestationError(err instanceof Error ? err.message : 'Failed to fetch TEE attestation quote.');
+      setAttestation(null);
+    } finally {
+      setIsAttestationLoading(false);
     }
   };
 
@@ -757,6 +780,140 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
                 <code> EcdsaSecp256k1Signature2019 </code>
                 proof; a mismatch fails closed (see <code>terminal3-adk-onboarding-doc-gaps.md</code> T3-ONB-019).
               </p>
+            </div>
+
+            {/* Live TEE Attestation Verification */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)', marginTop: 'var(--spacing-xs)' }}>
+              <h3 style={{ fontSize: '0.8rem', color: 'var(--color-text-primary)', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                Live TEE Attestation
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                One click performs a live <code>seal-intent</code> probe against the published matching
+                contract on the T3 Network. Only a real enclave can return an opaque intent handle and
+                TEE-attested reference bound to the pinned contract version. A stubbed or unregistered
+                contract surfaces as a failed verification with the upstream error.
+              </p>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ alignSelf: 'flex-start', fontFamily: 'var(--font-mono)', fontSize: '0.7rem', padding: '8px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                onClick={handleVerifyAttestation}
+                disabled={isAttestationLoading}
+                data-testid="verify-tee-attestation-btn"
+              >
+                {isAttestationLoading ? (
+                  <Loading03Icon size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                ) : (
+                  <Shield01Icon size={12} />
+                )}
+                {isAttestationLoading ? 'Probing TEE...' : 'Verify TEE Attestation'}
+              </button>
+
+              {attestationError && (
+                <div
+                  role="alert"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: 'var(--spacing-sm)',
+                    color: 'var(--color-text-secondary)',
+                    fontSize: '0.75rem',
+                  }}
+                >
+                  <AlertCircleIcon size={12} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                  {attestationError}
+                </div>
+              )}
+
+              {attestation && (
+                <div
+                  data-testid="enclave-attestation-quote"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: `1px solid ${attestation.verified ? 'rgba(94, 210, 156, 0.25)' : 'var(--color-border)'}`,
+                    borderRadius: 'var(--radius-md)',
+                    padding: 'var(--spacing-md)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 'var(--spacing-sm)',
+                    animation: 'fadeIn 0.2s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', fontWeight: 600 }}>
+                    {attestation.verified ? (
+                      <>
+                        <CheckmarkCircle01Icon size={14} style={{ color: 'var(--color-accent)' }} />
+                        <span style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                          TEE Verified
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircleIcon size={14} style={{ color: 'var(--color-text-secondary)' }} />
+                        <span style={{ color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                          Verification Failed
+                        </span>
+                      </>
+                    )}
+                    <span style={{ marginLeft: 'auto', fontSize: '0.6rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      {new Date(attestation.probedAt).toLocaleString()}
+                    </span>
+                  </div>
+
+                  {attestation.error && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                      {attestation.error}
+                    </div>
+                  )}
+
+                  {attestation.teeResponse && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)', fontSize: '0.7rem' }}>
+                      <DetailRow
+                        label="Intent Handle (TEE-issued)"
+                        value={attestation.teeResponse.intentHandle}
+                        accent="var(--color-accent)"
+                        testId="attestation-intent-handle"
+                      />
+                      <DetailRow
+                        label="Execution Ref"
+                        value={attestation.teeResponse.executionRef}
+                        testId="attestation-execution-ref"
+                      />
+                      <DetailRow
+                        label="Attestation Ref"
+                        value={attestation.teeResponse.attestationRef}
+                        accent="var(--color-accent)"
+                        testId="attestation-ref"
+                      />
+                      <DetailRow
+                        label="Contract Version"
+                        value={attestation.contractVersion}
+                        testId="attestation-contract-version"
+                      />
+                      <DetailRow
+                        label="T3 Network"
+                        value={attestation.networkEnv}
+                        testId="attestation-network-env"
+                      />
+                      <DetailRow
+                        label="HTTP Response Status"
+                        value={String(attestation.teeResponse.responseStatus)}
+                        testId="attestation-response-status"
+                      />
+                    </div>
+                  )}
+
+                  {attestation.publishedMatchingContract && (
+                    <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--spacing-sm)' }}>
+                      Bound to published contract v{attestation.publishedMatchingContract.contractVersion}
+                      {' · '}{attestation.publishedMatchingContract.wasmSize.toLocaleString()} bytes
+                      {' · '}published {new Date(attestation.publishedMatchingContract.publishedAt).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

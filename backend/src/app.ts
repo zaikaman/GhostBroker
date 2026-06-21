@@ -116,6 +116,7 @@ import {
   runStartupCheck,
   T3EnclaveConfigError,
   type AuthenticatedT3NetworkClientOptions,
+  type T3NetworkClient,
   loadEnvelopeMasterKey,
 } from "./enclave/index.js";
 import { SupabasePublishedContractRepository, type PublishedContractRepository } from "./services/published-contract.repository.js";
@@ -197,6 +198,18 @@ export interface BackendServices {
    * always reports `publishedMatchingContract: null`.
    */
   publishedContractRepository?: PublishedContractRepository;
+  /**
+   * Authenticated T3N network client (the SDK-backed adapter
+   * returned by `createAuthenticatedT3NetworkClient`). The
+   * Settings → Enclave Connection "Verify TEE Attestation"
+   * panel uses it to perform a live `seal-intent` probe against
+   * the published matching contract — the round-trip is the
+   * verifiable evidence that the enclave is real, not stubbed.
+   * Optional so test compositions that boot `BackendServices`
+   * without a T3N handshake can omit it; the attestation
+   * endpoint falls back to an honest "not available" state.
+   */
+  t3NetworkClient?: T3NetworkClient;
   tradeHistoryService?: TradeHistoryService;
   receiptService?: ReceiptService;
   authService?: AuthSessionService;
@@ -800,6 +813,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       sessionSecret: env.AUTH_SESSION_SECRET,
     }),
     publishedContractRepository,
+    t3NetworkClient,
   };
 }
 
@@ -837,7 +851,14 @@ export function createApp(
   app.use(createCorsMiddleware(env));
   app.use(express.json({ limit: "1mb" }));
   app.use(correlationIdMiddleware());
-  app.use("/api", createHealthRouter(env, services?.publishedContractRepository));
+  app.use(
+    "/api",
+    createHealthRouter(
+      env,
+      services?.publishedContractRepository,
+      services?.t3NetworkClient,
+    ),
+  );
   if (services.authService) {
     app.use("/api", createAuthRouter(services.authService));
   }

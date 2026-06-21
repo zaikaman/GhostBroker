@@ -24,6 +24,29 @@ export interface EnclaveIdentity {
   } | null;
 }
 
+export interface EnclaveAttestation {
+  verified: boolean;
+  probedAt: string;
+  networkEnv: 'testnet' | 'production';
+  contractVersion: string;
+  publishedMatchingContract: {
+    tail: 'matching';
+    contractVersion: string;
+    publishedAt: string;
+    tenantDid: string;
+    networkEnv: 'testnet' | 'production';
+    wasmSize: number;
+    handle?: string;
+  } | null;
+  teeResponse: {
+    intentHandle: string | null;
+    executionRef: string | null;
+    attestationRef: string | null;
+    responseStatus: number;
+  } | null;
+  error: string | null;
+}
+
 export interface CreateInstitutionRequest {
   legalName: string;
   displayName: string;
@@ -584,6 +607,13 @@ export const apiClient = {
       headers: { Accept: 'application/json' },
     });
     return handleResponse<EnclaveIdentity>(res);
+  },
+
+  async getEnclaveAttestation(): Promise<EnclaveAttestation> {
+    const res = await fetch(`${API_BASE_URL}/api/health/enclave/attestation`, {
+      headers: { Accept: 'application/json' },
+    });
+    return handleResponse<EnclaveAttestation>(res);
   },
 
   async createInstitution(req: CreateInstitutionRequest): Promise<Institution> {
