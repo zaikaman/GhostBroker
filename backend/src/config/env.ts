@@ -134,7 +134,7 @@ const envSchema = z.object({
     .trim()
     .min(1)
     .max(32)
-    .default("0.9.1"),
+    .default("0.10.1"),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
   SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
   /**
@@ -337,4 +337,3 @@ export function getCorsAllowedOrigins(
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 }
-

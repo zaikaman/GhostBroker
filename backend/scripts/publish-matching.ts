@@ -28,13 +28,15 @@
  * Optional:
  *   - T3N_ENV                            "testnet" (default) or "production"
  *   - T3_NETWORK_URL                     Override the testnet URL
- *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.9.1" (the
- *                                        v0.9.1 build that adds
+ *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.10.0" (the
+ *                                        v0.10.0 build that adds
  *                                        `seal-round-proposal` and
  *                                        `evaluate-round`; the same
  *                                        version covers `evaluate-match`,
  *                                        `seal-ticket`, and
- *                                        `evaluate-pair`)
+ *                                        `evaluate-pair`). v0.10.1
+ *                                        fixes kv-store map names to
+ *                                        use canonical `z:<tenant>:<tail>`.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -106,7 +108,7 @@ async function main(): Promise<void> {
   const configuredTenantDid = env.T3_TENANT_DID;
   const networkEnv = env.T3N_ENV ?? "testnet";
   const networkUrl = env.T3_NETWORK_URL;
-  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.9.1";
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.10.1";
   const tail = "matching";
 
   if (!apiKey) {

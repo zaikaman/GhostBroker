@@ -122,8 +122,6 @@ const crossEvaluator: NegotiationRoundEvaluator = {
       // Tests don't exercise the decode path, so the literal
       // strings are fine — they only need to round-trip through
       // the orchestrator without breaking types.
-      quantity: "0",
-      price: "0",
       distanceSignal: "far",
       attestationRef: `roundattest_seal_${harnessState.nextHandle}`,
       sealedAt: new Date().toISOString(),

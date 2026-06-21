@@ -110,23 +110,23 @@ const pairRequest: NegotiationPairVerificationRequest = {
 };
 
 describe("T3NegotiationTicketClient — contract version", () => {
-  it("pins the default contract version to 0.9.1 (the v0.9.1 round-flow build)", async () => {
+  it("pins the default contract version to 0.10.1 (the v0.10.1 canonical map-name build)", async () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3NegotiationTicketClient({ networkClient });
-    await client.sealTicket(ticketRequest);
-    expect(networkClient.requests[0]?.body).toMatchObject({
-      version: "0.9.1",
-    });
-  });
+   await client.sealTicket(ticketRequest);
+   expect(networkClient.requests[0]?.body).toMatchObject({
+      version: "0.10.1",
+   });
+ });
 
-  it("pins the contract version on the verifyPair body too", async () => {
+ it("pins the contract version on the verifyPair body too", async () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3NegotiationTicketClient({ networkClient });
-    await client.verifyPair(pairRequest);
-    expect(networkClient.requests[0]?.body).toMatchObject({
-      version: "0.9.1",
-    });
-  });
+   await client.verifyPair(pairRequest);
+   expect(networkClient.requests[0]?.body).toMatchObject({
+      version: "0.10.1",
+   });
+ });
 
   it("honours an explicit contractVersion override on both methods", async () => {
     const networkClient = new CapturingNetworkClient();
@@ -157,8 +157,8 @@ describe("T3NegotiationTicketClient — seal-ticket wire shape", () => {
       "/contracts/negotiation/tickets",
     );
     expect(networkClient.requests[0]?.method).toBe("POST");
-    expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.9.1",
+   expect(networkClient.requests[0]?.body).toEqual({
+      version: "0.10.1",
       institution_id: ticketRequest.institutionId,
       agent_did: ticketRequest.agentDid,
       authority_ref: ticketRequest.authorityRef,
@@ -197,8 +197,8 @@ describe("T3NegotiationTicketClient — evaluate-pair wire shape", () => {
       "/contracts/negotiation/pairs",
     );
     expect(networkClient.requests[0]?.method).toBe("POST");
-    expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.9.1",
+   expect(networkClient.requests[0]?.body).toEqual({
+      version: "0.10.1",
       buy_ticket_handle: pairRequest.buyTicketHandle,
       sell_ticket_handle: pairRequest.sellTicketHandle,
       buy_compatibility_token: pairRequest.buyCompatibilityToken,

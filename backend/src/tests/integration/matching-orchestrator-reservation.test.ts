@@ -154,8 +154,6 @@ class StaticBlindIntentClient implements BlindIntentClient {
         // orchestrator carries them through on the
         // `T3LockDescriptor` and forwards them to
         // `evaluate-match` on the canonical Rust wire form.
-        quantity: String(payload.quantity),
-        price: String(payload.price),
         amount,
         attestationRef: `t3attest:${this.counter}`,
       },

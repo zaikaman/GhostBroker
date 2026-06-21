@@ -150,7 +150,7 @@ export interface PendingIntent {
  * enclave produces all values; the orchestrator carries them
  * through.
  */
-export interface T3LockDescriptor {
+ export interface T3LockDescriptor {
   /**
    * Asset the intent is buying or selling. Authoritative on
    * the cross-candidate filter (buy and sell intents must
@@ -176,20 +176,6 @@ export interface T3LockDescriptor {
    * envelope contents to derive this.
    */
   side: "buy" | "sell";
-  /**
-   * TEE-attested intent quantity. Decimal string at the
-   * contract's implicit `WIRE_SCALE` (1e18) so the value
-   * flows directly into the `evaluate-match` `quantity` wire
-   * field without a re-scale step. The orchestrator carries
-   * this through on the match call.
-   */
-  quantity: string;
-  /**
-   * TEE-attested intent price (decimal string at the
-   * contract's implicit `WIRE_SCALE`). Same rationale as
-   * `quantity`.
-   */
-  price: string;
   /**
    * Reservation amount. `quantity * price` for a buy;
    * `quantity` for a sell. Equivalent to multiplying the

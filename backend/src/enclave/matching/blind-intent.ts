@@ -43,20 +43,6 @@ export interface BlindIntentLockDescriptor {
    */
   side: "buy" | "sell";
   /**
-   * TEE-attested intent quantity (decimal string at the
-   * contract's implicit `WIRE_SCALE` — `1e18` — so the value
-   * flows directly into the `evaluate-match` `quantity` wire
-   * field without a re-scale step). Sourced from the
-   * `seal-intent` v0.8.0 response, where the enclave emits
-   * the value it unsealed from the envelope.
-   */
-  quantity: string;
-  /**
-   * TEE-attested intent price (same decimal-string wire
-   * form). Sourced from the `seal-intent` v0.8.0 response.
-   */
-  price: string;
-  /**
    * Reservation amount. `quantity * price` for a buy;
    * `quantity` for a sell. Derived in the enclave and
    * surfaced on the `seal-intent` response.
@@ -528,17 +514,18 @@ export class T3BlindIntentClient implements BlindIntentClient {
       authorityRef: string;
     },
   ): BlindIntentLockDescriptor {
-    // v0.8.0+: the enclave unseals the envelope and emits the
-    // per-side TEE-attested parameters as siblings on the
-    // response. Prefer those over any nested `lock_descriptor`
+    // v0.10.0+: the enclave unseals the envelope, persists
+    // price/quantity into kv-store, and emits only the derived
+    // reservation amount + asset/side on the response. The
+    // orchestrator never holds plaintext price/quantity. Prefer
+    // the v0.10.0+ fields over any nested `lock_descriptor`
     // (a pre-v0.8.0 shape). Either path populates the same
-    // descriptor fields.
+    // descriptor fields (minus price/quantity, which stay in
+    // the TEE's kv-store as of v0.10.0).
     if (
       upstream.traded_asset_code &&
       upstream.settlement_asset_code &&
       upstream.side &&
-      upstream.quantity &&
-      upstream.price &&
       upstream.amount &&
       upstream.attestation_ref
     ) {
@@ -546,11 +533,6 @@ export class T3BlindIntentClient implements BlindIntentClient {
         tradedAssetCode: String(upstream.traded_asset_code).toUpperCase(),
         assetCode: String(upstream.settlement_asset_code).toUpperCase(),
         side: upstream.side,
-        quantity: parseWireDecimal(
-          String(upstream.quantity),
-          "quantity",
-        ),
-        price: parseWireDecimal(String(upstream.price), "price"),
         amount: parseLockAmount(String(upstream.amount)),
         attestationRef: String(upstream.attestation_ref),
       };
@@ -564,13 +546,11 @@ export class T3BlindIntentClient implements BlindIntentClient {
       upstream.lock_descriptor.attestation_ref
     ) {
       // Pre-v0.8.0 host. The TEE only emitted the reservation
-      // descriptor (not the per-side quantity / price). The
-      // in-process fallback below decodes the envelope to
-      // recover the per-side values for the `evaluate-match`
-      // wire form.
-      const decoded = decodeSealedEnvelope(envelope, context);
-      const quantity = String(decoded.quantity);
-      const price = String(decoded.price);
+      // descriptor. The orchestrator uses the TEE-provided
+      // amount for the balance lock; price/quantity are not
+      // needed on the descriptor as of v0.10.0 (the TEE holds
+      // them in kv-store and recovers them by handle on
+      // evaluate-match).
       const side = upstream.lock_descriptor.side;
       const amount = Number(
         String(upstream.lock_descriptor.amount).trim(),
@@ -584,8 +564,6 @@ export class T3BlindIntentClient implements BlindIntentClient {
         tradedAssetCode: String(upstream.lock_descriptor.traded_asset_code).toUpperCase(),
         assetCode: String(upstream.lock_descriptor.asset_code).toUpperCase(),
         side,
-        quantity,
-        price,
         amount,
         attestationRef: String(upstream.lock_descriptor.attestation_ref),
       };
@@ -604,37 +582,8 @@ export class T3BlindIntentClient implements BlindIntentClient {
       tradedAssetCode,
       assetCode: descriptorAsset,
       side: decoded.side,
-      quantity: String(decoded.quantity),
-      price: String(decoded.price),
       amount: descriptorAmount,
       attestationRef: `t3attest:${intentHandle}`,
     };
   }
-}
-
-/**
- * Parse a `WIRE_SCALE`-aligned decimal string into a plain
- * decimal string for transport on the `T3LockDescriptor`. The
- * Rust `seal-intent` already emits `format_decimal`-formatted
- * strings (no exponent, no trailing `.`), but we defensively
- * re-format here so a malformed value cannot flow into the
- * `evaluate-match` wire form.
- */
-function parseWireDecimal(value: string, field: string): string {
-  const trimmed = value.trim();
-  if (
-    !/^\d+(?:\.\d+)?$/u.test(trimmed) &&
-    !/^\.\d+$/u.test(trimmed)
-  ) {
-    throw new Error(
-      `Lock descriptor ${field} is not a plain non-negative decimal (${value}).`,
-    );
-  }
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(
-      `Lock descriptor ${field} is non-finite or non-positive (${value}).`,
-    );
-  }
-  return trimmed;
 }

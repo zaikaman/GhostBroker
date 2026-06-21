@@ -158,12 +158,26 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
         } as TBody,
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Terminal 3 request failed.";
+      // The T3N SDK throws an RpcError with `{"detail":"map already exists"}`
+      // when a kv-store map is already provisioned. Surface that as a 409 so
+      // callers can treat it as `already_exists` instead of a hard failure.
+      // This is expected on every reboot, so do not log it as an error.
+      if (/map[_ ]already[_ ]exists/u.test(message)) {
+        return {
+          status: 409,
+          body: {
+            code: "map_already_exists",
+            message,
+          } as TBody,
+        };
+      }
       console.error("[T3N CLIENT REQUEST ERROR]", error);
       return {
         status: 503,
         body: {
           code: classifySdkError(error),
-          message: error instanceof Error ? error.message : "Terminal 3 request failed.",
+          message,
         } as TBody,
       };
     }

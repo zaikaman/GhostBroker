@@ -16,7 +16,13 @@
  *   - minor bump → new exported function (v0.9.0
  *     introduced `seal-round-proposal` + `evaluate-round`;
  *     v0.9.1 added in-enclave AEAD decryption for both
- *     `seal-intent` and `seal-round-proposal`),
+ *     v0.9.1 added in-enclave AEAD decryption for both
+ *     `seal-intent` and `seal-round-proposal`; v0.10.0 added
+ *     `host:interfaces/kv-store` — the enclave now persists
+ *     decrypted price/quantity inside the TEE and the
+ *     orchestrator never holds or forwards plaintext; v0.10.1
+ *     fixed kv-store map names to use canonical `z:<tenant>:<tail>`
+ *     form — the host does not auto-prefix the tenant namespace),
  *   - major bump → response field removed or renamed.
  */
-export const DEFAULT_CONTRACT_VERSION = "0.9.1";
+export const DEFAULT_CONTRACT_VERSION = "0.10.1";

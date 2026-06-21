@@ -61,11 +61,11 @@ async function main(): Promise<void> {
 
   console.log("\n→ calling seal-round-proposal...");
   try {
-    const sealResult = await tenant.contracts.execute("matching", {
-      version: "0.9.1",
+   const sealResult = await tenant.contracts.execute("matching", {
+      version: "0.10.1",
       functionName: "seal-round-proposal",
       input: {
-        version: "0.9.1",
+        version: "0.10.1",
         sealed_envelope: envelope,
         envelope_master_key_hex: masterKey.key.toString("hex"),
         institution_did: institutionId,

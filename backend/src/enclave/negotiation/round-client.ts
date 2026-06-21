@@ -44,15 +44,6 @@ export interface RoundProposalDescriptor {
   /** TEE-echoed proposal side. */
   side: "buy" | "sell";
   /**
-   * TEE-echoed per-side quantity, decimal string at the contract's
-   * `WIRE_SCALE`. The orchestrator does not re-decode this on the
-   * cross-evaluation path; the field is surfaced so audit receipts
-   * can carry the TEE-attested value alongside the cross verdict.
-   */
-  quantity: string;
-  /** TEE-echoed per-side price, same decimal-string wire form. */
-  price: string;
-  /**
    * Coarse per-side signal: `crossed` (the proposal alone crosses
    * the prior round), `near` / `moderate` / `far` otherwise. The
    * TEE computes this from the unsealed envelope so the
@@ -394,8 +385,6 @@ export class T3NegotiationRoundClient implements NegotiationRoundClient {
       typeof body.proposal_handle !== "string" ||
       typeof body.traded_asset_code !== "string" ||
       typeof body.side !== "string" ||
-      typeof body.quantity !== "string" ||
-      typeof body.price !== "string" ||
       typeof body.attestation_ref !== "string"
     ) {
       // The T3 host didn't echo the new route. Fall back to the
@@ -406,13 +395,15 @@ export class T3NegotiationRoundClient implements NegotiationRoundClient {
       return localSealRoundProposal(request, this.envelopeMasterKey);
     }
 
+    // v0.10.0: the TEE persists price/quantity into kv-store and
+    // no longer emits them on the seal response. The orchestrator
+    // receives only the opaque handle + asset/side/distance signal;
+    // evaluate-round recovers the plaintext from kv-store by handle.
     return {
       proposalHandle: body.proposal_handle,
       executionRef: body.execution_ref ?? `t3exec_${randomUUID()}`,
       tradedAssetCode: body.traded_asset_code,
       side: body.side === "buy" ? "buy" : "sell",
-      quantity: body.quantity,
-      price: body.price,
       distanceSignal: parseDistanceSignal(body.distance_signal),
       attestationRef: body.attestation_ref,
       sealedAt:
@@ -576,8 +567,6 @@ function localSealRoundProposal(
     executionRef: `t3exec_${randomUUID()}`,
     tradedAssetCode: decoded.assetCode,
     side: decoded.side,
-    quantity,
-    price,
     distanceSignal,
     attestationRef: deriveSealAttestationRef({
       institutionDid: request.institutionDid,

@@ -118,6 +118,7 @@ import {
   type AuthenticatedT3NetworkClientOptions,
   type T3NetworkClient,
   loadEnvelopeMasterKey,
+  ensureTenantKvMaps,
 } from "./enclave/index.js";
 import { SupabasePublishedContractRepository, type PublishedContractRepository } from "./services/published-contract.repository.js";
 import { SupabaseTenantIdentityRepository } from "./services/tenant-identity.repository.js";
@@ -355,6 +356,15 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   const tenantDelegationSigner = new BackendTenantDelegationSigner(
     tenantIdentity,
   );
+
+  // v0.10.0: ensure the kv-store maps the matching contract
+  // writes to (`intents`, `rounds`) exist on the tenant before
+  // the orchestrator starts accepting intents. Idempotent — a
+  // 409 (already_exists) is treated as success so reboots are
+  // safe. The contract persists decrypted price/quantity into
+  // these maps; without them the TEE returns
+  // `unknown map: "intents"` on the first seal-intent call.
+  await ensureTenantKvMaps(t3NetworkClient, t3NetworkClient.tenantDidValue);
 
   // Ghostbroker-only authorization facade. Constructed
   // before the agent service so we can late-bind the

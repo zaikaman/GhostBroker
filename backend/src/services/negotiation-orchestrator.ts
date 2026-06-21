@@ -92,7 +92,7 @@ interface PendingTicket {
 interface SealedRoundProposal {
   /** Opaque TEE-issued handle. Forwarded to `evaluateRound` for cross. */
   proposalHandle: string;
-  /** TEE-attested descriptor: side, quantity, price, distance signal, attestation ref. */
+  /** TEE-attested descriptor: side, distance signal, attestation ref. */
   descriptor: RoundProposalDescriptor;
 }
 
@@ -1230,41 +1230,15 @@ export class NegotiationOrchestrator {
       matchedQuantity = evaluation.matchedQuantity;
       roundAttestationRef = evaluation.roundAttestationRef;
 
-      // v0.9.0 defense-in-depth fill fallback: the TEE attests the
-      // cross but cannot unseal the envelopes to compute the fill
-      // (the AEAD master key lives in the orchestrator's enclave
-      // adapter, not the TEE itself). When the TEE returns a crossed
-      // verdict with empty fill fields, compute the midpoint price
-      // and min quantity locally from the TEE-attested seal
-      // descriptors. The descriptors' price / quantity were
-      // themselves TEE-attested on the seal path, so this does not
-      // re-open the P0-7 plaintext leak — the orchestrator reads
-      // only values the TEE already vouched for.
-      if (crossed && executionPrice === 0 && matchedQuantity === 0) {
-        const buyPrice = Number(buyProposal.price);
-        const sellPrice = Number(sellProposal.price);
-        const buyQty = Number(buyProposal.quantity);
-        const sellQty = Number(sellProposal.quantity);
-        if (
-          Number.isFinite(buyPrice) && buyPrice > 0 &&
-          Number.isFinite(sellPrice) && sellPrice > 0 &&
-          Number.isFinite(buyQty) && buyQty > 0 &&
-          Number.isFinite(sellQty) && sellQty > 0
-        ) {
-          executionPrice = Math.round((buyPrice + sellPrice) / 2);
-          matchedQuantity = Math.min(buyQty, sellQty);
-          logger.debug(
-            {
-              event: "negotiation.round.fill_computed_locally",
-              sessionId: session.id,
-              actorSide,
-              executionPrice,
-              matchedQuantity,
-            },
-            "TEE attested cross but deferred fill; computed locally from seal descriptors",
-          );
-        }
-      }
+      // v0.10.0: the TEE now recovers price/quantity from its
+      // kv-store on the evaluate-round path and computes the fill
+      // (midpoint price + min quantity) inside the enclave. The
+      // v0.9.0 defense-in-depth fill fallback that computed the
+      // fill locally from the seal descriptors' price/quantity is
+      // no longer needed — the descriptor no longer carries
+      // price/quantity (they stay in the TEE's kv-store), and the
+      // TEE returns authoritative fill fields on a crossed
+      // verdict.
     } else {
       logger.debug(
         {

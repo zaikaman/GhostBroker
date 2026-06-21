@@ -34,10 +34,10 @@ describe("probeEnclaveAttestation", () => {
     }));
 
     const quote = await probeEnclaveAttestation({
-      networkClient: client,
-      contractVersion: "0.9.1",
-      tenantDid: "did:t3n:test",
-      correlationRef: "enclave-attestation-verify:probe-1",
+     networkClient: client,
+      contractVersion: "0.10.0",
+     tenantDid: "did:t3n:test",
+     correlationRef: "enclave-attestation-verify:probe-1",
       envelopeMasterKey: testMasterKey(),
     });
 
@@ -62,17 +62,17 @@ describe("probeEnclaveAttestation", () => {
     });
 
     await probeEnclaveAttestation({
-      networkClient: client,
-      contractVersion: "0.9.1",
-      tenantDid: "did:t3n:test",
-      correlationRef: "enclave-attestation-verify:probe-2",
+     networkClient: client,
+      contractVersion: "0.10.0",
+     tenantDid: "did:t3n:test",
+     correlationRef: "enclave-attestation-verify:probe-2",
       envelopeMasterKey: testMasterKey(),
     });
 
     expect(captured?.method).toBe("POST");
     expect(captured?.path).toBe("/contracts/matching/blind-intents");
     const body = captured?.body as Record<string, unknown>;
-    expect(body.version).toBe("0.9.1");
+    expect(body.version).toBe("0.10.0");
     expect(body.correlation_ref).toBe("enclave-attestation-verify:probe-2");
     expect(body.agent_did).toBe("did:t3n:enclave-attestation-verify");
     // The probe envelope must be a real AEAD ciphertext (the v0.9.1
@@ -93,10 +93,10 @@ describe("probeEnclaveAttestation", () => {
     }));
 
     const quote = await probeEnclaveAttestation({
-      networkClient: client,
-      contractVersion: "0.9.1",
-      tenantDid: "did:t3n:test",
-      correlationRef: "enclave-attestation-verify:probe-3",
+     networkClient: client,
+      contractVersion: "0.10.0",
+     tenantDid: "did:t3n:test",
+     correlationRef: "enclave-attestation-verify:probe-3",
       envelopeMasterKey: testMasterKey(),
     });
 
@@ -112,10 +112,10 @@ describe("probeEnclaveAttestation", () => {
     }));
 
     const quote = await probeEnclaveAttestation({
-      networkClient: client,
-      contractVersion: "0.9.1",
-      tenantDid: "did:t3n:test",
-      correlationRef: "enclave-attestation-verify:probe-4",
+     networkClient: client,
+      contractVersion: "0.10.0",
+     tenantDid: "did:t3n:test",
+     correlationRef: "enclave-attestation-verify:probe-4",
       envelopeMasterKey: testMasterKey(),
     });
 
@@ -131,10 +131,10 @@ describe("probeEnclaveAttestation", () => {
     }));
 
     const quote = await probeEnclaveAttestation({
-      networkClient: client,
-      contractVersion: "0.9.1",
-      tenantDid: "did:t3n:test",
-      correlationRef: "enclave-attestation-verify:probe-5",
+     networkClient: client,
+      contractVersion: "0.10.0",
+     tenantDid: "did:t3n:test",
+     correlationRef: "enclave-attestation-verify:probe-5",
       envelopeMasterKey: testMasterKey(),
     });
 

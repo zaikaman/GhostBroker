@@ -75,8 +75,6 @@ const buyIntent: PendingIntent = {
     // enclave unsealed from the envelope. The orchestrator
     // carries them through on the lock descriptor and forwards
     // them to `evaluate-match` on the canonical Rust wire form.
-    quantity: "2",
-    price: "50000",
     amount: 100_000,
     attestationRef: "t3attest:buy_1",
   },
@@ -100,8 +98,6 @@ const sellIntent: PendingIntent = {
     // enclave unsealed from the envelope. The orchestrator
     // carries them through on the lock descriptor and forwards
     // them to `evaluate-match` on the canonical Rust wire form.
-    quantity: "3",
-    price: "51000",
     amount: 3,
     attestationRef: "t3attest:sell_1",
   },

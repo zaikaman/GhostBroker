@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   const apiKey = env.T3N_API_KEY;
   const networkEnv = env.T3N_ENV ?? "testnet";
   const networkUrl = env.T3_NETWORK_URL;
-  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.6.0";
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.10.1";
   if (!apiKey) {
     throw new Error("T3N_API_KEY is missing from backend/.env");
   }

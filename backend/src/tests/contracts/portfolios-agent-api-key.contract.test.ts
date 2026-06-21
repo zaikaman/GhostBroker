@@ -88,8 +88,6 @@ const buyIntent: PendingIntent = {
     // enclave unsealed from the envelope. The orchestrator
     // carries them through on the lock descriptor and forwards
     // them to `evaluate-match` on the canonical Rust wire form.
-    quantity: "1",
-    price: "50000",
     amount: 50_000,
     attestationRef: "t3attest:buy_apikey_1",
   },

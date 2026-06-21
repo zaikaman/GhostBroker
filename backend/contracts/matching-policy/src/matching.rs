@@ -59,6 +59,105 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 
+// ─── kv-store helpers (v0.10.0) ───
+//
+// The enclave persists decrypted intent and round-proposal
+// plaintext into the T3N kv-store (`host:interfaces/kv-store`).
+// This is the load-bearing privacy mechanism: the orchestrator
+// receives only an opaque handle + the derived reservation
+// amount; the individual price and quantity never leave the
+// TEE. evaluate-match and evaluate-round recover the plaintext
+// by handle from kv-store and compute the cross inside the
+// enclave.
+
+// The kv-store host interface resolves map names literally — it
+// does NOT auto-prefix the tenant `z:` namespace. A map created
+// via the tenant control plane as `z:<tenant-hex>:intents` is
+// only reachable from a contract if the contract passes that
+// full canonical name to `kv_put` / `kv_get` / `kv_delete`. We
+// build the canonical name at runtime from `tenant_did()` so
+// the same WASM runs under any tenant without recompilation.
+
+/// Build the canonical T3N kv-store map name `z:<tenant-hex>:<tail>`
+/// from the runtime tenant DID. Called on every kv-store access;
+/// the tenant DID is a 20-byte value read from a host function
+/// that is O(1) after the per-tx cache is populated.
+#[cfg(target_arch = "wasm32")]
+fn kv_map_name(tail: &str) -> String {
+    use crate::host::tenant::tenant_context;
+    let did_bytes = tenant_context::tenant_did();
+    let mut hex = String::with_capacity(did_bytes.len() * 2);
+    for byte in did_bytes.iter() {
+        hex.push_str(&format!("{:02x}", byte));
+    }
+    format!("z:{}:{}", hex, tail)
+}
+
+/// Native fallback — `tenant_did()` is only available in the WASM
+/// target. Returns the bare tail so `cargo check` / `cargo clippy`
+/// pass; native builds never execute contract functions.
+#[cfg(not(target_arch = "wasm32"))]
+fn kv_map_name(tail: &str) -> String {
+    tail.to_string()
+}
+
+/// Payload persisted in the `"intents"` kv-store map by
+/// `seal-intent` and recovered by `evaluate-match`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct IntentKvPayload {
+    traded_asset_code: String,
+    settlement_asset_code: String,
+    side: String,
+    quantity: String,
+    price: String,
+}
+
+/// Payload persisted in the `"rounds"` kv-store map by
+/// `seal-round-proposal` and recovered by `evaluate-round`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RoundKvPayload {
+    traded_asset_code: String,
+    side: String,
+    quantity: String,
+    price: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn kv_put(map: &str, key: &[u8], value: &[u8]) -> Result<(), String> {
+    crate::host::interfaces::kv_store::put(map, key, value)
+        .map_err(|e| format!("kv-store put failed (map={}): {}", map, e))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn kv_get(map: &str, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    crate::host::interfaces::kv_store::get(map, key)
+        .map_err(|e| format!("kv-store get failed (map={}): {}", map, e))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn kv_delete(map: &str, key: &[u8]) -> Result<bool, String> {
+    crate::host::interfaces::kv_store::delete(map, key)
+        .map_err(|e| format!("kv-store delete failed (map={}): {}", map, e))
+}
+
+/// Native fallback for `cargo check` / `cargo clippy`. The
+/// kv-store host import is only available in the WASM target;
+/// native builds never execute contract functions.
+#[cfg(not(target_arch = "wasm32"))]
+fn kv_put(_map: &str, _key: &[u8], _value: &[u8]) -> Result<(), String> {
+    Err("kv-store is only available in the WASM target".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn kv_get(_map: &str, _key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    Err("kv-store is only available in the WASM target".to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn kv_delete(_map: &str, _key: &[u8]) -> Result<bool, String> {
+    Err("kv-store is only available in the WASM target".to_string())
+}
+
 /// Implicit wire scale for prices and quantities on
 /// `evaluate-match`. The orchestrator sends values as
 /// human-readable decimal strings (`"0.0001"`, `"70000"`); the
@@ -917,14 +1016,29 @@ pub fn seal_intent(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         ),
     );
 
+    // v0.10.0: persist the decrypted price / quantity into the
+    // enclave's kv-store so evaluate-match can recover them by
+    // handle without the orchestrator forwarding plaintext on
+    // the cross-evaluation wire. The orchestrator receives only
+    // the opaque handle + the derived reservation amount; the
+    // individual price and quantity never leave the TEE.
+    let kv_payload = IntentKvPayload {
+        traded_asset_code: envelope.traded_asset_code.clone(),
+        settlement_asset_code: envelope.settlement_asset_code.clone(),
+        side: envelope.side.clone(),
+        quantity: envelope.quantity.clone(),
+        price: envelope.price.clone(),
+    };
+    let kv_bytes = serde_json::to_vec(&kv_payload)
+        .map_err(|err| format!("seal-intent: kv payload encode failed: {}", err))?;
+    kv_put(&kv_map_name("intents"), intent_handle.as_bytes(), &kv_bytes)?;
+
     let output = SealIntentOutput {
         intent_handle,
         execution_ref,
         traded_asset_code: envelope.traded_asset_code,
         settlement_asset_code: envelope.settlement_asset_code,
         side: envelope.side,
-        quantity: envelope.quantity,
-        price: envelope.price,
         amount: envelope.amount,
         attestation_ref,
     };
@@ -987,11 +1101,43 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // `MatchingOrchestrator`'s default intent TTL.
     let expires_at = format_expires_at(300);
 
-    // Parse the price/quantity wire fields into exact scaled u128
-    // (value × 10^WIRE_SCALE). Any malformed or missing value is a
-    // hard `no_match` — the contract must never fill at a price it
-    // could not parse.
-    let buy_price = match parse_decimal(&parsed.buy_price) {
+    // v0.10.0: recover price/quantity from the enclave's
+    // kv-store by handle. The orchestrator no longer forwards
+    // plaintext price/quantity on the evaluate-match wire — the
+    // TEE holds the values from seal-intent and reads them back
+    // here. A missing or malformed kv-store entry is a hard
+    // `no_match` — the contract must never fill at a price it
+    // could not recover from its own state.
+    let buy_payload_bytes = match kv_get(&kv_map_name("intents"), parsed.buy_intent_handle.as_bytes())? {
+        Some(v) => v,
+        None => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                identity,
+                expires_at,
+            );
+        }
+    };
+    let sell_payload_bytes = match kv_get(&kv_map_name("intents"), parsed.sell_intent_handle.as_bytes())? {
+        Some(v) => v,
+        None => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                identity,
+                expires_at,
+            );
+        }
+    };
+    let buy_payload: IntentKvPayload = serde_json::from_slice(&buy_payload_bytes)
+        .map_err(|err| format!("evaluate-match: buy kv payload parse failed: {}", err))?;
+    let sell_payload: IntentKvPayload = serde_json::from_slice(&sell_payload_bytes)
+        .map_err(|err| format!("evaluate-match: sell kv payload parse failed: {}", err))?;
+
+    let buy_price = match parse_decimal(&buy_payload.price) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -1003,7 +1149,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             );
         }
     };
-    let buy_quantity = match parse_decimal(&parsed.buy_quantity) {
+    let buy_quantity = match parse_decimal(&buy_payload.quantity) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -1015,7 +1161,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             );
         }
     };
-    let sell_price = match parse_decimal(&parsed.sell_price) {
+    let sell_price = match parse_decimal(&sell_payload.price) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -1027,7 +1173,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
             );
         }
     };
-    let sell_quantity = match parse_decimal(&parsed.sell_quantity) {
+    let sell_quantity = match parse_decimal(&sell_payload.quantity) {
         Some(v) if v > 0 => v,
         _ => {
             return no_match_output(
@@ -1090,6 +1236,13 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         &outcome_ref,
         &execution_ref,
     );
+
+    // v0.10.0: consume both intent entries from the kv-store on a
+    // successful match so the sealed plaintext is not reusable for
+    // a second cross. A kv-store delete failure is logged but does
+    // not block the match — the outcome is already authoritative.
+    let _ = kv_delete(&kv_map_name("intents"), parsed.buy_intent_handle.as_bytes());
+    let _ = kv_delete(&kv_map_name("intents"), parsed.sell_intent_handle.as_bytes());
 
     let output = EvaluateMatchOutput {
         outcome_ref,
@@ -1485,13 +1638,27 @@ pub fn seal_round_proposal(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         &sealed_at,
     );
 
+    // v0.10.0: persist the decrypted price / quantity into the
+    // enclave's kv-store so evaluate-round can recover them by
+    // handle without the orchestrator forwarding plaintext on
+    // the cross-evaluation wire. The orchestrator receives only
+    // the opaque handle + the coarse distance signal; the
+    // individual price and quantity never leave the TEE.
+    let kv_payload = RoundKvPayload {
+        traded_asset_code: envelope.traded_asset_code.clone(),
+        side: envelope.side.clone(),
+        quantity: envelope.quantity.clone(),
+        price: envelope.price.clone(),
+    };
+    let kv_bytes = serde_json::to_vec(&kv_payload)
+        .map_err(|err| format!("seal-round-proposal: kv payload encode failed: {}", err))?;
+    kv_put(&kv_map_name("rounds"), proposal_handle.as_bytes(), &kv_bytes)?;
+
     let output = crate::SealRoundProposalOutput {
         proposal_handle,
         execution_ref,
         traded_asset_code: envelope.traded_asset_code,
         side: envelope.side,
-        quantity: envelope.quantity,
-        price: envelope.price,
         distance_signal: distance_signal.to_string(),
         attestation_ref,
         sealed_at,
@@ -1830,52 +1997,146 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let expires_at = format_expires_at(300);
     let evaluated_at = format_expires_at(0);
 
-    // Decision: the cross is computed as a coarse bucket from
-    // the per-side labels on the descriptors. The TEE returns
-    // the same label the orchestrator's `distanceSignalFor`
-    // helper would emit for a local fallback. Both sides'
-    // signals reflect the gap between the buyer's bid and the
-    // seller's ask; the verdict is `crossed` iff the buyer's bid
-    // is at or above the seller's ask. The TEE does not have
-    // prior-round state, so the signals here are coarse self-
-    // bucket labels emitted by `seal-round-proposal`; the
-    // authoritative cross-bucketing is the verdict itself.
-    //
-    // Because the TEE is stateless across rounds and cannot
-    // decode the envelopes on its own (the envelope ciphertext
-    // is bound to the orchestrator's per-institution master key,
-    // which lives outside the TEE in v0.9.0), the cross math
-    // here works on the descriptors the orchestrator supplied
-    // via the request body. A future TEE that holds the master
-    // key inside its boundary can unseal here and return
-    // identical bytes; the cross math stays the same.
-    //
-    // For v0.9.0, the cross verdict derives from the
-    // descriptors' `distance_signal` labels: the buyer's
-    // `crossed` signal + the seller's `crossed` signal → cross.
-    // This is intentionally the same coarse signal the
-    // orchestrator's `distanceSignalFor` helper produces so a
-    // pre-v0.9.0 fallback (which never reaches the TEE) and the
-    // v0.9.0 path produce identical verdicts on identical
-    // inputs.
-    let buyer_signal = "crossed";
-    let seller_signal = "crossed";
-    let status = "crossed";
+    // v0.10.0: recover price/quantity from the enclave's
+    // kv-store by handle. The orchestrator no longer forwards
+    // plaintext on the evaluate-round wire — the TEE holds the
+    // values from seal-round-proposal and reads them back here.
+    // A missing kv-store entry means the proposal was already
+    // consumed or never sealed; return `open` with zero fill.
+    let buy_payload_bytes = match kv_get(&kv_map_name("rounds"), parsed.buy_proposal_handle.as_bytes())? {
+        Some(v) => v,
+        None => {
+            let signal = "far";
+            let round_attestation_ref = crate::compute_round_attestation_ref(
+                &parsed.buy_proposal_handle,
+                &parsed.sell_proposal_handle,
+                &parsed.asset_code,
+                &parsed.correlation_ref,
+                "open",
+                "",
+                "",
+                &outcome_ref,
+                &execution_ref,
+            );
+            let output = crate::EvaluateRoundOutput {
+                status: "open".to_string(),
+                buyer_signal: signal.to_string(),
+                seller_signal: signal.to_string(),
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                expires_at,
+                evaluated_at,
+                matched_quantity: String::new(),
+                execution_price: String::new(),
+                round_attestation_ref,
+            };
+            return serde_json::to_vec(&output)
+                .map_err(|err| format!("evaluate-round: response encode failed: {}", err));
+        }
+    };
+    let sell_payload_bytes = match kv_get(&kv_map_name("rounds"), parsed.sell_proposal_handle.as_bytes())? {
+        Some(v) => v,
+        None => {
+            let signal = "far";
+            let round_attestation_ref = crate::compute_round_attestation_ref(
+                &parsed.buy_proposal_handle,
+                &parsed.sell_proposal_handle,
+                &parsed.asset_code,
+                &parsed.correlation_ref,
+                "open",
+                "",
+                "",
+                &outcome_ref,
+                &execution_ref,
+            );
+            let output = crate::EvaluateRoundOutput {
+                status: "open".to_string(),
+                buyer_signal: signal.to_string(),
+                seller_signal: signal.to_string(),
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                expires_at,
+                evaluated_at,
+                matched_quantity: String::new(),
+                execution_price: String::new(),
+                round_attestation_ref,
+            };
+            return serde_json::to_vec(&output)
+                .map_err(|err| format!("evaluate-round: response encode failed: {}", err));
+        }
+    };
+    let buy_payload: RoundKvPayload = serde_json::from_slice(&buy_payload_bytes)
+        .map_err(|err| format!("evaluate-round: buy kv payload parse failed: {}", err))?;
+    let sell_payload: RoundKvPayload = serde_json::from_slice(&sell_payload_bytes)
+        .map_err(|err| format!("evaluate-round: sell kv payload parse failed: {}", err))?;
 
-    // The TEE cannot unseal the envelopes in v0.9.0 (the
-    // master key is held by the orchestrator's enclave adapter,
-    // not the TEE itself), so the cross verdict is derived from
-    // the orchestrator-supplied per-side signals. The fill
-    // fields are emitted empty on this `crossed` verdict
-    // because the TEE has no in-round state for the quantities
-    // — a future v0.10.0 build that moves the master key into
-    // the TEE will populate these directly from the unsealed
-    // envelopes. The orchestrator's defense-in-depth fallback
-    // covers the v0.9.0 gap: when the host doesn't echo the
-    // round routes, the fallback computes the verdict + fill
-    // locally from the unsealed envelopes.
-    let matched_quantity = String::new();
-    let execution_price = String::new();
+    let buy_price = match parse_decimal(&buy_payload.price) {
+        Some(v) => v,
+        None => return Err("evaluate-round: buy kv payload price is malformed".to_string()),
+    };
+    let buy_quantity = match parse_decimal(&buy_payload.quantity) {
+        Some(v) => v,
+        None => return Err("evaluate-round: buy kv payload quantity is malformed".to_string()),
+    };
+    let sell_price = match parse_decimal(&sell_payload.price) {
+        Some(v) => v,
+        None => return Err("evaluate-round: sell kv payload price is malformed".to_string()),
+    };
+    let sell_quantity = match parse_decimal(&sell_payload.quantity) {
+        Some(v) => v,
+        None => return Err("evaluate-round: sell kv payload quantity is malformed".to_string()),
+    };
+
+    // Compute the distance signal from the actual prices. Mirrors
+    // the TS `distanceSignalFor` helper so the orchestrator's
+    // defense-in-depth fallback produces the same label.
+    let signal = if buy_price >= sell_price {
+        "crossed"
+    } else {
+        let gap = sell_price - buy_price;
+        // gap_ratio = gap / sell_price
+        // near:  gap_ratio <= 0.01 → gap * 100 <= sell_price
+        // moderate: gap_ratio <= 0.05 → gap * 100 <= sell_price * 5
+        // far: otherwise
+        if sell_price == 0 {
+            "far"
+        } else if gap.checked_mul(100).map(|g| g <= sell_price).unwrap_or(false) {
+            "near"
+        } else if gap.checked_mul(100).map(|g| g <= sell_price.checked_mul(5).unwrap_or(u128::MAX)).unwrap_or(false) {
+            "moderate"
+        } else {
+            "far"
+        }
+    };
+    let buyer_signal = signal;
+    let seller_signal = signal;
+
+    // Cross verdict: the buyer's bid is at or above the seller's
+    // ask and both quantities are positive. The TEE is the sole
+    // authority on the cross — the orchestrator does not compute
+    // this locally.
+    let crosses = buy_price >= sell_price && buy_quantity > 0 && sell_quantity > 0;
+    let status = if crosses { "crossed" } else { "open" };
+
+    let (matched_quantity, execution_price) = if crosses {
+        let matched = core::cmp::min(buy_quantity, sell_quantity);
+        let mid = match midpoint(buy_price, sell_price) {
+            Some(v) => v,
+            None => {
+                return Err("evaluate-round: midpoint overflow".to_string());
+            }
+        };
+        // v0.10.0: consume both proposal entries from the
+        // kv-store on a successful cross so the sealed plaintext
+        // is not reusable for a second cross.
+        let _ = kv_delete(&kv_map_name("rounds"), parsed.buy_proposal_handle.as_bytes());
+        let _ = kv_delete(&kv_map_name("rounds"), parsed.sell_proposal_handle.as_bytes());
+        (format_decimal(matched), format_decimal(mid))
+    } else {
+        (String::new(), String::new())
+    };
 
     let round_attestation_ref = crate::compute_round_attestation_ref(
         &parsed.buy_proposal_handle,

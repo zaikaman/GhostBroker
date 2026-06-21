@@ -14,37 +14,6 @@ export interface MatchEvaluationRequest {
    */
   assetCode: string;
   /**
-   * Buy-side bid price, decimal string at the contract's
-   * implicit `WIRE_SCALE` (1e18). JSON numbers may be
-   * IEEE-754 doubles on some hosts; rounding them would
-   * make the midpoint non-deterministic, so the wire form
-   * is always a plain decimal string the contract parses
-   * into an exact scaled `u128` internally. Sourced from the
-   * TEE-attested `T3LockDescriptor.price` returned by
-   * `seal-intent` v0.8.0+ — the envelope is unsealed inside
-   * the enclave and the orchestrator carries the value
-   * through without re-decoding.
-   */
-  buyPrice: string;
-  /**
-   * Buy-side intent quantity, same `WIRE_SCALE` decimal
-   * string. Sourced from the TEE-attested
-   * `T3LockDescriptor.quantity`.
-   */
-  buyQuantity: string;
-  /**
-   * Sell-side ask price, same `WIRE_SCALE` decimal string.
-   * Sourced from the TEE-attested
-   * `T3LockDescriptor.price`.
-   */
-  sellPrice: string;
-  /**
-   * Sell-side intent quantity, same `WIRE_SCALE` decimal
-   * string. Sourced from the TEE-attested
-   * `T3LockDescriptor.quantity`.
-   */
-  sellQuantity: string;
-  /**
    * The buyer institution UUID the orchestrator already holds
    * in its pending-intent queue (the value the seal call
    * accepted at submit time on the buy side). Required as of
@@ -295,25 +264,17 @@ export class T3MatchContractClient implements MatchContractClient {
         // is camelCase to match the rest of the GhostBroker API
         // surface, so we translate at the network boundary.
         //
-        // The wire form is the v0.8.0 Rust canonical shape:
-        // plaintext `asset_code`, `buy_price`, `buy_quantity`,
-        // `sell_price`, `sell_quantity` (decimal strings at the
-        // contract's implicit `WIRE_SCALE`), plus the per-side
-        // identity fields the audit trail needs to attribute the
-        // outcome. The orchestrator sources `buy_price` /
-        // `buy_quantity` from the TEE-attested
-        // `T3LockDescriptor` returned by `seal-intent` v0.8.0+;
-        // the envelope was unsealed inside the TEE on the seal
-        // path and the orchestrator carries the values through
-        // without re-decoding.
+        // v0.10.0 wire form: the TEE recovers price/quantity
+        // from its kv-store by handle — the orchestrator no
+        // longer forwards `buy_price` / `buy_quantity` /
+        // `sell_price` / `sell_quantity` on the wire. The
+        // per-side identity fields are still forwarded so the
+        // TEE can echo them back on the match outcome and bind
+        // them to the match attestation ref.
         buy_intent_handle: request.buyIntentHandle,
         sell_intent_handle: request.sellIntentHandle,
         correlation_ref: request.correlationRef,
         asset_code: request.assetCode,
-        buy_price: request.buyPrice,
-        buy_quantity: request.buyQuantity,
-        sell_price: request.sellPrice,
-        sell_quantity: request.sellQuantity,
         // v0.8.0: per-side identity. The TEE echoes these back
         // on the match outcome and binds them to
         // `match_attestation_ref`. Required fields — the

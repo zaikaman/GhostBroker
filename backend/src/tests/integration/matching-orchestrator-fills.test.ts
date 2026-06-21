@@ -69,6 +69,12 @@ class VerifiedAuthorization implements AgentAuthorizationFacade {
 
 const SETTLEMENT_ASSET = "USDC";
 
+// v0.10.0 kv-store simulation: StaticBlindIntentClient writes
+// the decoded payload keyed by intent handle; MatchedClient
+// reads it back by handle to compute the fill — mirroring the
+// real TEE's kv-store-backed evaluate-match path.
+const intentKvStore = new Map<string, { quantity: number; price: number; side: string }>();
+
 /**
  * Decode a `ghostbroker.envelope.aead/v1` envelope back into its
  * structured payload. The in-process test path uses envelopes
@@ -110,15 +116,12 @@ class StaticBlindIntentClient implements BlindIntentClient {
     request: BlindIntentRequest,
   ): Promise<BlindIntentResult> {
     this.counter++;
-    // The TEE seal returns the lock descriptor alongside the
-    // opaque handle. The in-process test path derives the
-    // descriptor from the canonical envelope (mirroring the
-    // production `seal-intent` v0.8.0+ behavior, which unseals
-    // the envelope inside the TEE and emits the per-side
-    // trading parameters on the response). The orchestrator
-    // carries the values through on the `T3LockDescriptor`
-    // and forwards them to `evaluate-match` on the canonical
-    // Rust wire form.
+    // v0.10.0: the TEE seal decrypts the envelope, persists
+    // price/quantity to kv-store, and returns only the derived
+    // amount + asset/side. The test stub mirrors this: it
+    // decodes the envelope, stores the payload in the shared
+    // intentKvStore, and returns the lock descriptor without
+    // price/quantity.
     const payload = decodeTestEnvelope(
       request.encryptedIntentEnvelope,
       request.institutionId,
@@ -131,8 +134,14 @@ class StaticBlindIntentClient implements BlindIntentClient {
       payload.side === "buy"
         ? payload.quantity * payload.price
         : payload.quantity;
+    const intentHandle = `intent_opaque_${this.counter}`;
+    intentKvStore.set(intentHandle, {
+      quantity: payload.quantity,
+      price: payload.price,
+      side: payload.side,
+    });
     return {
-      intentHandle: `intent_opaque_${this.counter}`,
+      intentHandle,
       state: "intent_sealed",
       executionRef: `t3exec_${this.counter}`,
       sealedAt: new Date().toISOString(),
@@ -140,8 +149,6 @@ class StaticBlindIntentClient implements BlindIntentClient {
         tradedAssetCode: payload.assetCode.toUpperCase(),
         assetCode: assetCode.toUpperCase(),
         side: payload.side,
-        quantity: String(payload.quantity),
-        price: String(payload.price),
         amount,
         attestationRef: `t3attest:${this.counter}`,
       },
@@ -155,25 +162,23 @@ class MatchedClient implements MatchContractClient {
     request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
     this.calls++;
-    // v0.8.0: the orchestrator now forwards the per-side
-    // trading parameters (asset_code, buy_price, buy_quantity,
-    // sell_price, sell_quantity) plus the institution IDs and
-    // authority refs as inputs; the TEE echoes the identity
-    // back on the outcome. The test stub mirrors the
-    // production contract: the response carries the same
-    // identity values the request submitted (so the
-    // orchestrator's `detectIdentityMismatch` check passes)
-    // and computes the fill terms from the request's
-    // per-side `quantity` (matching the TEE's
-    // `min(buy_quantity, sell_quantity)` rule) and the
-    // midpoint of the per-side `price` (matching the TEE's
-    // deterministic midpoint rule).
-    const buyQuantity = Number(request.buyQuantity);
-    const sellQuantity = Number(request.sellQuantity);
-    const buyPrice = Number(request.buyPrice);
-    const sellPrice = Number(request.sellPrice);
-    const matchedQuantity = Math.min(buyQuantity, sellQuantity);
-    const executionPrice = Math.round((buyPrice + sellPrice) / 2);
+    // v0.10.0: the TEE recovers price/quantity from kv-store
+    // by handle. The stub mirrors this: it looks up both
+    // handles in the shared intentKvStore and computes the fill
+    // (min quantity, midpoint price) from the stored payloads.
+    const buyPayload = intentKvStore.get(request.buyIntentHandle);
+    const sellPayload = intentKvStore.get(request.sellIntentHandle);
+    let matchedQuantity: number;
+    let executionPrice: number;
+    if (buyPayload && sellPayload) {
+      matchedQuantity = Math.min(buyPayload.quantity, sellPayload.quantity);
+      executionPrice = Math.round((buyPayload.price + sellPayload.price) / 2);
+    } else {
+      // Fallback for handles not in the kv-store (should not
+      // happen in well-isolated tests).
+      matchedQuantity = 0;
+      executionPrice = 0;
+    }
     return {
       status: "matched",
       outcomeRef: `outcome_${this.calls}`,
@@ -309,6 +314,10 @@ function buildStack(
 }
 
 describe("matching orchestrator - fills and crossing", () => {
+  beforeEach(() => {
+    intentKvStore.clear();
+  });
+
   it("does not match when the buyer's bid is below the seller's ask", async () => {
     const client = new InMemoryPortfolioClient([
       makePortfolioRecord({ institutionId: buyerId, assetCode: "USDC", balance: 100_000_000 }),
@@ -1060,3 +1069,4 @@ function makeEnvelope(
     nonce: "nonce-test",
   });
 }
+import { beforeEach } from "vitest";

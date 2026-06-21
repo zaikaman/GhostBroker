@@ -50,14 +50,34 @@
 //! `evaluate-match` is a plain decimal string at the contract's
 //! internal `WIRE_SCALE` (1e18): `"0.0001"`, `"70000"`,
 //! `"12345.6789"`. Match authority still lives inside the
-//! enclave: the caller sends both sides' asset code, prices,
-//! and quantities, and the contract returns `status: "matched"`
-//! with `matched_quantity` and `execution_price` (also in the
-//! same human-readable decimal form) only when the buyer's bid
-//! crosses the seller's ask. The backend orchestrator is a
-//! verifier/orchestrator around the enclave outcome, not the
-//! price matcher. The functions stay pure and deterministic —
-//! no new enclave state is required.
+//! enclave: the contract returns `status: "matched"` with
+//! `matched_quantity` and `execution_price` only when the
+//! buyer's bid crosses the seller's ask. The backend
+//! orchestrator is a verifier/orchestrator around the enclave
+//! outcome, not the price matcher.
+//!
+//! v0.10.0 changes (kv-store-backed TEE state):
+//!   * `seal-intent` and `seal-round-proposal` now persist the
+//!     decrypted price/quantity into the enclave's kv-store
+//!     (`host:interfaces/kv-store@2.1.0`) keyed by the opaque
+//!     handle. The orchestrator receives only the handle + the
+//!     derived reservation amount; the individual price and
+//!     quantity never leave the TEE.
+//!   * `evaluate-match` and `evaluate-round` recover the
+//!     price/quantity from kv-store by handle and compute the
+//!     cross inside the enclave. The orchestrator no longer
+//!     forwards plaintext price/quantity on the cross-evaluation
+//!     wire.
+//!   * `evaluate-round` now computes the real cross verdict
+//!     (buy_price >= sell_price, fill = min quantities, midpoint
+//!     price) instead of the v0.9.0 hardcoded "crossed" verdict
+//!     with empty fill fields. The v0.9.0 defense-in-depth
+//!     fallback in the orchestrator is no longer needed.
+//!   * The contract is no longer stateless — it holds sealed
+//!     intent and round-proposal plaintext in the kv-store
+//!     between the seal and evaluate calls. This is the
+//!     load-bearing privacy mechanism: active order data lives
+//!     exclusively inside the TEE.
 //!
 //! v0.6.0 changes:
 //!   * `seal-ticket` now binds `policy_hash` and
@@ -169,7 +189,12 @@ wit_bindgen::generate!({
 
 mod matching;
 
-pub const CONTRACT_VERSION: &str = "0.9.1";
+// v0.10.0: kv-store-backed state. seal-intent and seal-round-proposal
+// persist plaintext price/quantity into the enclave's kv-store;
+// evaluate-match and evaluate-round recover them by handle.
+// v0.10.1: use canonical `z:<tenant-hex>:<tail>` kv-store map names
+// instead of bare tails — the host does not auto-prefix.
+pub const CONTRACT_VERSION: &str = "0.10.1";
 
 struct Component;
 
@@ -305,23 +330,16 @@ pub struct SealIntentInput {
 pub struct SealIntentOutput {
     pub intent_handle: String,
     pub execution_ref: String,
-    /// Per-side TEE-attested trading parameters the enclave
-    /// extracted from the decrypted envelope. These are the
-    /// authoritative values the enclave computed; the
-    /// orchestrator carries them through on the
-    /// `T3LockDescriptor` so the `evaluate-match` wire form can
-    /// forward plaintext `buy_price` / `buy_quantity` /
-    /// `sell_price` / `sell_quantity` to the TEE without
-    /// re-decoding the envelope outside the TEE.
     pub traded_asset_code: String,
-    /// Asset to reserve for this intent. Mirrors `asset_code` on
-    /// the `T3LockDescriptor`. For a buy intent this is the
-    /// settlement asset (e.g. `USDC`); for a sell intent it is
-    /// the same as `traded_asset_code`.
+    /// Asset to reserve for this intent. For a buy intent this
+    /// is the settlement asset (e.g. `USDC`); for a sell intent
+    /// it is the same as `traded_asset_code`.
     pub settlement_asset_code: String,
     pub side: String,
-    pub quantity: String,
-    pub price: String,
+    /// Reservation amount (`quantity * price` for a buy,
+    /// `quantity` for a sell). The orchestrator needs this for
+    /// the balance lock; the individual price and quantity stay
+    /// in the enclave's kv-store and never leave the TEE.
     pub amount: String,
     pub attestation_ref: String,
 }
@@ -331,22 +349,11 @@ pub struct EvaluateMatchInput {
     pub buy_intent_handle: String,
     pub sell_intent_handle: String,
     pub correlation_ref: String,
-    /// Shared traded asset code (e.g. "WBTC"). Both sides must be on
-    /// the same instrument; the orchestrator already filters this, but
-    /// the enclave checks it too so a mismatch is a `no_match`, not a
-    /// silent cross-asset fill.
+    /// Shared traded asset code (e.g. "WBTC"). Both sides must be
+    /// on the same instrument; the orchestrator already filters
+    /// this, but the enclave checks it too so a mismatch is a
+    /// `no_match`, not a silent cross-asset fill.
     pub asset_code: String,
-    /// Buy/sell prices and quantities, carried as plain decimal
-    /// strings at the contract's implicit `WIRE_SCALE` (1e18):
-    /// `"0.0001"`, `"70000"`, `"12345.6789"`. JSON numbers may
-    /// be IEEE-754 doubles on some hosts; rounding them would make
-    /// the midpoint non-deterministic, so the wire form is always
-    /// a decimal string the contract parses into an exact scaled
-    /// `u128` internally.
-    pub buy_price: String,
-    pub buy_quantity: String,
-    pub sell_price: String,
-    pub sell_quantity: String,
     /// Per-side identity fields. Required on every `evaluate-match`
     /// call as of v0.8.0. The orchestrator already holds these in
     /// its pending-intent queue (they were verified at seal time
@@ -578,10 +585,6 @@ pub struct SealRoundProposalOutput {
     pub traded_asset_code: String,
     /// TEE-echoed proposal side.
     pub side: String,
-    /// Per-side quantity at the wire's natural decimal scale.
-    pub quantity: String,
-    /// Per-side price at the wire's natural decimal scale.
-    pub price: String,
     /// Coarse per-side signal — `crossed` (the proposal alone
     /// crosses the prior round), `near` / `moderate` / `far`
     /// otherwise. The TEE computes this from the unsealed

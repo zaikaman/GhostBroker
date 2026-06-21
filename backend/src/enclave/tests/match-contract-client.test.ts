@@ -42,18 +42,10 @@ const request: MatchEvaluationRequest = {
   buyIntentHandle: "intent_buy_opaque",
   sellIntentHandle: "intent_sell_opaque",
   correlationRef: "corr_us3",
-  // v0.8.0 canonical Rust wire form: plaintext per-side trading
-  // parameters sourced from the TEE-attested `T3LockDescriptor`
-  // returned by `seal-intent` v0.8.0+. The envelope is unsealed
-  // inside the enclave on the seal path; the orchestrator carries
-  // the values through on the lock descriptor and forwards them
-  // here as decimal strings at the contract's implicit
-  // `WIRE_SCALE` (1e18).
+  // v0.10.0: the TEE recovers price/quantity from its kv-store
+  // by handle — the orchestrator no longer forwards per-side
+  // trading parameters on the evaluate-match wire.
   assetCode: "WBTC",
-  buyPrice: "51000",
-  buyQuantity: "10",
-  sellPrice: "49000",
-  sellQuantity: "10",
   // v0.8.0: per-side identity is now required on every
   // `evaluate-match` call so the TEE can echo the values back
   // and bind them to a match attestation. The orchestrator's
@@ -81,27 +73,17 @@ describe("match contract client", () => {
     // The on-the-wire body is snake_case to match the TEE
     // contract's `EvaluateMatchInput` deserializer in
     // contracts/matching-policy/src/lib.rs, and carries the
-    // explicit contract version so the T3N adapter routes to the
-    // v0.8.0 build (the audit-trail identity echo + match
-    // attestation version). The per-side institution IDs and
-    // authority refs are forwarded to the TEE so it can echo
-    // them back on the outcome and bind them to the match
-    // attestation ref. The per-side trading parameters
-    // (`asset_code`, `buy_price`, `buy_quantity`, `sell_price`,
-    // `sell_quantity`) are the canonical Rust plaintext wire
-    // form the TEE parses into scaled `u128` values
-    // internally; the orchestrator sources them from the
-    // TEE-attested `T3LockDescriptor` returned by `seal-intent`.
+    // explicit contract version so the T3N adapter routes to
+    // the v0.10.1 build (kv-store-backed state). The per-side
+    // institution IDs and authority refs are forwarded to the
+    // TEE so it can echo them back on the outcome and bind them
+    // to the match attestation ref.
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.9.1",
+      version: "0.10.1",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
       asset_code: request.assetCode,
-      buy_price: request.buyPrice,
-      buy_quantity: request.buyQuantity,
-      sell_price: request.sellPrice,
-      sell_quantity: request.sellQuantity,
       buy_institution_id: request.buyInstitutionId,
       sell_institution_id: request.sellInstitutionId,
       buy_authority_ref: request.buyAuthorityRef,

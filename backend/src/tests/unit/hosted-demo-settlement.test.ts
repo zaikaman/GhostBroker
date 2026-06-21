@@ -97,8 +97,6 @@ const crossEvaluator: NegotiationRoundEvaluator = {
       executionRef: `t3exec_demo_${input.roundNumber}`,
       tradedAssetCode: input.assetCode,
       side: input.side,
-      quantity: "0",
-      price: "0",
       distanceSignal: "far",
       attestationRef: `roundattest_seal_demo_${input.roundNumber}`,
       sealedAt: new Date().toISOString(),
