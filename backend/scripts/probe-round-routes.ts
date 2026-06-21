@@ -28,6 +28,13 @@ async function main(): Promise<void> {
   const auth = await t3n.authenticate(createEthAuthInput(address));
   const tenantDid = auth.value;
   console.log("authenticated as", tenantDid);
+  const tenant = new TenantClient({
+    environment: networkEnv as "testnet" | "production",
+    endpoint: baseUrl,
+    baseUrl,
+    tenantDid,
+    t3n,
+  });
 
   // Build a real envelope client-side so the TEE can unseal it.
   const masterKey = loadEnvelopeMasterKey();
@@ -52,15 +59,12 @@ async function main(): Promise<void> {
   });
   console.log("envelope bytes:", envelope.length);
 
-  const roundSealPath = "/contracts/negotiation/round-proposals";
-  const roundEvalPath = "/contracts/negotiation/round-evaluation";
-
   console.log("\n→ calling seal-round-proposal...");
   try {
-    const sealResponse = await t3n.request({
-      method: "POST",
-      path: roundSealPath,
-      body: {
+    const sealResult = await tenant.contracts.execute("matching", {
+      version: "0.9.1",
+      functionName: "seal-round-proposal",
+      input: {
         version: "0.9.1",
         sealed_envelope: envelope,
         envelope_master_key_hex: masterKey.key.toString("hex"),
@@ -72,8 +76,7 @@ async function main(): Promise<void> {
         correlation_ref: "round:probe:buyer:0001",
       },
     });
-    console.log("status:", sealResponse.status);
-    console.log("body:", JSON.stringify(sealResponse.body, null, 2));
+    console.log("result:", JSON.stringify(sealResult, null, 2));
   } catch (err) {
     console.log("seal-round-proposal threw:", err instanceof Error ? err.message : err);
   }

@@ -1,6 +1,21 @@
 import { createSupabaseServiceClient } from "../src/services/supabase-client.js";
 import { readFileSync } from "node:fs";
 
+interface PublishedContractListResult {
+  data: Array<Record<string, unknown>> | null;
+  error: { message: string } | null;
+}
+
+interface PublishedContractListChain {
+  select(columns: string): PublishedContractListChain;
+  order(column: string, options: { ascending: boolean }): PublishedContractListChain;
+  limit(n: number): Promise<PublishedContractListResult>;
+}
+
+interface PublishedContractListClient {
+  from(table: "published_contracts"): PublishedContractListChain;
+}
+
 async function main(): Promise<void> {
   const env = Object.fromEntries(
     readFileSync("backend/.env", "utf8")
@@ -11,10 +26,17 @@ async function main(): Promise<void> {
         return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
       }),
   );
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in backend/.env.",
+    );
+  }
   const supabase = createSupabaseServiceClient({
-    SUPABASE_URL: env.SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-  });
+    SUPABASE_URL: supabaseUrl,
+    SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+  }) as unknown as PublishedContractListClient;
   const result = await supabase
     .from("published_contracts")
     .select("*")

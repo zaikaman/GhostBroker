@@ -34,11 +34,20 @@ async function main(): Promise<void> {
     t3n,
   });
   console.log("tenantDid:", tenantDid);
-  const contracts = await tenant.contracts.list();
-  console.log("count =", contracts.length);
-  for (const c of contracts) {
-    console.log(JSON.stringify(c));
-  }
+  const me = await tenant.tenant.me();
+  console.log("tenant.me:", JSON.stringify(me));
+  // The T3N SDK's TenantContractsNamespace exposes publish, register,
+  // disable, enable, unregister, logs, and execute — but no list/enumerate
+  // call. GhostBroker tracks published contracts in the Supabase
+  // `published_contracts` table (the source of truth the Settings panel
+  // reads). Use `list-published-contracts.ts` for the durable record, or
+  // `tenant.contracts.logs(tail)` to inspect a specific contract's debug log.
+  console.log(
+    "The T3N SDK does not expose a contract enumeration API. " +
+      "Run `npx tsx backend/scripts/list-published-contracts.ts` for the " +
+      "GhostBroker published-contract records, or " +
+      "`tenant.contracts.logs(\"matching\")` for a specific contract's log.",
+  );
 }
 
 main().catch((err) => {
