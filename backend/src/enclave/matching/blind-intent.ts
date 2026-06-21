@@ -106,6 +106,14 @@ export interface T3BlindIntentClientOptions {
    * the test-path envelope re-decoding.
    */
   settlementAssetCode?: string;
+  /**
+   * Hex-encoded (64-char) AEAD master key the TEE uses to
+   * AES-256-GCM decrypt `encrypted_intent` inside the enclave.
+   * Read from `loadEnvelopeMasterKey().key.toString("hex")` at
+   * the composition site. The T3N session is the authenticated
+   * channel into the TEE.
+   */
+  envelopeMasterKeyHex: string;
 }
 
 interface T3BlindIntentResponse {
@@ -372,6 +380,7 @@ export class T3BlindIntentClient implements BlindIntentClient {
   private readonly minimumTokenBalance: bigint;
   private readonly contractPath: string;
   private readonly settlementAssetCode: string | undefined;
+  private readonly envelopeMasterKeyHex: string;
 
   public constructor(options: T3BlindIntentClientOptions) {
     this.networkClient = options.networkClient;
@@ -380,6 +389,7 @@ export class T3BlindIntentClient implements BlindIntentClient {
     this.minimumTokenBalance = options.minimumTokenBalance ?? 1n;
     this.contractPath = options.contractPath ?? "/contracts/matching/blind-intents";
     this.settlementAssetCode = options.settlementAssetCode;
+    this.envelopeMasterKeyHex = options.envelopeMasterKeyHex;
   }
 
   public async sealIntent(request: BlindIntentRequest): Promise<BlindIntentResult> {
@@ -410,6 +420,7 @@ export class T3BlindIntentClient implements BlindIntentClient {
         institution_id: request.institutionId,
         agent_did: request.agentDid,
         encrypted_intent: request.encryptedIntentEnvelope,
+        envelope_master_key_hex: this.envelopeMasterKeyHex,
         authority_ref: request.authorityRef,
         correlation_ref: request.correlationRef,
          // v0.8.0+: the enclave needs the settlement asset

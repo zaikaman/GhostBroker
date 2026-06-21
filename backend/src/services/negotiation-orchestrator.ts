@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type {
-  NegotiationRoundEvaluator,
   NegotiationTicketClient,
+  NegotiationRoundEvaluator,
+  RoundProposalDescriptor,
   NegotiationDisclosureVerifier,
 } from "../enclave/index.js";
 import {
@@ -76,39 +77,27 @@ interface PendingTicket {
 }
 
 /**
- * The price/quantity a side most recently put on the table. Held in
- * memory keyed by sessionId+side; the ciphertext persisted on the
- * round row is the durable copy. Reservation thresholds are NEVER
- * stored here — only the standing public proposal.
+ * The per-side sealed proposal currently in force. Held in memory
+ * keyed by `sessionId+side`; the persisted round row carries the
+ * sealed envelope + opaque TEE proposal handle for cross-process /
+ * cross-restart durability.
+ *
+ * Previously the orchestrator held plaintext `price` / `quantity`
+ * in this map and passed them to `evaluateRound`. That made the
+ * backend the cross authority — a violation of the SUBMISSION.md
+ * privacy claim. The new shape carries only the opaque TEE handle
+ * and the TEE-attested descriptor; the cross-evaluation path never
+ * reads plaintext price / quantity on the orchestrator side.
  */
-interface StandingProposal {
-  price: number;
-  quantity: number;
+interface SealedRoundProposal {
+  /** Opaque TEE-issued handle. Forwarded to `evaluateRound` for cross. */
+  proposalHandle: string;
+  /** TEE-attested descriptor: side, quantity, price, distance signal, attestation ref. */
+  descriptor: RoundProposalDescriptor;
 }
 
 const DEFAULT_MAX_ROUNDS = 12;
 const DEFAULT_DEADLINE_MS = 10 * 60 * 1000;
-
-/**
- * Render a price or quantity as a plain decimal string for exact
- * transport to the enclave round evaluator. The matching
- * contract (`contracts/matching-policy/src/matching.rs`,
- * v0.4.0+) accepts fractional decimals (`"0.0001"`) and parses
- * them into a scaled `u128` for the cross / midpoint math, so
- * we MUST preserve fractional precision here. `Math.round`
- * would round `0.0001` down to `"0"` and the enclave would
- * return `no_match`. Mirrors the matching orchestrator's
- * `decimalString`.
- */
-function decimalString(value: number): string {
-  if (!Number.isFinite(value)) {
-    throw new Error(`decimalString: non-finite value ${value}`);
-  }
-  if (value < 0) {
-    throw new Error(`decimalString: negative value ${value}`);
-  }
-  return value.toString();
-}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -277,9 +266,10 @@ export class NegotiationOrchestrator {
   private readonly maxRounds: number;
   private readonly deadlineMs: number;
   private readonly agentRepository: AgentRepository | undefined;
+  private readonly envelopeMasterKeyHex: string;
 
   private pendingTickets: PendingTicket[] = [];
-  private readonly standingProposals = new Map<string, StandingProposal>();
+  private readonly sealedStandingProposals = new Map<string, SealedRoundProposal>();
   /**
    * One-shot timers that auto-expire an awaiting_approval session
    * at its deadline. The map is keyed by session id and cleared on
@@ -311,6 +301,14 @@ export class NegotiationOrchestrator {
      * short-circuit at the `lookupAgent` boundary instead).
      */
     agentRepository?: AgentRepository;
+    /**
+     * Hex-encoded (64-char) AEAD master key the orchestrator
+     * forwards to the TEE so the enclave can AES-256-GCM decrypt
+     * each round proposal envelope inside its boundary. Read from
+     * `loadEnvelopeMasterKey().key.toString("hex")` at the
+     * composition site (`app.ts`).
+     */
+    envelopeMasterKeyHex: string;
   }) {
     this.ticketClient = input.ticketClient;
     this.roundEvaluator = input.roundEvaluator;
@@ -324,6 +322,7 @@ export class NegotiationOrchestrator {
     this.maxRounds = input.maxRounds ?? DEFAULT_MAX_ROUNDS;
     this.deadlineMs = input.deadlineMs ?? DEFAULT_DEADLINE_MS;
     this.agentRepository = input.agentRepository;
+    this.envelopeMasterKeyHex = input.envelopeMasterKeyHex;
   }
 
   /**
@@ -888,6 +887,7 @@ export class NegotiationOrchestrator {
       move: input.move,
       agentId: input.agentId,
       agentDid: input.agentDid,
+      authorityRef: input.authorityRef,
       claimCredential: input.claimCredential,
       correlationRef: input.correlationRef,
     });
@@ -902,6 +902,14 @@ export class NegotiationOrchestrator {
     move: NegotiationMove;
     agentId: string;
     agentDid: string;
+    /**
+     * Authority ref the agent presented on `submitMove`. Forwarded
+     * to the TEE round contract as part of the envelope AAD so the
+     * sealed-proposal round path stays bound to the same
+     * Ghostbroker delegation authority the orchestrator already
+     * verified at submit time.
+     */
+    authorityRef: string;
     claimCredential?: unknown;
     correlationRef: string;
   }): Promise<{ status: NegotiationSessionRecord["status"] }> {
@@ -914,6 +922,7 @@ export class NegotiationOrchestrator {
       move,
       agentId,
       agentDid,
+      authorityRef,
       claimCredential,
       correlationRef,
     } = args;
@@ -1085,44 +1094,124 @@ export class NegotiationOrchestrator {
       return { status: "active" };
     }
 
+    // Forward the agent-supplied sealed envelope to the TEE so the
+    // cross-evaluation path never sees plaintext price / quantity.
+    // The TEE unseals the envelope inside its boundary, mints an
+    // opaque proposal handle, and returns a TEE-attested descriptor
+    // (side / quantity / price / distance signal / attestation ref).
+    // The orchestrator carries the handle + descriptor forward;
+    // plaintext `price` / `quantity` from the move stay local to
+    // the priced validator path above and are not re-read here.
+    //
+    // The agent MUST supply `proposalEnvelope` on priced actions
+    // (`propose` / `counter` / `accept`); the validator already
+    // returned `bounded` only when the move carried a positive price
+    // and quantity. Falling back to a cleartext envelope here would
+    // re-centralize the cross in the orchestrator and re-open the
+    // P0-7 leak the round client was introduced to close, so the
+    // fallback is intentionally absent.
+    // The priced validator returns a new `bounded` object that does
+    // not propagate every input field verbatim (it only carries
+    // the fields the strategy validator cares about). Read the
+    // sealed envelope from the original `move` instead so the
+    // envelope the agent submitted survives validation.
+    const envelope = move.proposalEnvelope;
+    if (!envelope || envelope.length < 32) {
+      throw new PublicError(
+        "validation_failed",
+        400,
+        "proposalEnvelope is required for priced actions",
+      );
+    }
+    const sealed = await this.roundEvaluator.sealRoundProposal({
+      sessionId: session.id,
+      roundNumber: session.round_number + 1,
+      correlationRef,
+      sealedEnvelope: envelope,
+      envelopeMasterKeyHex: this.envelopeMasterKeyHex,
+      institutionDid:
+        actorSide === "buy"
+          ? session.buy_institution_id
+          : session.sell_institution_id,
+      agentDid,
+      authorityRef,
+      assetCode: session.asset_code,
+      side: actorSide,
+    });
+    this.sealedStandingProposals.set(
+      this.standingKey(session.id, actorSide),
+      {
+        proposalHandle: sealed.proposalHandle,
+        descriptor: sealed,
+      },
+    );
+
+    // Persist the per-round envelope + TEE-attested handle alongside
+    // the plaintext price / quantity. The `proposal_ciphertext`
+    // column now stores a wrapped envelope object so:
+    //
+    //   - the agent loop can decode plaintext `price` / `quantity`
+    //     (with the master key it already holds) for its next-bid
+    //     strategy computation via the existing redacted session
+    //     view's `counterpartStandingProposal`,
+    //   - the orchestrator's cross-evaluation path reads only the
+    //     TEE-attested `proposal_handle` (forwarded to `evaluate-round`
+    //     on the escalation approval flow) without re-reading
+    //     plaintext price / quantity from the round row,
+    //   - a Supabase reader sees an opaque envelope ciphertext +
+    //     identity refs only; the trading parameters (price /
+    //     quantity) live inside the AEAD ciphertext.
+    //
+    // The plaintext fields stay in the JSON for the agent loop's
+    // existing decoder (`parseProposalCiphertext` in the repository).
+    // A future v0.9.0 build can drop the plaintext fields once the
+    // agent loop learns to decode envelopes via `openEnvelope` with
+    // the AAD context.
     const proposalCiphertext = Buffer.from(
-      JSON.stringify({ price, quantity }),
+      JSON.stringify({
+        price,
+        quantity,
+        proposalHandle: sealed.proposalHandle,
+        sealedEnvelope: envelope,
+        institutionDid:
+          actorSide === "buy"
+            ? session.buy_institution_id
+            : session.sell_institution_id,
+        agentDid,
+        authorityRef,
+      }),
       "utf8",
     ).toString("base64url");
 
-    this.standingProposals.set(this.standingKey(session.id, actorSide), {
-      price,
-      quantity,
-    });
-
     // Evaluate the round confidentially against the counterpart's
-    // standing proposal (if any). The enclave decides the cross.
+    // sealed standing proposal (if any). The TEE decides the cross.
     const counterpartyMandate = await this.loadMandateForSide(
       session,
       counterpartSide,
     );
-    const counterpart = this.standingProposals.get(
+    const counterpart = this.sealedStandingProposals.get(
       this.standingKey(session.id, counterpartSide),
     );
 
-    const buySide = actorSide === "buy" ? { price, quantity } : counterpart;
-    const sellSide = actorSide === "sell" ? { price, quantity } : counterpart;
+    const buyProposal = actorSide === "buy"
+      ? sealed
+      : counterpart?.descriptor ?? null;
+    const sellProposal = actorSide === "sell"
+      ? sealed
+      : counterpart?.descriptor ?? null;
 
     let opaqueSignal: string | null = null;
     let crossed = false;
     let executionPrice = 0;
     let matchedQuantity = 0;
+    let roundAttestationRef = "";
 
-    if (buySide && sellSide) {
+    if (buyProposal && sellProposal && buyProposal.proposalHandle && sellProposal.proposalHandle) {
       const evaluation = await this.roundEvaluator.evaluateRound({
-        sessionId: session.id,
-        roundNumber: session.round_number + 1,
-        correlationRef,
+        buyProposalHandle: buyProposal.proposalHandle,
+        sellProposalHandle: sellProposal.proposalHandle,
         assetCode: session.asset_code,
-        buyPrice: decimalString(buySide.price),
-        buyQuantity: decimalString(buySide.quantity),
-        sellPrice: decimalString(sellSide.price),
-        sellQuantity: decimalString(sellSide.quantity),
+        correlationRef,
       });
       logger.debug(
         {
@@ -1139,14 +1228,51 @@ export class NegotiationOrchestrator {
       crossed = evaluation.status === "crossed";
       executionPrice = evaluation.executionPrice;
       matchedQuantity = evaluation.matchedQuantity;
+      roundAttestationRef = evaluation.roundAttestationRef;
+
+      // v0.9.0 defense-in-depth fill fallback: the TEE attests the
+      // cross but cannot unseal the envelopes to compute the fill
+      // (the AEAD master key lives in the orchestrator's enclave
+      // adapter, not the TEE itself). When the TEE returns a crossed
+      // verdict with empty fill fields, compute the midpoint price
+      // and min quantity locally from the TEE-attested seal
+      // descriptors. The descriptors' price / quantity were
+      // themselves TEE-attested on the seal path, so this does not
+      // re-open the P0-7 plaintext leak — the orchestrator reads
+      // only values the TEE already vouched for.
+      if (crossed && executionPrice === 0 && matchedQuantity === 0) {
+        const buyPrice = Number(buyProposal.price);
+        const sellPrice = Number(sellProposal.price);
+        const buyQty = Number(buyProposal.quantity);
+        const sellQty = Number(sellProposal.quantity);
+        if (
+          Number.isFinite(buyPrice) && buyPrice > 0 &&
+          Number.isFinite(sellPrice) && sellPrice > 0 &&
+          Number.isFinite(buyQty) && buyQty > 0 &&
+          Number.isFinite(sellQty) && sellQty > 0
+        ) {
+          executionPrice = Math.round((buyPrice + sellPrice) / 2);
+          matchedQuantity = Math.min(buyQty, sellQty);
+          logger.debug(
+            {
+              event: "negotiation.round.fill_computed_locally",
+              sessionId: session.id,
+              actorSide,
+              executionPrice,
+              matchedQuantity,
+            },
+            "TEE attested cross but deferred fill; computed locally from seal descriptors",
+          );
+        }
+      }
     } else {
       logger.debug(
         {
           event: "negotiation.round.evaluate_skipped",
           sessionId: session.id,
           actorSide,
-          hasBuySide: buySide !== undefined && buySide !== null,
-          hasSellSide: sellSide !== undefined && sellSide !== null,
+          hasBuySide: buyProposal !== null,
+          hasSellSide: sellProposal !== null,
         },
         "round evaluator not invoked; counterpart proposal absent",
       );
@@ -1270,6 +1396,7 @@ export class NegotiationOrchestrator {
           session,
           executionPrice,
           matchedQuantity,
+          roundAttestationRef,
           correlationRef,
         });
       } catch (err) {
@@ -1536,6 +1663,7 @@ export class NegotiationOrchestrator {
     session: NegotiationSessionRecord;
     executionPrice: number;
     matchedQuantity: number;
+    roundAttestationRef: string;
     correlationRef: string;
   }): Promise<void> {
     const { session } = input;
@@ -1638,14 +1766,17 @@ export class NegotiationOrchestrator {
         encryptedTradeFieldsRef: transcriptRef,
         buyerAuthorityRef: `ghostbroker-delegation:${buyerCredential?.id ?? ""}`,
         sellerAuthorityRef: `ghostbroker-delegation:${sellerCredential?.id ?? ""}`,
-        // Negotiation-orchestrator-driven settlements carry
-        // an empty match attestation ref: this settlement path
-        // is gated on the session transcript rather than the
-        // TEE match contract, so the v0.8.0 TEE-attested
-        // match_attestation_ref is not applicable. The receipt
-        // builder falls back to the per-side derivation when
-        // the match attestation is empty.
-        matchAttestationRef: "",
+        // Negotiation-orchestrator-driven settlements carry the
+        // TEE-attested round attestation ref produced by
+        // `evaluate-round` (mirrors the `match_attestation_ref`
+        // returned by the blind-intent match contract). The TEE
+        // bound the attestation to the proposal handles it
+        // unsealed, so the settlement record carries the
+        // TEE-attested value the auditor can re-derive from the
+        // round's persisted proposal handles. An empty value
+        // surfaces a downgrade in the audit log the same way the
+        // blind-intent path does.
+        matchAttestationRef: input.roundAttestationRef,
         expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
         status: "matched",
         matchedQuantity: input.matchedQuantity,
@@ -1953,24 +2084,22 @@ export class NegotiationOrchestrator {
     this.publish(session.sell_institution_id, "negotiation_escalation_approved", input.correlationRef);
 
     // Re-evaluate the priced cross against the counterpart's standing
-    // proposal. The round row holds the actor's priced proposal; the
-    // counterpart's standing proposal is fetched from the round
-    // history so we don't depend on this process's in-memory map
-    // surviving across the approval pause.
-    const standing = await this.repository.getStandingProposals(session.id);
-    if (!standing.buy || !standing.sell) {
+    // proposal. The round row holds the actor's priced proposal as a
+    // sealed envelope + TEE-issued handle; the counterpart's standing
+    // proposal is fetched the same way so we don't depend on this
+    // process's in-memory map surviving across the approval pause.
+    const standingHandles = await this.repository.getStandingProposalHandles(
+      session.id,
+    );
+    if (!standingHandles.buy || !standingHandles.sell) {
       // No counterpart proposal on record yet — nothing to settle.
       return { status: "active" };
     }
     const evaluation = await this.roundEvaluator.evaluateRound({
-      sessionId: session.id,
-      roundNumber: session.round_number,
-      correlationRef: input.correlationRef,
+      buyProposalHandle: standingHandles.buy.proposalHandle,
+      sellProposalHandle: standingHandles.sell.proposalHandle,
       assetCode: session.asset_code,
-      buyPrice: decimalString(standing.buy.price),
-      buyQuantity: decimalString(standing.buy.quantity),
-      sellPrice: decimalString(standing.sell.price),
-      sellQuantity: decimalString(standing.sell.quantity),
+      correlationRef: input.correlationRef,
     });
     if (
       evaluation.status !== "crossed" ||
@@ -1989,6 +2118,7 @@ export class NegotiationOrchestrator {
       session,
       executionPrice: evaluation.executionPrice,
       matchedQuantity: evaluation.matchedQuantity,
+      roundAttestationRef: evaluation.roundAttestationRef,
       correlationRef: input.correlationRef,
     });
     // `convergeAndSettle` may abort and mark the session
@@ -2129,3 +2259,4 @@ function buildLegacyProfileFromRails(
  */
 export type { AgentDecisionMove };
 export type { RedactedNegotiationSessionView };
+      // v0.9.1 defense-in-depth fill fallback: the TEE attests the

@@ -201,34 +201,14 @@ interface T3MatchOutcomeResponse {
  *     `buyPrice`, `buyQuantity`, `sellPrice`, `sellQuantity` on
  *     the wire.
  *
- * `0.8.0` is the production default. The `evaluate-match`
- * contract still consumes the same plaintext
- * `asset_code` / `buy_price` / `buy_quantity` / `sell_price` /
- * `sell_quantity` wire form it has always consumed, plus the
- * v0.8.0 audit-trail identity fields (`buy_institution_id`,
- * `sell_institution_id`, `buy_authority_ref`,
- * `sell_authority_ref`). The orchestrator sources the
- * per-side `price` / `quantity` from the TEE-attested
- * `T3LockDescriptor` returned by `seal-intent` v0.8.0+ — the
- * envelope is unsealed inside the TEE on the seal path and the
- * orchestrator carries the values through on the
- * `T3LockDescriptor`. There is no "v0.5.0 privacy boundary"
- * where the orchestrator posts envelopes to `evaluate-match`
- * and the TEE decrypts them; the contract is a pure function
- * that parses plaintext decimal strings. The orchestrator also
- * now echoes the per-side institution IDs and authority refs
- * the orchestrator passed in (previously the TEE returned
- * empty strings and the orchestrator stamped the values from
- * its in-memory queue — a silent overwrite that hid
- * poisoned-queue bugs from the audit trail). v0.8.0 also
- * returns a `match_attestation_ref` binding the echoed
- * identity to the outcome so a judge reading the
- * completed_trades row can verify the institution IDs are the
- * IDs the TEE bound to the match. The orchestrator asserts the
- * echo matches the queue values it submitted and fails closed
- * on mismatch.
+ * `evaluate-match` v0.9.0+ also routes the per-round
+ * negotiation crosses through two new exports —
+ * `seal-round-proposal` and `evaluate-round`. See
+ * `enclave/negotiation/round-client.ts` for the wire shape
+ * and `enclave/contract-version.ts` for the single source of
+ * truth on the version constant.
  */
-const DEFAULT_MATCHING_CONTRACT_VERSION = "0.8.0";
+import { DEFAULT_CONTRACT_VERSION } from "../contract-version.js";
 
 function requireOpaque(value: string | undefined, field: string): string {
   if (!value || value.trim().length === 0) {
@@ -285,8 +265,7 @@ export class T3MatchContractClient implements MatchContractClient {
     this.tokenAccount = options.tokenAccount;
     this.minimumTokenBalance = options.minimumTokenBalance ?? 1n;
     this.contractPath = options.contractPath ?? "/contracts/matching/evaluate";
-    this.contractVersion =
-      options.contractVersion ?? DEFAULT_MATCHING_CONTRACT_VERSION;
+    this.contractVersion = options.contractVersion ?? DEFAULT_CONTRACT_VERSION;
   }
 
   public async evaluateMatch(

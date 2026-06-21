@@ -197,6 +197,31 @@ export class InMemoryNegotiationRepository implements NegotiationRepository {
     });
   }
 
+  public getStandingProposalHandles(sessionId: string): Promise<{
+    buy: {
+      proposalHandle: string;
+      sealedEnvelope: string;
+      institutionDid: string;
+      agentDid: string;
+      authorityRef: string;
+    } | null;
+    sell: {
+      proposalHandle: string;
+      sealedEnvelope: string;
+      institutionDid: string;
+      agentDid: string;
+      authorityRef: string;
+    } | null;
+  }> {
+    const sessionRounds = this.rounds
+      .filter((round) => round.session_id === sessionId)
+      .sort((a, b) => a.round_number - b.round_number);
+    return Promise.resolve({
+      buy: pickStandingHandle(sessionRounds, "buy"),
+      sell: pickStandingHandle(sessionRounds, "sell"),
+    });
+  }
+
   public appendRound(input: {
     sessionId: string;
     roundNumber: number;
@@ -459,6 +484,70 @@ function pickStanding(
     const parsed = parseProposalCiphertext(round.proposal_ciphertext);
     if (parsed.price !== null && parsed.quantity !== null) {
       return { price: parsed.price, quantity: parsed.quantity };
+    }
+  }
+  return null;
+}
+
+function parseProposalHandle(ciphertext: string | null): {
+  proposalHandle: string;
+  sealedEnvelope: string;
+  institutionDid: string;
+  agentDid: string;
+  authorityRef: string;
+} | null {
+  if (!ciphertext) return null;
+  try {
+    const decoded = Buffer.from(ciphertext, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded) as Record<string, unknown>;
+    if (
+      typeof parsed.proposalHandle !== "string" ||
+      typeof parsed.sealedEnvelope !== "string" ||
+      typeof parsed.institutionDid !== "string" ||
+      typeof parsed.agentDid !== "string" ||
+      typeof parsed.authorityRef !== "string"
+    ) {
+      return null;
+    }
+    return {
+      proposalHandle: parsed.proposalHandle,
+      sealedEnvelope: parsed.sealedEnvelope,
+      institutionDid: parsed.institutionDid,
+      agentDid: parsed.agentDid,
+      authorityRef: parsed.authorityRef,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function pickStandingHandle(
+  rounds: NegotiationRoundRecord[],
+  side: "buy" | "sell",
+): {
+  proposalHandle: string;
+  sealedEnvelope: string;
+  institutionDid: string;
+  agentDid: string;
+  authorityRef: string;
+} | null {
+  for (let i = rounds.length - 1; i >= 0; i -= 1) {
+    const round = rounds[i];
+    if (!round) continue;
+    if (round.actor_side !== side) continue;
+    if (
+      round.move_type !== "propose" &&
+      round.move_type !== "counter" &&
+      round.move_type !== "accept" &&
+      round.move_type !== "request_disclosure" &&
+      round.move_type !== "reveal" &&
+      round.move_type !== "hold"
+    ) {
+      continue;
+    }
+    const parsed = parseProposalHandle(round.proposal_ciphertext);
+    if (parsed !== null) {
+      return parsed;
     }
   }
   return null;

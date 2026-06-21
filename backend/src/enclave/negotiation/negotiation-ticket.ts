@@ -148,18 +148,7 @@ function opaqueHandle(seed: string): string {
   return `ticket_${digest.slice(0, 32)}`;
 }
 
-/**
- * Default contract version when the operator does not pin one
- * via the `T3_MATCHING_CONTRACT_VERSION` env var. v0.8.0 is
- * the production default for `seal-ticket` and `evaluate-pair`
- * — the same contract that powers `evaluate-match` (the audit
- * trail fix lives in `evaluate-match`, but the version bump
- * ships the whole contract forward so the operator only has
- * one pinned version to track). Older versions left the
- * orchestrator as the only match authority and the
- * compatibility token as dead code.
- */
-const DEFAULT_NEGOTIATION_CONTRACT_VERSION = "0.8.0";
+import { DEFAULT_CONTRACT_VERSION } from "../contract-version.js";
 
 /**
  * Local fallback when the T3 host omits the `evaluate-pair`
@@ -344,8 +333,7 @@ export class T3NegotiationTicketClient implements NegotiationTicketClient {
     this.minimumTokenBalance = options.minimumTokenBalance ?? 1n;
     this.contractPath = options.contractPath ?? "/contracts/negotiation/tickets";
     this.pairContractPath = options.pairContractPath ?? "/contracts/negotiation/pairs";
-    this.contractVersion =
-      options.contractVersion ?? DEFAULT_NEGOTIATION_CONTRACT_VERSION;
+    this.contractVersion = options.contractVersion ?? DEFAULT_CONTRACT_VERSION;
   }
 
   public async sealTicket(

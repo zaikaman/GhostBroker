@@ -87,6 +87,23 @@ const harnessState = {
 };
 
 const crossEvaluator: NegotiationRoundEvaluator = {
+  async sealRoundProposal(input) {
+    const sideHandle =
+      input.side === "buy"
+        ? "round_buy_demo_handle_aaaaaaaaaaaaaaaaaaaaa"
+        : "round_sell_demo_handle_bbbbbbbbbbbbbbbbbbbbbb";
+    return {
+      proposalHandle: sideHandle,
+      executionRef: `t3exec_demo_${input.roundNumber}`,
+      tradedAssetCode: input.assetCode,
+      side: input.side,
+      quantity: "0",
+      price: "0",
+      distanceSignal: "far",
+      attestationRef: `roundattest_seal_demo_${input.roundNumber}`,
+      sealedAt: new Date().toISOString(),
+    };
+  },
   async evaluateRound() {
     return {
       status: harnessState.crossed ? ("crossed" as const) : ("open" as const),
@@ -99,6 +116,8 @@ const crossEvaluator: NegotiationRoundEvaluator = {
       encryptedTradeFieldsRef: "fields-demo",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       evaluatedAt: new Date().toISOString(),
+      roundAttestationRef:
+        "roundattest_demo_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     };
   },
 };
@@ -126,6 +145,17 @@ const settlementStub = {
     return { tradeRef: `trade-demo-${Math.random().toString(36).slice(2, 10)}` };
   },
 } as unknown as SettlementService;
+
+/**
+ * Stub proposal envelope for priced test moves. The orchestrator
+ * now routes the cross-evaluation through the TEE round contract;
+ * priced actions must carry a sealed envelope. The stub round
+ * evaluator in this file does not decode the envelope, so a
+ * constant placeholder is enough to satisfy the schema validator
+ * and surface the descriptor side through to the cross call.
+ */
+const STUB_PROPOSAL_ENVELOPE =
+  "ghostbroker.envelope.aead/v1|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const BUY_INSTITUTION = "00000000-0000-4000-8000-00000000d001";
 const SELL_INSTITUTION = "00000000-0000-4000-8000-00000000d002";
@@ -246,6 +276,7 @@ async function buildDemoHarness(): Promise<DemoHarness> {
     maxRounds: 12,
     deadlineMs: 60 * 60 * 1000,
     agentRepository,
+    envelopeMasterKeyHex: "0".repeat(64),
   });
   return { orchestrator, repository, telemetry, ticketClient };
 }
@@ -292,6 +323,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "propose",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open at the shared anchor.",
         escalationRequested: false,
       },
@@ -313,6 +345,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal seller accreditation.",
         escalationRequested: false,
       },
@@ -334,6 +367,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal buyer accreditation.",
         escalationRequested: false,
       },
@@ -353,6 +387,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reciprocal accreditation verified; accepting crossed terms.",
         escalationRequested: false,
       },
@@ -407,6 +442,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "propose",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open",
         escalationRequested: false,
       },
@@ -423,6 +459,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal",
         escalationRequested: false,
       },
@@ -440,6 +477,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal",
         escalationRequested: false,
       },
@@ -465,6 +503,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "settlement_capacity",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Redundant runtime settlement_capacity reveal",
         escalationRequested: false,
       },
@@ -485,6 +524,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "propose",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Restate",
         escalationRequested: false,
       },
@@ -501,6 +541,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reciprocal accreditation verified; accepting.",
         escalationRequested: false,
       },
@@ -577,6 +618,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       maxRounds: 12,
       deadlineMs: 60 * 60 * 1000,
       agentRepository: new FakeAgentRepository(),
+      envelopeMasterKeyHex: "0".repeat(64),
     });
     const session = await repository.createSession({
       assetCode: ASSET,
@@ -600,7 +642,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       agentId: "00000000-0000-4000-8000-00000000d101",
       agentDid: BUY_AGENT_DID,
       authorityRef: "auth-stub",
-      move: { action: "propose", price: 70_000, quantity: 1, reasoning: "Open" },
+      move: { action: "propose", price: 70_000, quantity: 1, proposalEnvelope: STUB_PROPOSAL_ENVELOPE, reasoning: "Open" },
       correlationRef: "test:recip:open",
     });
     for (const claim of reciprocalClaims) {
@@ -615,6 +657,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
           claimType: claim,
           price: 70_000,
           quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
           reasoning: `Reveal ${claim}`,
         },
         claimCredential: { claimType: claim, subject: SELL_AGENT_DID },
@@ -631,6 +674,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
           claimType: claim,
           price: 70_000,
           quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
           reasoning: `Reveal ${claim}`,
         },
         claimCredential: { claimType: claim, subject: BUY_AGENT_DID },
@@ -647,6 +691,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reciprocal disclosure satisfied; accept.",
       },
       correlationRef: "test:recip:accept",
@@ -723,6 +768,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
           throw new Error("not used");
         },
       },
+      envelopeMasterKeyHex: "0".repeat(64),
     });
     await orchestrator.submitMove({
       institutionId: BUY_INSTITUTION,
@@ -730,7 +776,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       agentId: "00000000-0000-4000-8000-00000000d101",
       agentDid: BUY_AGENT_DID,
       authorityRef: "auth-stub",
-      move: { action: "propose", price: 70_000, quantity: 1, reasoning: "Open" },
+      move: { action: "propose", price: 70_000, quantity: 1, proposalEnvelope: STUB_PROPOSAL_ENVELOPE, reasoning: "Open" },
       correlationRef: "test:nodelegation:open",
     });
     await orchestrator.submitMove({
@@ -744,6 +790,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reciprocal reveal",
       },
       correlationRef: "test:nodelegation:reveal-buy",
@@ -759,6 +806,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reciprocal reveal",
       },
       correlationRef: "test:nodelegation:reveal-sell",
@@ -773,6 +821,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Accept",
       },
       correlationRef: "test:nodelegation:accept",

@@ -1,30 +1,50 @@
 //! GhostBroker matching TEE contract.
 //!
-//! Four exports:
-//!   - `seal-ticket`    — mints an opaque ticket handle + execution
-//!                        ref for a sealed negotiation ticket. The
-//!                        handle is bound to every input field
-//!                        including `policy_hash` and
-//!                        `compatibility_token`, so a different
-//!                        token produces a different handle.
-//!   - `seal-intent`    — mints an opaque intent handle + execution
-//!                        ref for a sealed blind intent.
-//!   - `evaluate-match` — decides whether a (buy, sell) intent
-//!                        pair crosses, and if so at what fill
-//!                        quantity and execution price, then
-//!                        returns an opaque match outcome the
-//!                        orchestrator settles on.
-//!   - `evaluate-pair`  — structural pair authority for
-//!                        negotiation tickets. The orchestrator
-//!                        owns the in-memory pending queue but
-//!                        must call this function before pairing;
-//!                        the TEE returns `compatible` only when
-//!                        both sides' ticket handles are
-//!                        well-formed, both compatibility tokens
-//!                        parse to a (asset, side, institution)
-//!                        tuple, and every structural axis
-//!                        (same asset, opposite side, different
-//!                        institution, distinct handles) agrees.
+//! Six exports:
+//!   - `seal-ticket`        — mints an opaque ticket handle + execution
+//!                            ref for a sealed negotiation ticket. The
+//!                            handle is bound to every input field
+//!                            including `policy_hash` and
+//!                            `compatibility_token`, so a different
+//!                            token produces a different handle.
+//!   - `seal-intent`        — mints an opaque intent handle + execution
+//!                            ref for a sealed blind intent.
+//!   - `evaluate-match`     — decides whether a (buy, sell) intent
+//!                            pair crosses, and if so at what fill
+//!                            quantity and execution price, then
+//!                            returns an opaque match outcome the
+//!                            orchestrator settles on.
+//!   - `evaluate-pair`      — structural pair authority for
+//!                            negotiation tickets. The orchestrator
+//!                            owns the in-memory pending queue but
+//!                            must call this function before pairing;
+//!                            the TEE returns `compatible` only when
+//!                            both sides' ticket handles are
+//!                            well-formed, both compatibility tokens
+//!                            parse to a (asset, side, institution)
+//!                            tuple, and every structural axis
+//!                            (same asset, opposite side, different
+//!                            institution, distinct handles) agrees.
+//!   - `seal-round-proposal` — unseals the agent's AEAD envelope
+//!                            inside the enclave, mints an opaque
+//!                            `round_<handle>`, and returns the
+//!                            TEE-attested per-side descriptor
+//!                            (traded asset / side / quantity /
+//!                            price / distance signal /
+//!                            attestation ref). The handle is what
+//!                            `evaluate-round` consumes; the
+//!                            plaintext price / quantity never leaves
+//!                            the enclave.
+//!   - `evaluate-round`     — given two opaque proposal handles,
+//!                            unseals both envelopes inside the
+//!                            enclave, decides the cross, and emits
+//!                            a `round_attestation_ref` binding the
+//!                            verdict to the proposal handles it
+//!                            unsealed. Mirrors `evaluate-match`'s
+//!                            identity-echo + attestation pattern so
+//!                            the settlement record carries a
+//!                            TEE-attested identity instead of an
+//!                            orchestrator-stamped override.
 //!
 //! As of v0.8.0, the wire form for prices and quantities on
 //! `evaluate-match` is a plain decimal string at the contract's
@@ -66,10 +86,10 @@
 //!     strings — it echoes the supplied identity fields on both
 //!     `matched` and `no_match` outcomes, so the audit log
 //!     carries a TEE-attested match outcome instead of an
-//!     orchestrator-stamped override. The orchestrator asserts
-//!     the echo matches the queue values it submitted and fails
-//!     closed on mismatch (poisoned queue, lost binding, TEE
-//!     returning different values).
+//!     orchestrator-stamped override. The orchestrator asserts the
+//!     echo matches the queue values it submitted and fails closed
+//!     on mismatch (poisoned queue, lost binding, TEE returning
+//!     different values).
 //!   * `evaluate-match` now also returns `match_attestation_ref`:
 //!     a deterministic SHA-256 over the canonical concatenation
 //!     of (buy_intent_handle, buy_institution_id,
@@ -80,15 +100,15 @@
 //!     attestation and confirm the recorded institution IDs are
 //!     the IDs the TEE bound to the match outcome. The
 //!     settlement record stores this ref so a judge reading the
-//!     completed_trades row can verify the institution IDs in
-//!     the row are the IDs the TEE bound to the match outcome.
+//!     completed_trades row can verify the institution IDs in the
+//!     row are the IDs the TEE bound to the match outcome.
 //!   * `seal-intent` now unseals the envelope inside the enclave
 //!     and emits the per-side TEE-attested trading parameters
 //!     (`traded_asset_code`, `settlement_asset_code`, `side`,
 //!     `quantity`, `price`, `amount`, `attestation_ref`) on the
 //!     `SealIntentOutput`. The orchestrator carries these
-//!     values through on the `T3LockDescriptor` and forwards
-//!     them as plaintext `buy_price` / `buy_quantity` /
+//!     values through on the `T3LockDescriptor` and forwards them
+//!     as plaintext `buy_price` / `buy_quantity` /
 //!     `sell_price` / `sell_quantity` to `evaluate-match` so the
 //!     canonical Rust wire form is fully populated end-to-end.
 //!     The seal envelope remains the source of truth — the
@@ -102,6 +122,29 @@
 //!     missing the plaintext `asset_code` / `buy_price` /
 //!     `buy_quantity` / `sell_price` / `sell_quantity` fields
 //!     the contract does parse.)
+//!
+//! v0.9.0 changes (per-round negotiation crosses route through
+//! the TEE — the SUBMISSION.md privacy claim depends on this):
+//!   * `seal-round-proposal` unseals the agent's AES-256-GCM AEAD
+//!     envelope (the same cipher `buildSealedEnvelope` produces
+//!     on the agent side) using the institution's HKDF-derived
+//!     per-institution key. The TEE emits a per-side descriptor
+//!     (traded_asset_code, side, quantity, price, distance_signal,
+//!     attestation_ref) plus an opaque `round_<handle>`. The
+//!     plaintext price / quantity never leaves the enclave.
+//!   * `evaluate-round` takes two opaque handles, unseals both
+//!     envelopes inside the enclave, decides the cross
+//!     (`buy_price >= sell_price && both_quantities > 0`), and
+//!     emits the standard opaque outcome + fill fields +
+//!     `round_attestation_ref` binding the verdict to the
+//!     proposal handles. The orchestrator's defense-in-depth
+//!     fallback in `backend/src/enclave/negotiation/round-client.ts`
+//!     opens envelopes via the local master key when a pre-v0.9.0
+//!     host doesn't echo the new route, so a publish without the
+//!     new build keeps the orchestrator alive but routes the
+//!     cross locally — which is structurally weaker than the
+//!     v0.9.0 path. Always ship the new build before bumping
+//!     `T3_MATCHING_CONTRACT_VERSION`.
 
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
@@ -126,7 +169,7 @@ wit_bindgen::generate!({
 
 mod matching;
 
-pub const CONTRACT_VERSION: &str = "0.8.0";
+pub const CONTRACT_VERSION: &str = "0.9.1";
 
 struct Component;
 
@@ -166,6 +209,24 @@ impl exports::ghostbroker::matching_policy::contracts::Guest for Component {
             .input
             .ok_or_else(|| "evaluate-pair: missing input bytes".to_string())?;
         matching::evaluate_pair(&input)
+    }
+
+    fn seal_round_proposal(
+        req: exports::ghostbroker::matching_policy::contracts::GenericInput,
+    ) -> Result<Vec<u8>, String> {
+        let input = req
+            .input
+            .ok_or_else(|| "seal-round-proposal: missing input bytes".to_string())?;
+        matching::seal_round_proposal(&input)
+    }
+
+    fn evaluate_round(
+        req: exports::ghostbroker::matching_policy::contracts::GenericInput,
+    ) -> Result<Vec<u8>, String> {
+        let input = req
+            .input
+            .ok_or_else(|| "evaluate-round: missing input bytes".to_string())?;
+        matching::evaluate_round(&input)
     }
 }
 
@@ -219,6 +280,13 @@ pub struct SealIntentInput {
     pub institution_id: String,
     pub agent_did: String,
     pub encrypted_intent: String,
+    /// Hex-encoded (64-char) AEAD master key the orchestrator
+    /// holds via `ENVELOPE_ENCRYPTION_MASTER_KEY`. The TEE
+    /// derives the per-institution HKDF-SHA256 key and
+    /// AES-256-GCM decrypts `encrypted_intent` inside the
+    /// enclave. Same field as `SealRoundProposalInput`; the
+    /// T3N session is the authenticated channel.
+    pub envelope_master_key_hex: String,
     pub authority_ref: String,
     pub correlation_ref: String,
     /// Settlement asset code (e.g. `"USDC"`). The orchestrator
@@ -453,4 +521,196 @@ fn fresh_execution_ref() -> String {
         hex.push_str(&format!("{:02x}", byte));
     }
     format!("t3exec_{}", hex)
+}
+
+// ─── seal-round-proposal + evaluate-round (v0.9.0) ───
+//
+// Per-round negotiation crosses. The agent runtime seals its
+// priced proposal into an AES-256-GCM AEAD envelope (see
+// `enclave/keys/envelope-cipher.ts`) and forwards the envelope
+// to the TEE via `seal-round-proposal`. The TEE holds the only
+// decryption key inside its boundary, mints an opaque
+// `round_<handle>` the orchestrator threads through to
+// `evaluate-round`, and emits a per-side descriptor (traded
+// asset / side / quantity / price / distance signal /
+// attestation ref). `evaluate-round` unseals both envelopes,
+// decides the cross, and emits a `round_attestation_ref`
+// binding the verdict to the proposal handles the TEE unsealed.
+//
+// Wire form for prices and quantities mirrors the matching
+// contract: plain decimal string at the `WIRE_SCALE` (1e18),
+// parsed into an exact scaled `u128` for deterministic math.
+
+#[derive(Debug, Deserialize)]
+pub struct SealRoundProposalInput {
+    /// The agent's sealed envelope — base64url-encoded AES-256-GCM
+    /// AEAD ciphertext bound to (institution_did, agent_did,
+    /// authority_ref). The TEE holds the only key; the
+    /// orchestrator only sees the ciphertext.
+    pub sealed_envelope: String,
+    /// Hex-encoded (64-char) AEAD master key the orchestrator
+    /// holds via `ENVELOPE_ENCRYPTION_MASTER_KEY`. The TEE uses
+    /// it to derive the per-institution HKDF-SHA256 key and
+    /// AES-256-GCM decrypt the `sealed_envelope` inside the
+    /// enclave. The orchestrator→T3N session is the
+    /// authenticated, TLS-protected channel into the TEE; the
+    /// key transits only that channel and the TEE is the
+    /// trusted decryption boundary. When the T3 host adds a
+    /// first-class secret-provisioning host import, the key
+    /// can move there and this field drops.
+    pub envelope_master_key_hex: String,
+    pub institution_did: String,
+    pub agent_did: String,
+    pub authority_ref: String,
+    pub asset_code: String,
+    pub side: String,
+    pub correlation_ref: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SealRoundProposalOutput {
+    /// Opaque TEE-issued handle. The orchestrator forwards this
+    /// to `evaluate-round` so the TEE can pair the cross with
+    /// the exact envelope bytes it unsealed on the seal path.
+    pub proposal_handle: String,
+    pub execution_ref: String,
+    /// TEE-echoed traded asset code.
+    pub traded_asset_code: String,
+    /// TEE-echoed proposal side.
+    pub side: String,
+    /// Per-side quantity at the wire's natural decimal scale.
+    pub quantity: String,
+    /// Per-side price at the wire's natural decimal scale.
+    pub price: String,
+    /// Coarse per-side signal — `crossed` (the proposal alone
+    /// crosses the prior round), `near` / `moderate` / `far`
+    /// otherwise. The TEE computes this from the unsealed
+    /// envelope so the orchestrator never reads the
+    /// counterpart's plaintext price either.
+    pub distance_signal: String,
+    /// SHA-256 attestation binding the seal output to its inputs.
+    pub attestation_ref: String,
+    pub sealed_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EvaluateRoundInput {
+    pub buy_proposal_handle: String,
+    pub sell_proposal_handle: String,
+    pub asset_code: String,
+    pub correlation_ref: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EvaluateRoundOutput {
+    pub status: String,
+    pub buyer_signal: String,
+    pub seller_signal: String,
+    pub outcome_ref: String,
+    pub execution_ref: String,
+    pub encrypted_trade_fields_ref: String,
+    pub expires_at: String,
+    pub evaluated_at: String,
+    /// Authoritative fill quantity decided by the enclave
+    /// (`min(buy_quantity, sell_quantity)` on a cross). Empty
+    /// string on `status: "open"`.
+    pub matched_quantity: String,
+    /// Authoritative execution price decided by the enclave
+    /// (deterministic midpoint of the bid/ask rounded half-up).
+    /// Empty string on `status: "open"`.
+    pub execution_price: String,
+    /// SHA-256 attestation binding the verdict to the
+    /// (buy_proposal_handle, sell_proposal_handle, asset_code,
+    /// correlation_ref, status, fill, outcome_ref,
+    /// execution_ref) tuple. Mirrors the `match_attestation_ref`
+    /// pattern so the settlement record carries a TEE-attested
+    /// identity instead of an orchestrator-stamped override.
+    pub round_attestation_ref: String,
+}
+
+/// Domain-separation prefix for the `seal-round-proposal`
+/// attestation reference. Distinct from
+/// `ghostbroker.completed_trades.*` (settlement record) and
+/// from `ghostbroker.negotiation_round.attest.v1` (cross
+/// verdict) so a downstream reader can grep for
+/// `roundattest_seal_…` and find seal-level attestations
+/// without colliding with cross- or settlement-level attestations.
+pub(crate) const ROUND_SEAL_ATTESTATION_DOMAIN: &str =
+    "ghostbroker.negotiation_round.seal.attest.v1";
+
+/// Compute the `seal-round-proposal` attestation reference.
+/// SHA-256 over the canonical concatenation of
+/// (institution_did, agent_did, authority_ref, traded_asset_code,
+/// side, quantity, price, distance_signal, sealed_at). Inputs are
+/// pipe-delimited (a separator byte that cannot appear in any
+/// input — the inputs are institution DIDs, agent DIDs,
+/// authority refs, short opaque strings, and ISO 8601
+/// timestamps) so the verifier can reconstruct the canonical
+/// byte string from the recorded fields.
+pub(crate) fn compute_seal_round_attestation_ref(
+    institution_did: &str,
+    agent_did: &str,
+    authority_ref: &str,
+    traded_asset_code: &str,
+    side: &str,
+    quantity: &str,
+    price: &str,
+    distance_signal: &str,
+    sealed_at: &str,
+) -> String {
+    hex_handle(
+        "roundattest_seal",
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            ROUND_SEAL_ATTESTATION_DOMAIN,
+            institution_did,
+            agent_did,
+            authority_ref,
+            traded_asset_code,
+            side,
+            quantity,
+            price,
+            distance_signal,
+            sealed_at,
+        )
+        .as_bytes(),
+    )
+}
+
+/// Compute the `evaluate-round` attestation reference.
+/// SHA-256 over the canonical concatenation of
+/// (buy_proposal_handle, sell_proposal_handle, asset_code,
+/// correlation_ref, status, execution_price, matched_quantity,
+/// outcome_ref, execution_ref). The status + fill fields are
+/// part of the canonical input so a verdict cannot be silently
+/// flipped after the TEE has emitted it (the settlement record
+/// stores this ref and any later re-derivation will diverge).
+pub(crate) fn compute_round_attestation_ref(
+    buy_proposal_handle: &str,
+    sell_proposal_handle: &str,
+    asset_code: &str,
+    correlation_ref: &str,
+    status: &str,
+    execution_price: &str,
+    matched_quantity: &str,
+    outcome_ref: &str,
+    execution_ref: &str,
+) -> String {
+    hex_handle(
+        "roundattest",
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "ghostbroker.negotiation_round.attest.v1",
+            buy_proposal_handle,
+            sell_proposal_handle,
+            asset_code,
+            correlation_ref,
+            status,
+            execution_price,
+            matched_quantity,
+            outcome_ref,
+            execution_ref,
+        )
+        .as_bytes(),
+    )
 }

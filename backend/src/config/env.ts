@@ -114,12 +114,27 @@ const envSchema = z.object({
    * the request body, so changing it here (after a new publish)
    * repoints the backend without a code change.
    */
+  /**
+   * The T3 TEE contract version the backend pins on every
+   * cross-contract call body. Bumping this (after a new publish)
+   * repoints every T3 client (`match`, `negotiation-ticket`,
+   * `negotiation-round`) without a code change — the clients
+   * forward the value into the request body's `version` field,
+   * and the T3N adapter (`readVersionFromBody`) routes execution
+   * to the matching published build.
+   *
+   * Default mirrors `DEFAULT_CONTRACT_VERSION` in
+   * `enclave/contract-version.ts` (the single source of truth
+   * for the contract version on the backend side). Override
+   * here only for staged rollouts where you need to pin a
+   * specific tenant build before flipping the constant.
+   */
   T3_MATCHING_CONTRACT_VERSION: z
     .string()
     .trim()
     .min(1)
     .max(32)
-    .default("0.8.0"),
+    .default("0.9.1"),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
   SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
   /**

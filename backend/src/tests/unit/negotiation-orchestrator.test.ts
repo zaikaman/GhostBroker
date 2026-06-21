@@ -8,11 +8,26 @@ import type {
   NegotiationPairVerificationResult,
   NegotiationTicketClient,
   NegotiationRoundEvaluator,
+  RoundEvaluationResult,
+  RoundProposalDescriptor,
   NegotiationDisclosureVerifier,
 } from "../../enclave/index.js";
 import { InMemoryNegotiationRepository } from "../data/in-memory-negotiation-repository.js";
 import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import type { NegotiationMandateRecord } from "../../models/negotiation.js";
+
+/**
+ * The orchestrator now requires priced moves to carry a sealed
+ * envelope (the cross-evaluation path is TEE-routed via the
+ * round client). Tests don't exercise the envelope decode — the
+ * stub round evaluator records the descriptor it returns without
+ * inspecting the envelope bytes — so a constant 64-char placeholder
+ * is enough to satisfy the schema validator. The placeholder
+ * starts with `ghostbroker.envelope.aead/v1|` so the wire-shape
+ * check (when one is added) sees a real schema version.
+ */
+const STUB_PROPOSAL_ENVELOPE =
+  "ghostbroker.envelope.aead/v1|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const stubAuth: AgentAuthorizationFacade = {
   async verifyAgentAuthority(request) {
@@ -76,10 +91,45 @@ const harnessState = {
   crossed: true,
   nextExecutionPrice: 70_100,
   nextMatchedQuantity: 1,
+  /**
+   * Side-keyed TEE-issued proposal handles. The stub round
+   * evaluator mirrors the real TEE contract by minting a fresh
+   * handle per `sealRoundProposal` call and using both side
+   * handles on the subsequent `evaluateRound` call. Production
+   * T3 hosts compute the handle from the envelope bytes inside
+   * the enclave; the stub's deterministic handle per side
+   * mirrors that for the cross-evaluation call.
+   */
+  nextHandle: 0,
+  buyHandle: "round_buy_stub_handle_aaaaaaaaaaaaaaaa",
+  sellHandle: "round_sell_stub_handle_bbbbbbbbbbbbbbbbbbbb",
 };
 
 const crossEvaluator: NegotiationRoundEvaluator = {
-  async evaluateRound() {
+  async sealRoundProposal(input): Promise<RoundProposalDescriptor> {
+    harnessState.nextHandle += 1;
+    const sideHandle =
+      input.side === "buy"
+        ? harnessState.buyHandle
+        : harnessState.sellHandle;
+    return {
+      proposalHandle: sideHandle,
+      executionRef: `t3exec_seal_${harnessState.nextHandle}`,
+      tradedAssetCode: input.assetCode,
+      side: input.side,
+      // Plaintext `quantity` / `price` in the descriptor are the
+      // TEE-echoed values the enclave unsealed from the envelope.
+      // Tests don't exercise the decode path, so the literal
+      // strings are fine — they only need to round-trip through
+      // the orchestrator without breaking types.
+      quantity: "0",
+      price: "0",
+      distanceSignal: "far",
+      attestationRef: `roundattest_seal_${harnessState.nextHandle}`,
+      sealedAt: new Date().toISOString(),
+    };
+  },
+  async evaluateRound(): Promise<RoundEvaluationResult> {
     return {
       status: harnessState.crossed ? ("crossed" as const) : ("open" as const),
       executionPrice: harnessState.nextExecutionPrice,
@@ -91,6 +141,7 @@ const crossEvaluator: NegotiationRoundEvaluator = {
       encryptedTradeFieldsRef: "fields-stub",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       evaluatedAt: new Date().toISOString(),
+      roundAttestationRef: "roundattest_stub_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     };
   },
 };
@@ -269,6 +320,7 @@ async function buildHarness(options: {
     maxRounds: 12,
     deadlineMs: 60 * 60 * 1000,
     agentRepository: new FakeAgentRepository(),
+    envelopeMasterKeyHex: "0".repeat(64),
   });
   return { orchestrator, repository, telemetry };
 }
@@ -324,6 +376,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "propose",
         price: 70_080,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open at the anchor",
         escalationRequested: false,
       },
@@ -342,6 +395,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "counter",
         price: 70_090,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Counter near the anchor",
         escalationRequested: false,
       },
@@ -384,6 +438,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "propose",
         price: 70_080,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Walk the envelope",
         escalationRequested: false,
       },
@@ -405,6 +460,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "counter",
         price: 71_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Push the walk-away",
         escalationRequested: false,
       },
@@ -440,6 +496,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "propose",
         price: 70_080,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open",
         escalationRequested: false,
       },
@@ -455,6 +512,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "counter",
         price: 71_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Push",
         escalationRequested: false,
       },
@@ -497,6 +555,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "propose",
         price: 70_080,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open",
         escalationRequested: false,
       },
@@ -512,6 +571,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "counter",
         price: 71_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Push",
         escalationRequested: false,
       },
@@ -556,6 +616,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "propose",
         price: 70_020,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open",
         escalationRequested: false,
       },
@@ -571,6 +632,7 @@ describe("NegotiationOrchestrator — escalation gate", () => {
         action: "counter",
         price: 70_050,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Meet in the middle",
         escalationRequested: false,
       },
@@ -603,6 +665,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         action: "propose",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open at the shared anchor.",
         escalationRequested: false,
       },
@@ -621,6 +684,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal institution status before settlement.",
         escalationRequested: false,
       },
@@ -640,6 +704,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         claimType: "settlement_capacity",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Request seller settlement capacity.",
         escalationRequested: false,
       },
@@ -658,6 +723,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         claimType: "settlement_capacity",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal seller settlement capacity.",
         escalationRequested: false,
       },
@@ -677,6 +743,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal buyer institution status.",
         escalationRequested: false,
       },
@@ -696,6 +763,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         claimType: "settlement_capacity",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Request buyer settlement capacity.",
         escalationRequested: false,
       },
@@ -714,6 +782,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         claimType: "settlement_capacity",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Reveal buyer settlement capacity.",
         escalationRequested: false,
       },
@@ -732,6 +801,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "All reciprocal proof is verified; accept crossed terms.",
         escalationRequested: false,
       },
@@ -785,6 +855,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         action: "propose",
         price: 70_020,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open",
       },
       correlationRef: "test:buyer:1",
@@ -799,6 +870,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         action: "counter",
         price: 70_050,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Meet",
       },
       correlationRef: "test:seller:1",
@@ -830,6 +902,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         action: "propose",
         price: 70_020,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Open",
       },
       correlationRef: "test:buyer:1",
@@ -844,6 +917,7 @@ describe("NegotiationOrchestrator — disclosure gate", () => {
         action: "counter",
         price: 70_050,
         quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
         reasoning: "Meet",
       },
       correlationRef: "test:seller:1",
@@ -1075,6 +1149,7 @@ describe("NegotiationOrchestrator — privacy boundary on logs", () => {
           action: "propose",
           price: 70_020,
           quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
           reasoning: "Open",
         },
         correlationRef: "test:privacy:buyer",
@@ -1089,6 +1164,7 @@ describe("NegotiationOrchestrator — privacy boundary on logs", () => {
           action: "counter",
           price: 70_050,
           quantity: 1,
+        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
           reasoning: "Meet",
         },
         correlationRef: "test:privacy:seller",

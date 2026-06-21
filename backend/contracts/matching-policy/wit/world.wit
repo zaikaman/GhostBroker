@@ -1,16 +1,16 @@
 // WIT world for the GhostBroker matching TEE contract.
 //
-// T3N host calls this contract at four routes, all under the
+// T3N host calls this contract at six routes, all under the
 // `matching` tail the GhostBroker orchestrator hits via the
-// `T3BlindIntentClient` and `T3NegotiationTicketClient` in
-// `t3-enclave/src/matching/` and
-// `t3-enclave/src/negotiation/`. The functions are pure
-// (no host I/O) and produce deterministic opaque handles the
-// orchestrator threads through its in-memory queue.
+// `T3BlindIntentClient`, `T3NegotiationTicketClient`, and
+// `T3NegotiationRoundClient` in `backend/src/enclave/`. The
+// functions are pure (no host I/O) and produce deterministic
+// opaque handles the orchestrator threads through its
+// in-memory queue.
 //
 // Tail: `matching` (must match the T3 contract-name + the
 // `contractPath` defaults in the t3-enclave clients).
-package ghostbroker:matching-policy@0.2.0;
+package ghostbroker:matching-policy@0.9.1;
 
 world contract {
   import host:tenant/tenant-context@1.0.0;
@@ -189,4 +189,82 @@ interface contracts {
   //                                         to pair with itself)
   //   * `self_pair`                       — both ticket handles are equal
   evaluate-pair: func(req: generic-input) -> result<list<u8>, string>;
+
+  // — Per-round negotiation crosses (v0.9.0) —
+  //
+  // Each agent runtime seals its priced proposal into an AES-256-GCM
+  // AEAD envelope with the institution's per-institution key derived
+  // from `ENVELOPE_ENCRYPTION_MASTER_KEY` via HKDF-SHA256 (the same
+  // cipher used by hidden intents — see `enclave/keys/envelope-cipher.ts`).
+  // The orchestrator forwards both sides' sealed envelopes + AAD context
+  // to `seal-round-proposal` and `evaluate-round` so the cross-evaluation
+  // path never sees plaintext price / quantity on the backend side.
+  // The TEE holds the only decryption key inside its boundary.
+
+  // seal-round-proposal: unseal one envelope, mint a `round_<handle>`,
+  // and return the TEE-attested per-side descriptor. The orchestrator
+  // forwards the handle to `evaluate-round` so the TEE can pair the
+  // cross with the exact envelope bytes it unsealed on the seal path.
+  //
+  // Input  (JSON): SealRoundProposalInput
+  //   {
+  //     "sealed_envelope":  "ghostbroker.envelope.aead/v1|...",
+  //     "institution_did":  "<did:t3n:...>",
+  //     "agent_did":        "did:t3n:...",
+  //     "authority_ref":    "ghostbroker-delegation:...",
+  //     "asset_code":       "WBTC",
+  //     "side":             "buy" | "sell",
+  //     "correlation_ref":  "round:...",
+  //   }
+  // Output (JSON): SealRoundProposalOutput
+  //   {
+  //     "proposal_handle":   "round_<32-hex>",
+  //     "execution_ref":     "t3exec_<uuid>",
+  //     "traded_asset_code": "WBTC",
+  //     "side":              "buy" | "sell",
+  //     "quantity":          "<decimal-string>",
+  //     "price":             "<decimal-string>",
+  //     "distance_signal":   "crossed" | "near" | "moderate" | "far",
+  //     "attestation_ref":   "roundattest_seal_<32-hex>",
+  //     "sealed_at":         "<iso8601>",
+  //   }
+  seal-round-proposal: func(req: generic-input) -> result<list<u8>, string>;
+
+  // evaluate-round: given two opaque proposal handles from
+  // `seal-round-proposal`, unseal both envelopes inside the enclave,
+  // decide the cross (bid >= ask + both quantities > 0), compute
+  // the midpoint execution price and `min(buy_quantity, sell_quantity)`
+  // fill, and emit a TEE-attested `round_attestation_ref` that
+  // cryptographically binds the verdict to the proposal handles the
+  // TEE unsealed.
+  //
+  // Input  (JSON): EvaluateRoundInput
+  //   {
+  //     "buy_proposal_handle":  "round_<32-hex>",
+  //     "sell_proposal_handle": "round_<32-hex>",
+  //     "asset_code":           "WBTC",
+  //     "correlation_ref":      "round-eval:...",
+  //   }
+  // Output (JSON): EvaluateRoundOutput
+  //   {
+  //     "status":                  "crossed" | "open",
+  //     "buyer_signal":            "crossed" | "near" | "moderate" | "far",
+  //     "seller_signal":           "crossed" | "near" | "moderate" | "far",
+  //     "outcome_ref":             "round_outcome_<32-hex>",
+  //     "execution_ref":           "t3exec_<uuid>",
+  //     "encrypted_trade_fields_ref": "t3fields_round_<32-hex>",
+  //     "expires_at":              "<iso8601>",
+  //     "evaluated_at":            "<iso8601>",
+  //     "matched_quantity":        "<decimal-string>",   // "" on open
+  //     "execution_price":         "<decimal-string>",   // "" on open
+  //     "round_attestation_ref":   "roundattest_<32-hex>",
+  //   }
+  //
+  // Distance signal bucketing matches the public `distanceSignalFor`
+  // helper in `backend/src/enclave/negotiation/round-client.ts` so
+  // a fallback computation on a pre-v0.9.0 host returns the same
+  // label the TEE would emit. The bucket thresholds (relative to
+  // the ask): `crossed` when bid >= ask; `near` when the gap is
+  // <= 1% of the ask; `moderate` when <= 5%; `far` otherwise.
+  evaluate-round: func(req: generic-input) -> result<list<u8>, string>;
 }

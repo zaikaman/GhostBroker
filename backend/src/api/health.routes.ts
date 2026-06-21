@@ -4,6 +4,7 @@ import {
   addressFromPrivateKey,
   didEthrForPrivateKey,
 } from "../enclave/sandbox/tenant-identity-store.js";
+import { DEFAULT_CONTRACT_VERSION } from "../enclave/contract-version.js";
 import type { PublishedContractRepository } from "../services/published-contract.repository.js";
 
 export type HealthStatus = "ok" | "degraded" | "unavailable";
@@ -91,7 +92,7 @@ export function buildEnclaveIdentityResponse(
     t3NetworkEnv,
     t3TenantDid: env.T3_TENANT_DID ?? null,
     matchingContractId: env.T3_MATCH_CONTRACT_ID ?? null,
-    matchingContractVersion: env.T3_MATCHING_CONTRACT_VERSION ?? "0.8.0",
+    matchingContractVersion: env.T3_MATCHING_CONTRACT_VERSION ?? DEFAULT_CONTRACT_VERSION,
     tenantSigningAddress,
     tenantIssuerDid,
     attestationHandlePrefix: "t3attest:",

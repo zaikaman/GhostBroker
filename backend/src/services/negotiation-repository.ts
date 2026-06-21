@@ -185,6 +185,31 @@ export interface NegotiationRepository {
     buy: { price: number; quantity: number } | null;
     sell: { price: number; quantity: number } | null;
   }>;
+  /**
+   * Return the most recent TEE-issued `proposal_handle` per side
+   * (and the sealed envelope + AAD context that produced it) so the
+   * orchestrator can re-evaluate a cross after an escalation
+   * approval without re-reading plaintext price / quantity. The
+   * envelope handle is what the TEE's `evaluate-round` route
+   * consumes; the orchestrator carries it forward without
+   * touching the underlying parameters.
+   */
+  getStandingProposalHandles(sessionId: string): Promise<{
+    buy: {
+      proposalHandle: string;
+      sealedEnvelope: string;
+      institutionDid: string;
+      agentDid: string;
+      authorityRef: string;
+    } | null;
+    sell: {
+      proposalHandle: string;
+      sealedEnvelope: string;
+      institutionDid: string;
+      agentDid: string;
+      authorityRef: string;
+    } | null;
+  }>;
   appendRound(input: {
     sessionId: string;
     roundNumber: number;
@@ -227,7 +252,21 @@ function parseProposalCiphertext(
   }
   try {
     const decoded = Buffer.from(ciphertext, "base64url").toString("utf8");
-    const parsed = JSON.parse(decoded) as { price?: unknown; quantity?: unknown };
+    const parsed = JSON.parse(decoded) as {
+      price?: unknown;
+      quantity?: unknown;
+      // The wrapped envelope shape introduced for the
+      // sealed-envelope round flow also carries these — see
+      // `NegotiationOrchestrator.runPricedMove`. The decoder
+      // tolerates either shape so a pre-wrapper round row
+      // continues to surface plaintext price / quantity to
+      // the agent loop unchanged.
+      proposalHandle?: unknown;
+      sealedEnvelope?: unknown;
+      institutionDid?: unknown;
+      agentDid?: unknown;
+      authorityRef?: unknown;
+    };
     return {
       price: typeof parsed.price === "number" ? parsed.price : null,
       quantity: typeof parsed.quantity === "number" ? parsed.quantity : null,
@@ -242,6 +281,92 @@ function parseProposalCiphertext(
     );
     return { price: null, quantity: null };
   }
+}
+
+/**
+ * Extract the TEE-issued `proposal_handle` + sealed envelope from
+ * the latest priced round on the given side. The wrapped round
+ * column now carries the handle so the orchestrator's cross-evaluation
+ * path can re-evaluate a cross after an escalation approval without
+ * re-reading plaintext price / quantity. Returns `null` when no
+ * priced round is on record or the column is malformed (the latter
+ * is treated as "no cross possible" rather than an exception — the
+ * orchestrator's escalation path falls back to "active" instead of
+ * crashing).
+ */
+function parseProposalHandle(
+  ciphertext: string | null,
+): {
+  proposalHandle: string;
+  sealedEnvelope: string;
+  institutionDid: string;
+  agentDid: string;
+  authorityRef: string;
+} | null {
+  if (!ciphertext) {
+    return null;
+  }
+  try {
+    const decoded = Buffer.from(ciphertext, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded) as Record<string, unknown>;
+    if (
+      typeof parsed.proposalHandle !== "string" ||
+      typeof parsed.sealedEnvelope !== "string" ||
+      typeof parsed.institutionDid !== "string" ||
+      typeof parsed.agentDid !== "string" ||
+      typeof parsed.authorityRef !== "string"
+    ) {
+      return null;
+    }
+    return {
+      proposalHandle: parsed.proposalHandle,
+      sealedEnvelope: parsed.sealedEnvelope,
+      institutionDid: parsed.institutionDid,
+      agentDid: parsed.agentDid,
+      authorityRef: parsed.authorityRef,
+    };
+  } catch (err) {
+    logger.debug(
+      {
+        err,
+        event: "negotiation.parse_proposal_handle_failed",
+      },
+      "Failed to decode standing-proposal handle; treating as null.",
+    );
+    return null;
+  }
+}
+
+function pickLatestStandingProposalHandle(
+  rounds: NegotiationRoundRecord[],
+  side: "buy" | "sell",
+): {
+  proposalHandle: string;
+  sealedEnvelope: string;
+  institutionDid: string;
+  agentDid: string;
+  authorityRef: string;
+} | null {
+  for (let i = rounds.length - 1; i >= 0; i -= 1) {
+    const round = rounds[i];
+    if (!round) continue;
+    if (round.actor_side !== side) continue;
+    if (
+      round.move_type !== "propose" &&
+      round.move_type !== "counter" &&
+      round.move_type !== "accept" &&
+      round.move_type !== "request_disclosure" &&
+      round.move_type !== "reveal" &&
+      round.move_type !== "hold"
+    ) {
+      continue;
+    }
+    const parsed = parseProposalHandle(round.proposal_ciphertext);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function pickLatestStandingProposal(
@@ -637,6 +762,36 @@ export class SupabaseNegotiationRepository implements NegotiationRepository {
     const buy = pickLatestStandingProposal(rounds, "buy");
     const sell = pickLatestStandingProposal(rounds, "sell");
     return { buy, sell };
+  }
+
+  public async getStandingProposalHandles(sessionId: string): Promise<{
+    buy: {
+      proposalHandle: string;
+      sealedEnvelope: string;
+      institutionDid: string;
+      agentDid: string;
+      authorityRef: string;
+    } | null;
+    sell: {
+      proposalHandle: string;
+      sealedEnvelope: string;
+      institutionDid: string;
+      agentDid: string;
+      authorityRef: string;
+    } | null;
+  }> {
+    const { data: rounds, error } = await this.client
+      .from("negotiation_rounds")
+      .select("*")
+      .eq("session_id", sessionId)
+      .order("round_number", { ascending: true });
+    if (error || !rounds) {
+      return { buy: null, sell: null };
+    }
+    return {
+      buy: pickLatestStandingProposalHandle(rounds, "buy"),
+      sell: pickLatestStandingProposalHandle(rounds, "sell"),
+    };
   }
 
   public async appendRound(input: {

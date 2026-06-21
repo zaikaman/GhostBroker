@@ -108,6 +108,7 @@ import {
   T3AgentIdentityVerifier,
   T3NegotiationDisclosureVerifier,
   T3NegotiationRoundEvaluator,
+  T3NegotiationRoundClient,
   T3NegotiationTicketClient,
   createAuthenticatedT3NetworkClient,
   loadOrCreateTenantIdentityFromRepository,
@@ -115,6 +116,7 @@ import {
   runStartupCheck,
   T3EnclaveConfigError,
   type AuthenticatedT3NetworkClientOptions,
+  loadEnvelopeMasterKey,
 } from "./enclave/index.js";
 import { SupabasePublishedContractRepository, type PublishedContractRepository } from "./services/published-contract.repository.js";
 import { SupabaseTenantIdentityRepository } from "./services/tenant-identity.repository.js";
@@ -573,6 +575,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
     minimumTokenBalance: 1n,
     settlementAssetCode: env.SETTLEMENT_ASSET_CODE,
+    envelopeMasterKeyHex: loadEnvelopeMasterKey().key.toString("hex"),
   });
 
   const matchContractClient = new T3MatchContractClient({
@@ -643,7 +646,23 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     // `evaluate-pair`.
     contractVersion: env.T3_MATCHING_CONTRACT_VERSION,
   });
-  const negotiationRoundEvaluator = new T3NegotiationRoundEvaluator();
+  const negotiationRoundEvaluator = new T3NegotiationRoundEvaluator(
+    new T3NegotiationRoundClient({
+      networkClient: t3NetworkClient,
+      tokenBalanceClient,
+      tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
+      minimumTokenBalance: 1n,
+      // Pin the seal-round-proposal / evaluate-round contract
+      // version so the negotiation cross-evaluation path runs
+      // on the same published build as the rest of the matching
+      // / negotiation tenant contracts. The T3N adapter
+      // (`readVersionFromBody`) reads this off the body and
+      // routes execution; without it the tenant falls back to
+      // its default version, which may not yet expose
+      // `seal-round-proposal`.
+      contractVersion: env.T3_MATCHING_CONTRACT_VERSION,
+    }),
+  );
   const negotiationDisclosureVerifier = new T3NegotiationDisclosureVerifier();
   const negotiationOrchestrator = new NegotiationOrchestrator({
     ticketClient: negotiationTicketClient,
@@ -656,6 +675,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     portfolioService,
     settlementAssetCode: env.SETTLEMENT_ASSET_CODE,
     agentRepository: new SupabaseAgentRepository(supabase as never),
+    envelopeMasterKeyHex: loadEnvelopeMasterKey().key.toString("hex"),
   });
   const negotiationService = new NegotiationService({
     repository: negotiationRepository,

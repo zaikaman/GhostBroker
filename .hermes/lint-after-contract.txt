@@ -1,0 +1,12 @@
+﻿
+> ghostbroker@0.1.0 lint
+> npm run lint --workspaces --if-present
+
+
+> @ghostbroker/frontend@0.1.0 lint
+> eslint . --max-warnings=0
+
+
+> @ghostbroker/backend@0.1.0 lint
+> eslint . --max-warnings=0
+

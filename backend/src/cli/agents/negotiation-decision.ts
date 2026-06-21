@@ -29,6 +29,22 @@ export const negotiationDecisionSchema = z.object({
   ]),
   price: z.number().nonnegative(),
   quantity: z.number().nonnegative(),
+  /**
+   * AEAD-sealed envelope carrying the priced proposal. Built
+   * locally by `buildSealedEnvelope` in `negotiation-loop.ts`
+   * after the LLM returns a priced decision; the validator
+   * passes the field through to the orchestrator so the
+   * cross-evaluation path stays TEE-routed. Optional on the
+   * `negotiationDecisionSchema` so a non-priced LLM response
+   * (which the agent loop never builds an envelope for) still
+   * parses cleanly.
+   */
+  proposalEnvelope: z
+    .string()
+    .trim()
+    .min(32)
+    .max(32_768)
+    .optional(),
   // The LLM sometimes returns explicit `null` for absent optional
   // fields. Strip `null` to `undefined` before validation so the
   // parsed shape stays `T | undefined` (truly optional under

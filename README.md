@@ -1235,7 +1235,7 @@ npm run typecheck
 
 ## Testing
 
-GhostBroker ships with a comprehensive test suite: **577 tests passing,
+GhostBroker ships with a comprehensive test suite: **596 tests passing,
 8 skipped across 110 test files** (the 8 skipped tests live in the
 on-chain settlement suite behind `WS2_ANVIL_INTEGRATION=1`; the 1 skipped
 test file is the root-level Playwright E2E spec which runs under
@@ -1512,7 +1512,7 @@ classes of friction:
   is unit-tested against an explicit deny list; the schema and API
   response shapes are built around the boundary.
 
-- **The code is production-ready and tested.** 577 tests passing, 8 skipped
+- **The code is production-ready and tested.** 596 tests passing, 8 skipped
   across 110 test files;
   `tsc --noEmit` clean on both workspaces; the verifier has its own test
   file with positive and negative cases; the session and authority layers

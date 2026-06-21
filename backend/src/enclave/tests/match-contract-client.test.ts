@@ -93,7 +93,7 @@ describe("match contract client", () => {
     // internally; the orchestrator sources them from the
     // TEE-attested `T3LockDescriptor` returned by `seal-intent`.
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.8.0",
+      version: "0.9.1",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,

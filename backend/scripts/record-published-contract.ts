@@ -30,13 +30,13 @@
  *   - SUPABASE_SERVICE_ROLE_KEY  Supabase service role key
  * Optional:
  *   - T3N_ENV                            "testnet" (default) or "production"
- *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.8.0"
+ *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.9.1"
  *
  * Run from the workspace root:
  *   npx tsx backend/scripts/record-published-contract.ts
  *
  * Override the version with:
- *   T3_MATCHING_CONTRACT_VERSION=0.8.0 npx tsx backend/scripts/record-published-contract.ts
+ *   T3_MATCHING_CONTRACT_VERSION=0.9.1 npx tsx backend/scripts/record-published-contract.ts
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     throw new Error("T3_TENANT_DID is missing from backend/.env");
   }
   const networkEnv = env.T3N_ENV ?? "testnet";
-  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.8.0";
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.9.1";
   const tail = "matching";
 
   if (!existsSync(WASM_PATH)) {

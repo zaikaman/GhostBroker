@@ -210,8 +210,29 @@ export const settlementReadinessSchema = z.enum([
 
 export const negotiationMoveSchema = z.object({
   action: negotiationActionSchema,
+  /**
+   * Plaintext price for the priced validator path. Still required
+   * (in plaintext) so the orchestrator can run the
+   * `negotiation-core` validator against the agent's mandate
+   * rails, which use the same validator on both sides. The TEE
+   * never sees this field; the cross-evaluation path uses the
+   * sealed `proposalEnvelope` below.
+   */
   price: z.number().positive().optional(),
+  /** Plaintext quantity for the priced validator path. */
   quantity: z.number().positive().optional(),
+  /**
+   * AEAD-sealed envelope carrying the priced proposal. Built
+   * client-side by the hosted agent with the same `sealEnvelope`
+   * cipher used by hidden intents; the TEE unseals it inside its
+   * boundary on `seal-round-proposal` and the orchestrator never
+   * sees plaintext price / quantity on the cross-evaluation path.
+   * Required for priced actions (`propose` / `counter` / `accept`)
+   * so the orchestrator can route the cross through the TEE.
+   * Optional (and ignored) for non-priced actions (`reveal` /
+   * `request_disclosure` / `hold` / `walkaway`).
+   */
+  proposalEnvelope: z.string().trim().min(32).max(32_768).optional(),
   claimType: z.string().trim().min(1).max(64).optional(),
   strategicIntent: strategicIntentSchema.optional(),
   confidence: z.number().min(0).max(1).optional(),

@@ -259,6 +259,76 @@ describe("SdkAuthenticatedT3NetworkClient — contract execution", () => {
     );
     expect(execCall?.args[1]).toMatchObject({ version: "0.1.0" });
   });
+
+  it("dispatches /contracts/negotiation/round-proposals to seal-round-proposal", async () => {
+    const { client, fake } = makeClient();
+    const response = await client.request<{ outcome_ref: string }>({
+      method: "POST",
+      path: "/contracts/negotiation/round-proposals",
+      body: {
+        version: "0.9.0",
+        sealed_envelope: "env",
+        envelope_master_key_hex: "deadbeef",
+        institution_did: "did:t3n:i1",
+        agent_did: "did:t3n:a1",
+        authority_ref: "auth",
+        asset_code: "USD",
+        side: "buy",
+        correlation_ref: "corr",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.outcome_ref).toBe("outcome_from_sdk");
+    expect(fake.calls).toContainEqual({
+      method: "contracts.execute",
+      args: [
+        "matching",
+        {
+          version: "0.9.0",
+          functionName: "seal-round-proposal",
+          input: {
+            sealed_envelope: "env",
+            envelope_master_key_hex: "deadbeef",
+            institution_did: "did:t3n:i1",
+            agent_did: "did:t3n:a1",
+            authority_ref: "auth",
+            asset_code: "USD",
+            side: "buy",
+            correlation_ref: "corr",
+          },
+        },
+      ],
+    });
+  });
+
+  it("dispatches /contracts/negotiation/round-evaluation to evaluate-round", async () => {
+    const { client, fake } = makeClient();
+    const response = await client.request<{ decision: string }>({
+      method: "POST",
+      path: "/contracts/negotiation/round-evaluation",
+      body: {
+        version: "0.9.0",
+        buy_proposal_handle: "round_b1",
+        sell_proposal_handle: "round_s1",
+        asset_code: "USD",
+        correlation_ref: "corr",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(response.body.decision).toBe("matched");
+    const execCall = fake.calls.find(
+      (call) => call.method === "contracts.execute",
+    );
+    expect(execCall?.args[1]).toMatchObject({
+      functionName: "evaluate-round",
+      input: {
+        buy_proposal_handle: "round_b1",
+        sell_proposal_handle: "round_s1",
+        asset_code: "USD",
+        correlation_ref: "corr",
+      },
+    });
+  });
 });
 
 describe("SdkAuthenticatedT3NetworkClient — runner lifecycle", () => {

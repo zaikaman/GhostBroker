@@ -28,11 +28,13 @@
  * Optional:
  *   - T3N_ENV                            "testnet" (default) or "production"
  *   - T3_NETWORK_URL                     Override the testnet URL
- *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.8.0" (the
- *                                        `evaluate-match` identity-echo +
- *                                        match-attestation build, with
- *                                        the wire-shape reconciliation
- *                                        against the orchestrator)
+ *   - T3_MATCHING_CONTRACT_VERSION       defaults to "0.9.1" (the
+ *                                        v0.9.1 build that adds
+ *                                        `seal-round-proposal` and
+ *                                        `evaluate-round`; the same
+ *                                        version covers `evaluate-match`,
+ *                                        `seal-ticket`, and
+ *                                        `evaluate-pair`)
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -104,7 +106,7 @@ async function main(): Promise<void> {
   const configuredTenantDid = env.T3_TENANT_DID;
   const networkEnv = env.T3N_ENV ?? "testnet";
   const networkUrl = env.T3_NETWORK_URL;
-  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.8.0";
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.9.1";
   const tail = "matching";
 
   if (!apiKey) {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyVc } from "@terminal3/verify_vc";
+import type { verifyVc as VerifyVc } from "@terminal3/verify_vc";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { ethers } from "ethers";
@@ -26,9 +26,9 @@ import {
 let verifyVcSpy = vi.fn();
 
 vi.mock("@terminal3/verify_vc", async () => {
-  const actual = await vi.importActual<typeof import("@terminal3/verify_vc")>(
-    "@terminal3/verify_vc",
-  );
+  const actual = (await vi.importActual("@terminal3/verify_vc")) as {
+    verifyVc: typeof VerifyVc;
+  };
   return {
     ...actual,
     verifyVc: (...args: unknown[]) => verifyVcSpy(...args),
@@ -58,10 +58,10 @@ function freshKeypair(): { privateKey: string; publicKey: string; issuerDid: str
 beforeEach(() => {
   verifyVcSpy = vi.fn().mockImplementation(async (vc) => {
     const actual = vi.importActual("@terminal3/verify_vc" as never) as Promise<{
-      verifyVc: typeof verifyVc;
+      verifyVc: typeof VerifyVc;
     }>;
     const mod = await actual;
-    return mod.verifyVc(vc as Parameters<typeof verifyVc>[0]);
+    return mod.verifyVc(vc as Parameters<typeof VerifyVc>[0]);
   });
 });
 

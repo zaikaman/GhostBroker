@@ -555,6 +555,15 @@ export interface AgentDecisionMove {
     | "walkaway";
   price?: number;
   quantity?: number;
+  /**
+   * AEAD-sealed envelope carrying the priced proposal. The
+   * shared strategy validator propagates the field unchanged so
+   * the orchestrator's cross-evaluation path can forward it to
+   * the TEE round contract without ever decoding plaintext on
+   * the orchestrator. Set by the agent runtime before the move
+   * reaches the backend; required for priced actions.
+   */
+  proposalEnvelope?: string;
   claimType?: string;
   /** LLM-declared strategic intent for this move. */
   strategicIntent?: StrategicIntent;

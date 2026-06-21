@@ -145,6 +145,17 @@ export interface NegotiationMove {
     | "walkaway";
   price?: number | undefined;
   quantity?: number | undefined;
+  /**
+   * AEAD-sealed envelope carrying the priced proposal. Required
+   * for priced actions (`propose` / `counter` / `accept`) so the
+   * cross-evaluation path on the backend can route through the
+   * TEE without ever seeing plaintext price / quantity on the
+   * orchestrator. Built client-side with the same `sealEnvelope`
+   * cipher the agent uses for hidden intents; the orchestrator
+   * forwards it to the TEE's `seal-round-proposal` route which
+   * unseals it inside the enclave.
+   */
+  proposalEnvelope?: string | undefined;
   claimType?: string | undefined;
   strategicIntent?:
     | "open_patiently"

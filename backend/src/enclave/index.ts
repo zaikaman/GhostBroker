@@ -1,4 +1,5 @@
 export * from "./auth/index.js";
+export * from "./contract-version.js";
 export * from "./keys/index.js";
 export * from "./matching/index.js";
 export * from "./matching/match-contract-client.js";

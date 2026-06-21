@@ -68,7 +68,7 @@ export function TeeNegotiationVisualizer({
         if (!isNaN(date.getTime())) {
           timeStr = date.toTimeString().split(' ')[0] || '';
         }
-      } catch (e) {
+      } catch (_e) {
         // fallback
       }
       if (!timeStr) {
@@ -438,7 +438,7 @@ export function TeeNegotiationVisualizer({
         });
       }, 0);
     }
-  }, [latestPhase, intents.length, localAgent, counterpartyAgent, institutionName, forceIdle]);
+  }, [latestPhase, intents.length, localAgent, counterpartyAgent, institutionName, forceIdle, logTail]);
 
   // Clean state when agents are disconnected
   useEffect(() => {
@@ -478,8 +478,7 @@ export function TeeNegotiationVisualizer({
       // bubble; the lint rule's preferred pattern (deriving
       // state in render) does not work here because the bubble
       // has its own independent lifetime independent of the
-      // `displayMessages` array. Suppress the rule for this branch.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // `displayMessages` array.
       setLatestHubBubble(lastMsg.message);
       const t = setTimeout(() => setLatestHubBubble(null), 4500);
       return () => clearTimeout(t);

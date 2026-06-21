@@ -20,11 +20,11 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 
 | Surface | Evidence |
 |---|---|
-| Test suite | **577 tests passing, 8 skipped across 110 test files** (8 are gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
+| Test suite | **596 tests passing, 8 skipped across 99 test files** (8 are gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
 | Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, shared `database/`, `tests/` |
 | Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 29 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
 | Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
-| Smart contracts | **Real Rust WASI P2 matching contract v0.8.0** (`backend/contracts/matching-policy/`, ~1300 LOC after the v0.8.0 wire-shape reconciliation against the orchestrator + the audit-trail identity-echo + match-attestation fix carried forward from v0.7.0, compiled to `matching_policy.wasm`, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
+| Smart contracts | **Real Rust WASI P2 matching contract v0.9.1** (`backend/contracts/matching-policy/`, ~1900 LOC: v0.9.0 round-flow additions (`seal-round-proposal` + `evaluate-round`) + v0.9.1 in-enclave AEAD decryption for `seal-intent` and `seal-round-proposal`, compiled to `matching_policy.wasm`, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
 | Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 56 tests) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
 | Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); opaque per-field correlation handles on `completed_trades` |
 | Heroku durability | All runtime state is Supabase-backed (no `backend/output/` file writes); the tenant signing keypair and the T3N publish record both survive Heroku dyno restarts and Heroku's ephemeral dyno filesystem |
@@ -126,7 +126,7 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 $EDITOR backend/.env frontend/.env
 
-# 3. Type-check + tests (110 files, 577 tests)
+# 3. Type-check + tests (99 files, 596 tests)
 npm run typecheck
 npm test
 
@@ -169,7 +169,7 @@ Honest disclosure (any of these would surface quickly during a code walkthrough)
 **Deliberately scoped for the bounty demo (v1):**
 
 - `backend/src/cli/agents/sealed-envelope.ts` — for loop agents that do not have a TEE in front of them, the envelope is a real AES-256-GCM AEAD ciphertext (`ghostbroker.envelope.aead/v1`) with a per-institution key derived from `ENVELOPE_ENCRYPTION_MASTER_KEY` via HKDF-SHA256. The AEAD's Additional Data binds the ciphertext to (institutionDid, agentDid, authorityRef, schema version); any tamper, wrong key, or AAD mismatch fails the GCM tag verification on `openEnvelope`. The previous plaintext base64url-JSON envelope leaked the full trading parameters through the Supabase column; the new format is opaque to anyone without the master key. See `backend/src/enclave/keys/envelope-cipher.ts` and the 22 cipher unit tests in `envelope-cipher.test.ts` for the round-trip / tamper-detection / wrong-key / AAD-mismatch coverage. The production path (`backend/src/enclave/matching/blind-intent.ts` via `T3BlindIntentClient.sealIntent`) is real TEE encryption.
-- `backend/src/enclave/negotiation/evaluate-round.ts` — turn-by-turn negotiation crosses are computed inline because both sides' prices are already visible to the agents by design; the TEE still seals tickets and validates pair compatibility. The cross is a *transcript outcome*, not a settlement authority.
+- `backend/src/enclave/negotiation/round-client.ts` (and `evaluate-round.ts` which delegates to it) — per-round negotiation crosses now route through the T3 negotiation round contract. The hosted agent seals every priced move into an AEAD envelope (the same cipher used by hidden intents), the orchestrator forwards the envelope to the TEE's `seal-round-proposal` route, and `evaluate-round` takes both sealed proposal handles and emits the cross verdict + a TEE-attested `round_attestation_ref`. The orchestrator's in-memory standing-proposal map carries only the opaque handle + TEE-attested descriptor; plaintext price / quantity never enters the cross-evaluation path. A defense-in-depth local fallback (the same pattern `verifyPair` uses for a missing `evaluate-pair` route) keeps a pre-v0.8.0 host from silently breaking the orchestrator. The orchestrator no longer computes the cross inline.
 
 **Dashboard UI surfaces are wired to live data:**
 

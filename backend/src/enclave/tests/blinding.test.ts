@@ -15,6 +15,7 @@ import type { TokenBalanceClient, TokenBalance } from "../sandbox/token-balance.
 
 const BLINDING_TEST_MASTER_KEY = "0".repeat(64);
 process.env["ENVELOPE_ENCRYPTION_MASTER_KEY"] = BLINDING_TEST_MASTER_KEY;
+const BLINDING_TEST_MASTER_KEY_HEX = BLINDING_TEST_MASTER_KEY;
 
 class CapturingNetworkClient implements T3NetworkClient {
   public requests: T3NetworkRequest[] = [];
@@ -107,6 +108,7 @@ describe("blind intent client", () => {
       tokenBalanceClient: tokenClient,
       tokenAccount: "did:t3n:institution:us2",
       minimumTokenBalance: 1n,
+      envelopeMasterKeyHex: BLINDING_TEST_MASTER_KEY_HEX,
     });
 
     await expect(client.sealIntent(request)).resolves.toMatchObject({
@@ -134,6 +136,7 @@ describe("blind intent client", () => {
       institution_id: request.institutionId,
       agent_did: request.agentDid,
       encrypted_intent: request.encryptedIntentEnvelope,
+      envelope_master_key_hex: BLINDING_TEST_MASTER_KEY_HEX,
       authority_ref: request.authorityRef,
       correlation_ref: request.correlationRef,
     });
@@ -154,6 +157,7 @@ describe("blind intent client", () => {
       tokenBalanceClient: tokenClient,
       tokenAccount: "did:t3n:institution:us2",
       minimumTokenBalance: 1n,
+      envelopeMasterKeyHex: BLINDING_TEST_MASTER_KEY_HEX,
     });
 
     await expect(client.sealIntent(request)).rejects.toMatchObject({
@@ -180,6 +184,7 @@ describe("blind intent client", () => {
       tokenBalanceClient: tokenClient,
       tokenAccount: "did:t3n:institution:us2",
       minimumTokenBalance: 1n,
+      envelopeMasterKeyHex: BLINDING_TEST_MASTER_KEY_HEX,
     });
 
     await expect(client.sealIntent(request)).rejects.toMatchObject({
@@ -198,6 +203,7 @@ describe("blind intent client", () => {
       tokenBalanceClient: tokenClient,
       tokenAccount: "did:t3n:institution:us2",
       minimumTokenBalance: 1n,
+      envelopeMasterKeyHex: BLINDING_TEST_MASTER_KEY_HEX,
     });
 
     let caught: BlindIntentSealFailureError | undefined;

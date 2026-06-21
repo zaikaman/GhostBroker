@@ -19,6 +19,34 @@ import {
 } from "./negotiation-decision.js";
 import { loadOrGenerateIdentity } from "./identity.js";
 import { buildSignedClaimCredential } from "./claim-credential.js";
+import { buildSealedEnvelope } from "./sealed-envelope.js";
+
+/**
+ * True when the priced `move` carries a positive price and quantity
+ * that the agent loop should seal into an AEAD envelope. The
+ * backend's cross-evaluation path refuses priced actions without a
+ * sealed envelope (the orchestrator would have to re-decrypt
+ * plaintext to compute the cross, which is exactly the P0-7 leak
+ * the round client was introduced to close).
+ */
+function pricedMoveNeedsEnvelope(
+  move: NegotiationDecision,
+): move is NegotiationDecision & {
+  action: "propose" | "counter" | "accept";
+  price: number;
+  quantity: number;
+} {
+  if (move.action !== "propose" && move.action !== "counter" && move.action !== "accept") {
+    return false;
+  }
+  if (typeof move.price !== "number" || !Number.isFinite(move.price) || move.price <= 0) {
+    return false;
+  }
+  if (typeof move.quantity !== "number" || !Number.isFinite(move.quantity) || move.quantity <= 0) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * The expanded runtime mandate as returned by the hosted-mandate
@@ -101,23 +129,46 @@ export interface NegotiationLoopResult {
 }
 
 /**
- * True when the hosted-agent-service has supplied the
- * institution's tenant signing keypair + derived
- * `did:ethr:0x<address>` as env vars. All three fields MUST be
- * set together (the backend never sets just one); partial
- * configuration is treated as "not configured" so the agent
- * loop surfaces a clear "tenant signer not wired" log line
- * instead of building a half-broken VC.
+ * The tenant signing material the hosted-agent-service has supplied
+ * as env vars. All three fields MUST be set together (the backend
+ * never sets just one); partial configuration is treated as "not
+ * configured" so the agent loop surfaces a clear "tenant signer not
+ * wired" log line instead of building a half-broken VC. Returning
+ * the validated values (rather than a boolean) eliminates the
+ * non-null assertion the call site would otherwise need.
  */
-function hasTenantSignerCredentials(env: AgentEnv): boolean {
-  return (
-    typeof env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY === "string" &&
-    env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY.length === 66 &&
-    typeof env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY === "string" &&
-    env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY.length === 68 &&
-    typeof env.HOSTED_AGENT_TENANT_SIGNER_DID === "string" &&
-    env.HOSTED_AGENT_TENANT_SIGNER_DID.startsWith("did:ethr:")
-  );
+function readTenantSignerCredentials(
+  env: AgentEnv,
+):
+  | {
+      privateKey: string;
+      publicKey: string;
+      issuerDid: string;
+    }
+  | null {
+  if (
+    typeof env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY !== "string" ||
+    env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY.length !== 66
+  ) {
+    return null;
+  }
+  if (
+    typeof env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY !== "string" ||
+    env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY.length !== 68
+  ) {
+    return null;
+  }
+  if (
+    typeof env.HOSTED_AGENT_TENANT_SIGNER_DID !== "string" ||
+    !env.HOSTED_AGENT_TENANT_SIGNER_DID.startsWith("did:ethr:")
+  ) {
+    return null;
+  }
+  return {
+    privateKey: env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY,
+    publicKey: env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY,
+    issuerDid: env.HOSTED_AGENT_TENANT_SIGNER_DID,
+  };
 }
 
 function buildSessionFromEnv(env: AgentEnv): AuthSession | undefined {
@@ -477,13 +528,7 @@ let admission: AgentAdmission;
         // are bound to the institution's T3 identity, not to
         // the signing keypair. The tenant signing key is used
         // ONLY for claim VCs.
-        const tenantSigner = hasTenantSignerCredentials(env)
-          ? {
-              privateKey: env.HOSTED_AGENT_TENANT_SIGNER_PRIVATE_KEY!,
-              publicKey: env.HOSTED_AGENT_TENANT_SIGNER_PUBLIC_KEY!,
-              issuerDid: env.HOSTED_AGENT_TENANT_SIGNER_DID!,
-            }
-          : null;
+        const tenantSigner = readTenantSignerCredentials(env);
         const claimCredential =
           moveToSubmit.action === "reveal" &&
           moveToSubmit.claimType &&
@@ -508,11 +553,38 @@ let admission: AgentAdmission;
           );
         }
 
+        // Seal the priced proposal into an AEAD envelope before
+        // submitting. The backend's cross-evaluation path will
+        // forward this envelope to the TEE's `seal-round-proposal`
+        // route which unseals it inside its boundary; the
+        // orchestrator never sees plaintext price / quantity on the
+        // cross-evaluation path (the P0-7 fix that this envelope
+        // pass enables). Non-priced actions (`reveal`,
+        // `request_disclosure`, `hold`) skip the envelope — the
+        // backend only routes priced moves through the cross
+        // evaluator.
+        const moveToSubmitWithEnvelope: NegotiationDecision = pricedMoveNeedsEnvelope(
+          moveToSubmit,
+        )
+          ? {
+              ...moveToSubmit,
+              proposalEnvelope: buildSealedEnvelope({
+                institutionId: session.institution.id,
+                agentDid: identity.did,
+                authorityRef: admission.authorityRef,
+                assetCode: mandate.assetCode,
+                side: mandate.side,
+                quantity: moveToSubmit.quantity,
+                price: moveToSubmit.price,
+              }).envelope,
+            }
+          : moveToSubmit;
+
         const result = await client.submitNegotiationMove(sessionId, {
           agentId: env.HOSTED_AGENT_ID ?? "00000000-0000-0000-0000-000000000000",
           agentDid: identity.did,
           authorityRef: admission.authorityRef,
-          move: moveToSubmit,
+          move: moveToSubmitWithEnvelope,
           ...(claimCredential !== undefined ? { claimCredential } : {}),
         });
         lastOutcome = `move -> ${result.status}`;

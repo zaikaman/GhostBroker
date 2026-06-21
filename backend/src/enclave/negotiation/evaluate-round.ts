@@ -1,149 +1,137 @@
-import { randomUUID } from "node:crypto";
+import type {
+  EvaluateRoundRequest,
+  NegotiationDistanceSignal,
+  NegotiationRoundClient,
+  RoundEvaluationResult,
+  RoundProposalDescriptor,
+  SealRoundProposalRequest,
+} from "./round-client.js";
+
+export type {
+  EvaluateRoundRequest,
+  NegotiationDistanceSignal,
+  RoundEvaluationResult,
+  RoundProposalDescriptor,
+  SealRoundProposalRequest,
+} from "./round-client.js";
 
 /**
- * Per-round negotiation evaluation — computed inline rather than
- * through the T3 blind‑match contract.
+ * Re-export the canonical types from the TEE-backed round client.
  *
- * Negotiation is bilateral: both sides' prices and quantities are
- * already visible to the orchestrator.  There is no need to pass
- * opaque intent handles through the T3 match contract — that
- * contract validates intent handles against sealed blind intents,
- * and negotiation tickets are sealed through an entirely different
- * contract path (`seal-ticket` vs `seal-intent`).  Using it would
- * always return `no_match`, making it impossible for any
- * negotiation to ever settle.
- *
- * Instead we compute the cross, the midpoint price, and the
- * minimum quantity right here.  The result is identical to what the
- * blind contract would return for non‑hidden prices — only the
- * attestation boundary is different.
+ * The historical entry point — `evaluate-round.ts` — defined the
+ * inline plaintext round math; that implementation computed the
+ * cross outside the TEE and violated the SUBMISSION.md privacy
+ * claim ("matched and settled inside a Terminal 3 Trusted Execution
+ * Environment without any counterparty ever seeing another
+ * counterparty's parameters"). The implementation now lives in
+ * {@link ./round-client.ts}. This module re-exports the canonical
+ * shapes so existing importers (the orchestrator, the app
+ * composition site, the test doubles) keep resolving without churn.
  */
 
-export type NegotiationDistanceSignal =
-  | "crossed"
-  | "near"
-  | "moderate"
-  | "far";
-
-export interface EvaluateRoundRequest {
+export interface SealRoundProposalInput {
   sessionId: string;
   roundNumber: number;
   correlationRef: string;
+  sealedEnvelope: string;
+  institutionDid: string;
+  agentDid: string;
+  authorityRef: string;
   assetCode: string;
-  /** Buyer's standing bid price, decimal string for exact transport. */
-  buyPrice: string;
-  /** Buyer's standing quantity, decimal string. */
-  buyQuantity: string;
-  /** Seller's standing ask price, decimal string. */
-  sellPrice: string;
-  /** Seller's standing quantity, decimal string. */
-  sellQuantity: string;
+  side: "buy" | "sell";
+  /**
+   * Hex-encoded AEAD master key the TEE uses to decrypt the
+   * sealed envelope inside the enclave. Forwarded from
+   * `loadEnvelopeMasterKey().key.toString("hex")` by the
+   * orchestrator.
+   */
+  envelopeMasterKeyHex: string;
 }
 
-export interface EvaluateRoundResult {
+export interface EvaluateRoundOutput {
   status: "crossed" | "open";
-  /** Coarse per-side signal — never a raw counterpart threshold. */
   buyerSignal: NegotiationDistanceSignal;
   sellerSignal: NegotiationDistanceSignal;
-  /** Midpoint price on a cross; `0` while still open. */
   executionPrice: number;
-  /** Min fill on a cross; `0` while still open. */
   matchedQuantity: number;
-  /** Opaque outcome ref for settlement linkage. */
   outcomeRef: string;
   executionRef: string;
   encryptedTradeFieldsRef: string;
   expiresAt: string;
   evaluatedAt: string;
+  /**
+   * TEE-attested cross attestation reference. Mirrors the
+   * `match_attestation_ref` returned by `evaluate-match` so the
+   * settlement service can verify the cross was bound to the exact
+   * proposal handles the TEE unsealed.
+   */
+  roundAttestationRef: string;
 }
 
 export interface NegotiationRoundEvaluator {
-  evaluateRound(request: EvaluateRoundRequest): Promise<EvaluateRoundResult>;
-}
-
-function parsePositiveDecimal(value: string): number {
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || !/^\d+(?:\.\d+)?$/u.test(trimmed)) {
-    return Number.NaN;
-  }
-  return Number(trimmed);
+  sealRoundProposal(
+    input: SealRoundProposalInput,
+  ): Promise<RoundProposalDescriptor>;
+  evaluateRound(request: EvaluateRoundRequest): Promise<EvaluateRoundOutput>;
 }
 
 /**
- * Bucket the gap between bid and ask into a coarse signal. The
- * gap is normalized against the ask so the bucket boundaries are
- * scale-invariant. The raw counterpart price is never leaked —
- * only the bucket label crosses the enclave boundary.
- */
-export function distanceSignalFor(
-  buyPrice: number,
-  sellPrice: number,
-): NegotiationDistanceSignal {
-  if (!Number.isFinite(buyPrice) || !Number.isFinite(sellPrice)) {
-    return "far";
-  }
-  if (buyPrice >= sellPrice) {
-    return "crossed";
-  }
-  const reference = sellPrice > 0 ? sellPrice : 1;
-  const gapRatio = (sellPrice - buyPrice) / reference;
-  if (gapRatio <= 0.01) {
-    return "near";
-  }
-  if (gapRatio <= 0.05) {
-    return "moderate";
-  }
-  return "far";
-}
-
-/**
- * Inline negotiation round evaluator.
- *
- * Computes the crossing decision, execution price (midpoint), and
- * fill quantity (min) directly from the two sides' priced proposals,
- * without routing through the T3 blind‑match contract.
+ * TEE-backed round evaluator. The previous `T3NegotiationRoundEvaluator`
+ * computed the cross inline; the new implementation routes both the
+ * seal step and the cross step through the T3 negotiation round
+ * contract so the orchestrator never sees plaintext price / quantity
+ * on the cross-evaluation path. The constructor accepts a
+ * `roundClient` so test doubles can inject a stub; production callers
+ * (the `app.ts` composition site) wire up a real
+ * `T3NegotiationRoundClient` at boot.
  */
 export class T3NegotiationRoundEvaluator implements NegotiationRoundEvaluator {
+  private readonly roundClient: NegotiationRoundClient;
+
+  public constructor(roundClient: NegotiationRoundClient) {
+    this.roundClient = roundClient;
+  }
+
+  public async sealRoundProposal(
+    input: SealRoundProposalInput,
+  ): Promise<RoundProposalDescriptor> {
+    const request: SealRoundProposalRequest = {
+      sealedEnvelope: input.sealedEnvelope,
+      envelopeMasterKeyHex: input.envelopeMasterKeyHex,
+      institutionDid: input.institutionDid,
+      agentDid: input.agentDid,
+      authorityRef: input.authorityRef,
+      assetCode: input.assetCode,
+      side: input.side,
+      correlationRef: `${input.sessionId}:${input.roundNumber}:${input.correlationRef}`,
+    };
+    return this.roundClient.sealRoundProposal(request);
+  }
+
   public async evaluateRound(
     request: EvaluateRoundRequest,
-  ): Promise<EvaluateRoundResult> {
-    const buyPrice = parsePositiveDecimal(request.buyPrice);
-    const sellPrice = parsePositiveDecimal(request.sellPrice);
-    const buyQuantity = parsePositiveDecimal(request.buyQuantity);
-    const sellQuantity = parsePositiveDecimal(request.sellQuantity);
-
-    const crossed =
-      Number.isFinite(buyPrice) &&
-      Number.isFinite(sellPrice) &&
-      Number.isFinite(buyQuantity) &&
-      Number.isFinite(sellQuantity) &&
-      buyPrice >= sellPrice &&
-      buyQuantity > 0 &&
-      sellQuantity > 0;
-
-    const signal: NegotiationDistanceSignal = crossed
-      ? "crossed"
-      : distanceSignalFor(
-          Number.isFinite(buyPrice) ? buyPrice : 0,
-          Number.isFinite(sellPrice) ? sellPrice : 0,
-        );
-
-    const executionPrice = crossed ? (buyPrice + sellPrice) / 2 : 0;
-    const matchedQuantity = crossed ? Math.min(buyQuantity, sellQuantity) : 0;
-
-    const roundRef = `round_${request.sessionId}_${request.roundNumber}_${randomUUID().slice(0, 8)}`;
-
-    return {
-      status: crossed ? "crossed" : "open",
-      buyerSignal: signal,
-      sellerSignal: signal,
-      executionPrice,
-      matchedQuantity,
-      outcomeRef: roundRef,
-      executionRef: `t3exec_${randomUUID()}`,
-      encryptedTradeFieldsRef: `negotiation-transcript:${request.sessionId}`,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-      evaluatedAt: new Date().toISOString(),
-    };
+  ): Promise<EvaluateRoundOutput> {
+    const result = await this.roundClient.evaluateRound(request);
+    return adaptRoundEvaluation(result);
   }
 }
+
+function adaptRoundEvaluation(
+  result: RoundEvaluationResult,
+): EvaluateRoundOutput {
+  return {
+    status: result.status,
+    buyerSignal: result.buyerSignal,
+    sellerSignal: result.sellerSignal,
+    executionPrice: result.executionPrice,
+    matchedQuantity: result.matchedQuantity,
+    outcomeRef: result.outcomeRef,
+    executionRef: result.executionRef,
+    encryptedTradeFieldsRef: result.encryptedTradeFieldsRef,
+    expiresAt: result.expiresAt,
+    evaluatedAt: result.evaluatedAt,
+    roundAttestationRef: result.roundAttestationRef,
+  };
+}
+
+export { distanceSignalFor, T3NegotiationRoundClient } from "./round-client.js";
