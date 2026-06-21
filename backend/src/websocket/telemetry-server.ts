@@ -3,6 +3,13 @@ import type { Server as HttpServer, IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { TelemetryBus } from "../services/telemetry-bus.js";
 
+/**
+ * Heroku terminates idle HTTP connections after 55 seconds (H15).
+ * Keepalive pings every 25 seconds prevent this timeout for
+ * long-lived WebSocket telemetry channels.
+ */
+const WS_KEEPALIVE_INTERVAL_MS = 25_000;
+
 function getInstitutionId(request: IncomingMessage): string | undefined {
   // 1. Check HTTP headers (used by server-side or proxy-to-server connections)
   const header =
@@ -82,6 +89,22 @@ export function attachTelemetryServer(
     });
 
     socket.on("close", unsubscribe);
+
+    // --- Keepalive: prevent Heroku H15 idle-connection timeouts ---
+    // Heroku's router terminates HTTP connections that have been idle
+    // for 55 seconds (H15). The telemetry channel sends events only
+    // when something changes (agent status, settlement events), so
+    // long idle periods are normal. A 25-second ping interval keeps
+    // the connection alive without adding meaningful overhead.
+    const keepaliveHandle = setInterval(() => {
+      if (socket.readyState === socket.OPEN) {
+        socket.ping();
+      }
+    }, WS_KEEPALIVE_INTERVAL_MS);
+
+    socket.on("close", () => {
+      clearInterval(keepaliveHandle);
+    });
   });
 
   return websocketServer;

@@ -45,7 +45,7 @@ interface RuntimeFormState {
 }
 
 const defaultRuntimeForm: RuntimeFormState = {
-  pollIntervalMs: '15000',
+  pollIntervalMs: '5000',
   maxTicks: '40',
   dryRun: false,
 };
@@ -353,15 +353,27 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       apiClient.getInstitution(session.institution.id),
     ]);
     if (token !== loadRequestRef.current) return;
+
+    // Only fetch mandates for the selected agent (or all agents if none selected yet),
+    // instead of fetching mandates for every admitted agent on every poll cycle.
+    // This eliminates the largest source of API call volume in the polling loop.
+    const targetAgents =
+      preferredAgentId && agents.some((a) => a.id === preferredAgentId)
+        ? agents.filter((a) => a.id === preferredAgentId)
+        : agents;
     const mandateEntries = await Promise.all(
-      agents.map(async (agent) => [agent.id, await apiClient.listNegotiationMandates(agent.id)] as const),
+      targetAgents.map(async (agent) => [agent.id, await apiClient.listNegotiationMandates(agent.id)] as const),
     );
     if (token !== loadRequestRef.current) return;
     const nextMandatesByAgentId = Object.fromEntries(mandateEntries);
 
     setHostedAgents(records);
     setAdmittedAgents(agents);
-    setMandatesByAgentId(nextMandatesByAgentId);
+    // Merge instead of replace: when polling with a preferredAgentId,
+    // we only fetch one agent's mandates, but we must not evict other
+    // agents' mandates from the map — the operator may switch agents
+    // mid-session and expects instant access without a 60s gap.
+    setMandatesByAgentId((prev) => ({ ...prev, ...nextMandatesByAgentId }));
     setInstitution(inst);
 
     if (inst.settlementProfileRef === 'chain:sepolia:erc20') {
@@ -410,15 +422,21 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         });
     });
 
+    // Reduced from 12s to 60s to eliminate log spam on Heroku.
+    // The WebSocket telemetry channel provides real-time updates
+    // for critical state changes; this REST fallback is only needed
+    // for reconciling state after a long idle period or reconnection.
+    // Pass the current selectedAgentId via ref so we only fetch
+    // mandates for the agent the operator is actively looking at.
     const intervalId = window.setInterval(() => {
       // Fire-and-forget but route errors through the same surface so
       // transient outages don't silently disappear.
-      loadState().catch((err: unknown) => {
+      loadState(selectedAgentIdRef.current).catch((err: unknown) => {
         if (!cancelled) {
           setError(deriveErrorMessage(err, 'Background refresh failed.'));
         }
       });
-    }, 12000);
+    }, 60000);
 
     const handleOnline = () => {
       // Re-sync as soon as connectivity returns. Without this a long
@@ -647,7 +665,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     setError(null);
     try {
       await apiClient.startHostedAgent(id);
-      await loadState();
+      await loadState(id);
       setSelectedAgentId(id);
     } catch (err) {
       setError(deriveErrorMessage(err, 'Failed to start hosted negotiator.'));
@@ -661,7 +679,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     setError(null);
     try {
       await apiClient.stopHostedAgent(id);
-      await loadState();
+      await loadState(id);
       setSelectedAgentId(id);
       // Clear the runtime telemetry view (agents, intents, enclave
       // status) back to its idle defaults so the negotiator
@@ -715,6 +733,13 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
       setActiveStep(1);
     }
   }, [selectedAgentId]);
+
+  // Keep a ref in sync with selectedAgentId so the setInterval
+  // callback (which captures a stable closure) can access the
+  // current selection and pass it to loadState, avoiding fetching
+  // mandates for every admitted agent on each poll tick.
+  const selectedAgentIdRef = useRef(selectedAgentId);
+  selectedAgentIdRef.current = selectedAgentId;
 
   return (
     <div className="deploy-layout deploy-factory-layout">
