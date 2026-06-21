@@ -115,45 +115,50 @@ export interface PendingIntent {
 }
 
 /**
- * TEE-attested balance-lock claim. The asset code, amount, and
- * side here are NOT plaintext trading parameters -- they are the
- * derived reservation values the T3 enclave computed after
- * decrypting the envelope. The TEE signs this descriptor; the
- * portfolio service SQL update and the orchestrator's local
- * match filter are the only consumers. Anything outside this
- * reservation descriptor (the raw `quantity` and `bidPrice`
- * sealed into the envelope) is held only inside the TEE.
+ * TEE-attested balance-lock claim. The asset code, amount,
+ * side, quantity, and price here are NOT plaintext trading
+ * parameters that the orchestrator had to decode from the
+ * envelope — they are the per-side TEE-attested claim
+ * produced by `seal-intent` v0.8.0+ after it unsealed the
+ * envelope inside the enclave. The orchestrator carries the
+ * descriptor through to the portfolio service for the SQL
+ * reservation and to the matching orchestrator as the
+ * canonical source of the per-side `quantity` / `price`
+ * fields the `evaluate-match` wire form consumes.
  *
  * The descriptor carries two asset codes:
  *
  *   - `tradedAssetCode` -- the asset the intent is buying or
- *     selling (e.g. `WBTC`). The orchestrator uses this for the
- *     local cross-candidate filter: a buy intent and a sell
- *     intent must trade the same asset to cross. This is the
- *     TEE's authoritative claim about what the envelope carries.
- *   - `assetCode` -- the asset the orchestrator should lock in
- *     `portfolios.locked`. For a buy intent, this is the
- *     settlement asset (typically `USDC`); for a sell intent, it
- *     is the same as `tradedAssetCode`.
+ *     selling (e.g. `WBTC`). The orchestrator uses this for
+ *     the local cross-candidate filter and as the
+ *     `asset_code` field on the `evaluate-match` wire form.
+ *     For a buy intent and a sell intent to cross they must
+ *     trade the same asset. This is the TEE's authoritative
+ *     claim about what the envelope carries.
+ *   - `assetCode` -- the asset the orchestrator should lock
+ *     in `portfolios.locked`. For a buy intent, this is the
+ *     settlement asset (typically `USDC`); for a sell intent,
+ *     it is the same as `tradedAssetCode`.
  *
  * Splitting the two means the orchestrator can do its local
  * cross filter without ever decoding the envelope. The T3
- * enclave produces both values; the orchestrator carries them
+ * enclave produces all values; the orchestrator carries them
  * through.
  */
 export interface T3LockDescriptor {
   /**
-   * Asset the intent is buying or selling. Authoritative on the
-   * cross-candidate filter (buy and sell intents must trade the
-   * same asset). The TEE has unsealed the envelope to produce
-   * this; the orchestrator never sees the underlying trading
-   * parameters.
+   * Asset the intent is buying or selling. Authoritative on
+   * the cross-candidate filter (buy and sell intents must
+   * trade the same asset) and the `asset_code` field on the
+   * `evaluate-match` wire form. The TEE has unsealed the
+   * envelope to produce this; the orchestrator never sees
+   * the underlying trading parameters.
    */
   tradedAssetCode: string;
   /**
-   * Asset to reserve. For a buy intent, this is the settlement
-   * asset (USDC). For a sell intent, this is the same as
-   * `tradedAssetCode`.
+   * Asset to reserve. For a buy intent, this is the
+   * settlement asset (USDC). For a sell intent, it is the
+   * same as `tradedAssetCode`.
    */
   assetCode: string;
   /**
@@ -162,19 +167,38 @@ export interface T3LockDescriptor {
    * trade the same asset with opposite sides). The value is
    * NOT a wire-side plaintext leak -- it is the TEE's
    * authoritative claim about which side of the cross the
-   * intent is on. The orchestrator never inspects the envelope
-   * contents to derive this.
+   * intent is on. The orchestrator never inspects the
+   * envelope contents to derive this.
    */
   side: "buy" | "sell";
-  /** Reservation amount. `quantity * price` for a buy; `quantity`
-   * for a sell. */
+  /**
+   * TEE-attested intent quantity. Decimal string at the
+   * contract's implicit `WIRE_SCALE` (1e18) so the value
+   * flows directly into the `evaluate-match` `quantity` wire
+   * field without a re-scale step. The orchestrator carries
+   * this through on the match call.
+   */
+  quantity: string;
+  /**
+   * TEE-attested intent price (decimal string at the
+   * contract's implicit `WIRE_SCALE`). Same rationale as
+   * `quantity`.
+   */
+  price: string;
+  /**
+   * Reservation amount. `quantity * price` for a buy;
+   * `quantity` for a sell. Equivalent to multiplying the
+   * two scaled values and re-formatting at the wire scale.
+   * The orchestrator carries this through to the portfolio
+   * service for the SQL reservation.
+   */
   amount: number;
   /**
-   * TEE-issued attestation reference. The portfolio service can
-   * hand this to a TEE verifier to confirm the descriptor was
-   * actually produced by the T3 enclave for this intent handle.
-   * The orchestrator does not interpret the value; it just carries
-   * it through.
+   * TEE-issued attestation reference. The portfolio service
+   * can hand this to a TEE verifier to confirm the
+   * descriptor was actually produced by the T3 enclave for
+   * this intent handle. The orchestrator does not interpret
+   * the value; it just carries it through.
    */
   attestationRef: string;
 }

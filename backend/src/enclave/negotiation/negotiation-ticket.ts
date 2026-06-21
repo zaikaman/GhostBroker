@@ -109,7 +109,7 @@ export interface T3NegotiationTicketClientOptions {
    * reads this off the request body and routes execution to
    * the published contract version, so changing it here
    * (after a new publish) repoints the backend without touching
-   * the orchestrator. Defaults to `"0.7.0"` — the version that
+   * the orchestrator. Defaults to `"0.8.0"` — the version that
    * introduced the `evaluate-pair` export, the corrected
    * `seal-ticket` hash that binds `policy_hash` and
    * `compatibility_token` into the handle, and the
@@ -150,7 +150,7 @@ function opaqueHandle(seed: string): string {
 
 /**
  * Default contract version when the operator does not pin one
- * via the `T3_MATCHING_CONTRACT_VERSION` env var. v0.7.0 is
+ * via the `T3_MATCHING_CONTRACT_VERSION` env var. v0.8.0 is
  * the production default for `seal-ticket` and `evaluate-pair`
  * — the same contract that powers `evaluate-match` (the audit
  * trail fix lives in `evaluate-match`, but the version bump
@@ -159,7 +159,7 @@ function opaqueHandle(seed: string): string {
  * orchestrator as the only match authority and the
  * compatibility token as dead code.
  */
-const DEFAULT_NEGOTIATION_CONTRACT_VERSION = "0.7.0";
+const DEFAULT_NEGOTIATION_CONTRACT_VERSION = "0.8.0";
 
 /**
  * Local fallback when the T3 host omits the `evaluate-pair`

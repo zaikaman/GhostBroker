@@ -7,35 +7,48 @@ export interface MatchEvaluationRequest {
   sellIntentHandle: string;
   correlationRef: string;
   /**
-   * Sealed envelope for the buy-side intent. The T3 enclave
-   * holds the only decryption key and extracts `assetCode`,
-   * `side`, `quantity`, and `bidPrice` from it. Production
-   * `evaluate-match` v0.5.0+ consumes envelopes instead of
-   * plaintext trading parameters, so the orchestrator never
-   * holds plaintext outside the TEE.
+   * Shared traded asset code (e.g. `"WBTC"`). Both sides must
+   * trade the same instrument; the orchestrator already
+   * filters this locally, but the enclave re-checks it so a
+   * cross-asset fill is a `no_match`, not a silent error.
    */
-  buyEnvelope: string;
+  assetCode: string;
   /**
-   * Sealed envelope for the sell-side intent.
+   * Buy-side bid price, decimal string at the contract's
+   * implicit `WIRE_SCALE` (1e18). JSON numbers may be
+   * IEEE-754 doubles on some hosts; rounding them would
+   * make the midpoint non-deterministic, so the wire form
+   * is always a plain decimal string the contract parses
+   * into an exact scaled `u128` internally. Sourced from the
+   * TEE-attested `T3LockDescriptor.price` returned by
+   * `seal-intent` v0.8.0+ — the envelope is unsealed inside
+   * the enclave and the orchestrator carries the value
+   * through without re-decoding.
    */
-  sellEnvelope: string;
+  buyPrice: string;
   /**
-   * TEE-issued attestation reference for the buy-side lock
-   * descriptor. The enclave uses this to confirm the
-   * orchestrator is forwarding the lock claim the seal call
-   * actually produced for the buy intent handle.
+   * Buy-side intent quantity, same `WIRE_SCALE` decimal
+   * string. Sourced from the TEE-attested
+   * `T3LockDescriptor.quantity`.
    */
-  buyLockAttestationRef: string;
+  buyQuantity: string;
   /**
-   * TEE-issued attestation reference for the sell-side lock
-   * descriptor.
+   * Sell-side ask price, same `WIRE_SCALE` decimal string.
+   * Sourced from the TEE-attested
+   * `T3LockDescriptor.price`.
    */
-  sellLockAttestationRef: string;
+  sellPrice: string;
+  /**
+   * Sell-side intent quantity, same `WIRE_SCALE` decimal
+   * string. Sourced from the TEE-attested
+   * `T3LockDescriptor.quantity`.
+   */
+  sellQuantity: string;
   /**
    * The buyer institution UUID the orchestrator already holds
    * in its pending-intent queue (the value the seal call
    * accepted at submit time on the buy side). Required as of
-   * v0.7.0 so the TEE can echo it back on the match outcome —
+   * v0.8.0 so the TEE can echo it back on the match outcome —
    * the audit trail carries the TEE-attested value instead of
    * an orchestrator-stamped override. The orchestrator asserts
    * the echo matches the queue value and fails closed on
@@ -44,19 +57,19 @@ export interface MatchEvaluationRequest {
   buyInstitutionId: string;
   /**
    * The seller institution UUID the orchestrator already holds
-   * in its pending-intent queue. Required as of v0.7.0; see
+   * in its pending-intent queue. Required as of v0.8.0; see
    * `buyInstitutionId` for the rationale.
    */
   sellInstitutionId: string;
   /**
    * The buy-side authority ref (the Ghostbroker delegation VC
    * reference the buy agent presented at submit time). Required
-   * as of v0.7.0; the TEE echoes it back on the match outcome
+   * as of v0.8.0; the TEE echoes it back on the match outcome
    * and binds it to `matchAttestationRef` for the audit trail.
    */
   buyAuthorityRef: string;
   /**
-   * The sell-side authority ref. Required as of v0.7.0; see
+   * The sell-side authority ref. Required as of v0.8.0; see
    * `buyAuthorityRef` for the rationale.
    */
   sellAuthorityRef: string;
@@ -66,7 +79,7 @@ export interface OpaqueMatchOutcome {
   outcomeRef: string;
   executionRef: string;
   /**
-   * TEE-echoed buyer institution UUID (v0.7.0+). The audit
+   * TEE-echoed buyer institution UUID (v0.8.0+). The audit
    * trail carries this value as the buyer for the outcome —
    * not the orchestrator's in-memory queue value. The
    * orchestrator asserts the echo matches the queue value it
@@ -74,13 +87,13 @@ export interface OpaqueMatchOutcome {
    */
   buyerInstitutionId: string;
   /**
-   * TEE-echoed seller institution UUID (v0.7.0+). See
+   * TEE-echoed seller institution UUID (v0.8.0+). See
    * `buyerInstitutionId` for the rationale.
    */
   sellerInstitutionId: string;
   encryptedTradeFieldsRef: string;
   /**
-   * TEE-echoed buyer authority ref (v0.7.0+). The settlement
+   * TEE-echoed buyer authority ref (v0.8.0+). The settlement
    * record stores this ref alongside the institution IDs so an
    * auditor can verify the buy-side authority bound to the
    * outcome matches the buy-side authority on the VC the agent
@@ -88,12 +101,12 @@ export interface OpaqueMatchOutcome {
    */
   buyerAuthorityRef: string;
   /**
-   * TEE-echoed seller authority ref (v0.7.0+). See
+   * TEE-echoed seller authority ref (v0.8.0+). See
    * `buyerAuthorityRef` for the rationale.
    */
   sellerAuthorityRef: string;
   /**
-   * TEE-attested match attestation ref (v0.7.0+). Deterministic
+   * TEE-attested match attestation ref (v0.8.0+). Deterministic
    * SHA-256 over the canonical concatenation of (buy handle,
    * buyer institution ID, sell handle, seller institution ID,
    * buy authority ref, sell authority ref, correlation ref,
@@ -187,28 +200,35 @@ interface T3MatchOutcomeResponse {
  *     below 1. This version consumed plaintext `assetCode`,
  *     `buyPrice`, `buyQuantity`, `sellPrice`, `sellQuantity` on
  *     the wire.
- *   - `0.5.0` — privacy boundary. Consumes sealed envelopes
- *     (`buy_envelope`, `sell_envelope`) plus the TEE-attested
- *     lock descriptor attestation references
- *     (`buy_lock_attestation_ref`, `sell_lock_attestation_ref`)
- *     and never requires plaintext price / quantity inputs
- *     from the orchestrator. The TEE holds the only
- *     decryption key for the envelopes and is the sole
- *     authority on the per-side reservation math.
  *
- * `0.7.0` is the production default. The `evaluate-match`
- * contract now echoes the per-side institution IDs and
- * authority refs the orchestrator passed in (previously the
- * TEE returned empty strings and the orchestrator stamped the
- * values from its in-memory queue — a silent overwrite that
- * hid poisoned-queue bugs from the audit trail). v0.7.0 also
- * returns a `match_attestation_ref` binding the echoed identity
- * to the outcome so a judge reading the completed_trades row
- * can verify the institution IDs are the IDs the TEE bound to
- * the match. The orchestrator asserts the echo matches the
- * queue values it submitted and fails closed on mismatch.
+ * `0.8.0` is the production default. The `evaluate-match`
+ * contract still consumes the same plaintext
+ * `asset_code` / `buy_price` / `buy_quantity` / `sell_price` /
+ * `sell_quantity` wire form it has always consumed, plus the
+ * v0.8.0 audit-trail identity fields (`buy_institution_id`,
+ * `sell_institution_id`, `buy_authority_ref`,
+ * `sell_authority_ref`). The orchestrator sources the
+ * per-side `price` / `quantity` from the TEE-attested
+ * `T3LockDescriptor` returned by `seal-intent` v0.8.0+ — the
+ * envelope is unsealed inside the TEE on the seal path and the
+ * orchestrator carries the values through on the
+ * `T3LockDescriptor`. There is no "v0.5.0 privacy boundary"
+ * where the orchestrator posts envelopes to `evaluate-match`
+ * and the TEE decrypts them; the contract is a pure function
+ * that parses plaintext decimal strings. The orchestrator also
+ * now echoes the per-side institution IDs and authority refs
+ * the orchestrator passed in (previously the TEE returned
+ * empty strings and the orchestrator stamped the values from
+ * its in-memory queue — a silent overwrite that hid
+ * poisoned-queue bugs from the audit trail). v0.8.0 also
+ * returns a `match_attestation_ref` binding the echoed
+ * identity to the outcome so a judge reading the
+ * completed_trades row can verify the institution IDs are the
+ * IDs the TEE bound to the match. The orchestrator asserts the
+ * echo matches the queue values it submitted and fails closed
+ * on mismatch.
  */
-const DEFAULT_MATCHING_CONTRACT_VERSION = "0.7.0";
+const DEFAULT_MATCHING_CONTRACT_VERSION = "0.8.0";
 
 function requireOpaque(value: string | undefined, field: string): string {
   if (!value || value.trim().length === 0) {
@@ -295,19 +315,27 @@ export class T3MatchContractClient implements MatchContractClient {
         // snake_case keys. The public `MatchEvaluationRequest`
         // is camelCase to match the rest of the GhostBroker API
         // surface, so we translate at the network boundary.
-        // v0.5.0+ of the contract accepts sealed envelopes
-        // (the TEE holds the only decryption key) plus the
-        // TEE-attested lock descriptor attestation references;
-        // it no longer requires plaintext price / quantity
-        // inputs from the orchestrator.
+        //
+        // The wire form is the v0.8.0 Rust canonical shape:
+        // plaintext `asset_code`, `buy_price`, `buy_quantity`,
+        // `sell_price`, `sell_quantity` (decimal strings at the
+        // contract's implicit `WIRE_SCALE`), plus the per-side
+        // identity fields the audit trail needs to attribute the
+        // outcome. The orchestrator sources `buy_price` /
+        // `buy_quantity` from the TEE-attested
+        // `T3LockDescriptor` returned by `seal-intent` v0.8.0+;
+        // the envelope was unsealed inside the TEE on the seal
+        // path and the orchestrator carries the values through
+        // without re-decoding.
         buy_intent_handle: request.buyIntentHandle,
         sell_intent_handle: request.sellIntentHandle,
         correlation_ref: request.correlationRef,
-        buy_envelope: request.buyEnvelope,
-        sell_envelope: request.sellEnvelope,
-        buy_lock_attestation_ref: request.buyLockAttestationRef,
-        sell_lock_attestation_ref: request.sellLockAttestationRef,
-        // v0.7.0: per-side identity. The TEE echoes these back
+        asset_code: request.assetCode,
+        buy_price: request.buyPrice,
+        buy_quantity: request.buyQuantity,
+        sell_price: request.sellPrice,
+        sell_quantity: request.sellQuantity,
+        // v0.8.0: per-side identity. The TEE echoes these back
         // on the match outcome and binds them to
         // `match_attestation_ref`. Required fields — the
         // orchestrator's pending-intent queue already holds
@@ -374,9 +402,9 @@ export class T3MatchContractClient implements MatchContractClient {
     return {
       outcomeRef: requireOpaque(response.body.outcome_ref, "outcome_ref"),
       executionRef: response.body.execution_ref ?? `t3exec_${randomUUID()}`,
-      // v0.7.0: the TEE echoes the per-side identity back on
+      // v0.8.0: the TEE echoes the per-side identity back on
       // every outcome. We still accept an empty string for
-      // backwards compatibility with pre-0.7.0 hosts — the
+      // backwards compatibility with pre-0.8.0 hosts — the
       // orchestrator's pending-intent queue stamping is the
       // legacy fallback and the audit story is no worse than
       // v0.6.0 in that case. New hosts always echo.
@@ -388,9 +416,9 @@ export class T3MatchContractClient implements MatchContractClient {
       ),
       buyerAuthorityRef: response.body.buyer_authority_ref ?? "",
       sellerAuthorityRef: response.body.seller_authority_ref ?? "",
-      // v0.7.0: TEE-attested match attestation. Required for
+      // v0.8.0: TEE-attested match attestation. Required for
       // settlement records going forward; a missing value falls
-      // back to an empty string so a pre-0.7.0 host doesn't
+      // back to an empty string so a pre-0.8.0 host doesn't
       // crash the orchestrator. The settlement record builder
       // surfaces the empty string to the audit log so a
       // downgrade is visible.

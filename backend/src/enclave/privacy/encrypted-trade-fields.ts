@@ -139,7 +139,7 @@ export function deriveTeeAttestationRef(
 }
 
 /**
- * v0.7.0: derive a per-side receipt attestation that binds the
+ * v0.8.0: derive a per-side receipt attestation that binds the
  * receipt to the TEE-attested match identity binding
  * (`matchAttestationRef`). The TEE returns a `match_attestation_ref`
  * from `evaluate-match` as a SHA-256 over the canonical
@@ -159,7 +159,7 @@ export function deriveTeeAttestationRef(
  * Pass `matchAttestationRef` from the `OpaqueMatchOutcome` returned
  * by `T3MatchContractClient.evaluateMatch`. The derivation is a
  * no-op (returns the empty string) when the orchestrator is
- * running against a pre-v0.7.0 host that does not return a
+ * running against a pre-v0.8.0 host that does not return a
  * `match_attestation_ref` field — the caller falls back to
  * {@link deriveTeeAttestationRef} in that case.
  */

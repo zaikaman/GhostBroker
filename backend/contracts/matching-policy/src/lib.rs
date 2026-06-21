@@ -26,14 +26,14 @@
 //!                        (same asset, opposite side, different
 //!                        institution, distinct handles) agrees.
 //!
-//! As of v0.7.0, the wire form for prices and quantities on
+//! As of v0.8.0, the wire form for prices and quantities on
 //! `evaluate-match` is a plain decimal string at the contract's
 //! internal `WIRE_SCALE` (1e18): `"0.0001"`, `"70000"`,
 //! `"12345.6789"`. Match authority still lives inside the
-//! enclave: the caller sends both sides' asset code, prices, and
-//! quantities, and the contract returns `status: "matched"` with
-//! `matched_quantity` and `execution_price` (also in the same
-//! human-readable decimal form) only when the buyer's bid
+//! enclave: the caller sends both sides' asset code, prices,
+//! and quantities, and the contract returns `status: "matched"`
+//! with `matched_quantity` and `execution_price` (also in the
+//! same human-readable decimal form) only when the buyer's bid
 //! crosses the seller's ask. The backend orchestrator is a
 //! verifier/orchestrator around the enclave outcome, not the
 //! price matcher. The functions stay pure and deterministic —
@@ -54,9 +54,9 @@
 //!     agrees (handle well-formedness, asset agreement, opposite
 //!     side, different institution, distinct handles).
 //!
-//! v0.7.0 changes (audit-trail fix for the orchestrator's
-//! silent overwrites of the buyer/seller institution IDs and
-//! authority refs on the match outcome):
+//! v0.8.0 changes (wire-shape reconciliation against the
+//! orchestrator — the v0.8.0 audit-trail fixes for
+//! identity-echo + match-attestation carry forward):
 //!   * `evaluate-match` now requires the orchestrator to pass
 //!     `buy_institution_id`, `sell_institution_id`,
 //!     `buy_authority_ref`, `sell_authority_ref` on every call.
@@ -82,6 +82,26 @@
 //!     settlement record stores this ref so a judge reading the
 //!     completed_trades row can verify the institution IDs in
 //!     the row are the IDs the TEE bound to the match outcome.
+//!   * `seal-intent` now unseals the envelope inside the enclave
+//!     and emits the per-side TEE-attested trading parameters
+//!     (`traded_asset_code`, `settlement_asset_code`, `side`,
+//!     `quantity`, `price`, `amount`, `attestation_ref`) on the
+//!     `SealIntentOutput`. The orchestrator carries these
+//!     values through on the `T3LockDescriptor` and forwards
+//!     them as plaintext `buy_price` / `buy_quantity` /
+//!     `sell_price` / `sell_quantity` to `evaluate-match` so the
+//!     canonical Rust wire form is fully populated end-to-end.
+//!     The seal envelope remains the source of truth — the
+//!     plaintext fields on the output are the TEE's own
+//!     authoritative claim about what the envelope carried, not
+//!     an orchestrator-side decode. (Replaces the earlier
+//!     "v0.5.0 envelope-only" wire form on `evaluate-match`
+//!     that did not actually exist on the deployed Rust
+//!     contract — the TS orchestrator was posting envelopes the
+//!     Rust `EvaluateMatchInput` could not parse, and was
+//!     missing the plaintext `asset_code` / `buy_price` /
+//!     `buy_quantity` / `sell_price` / `sell_quantity` fields
+//!     the contract does parse.)
 
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
@@ -106,7 +126,7 @@ wit_bindgen::generate!({
 
 mod matching;
 
-pub const CONTRACT_VERSION: &str = "0.7.0";
+pub const CONTRACT_VERSION: &str = "0.8.0";
 
 struct Component;
 
@@ -201,12 +221,41 @@ pub struct SealIntentInput {
     pub encrypted_intent: String,
     pub authority_ref: String,
     pub correlation_ref: String,
+    /// Settlement asset code (e.g. `"USDC"`). The orchestrator
+    /// forwards this from `env.SETTLEMENT_ASSET_CODE` so the
+    /// enclave can compute the buy-side reservation amount as
+    /// `quantity * price` in the settlement asset without an
+    /// additional host import. Optional for backwards
+    /// compatibility with pre-v0.8.0 hosts that did not
+    /// forward it — the enclave falls back to `"USDC"` in
+    /// that case (the production default).
+    #[serde(default)]
+    pub settlement_asset_code: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SealIntentOutput {
     pub intent_handle: String,
     pub execution_ref: String,
+    /// Per-side TEE-attested trading parameters the enclave
+    /// extracted from the decrypted envelope. These are the
+    /// authoritative values the enclave computed; the
+    /// orchestrator carries them through on the
+    /// `T3LockDescriptor` so the `evaluate-match` wire form can
+    /// forward plaintext `buy_price` / `buy_quantity` /
+    /// `sell_price` / `sell_quantity` to the TEE without
+    /// re-decoding the envelope outside the TEE.
+    pub traded_asset_code: String,
+    /// Asset to reserve for this intent. Mirrors `asset_code` on
+    /// the `T3LockDescriptor`. For a buy intent this is the
+    /// settlement asset (e.g. `USDC`); for a sell intent it is
+    /// the same as `traded_asset_code`.
+    pub settlement_asset_code: String,
+    pub side: String,
+    pub quantity: String,
+    pub price: String,
+    pub amount: String,
+    pub attestation_ref: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,7 +280,7 @@ pub struct EvaluateMatchInput {
     pub sell_price: String,
     pub sell_quantity: String,
     /// Per-side identity fields. Required on every `evaluate-match`
-    /// call as of v0.7.0. The orchestrator already holds these in
+    /// call as of v0.8.0. The orchestrator already holds these in
     /// its pending-intent queue (they were verified at seal time
     /// via `seal-intent`'s `institution_id` / `authority_ref`).
     /// The TEE echoes them back on both `matched` and `no_match`
@@ -251,7 +300,7 @@ pub struct EvaluateMatchOutput {
     pub outcome_ref: String,
     pub execution_ref: String,
     /// Echoed `buy_institution_id` from the input. The TEE is the
-    /// binding authority on this value as of v0.7.0 — the audit
+    /// binding authority on this value as of v0.8.0 — the audit
     /// log records this string as the buyer institution for the
     /// outcome, not the orchestrator's in-memory queue value.
     /// Empty only when the caller submitted empty on a `no_match`

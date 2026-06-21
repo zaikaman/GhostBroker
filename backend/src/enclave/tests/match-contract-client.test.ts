@@ -42,11 +42,19 @@ const request: MatchEvaluationRequest = {
   buyIntentHandle: "intent_buy_opaque",
   sellIntentHandle: "intent_sell_opaque",
   correlationRef: "corr_us3",
-  buyEnvelope: "t3env.buyer.envelope.base64url.ciphertext",
-  sellEnvelope: "t3env.seller.envelope.base64url.ciphertext",
-  buyLockAttestationRef: "t3attest:buyer",
-  sellLockAttestationRef: "t3attest:seller",
-  // v0.7.0: per-side identity is now required on every
+  // v0.8.0 canonical Rust wire form: plaintext per-side trading
+  // parameters sourced from the TEE-attested `T3LockDescriptor`
+  // returned by `seal-intent` v0.8.0+. The envelope is unsealed
+  // inside the enclave on the seal path; the orchestrator carries
+  // the values through on the lock descriptor and forwards them
+  // here as decimal strings at the contract's implicit
+  // `WIRE_SCALE` (1e18).
+  assetCode: "WBTC",
+  buyPrice: "51000",
+  buyQuantity: "10",
+  sellPrice: "49000",
+  sellQuantity: "10",
+  // v0.8.0: per-side identity is now required on every
   // `evaluate-match` call so the TEE can echo the values back
   // and bind them to a match attestation. The orchestrator's
   // pending-intent queue already holds these (verified at seal
@@ -74,20 +82,26 @@ describe("match contract client", () => {
     // contract's `EvaluateMatchInput` deserializer in
     // contracts/matching-policy/src/lib.rs, and carries the
     // explicit contract version so the T3N adapter routes to the
-    // v0.7.0 build (the audit-trail identity echo + match
+    // v0.8.0 build (the audit-trail identity echo + match
     // attestation version). The per-side institution IDs and
     // authority refs are forwarded to the TEE so it can echo
     // them back on the outcome and bind them to the match
-    // attestation ref.
+    // attestation ref. The per-side trading parameters
+    // (`asset_code`, `buy_price`, `buy_quantity`, `sell_price`,
+    // `sell_quantity`) are the canonical Rust plaintext wire
+    // form the TEE parses into scaled `u128` values
+    // internally; the orchestrator sources them from the
+    // TEE-attested `T3LockDescriptor` returned by `seal-intent`.
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.7.0",
+      version: "0.8.0",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
-      buy_envelope: request.buyEnvelope,
-      sell_envelope: request.sellEnvelope,
-      buy_lock_attestation_ref: request.buyLockAttestationRef,
-      sell_lock_attestation_ref: request.sellLockAttestationRef,
+      asset_code: request.assetCode,
+      buy_price: request.buyPrice,
+      buy_quantity: request.buyQuantity,
+      sell_price: request.sellPrice,
+      sell_quantity: request.sellQuantity,
       buy_institution_id: request.buyInstitutionId,
       sell_institution_id: request.sellInstitutionId,
       buy_authority_ref: request.buyAuthorityRef,
@@ -96,7 +110,7 @@ describe("match contract client", () => {
   });
 
   it("surfaces the TEE-echoed institution ids and authority refs on a matched outcome", async () => {
-    // v0.7.0 audit-trail fix: the TEE echoes the per-side
+    // v0.8.0 audit-trail fix: the TEE echoes the per-side
     // identity on the match outcome and binds them to a match
     // attestation ref. The client surfaces them on the
     // `OpaqueMatchOutcome` so the orchestrator can assert the
@@ -119,10 +133,10 @@ describe("match contract client", () => {
   });
 
   it("accepts a matched outcome with empty identity for backwards compatibility", async () => {
-    // v0.7.0: an empty identity on a matched outcome is no
+    // v0.8.0: an empty identity on a matched outcome is no
     // longer a happy path (the TEE refuses to fill without
     // non-empty identity). But the client still surfaces the
-    // empty strings it received so a pre-v0.7.0 host that
+    // empty strings it received so a pre-v0.8.0 host that
     // returns the legacy shape doesn't crash the orchestrator
     // — the orchestrator's `detectIdentityMismatch` check
     // catches the mismatch and refuses the settlement. See the
@@ -172,7 +186,7 @@ describe("match contract client", () => {
     // `no_match` is a non-fill. The TEE still echoes the
     // identity on the rejection so the orchestrator's audit log
     // records which institution pair was rejected, but a
-    // legacy pre-v0.7.0 host that returns empty strings on a
+    // legacy pre-v0.8.0 host that returns empty strings on a
     // no_match does not block the orchestrator (the
     // orchestrator only enforces identity on a matched outcome;
     // a no_match is a benign rejection).

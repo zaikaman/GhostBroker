@@ -131,6 +131,13 @@ class StaticBlindIntentClient implements BlindIntentClient {
         tradedAssetCode: payload.assetCode.toUpperCase(),
         assetCode: assetCode.toUpperCase(),
         side: payload.side,
+        // v0.8.0: the TEE-attested per-side trading parameters
+        // the enclave unsealed from the envelope. The
+        // orchestrator carries them through on the
+        // `T3LockDescriptor` and forwards them to
+        // `evaluate-match` on the canonical Rust wire form.
+        quantity: String(payload.quantity),
+        price: String(payload.price),
         amount,
         attestationRef: `t3attest:${this.counter}`,
       },
@@ -142,7 +149,7 @@ class NoOpMatchClient implements MatchContractClient {
   public async evaluateMatch(
     request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
-    // v0.7.0: echo the per-side identity the orchestrator
+    // v0.8.0: echo the per-side identity the orchestrator
     // forwarded. This is a `no_match` outcome, so the
     // orchestrator's `detectIdentityMismatch` check is not
     // exercised (it only fires on `matched`), but mirroring the
@@ -455,7 +462,7 @@ describe("matching orchestrator — balance reservations", () => {
       public async evaluateMatch(
         request: MatchEvaluationRequest,
       ): Promise<OpaqueMatchOutcome> {
-        // v0.7.0: echo the orchestrator-supplied identity so
+        // v0.8.0: echo the orchestrator-supplied identity so
         // the identity-consistency check passes.
         return {
           status: "matched",
@@ -633,7 +640,7 @@ describe("matching orchestrator — balance reservations", () => {
       public async evaluateMatch(
         request: MatchEvaluationRequest,
       ): Promise<OpaqueMatchOutcome> {
-        // v0.7.0: echo the orchestrator's per-side identity so
+        // v0.8.0: echo the orchestrator's per-side identity so
         // the identity-consistency check passes. The point of
         // this test is the balance check that runs AFTER the
         // identity check — the seller's available WBTC is 0

@@ -84,6 +84,12 @@ const buyIntent: PendingIntent = {
     tradedAssetCode: "WBTC",
     assetCode: "USDC",
     side: "buy",
+    // v0.8.0: TEE-attested per-side trading parameters the
+    // enclave unsealed from the envelope. The orchestrator
+    // carries them through on the lock descriptor and forwards
+    // them to `evaluate-match` on the canonical Rust wire form.
+    quantity: "1",
+    price: "50000",
     amount: 50_000,
     attestationRef: "t3attest:buy_apikey_1",
   },

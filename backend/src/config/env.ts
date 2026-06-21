@@ -119,7 +119,7 @@ const envSchema = z.object({
     .trim()
     .min(1)
     .max(32)
-    .default("0.7.0"),
+    .default("0.8.0"),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
   SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
   ETHERSCAN_API_KEY: z.string().min(1).optional(),

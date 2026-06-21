@@ -100,10 +100,12 @@ class StaticBlindIntentClient implements BlindIntentClient {
     // The TEE seal returns the lock descriptor alongside the
     // opaque handle. The in-process test path derives the
     // descriptor from the canonical envelope (mirroring the
-    // production T3 fallback in
-    // `T3BlindIntentClient.resolveLockDescriptor`); production
-    // T3N responses include the descriptor on the wire and
-    // skip this decode.
+    // production `seal-intent` v0.8.0+ behavior, which unseals
+    // the envelope inside the TEE and emits the per-side
+    // trading parameters on the response). The orchestrator
+    // carries the values through on the `T3LockDescriptor`
+    // and forwards them to `evaluate-match` on the canonical
+    // Rust wire form.
     const payload = decodeTestEnvelope(request.encryptedIntentEnvelope);
     const assetCode =
       payload.side === "buy" ? SETTLEMENT_ASSET : payload.assetCode;
@@ -120,6 +122,8 @@ class StaticBlindIntentClient implements BlindIntentClient {
         tradedAssetCode: payload.assetCode.toUpperCase(),
         assetCode: assetCode.toUpperCase(),
         side: payload.side,
+        quantity: String(payload.quantity),
+        price: String(payload.price),
         amount,
         attestationRef: `t3attest:${this.counter}`,
       },
@@ -133,21 +137,25 @@ class MatchedClient implements MatchContractClient {
     request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
     this.calls++;
-    // v0.7.0: the orchestrator now forwards the per-side
-    // institution IDs and authority refs as inputs; the TEE
-    // echoes them back on the outcome. The test stub mirrors the
-    // production contract: the response carries the same values
-    // the request submitted (so the orchestrator's
-    // `detectIdentityMismatch` check passes).
-    const matchedQuantity = Math.min(
-      decodeTestEnvelope(request.buyEnvelope).quantity,
-      decodeTestEnvelope(request.sellEnvelope).quantity,
-    );
-    const executionPrice = Math.round(
-      (decodeTestEnvelope(request.buyEnvelope).price +
-        decodeTestEnvelope(request.sellEnvelope).price) /
-        2,
-    );
+    // v0.8.0: the orchestrator now forwards the per-side
+    // trading parameters (asset_code, buy_price, buy_quantity,
+    // sell_price, sell_quantity) plus the institution IDs and
+    // authority refs as inputs; the TEE echoes the identity
+    // back on the outcome. The test stub mirrors the
+    // production contract: the response carries the same
+    // identity values the request submitted (so the
+    // orchestrator's `detectIdentityMismatch` check passes)
+    // and computes the fill terms from the request's
+    // per-side `quantity` (matching the TEE's
+    // `min(buy_quantity, sell_quantity)` rule) and the
+    // midpoint of the per-side `price` (matching the TEE's
+    // deterministic midpoint rule).
+    const buyQuantity = Number(request.buyQuantity);
+    const sellQuantity = Number(request.sellQuantity);
+    const buyPrice = Number(request.buyPrice);
+    const sellPrice = Number(request.sellPrice);
+    const matchedQuantity = Math.min(buyQuantity, sellQuantity);
+    const executionPrice = Math.round((buyPrice + sellPrice) / 2);
     return {
       status: "matched",
       outcomeRef: `outcome_${this.calls}`,
@@ -157,7 +165,7 @@ class MatchedClient implements MatchContractClient {
       encryptedTradeFieldsRef: `fields_${this.calls}`,
       buyerAuthorityRef: request.buyAuthorityRef,
       sellerAuthorityRef: request.sellAuthorityRef,
-      // v0.7.0: TEE-attested match attestation. Stubbed
+      // v0.8.0: TEE-attested match attestation. Stubbed
       // with a deterministic value here; production callers
       // compute the same value via the TEE contract and
       // surface it on the audit log.
@@ -229,7 +237,7 @@ class NoMatchClient implements MatchContractClient {
     request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
     this.calls++;
-    // v0.7.0: the TEE echoes the per-side identity on a
+    // v0.8.0: the TEE echoes the per-side identity on a
     // `no_match` outcome too, so the orchestrator's audit log
     // records which institution pair was rejected. The stub
     // mirrors that by echoing the inputs.
@@ -482,7 +490,7 @@ describe("matching orchestrator - fills and crossing", () => {
       public async evaluateMatch(
         request: MatchEvaluationRequest,
       ): Promise<OpaqueMatchOutcome> {
-        // v0.7.0: echo the per-side identity supplied by the
+        // v0.8.0: echo the per-side identity supplied by the
         // orchestrator so the identity-consistency check
         // passes.
         return {
@@ -659,7 +667,7 @@ describe("matching orchestrator - fills and crossing", () => {
     expect(buyerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(sellerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
 
-    // v0.7.0: the TEE-attested match attestation ref flows
+    // v0.8.0: the TEE-attested match attestation ref flows
     // through to the receipt's t3AttestationRef column. Both
     // sides carry a domain-separated digest that binds the
     // receipt to the match_attestation_ref the TEE returned.
@@ -669,7 +677,7 @@ describe("matching orchestrator - fills and crossing", () => {
   });
 
   it("fails closed when the TEE echoes a different buyer institution id than the queue", async () => {
-    // v0.7.0 audit-trail invariant: the TEE-attested buyer
+    // v0.8.0 audit-trail invariant: the TEE-attested buyer
     // institution id on the match outcome must match the buyer
     // institution id the orchestrator submitted from its
     // pending-intent queue. A mismatch means the settlement
@@ -755,7 +763,7 @@ describe("matching orchestrator - fills and crossing", () => {
   });
 
   it("fails closed when the TEE echoes a different seller authority ref than the queue", async () => {
-    // v0.7.0 audit-trail invariant: the TEE-attested seller
+    // v0.8.0 audit-trail invariant: the TEE-attested seller
     // authority ref must match the seller authority ref the
     // orchestrator submitted from its pending-intent queue.
     // Same fail-closed pattern as the buyer institution id
@@ -824,7 +832,7 @@ describe("matching orchestrator - fills and crossing", () => {
   });
 
   it("settles when the TEE echoes the per-side identity exactly", async () => {
-    // Positive path for the v0.7.0 audit-trail invariant:
+    // Positive path for the v0.8.0 audit-trail invariant:
     // when the TEE echoes the same institution IDs and
     // authority refs the orchestrator submitted, the
     // settlement proceeds and the audit log carries the

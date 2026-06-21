@@ -96,6 +96,13 @@ class StaticBlindIntentClient implements BlindIntentClient {
         tradedAssetCode: "WBTC",
         assetCode: "USDC",
         side: "buy",
+        // v0.8.0: the TEE-attested per-side trading parameters
+        // the enclave unsealed from the envelope. The
+        // orchestrator carries them through on the
+        // `T3LockDescriptor` and forwards them to
+        // `evaluate-match` on the canonical Rust wire form.
+        quantity: "100",
+        price: "45000",
         amount: 4_500_000,
         attestationRef: `t3attest:restart_${this.counter}`,
       },
@@ -107,7 +114,7 @@ class NoOpMatchClient implements MatchContractClient {
   public async evaluateMatch(
     request: MatchEvaluationRequest,
   ): Promise<OpaqueMatchOutcome> {
-    // v0.7.0: echo the per-side identity the orchestrator
+    // v0.8.0: echo the per-side identity the orchestrator
     // forwarded (see the comment on the intent-cancellation
     // NoOpMatchClient).
     return {

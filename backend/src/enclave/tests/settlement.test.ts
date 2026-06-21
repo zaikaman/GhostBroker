@@ -19,7 +19,7 @@ const outcome: OpaqueMatchOutcome = {
   encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
   buyerAuthorityRef: "authority:buyer:settle",
   sellerAuthorityRef: "authority:seller:settle",
-  // v0.7.0: TEE-attested match attestation binding the
+      // v0.8.0: TEE-attested match attestation binding the
   // recorded institution IDs to the match outcome. The
   // settlement command builder threads this through to the
   // audit trail so a judge can re-derive the attestation from

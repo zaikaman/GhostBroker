@@ -13,38 +13,54 @@ export interface BlindIntentRequest {
 export interface BlindIntentLockDescriptor {
   /**
    * Asset the intent is buying or selling. The T3 enclave
-   * derives this from the decrypted envelope -- the
-   * orchestrator never sees the raw trading parameters. The
+   * derives this from the unsealed envelope -- the
+   * orchestrator never decodes the envelope itself. The
    * orchestrator uses this for the local cross-candidate
-   * filter (a buy intent and a sell intent must trade the same
-   * asset to cross).
+   * filter (a buy intent and a sell intent must trade the
+   * same asset to cross) and as the `asset_code` field on
+   * the `evaluate-match` wire form.
    */
   tradedAssetCode: string;
   /**
-   * Asset to reserve for this intent. For a buy intent, this is
-   * the settlement asset (e.g. USDC). For a sell intent, this is
-   * the traded asset. The T3 enclave derives this from the decrypted
-   * envelope.
+   * Asset to reserve for this intent. For a buy intent, this
+   * is the settlement asset (e.g. USDC). For a sell intent,
+   * it is the same as `tradedAssetCode`. The T3 enclave
+   * derives this from the unsealed envelope.
    */
   assetCode: string;
   /**
-   * TEE-attested intent side. The orchestrator uses this for the
-   * local match filter (buy/sell cross). The value is the TEE's
-   * authoritative claim, not a wire-side plaintext leak.
+   * TEE-attested intent side. The orchestrator uses this for
+   * the local match filter (buy/sell cross). The value is the
+   * TEE's authoritative claim, not a wire-side plaintext
+   * leak.
    */
   side: "buy" | "sell";
   /**
-   * Reservation amount. `quantity * price` for a buy; `quantity`
-   * for a sell. Derived inside the enclave from the unsealed
-   * envelope.
+   * TEE-attested intent quantity (decimal string at the
+   * contract's implicit `WIRE_SCALE` — `1e18` — so the value
+   * flows directly into the `evaluate-match` `quantity` wire
+   * field without a re-scale step). Sourced from the
+   * `seal-intent` v0.8.0 response, where the enclave emits
+   * the value it unsealed from the envelope.
+   */
+  quantity: string;
+  /**
+   * TEE-attested intent price (same decimal-string wire
+   * form). Sourced from the `seal-intent` v0.8.0 response.
+   */
+  price: string;
+  /**
+   * Reservation amount. `quantity * price` for a buy;
+   * `quantity` for a sell. Derived in the enclave and
+   * surfaced on the `seal-intent` response.
    */
   amount: number;
   /**
-   * TEE-issued attestation reference. The portfolio service can
-   * hand this to a TEE verifier to confirm the descriptor was
-   * actually produced by the T3 enclave for this intent handle.
-   * The orchestrator does not interpret the value; it just carries
-   * it through.
+   * TEE-issued attestation reference. The portfolio service
+   * can hand this to a TEE verifier to confirm the
+   * descriptor was actually produced by the T3 enclave for
+   * this intent handle. The orchestrator does not interpret
+   * the value; it just carries it through.
    */
   attestationRef: string;
 }
@@ -88,12 +104,36 @@ export interface T3BlindIntentClientOptions {
 interface T3BlindIntentResponse {
   intent_handle?: string;
   execution_ref?: string;
+  /**
+   * v0.8.0+ per-side TEE-attested trading parameters. The
+   * enclave unseals the envelope and emits these fields so
+   * the orchestrator can forward `quantity` / `price` /
+   * `traded_asset_code` directly to `evaluate-match` on the
+   * canonical Rust wire form. Pre-v0.8.0 hosts that do not
+   * emit these fields fall through to the in-process
+   * envelope decode below.
+   */
+  traded_asset_code?: string;
+  settlement_asset_code?: string;
+  side?: "buy" | "sell";
+  quantity?: string;
+  price?: string;
+  amount?: string;
+  attestation_ref?: string;
+  /**
+   * Pre-v0.8.0 envelope. Replaced by the top-level fields
+   * above on v0.8.0+; kept here so the in-process decode
+   * fallback still has a stable shape when running against
+   * older test hosts.
+   */
   lock_descriptor?: {
     traded_asset_code?: string;
     asset_code?: string;
     side?: "buy" | "sell";
     amount?: string;
     attestation_ref?: string;
+    quantity?: string;
+    price?: string;
   };
 }
 
@@ -359,6 +399,14 @@ export class T3BlindIntentClient implements BlindIntentClient {
         encrypted_intent: request.encryptedIntentEnvelope,
         authority_ref: request.authorityRef,
         correlation_ref: request.correlationRef,
+         // v0.8.0+: the enclave needs the settlement asset
+        // code to compute the buy-side reservation amount
+        // (`quantity * price`) in the right unit. Optional —
+        // the contract falls back to `"USDC"` when the host
+         // does not forward it (a pre-v0.8.0 build).
+        ...(this.settlementAssetCode
+          ? { settlement_asset_code: this.settlementAssetCode }
+          : {}),
       },
     });
 
@@ -394,16 +442,26 @@ export class T3BlindIntentClient implements BlindIntentClient {
     // the orchestrator forwards it to the portfolio service for
     // the SQL reservation without interpreting the values.
     //
+     // v0.8.0+ TEE responses emit the per-side trading
+    // parameters (`traded_asset_code`, `settlement_asset_code`,
+    // `side`, `quantity`, `price`, `amount`, `attestation_ref`)
+    // as siblings on the response — the enclave unseals the
+    // envelope inside the TEE and surfaces the values it
+    // extracted. The orchestrator carries those values through
+    // to the `evaluate-match` wire form so the canonical Rust
+    // shape is populated end-to-end without an orchestrator-
+    // side envelope decode.
+    //
     // The in-process test path (the seal request hit a T3N
-    // stub that did not produce a `lock_descriptor` field) falls
-    // back to deriving a deterministic descriptor from the
-    // envelope so the rest of the orchestrator and the test
-    // assertions keep working. The in-process derivation is
-    // explicit and bounded — there is no flow in which the
-    // orchestrator decodes the envelope on its own outside this
-    // explicit fallback.
+     // stub that did not produce the v0.8.0 fields) falls back
+    // to deriving a deterministic descriptor from the envelope
+    // so the rest of the orchestrator and the test assertions
+    // keep working. The in-process derivation is explicit and
+    // bounded — there is no flow in which the orchestrator
+    // decodes the envelope on its own outside this explicit
+    // fallback.
     const lockDescriptor = this.resolveLockDescriptor(
-      response.body.lock_descriptor,
+      response.body,
       request.encryptedIntentEnvelope,
       intentHandle,
     );
@@ -420,35 +478,82 @@ export class T3BlindIntentClient implements BlindIntentClient {
   /**
    * Resolve the TEE-attested balance-lock claim for a sealed
    * intent. In production the T3 enclave returns the descriptor
-   * verbatim and the orchestrator carries it through. When the
-   * T3N response is missing the field (the in-process test path
-   * uses T3N stubs that don't speak the lock-descriptor schema
-   * yet), the orchestrator derives a deterministic descriptor
-   * from the locally-sealed envelope so the test assertions
-   * remain stable. The fallback is gated on the envelope being
-   * a canonical `buildSealedEnvelope` payload; non-canonical
-   * envelopes (e.g. raw ciphertext) raise so the test cannot
-   * silently leak plaintext.
+   * verbatim on the `seal-intent` response and the
+   * orchestrator carries it through. When the T3N response
+    * predates v0.8.0 (the in-process test path uses T3N stubs
+   * that don't yet emit the new fields), the orchestrator
+   * derives a deterministic descriptor from the locally-sealed
+   * envelope so the test assertions remain stable. The
+   * fallback is gated on the envelope being a canonical
+   * `buildSealedEnvelope` payload; non-canonical envelopes
+   * (e.g. raw ciphertext) raise so the test cannot silently
+   * leak plaintext.
    */
   private resolveLockDescriptor(
-    upstream: T3BlindIntentResponse["lock_descriptor"],
+    upstream: T3BlindIntentResponse,
     envelope: string,
     intentHandle: string,
   ): BlindIntentLockDescriptor {
+    // v0.8.0+: the enclave unseals the envelope and emits the
+    // per-side TEE-attested parameters as siblings on the
+    // response. Prefer those over any nested `lock_descriptor`
+    // (a pre-v0.8.0 shape). Either path populates the same
+    // descriptor fields.
     if (
-      upstream &&
       upstream.traded_asset_code &&
-      upstream.asset_code &&
+      upstream.settlement_asset_code &&
       upstream.side &&
+      upstream.quantity &&
+      upstream.price &&
       upstream.amount &&
       upstream.attestation_ref
     ) {
       return {
         tradedAssetCode: String(upstream.traded_asset_code).toUpperCase(),
-        assetCode: String(upstream.asset_code).toUpperCase(),
+        assetCode: String(upstream.settlement_asset_code).toUpperCase(),
         side: upstream.side,
+        quantity: parseWireDecimal(
+          String(upstream.quantity),
+          "quantity",
+        ),
+        price: parseWireDecimal(String(upstream.price), "price"),
         amount: parseLockAmount(String(upstream.amount)),
         attestationRef: String(upstream.attestation_ref),
+      };
+    }
+    if (
+      upstream.lock_descriptor &&
+      upstream.lock_descriptor.traded_asset_code &&
+      upstream.lock_descriptor.asset_code &&
+      upstream.lock_descriptor.side &&
+      upstream.lock_descriptor.amount &&
+      upstream.lock_descriptor.attestation_ref
+    ) {
+      // Pre-v0.8.0 host. The TEE only emitted the reservation
+      // descriptor (not the per-side quantity / price). The
+      // in-process fallback below decodes the envelope to
+      // recover the per-side values for the `evaluate-match`
+      // wire form.
+      const decoded = decodeSealedEnvelope(envelope);
+      const quantity = String(decoded.quantity);
+      const price = String(decoded.price);
+      const side = upstream.lock_descriptor.side;
+      const amount = Number(
+        String(upstream.lock_descriptor.amount).trim(),
+      );
+      if (!Number.isFinite(amount)) {
+        throw new Error(
+          `Lock descriptor amount is non-finite (${upstream.lock_descriptor.amount}).`,
+        );
+      }
+      return {
+        tradedAssetCode: String(upstream.lock_descriptor.traded_asset_code).toUpperCase(),
+        assetCode: String(upstream.lock_descriptor.asset_code).toUpperCase(),
+        side,
+        quantity,
+        price,
+        amount,
+        attestationRef: String(upstream.lock_descriptor.attestation_ref),
       };
     }
     const decoded = decodeSealedEnvelope(envelope);
@@ -465,8 +570,37 @@ export class T3BlindIntentClient implements BlindIntentClient {
       tradedAssetCode,
       assetCode: descriptorAsset,
       side: decoded.side,
+      quantity: String(decoded.quantity),
+      price: String(decoded.price),
       amount: descriptorAmount,
       attestationRef: `t3attest:${intentHandle}`,
     };
   }
+}
+
+/**
+ * Parse a `WIRE_SCALE`-aligned decimal string into a plain
+ * decimal string for transport on the `T3LockDescriptor`. The
+ * Rust `seal-intent` already emits `format_decimal`-formatted
+ * strings (no exponent, no trailing `.`), but we defensively
+ * re-format here so a malformed value cannot flow into the
+ * `evaluate-match` wire form.
+ */
+function parseWireDecimal(value: string, field: string): string {
+  const trimmed = value.trim();
+  if (
+    !/^\d+(?:\.\d+)?$/u.test(trimmed) &&
+    !/^\.\d+$/u.test(trimmed)
+  ) {
+    throw new Error(
+      `Lock descriptor ${field} is not a plain non-negative decimal (${value}).`,
+    );
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `Lock descriptor ${field} is non-finite or non-positive (${value}).`,
+    );
+  }
+  return trimmed;
 }

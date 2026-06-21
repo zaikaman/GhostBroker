@@ -90,7 +90,7 @@ interface contracts {
   // seller's ask. The orchestrator is a verifier around the
   // enclave outcome, not the price matcher.
   //
-  // v0.7.0: the caller must also pass the per-side identity
+  // v0.8.0: the caller must also pass the per-side identity
   // (`buy_institution_id`, `sell_institution_id`,
   // `buy_authority_ref`, `sell_authority_ref`). The TEE echoes
   // those fields back on both `matched` and `no_match` outcomes

@@ -48,9 +48,17 @@ interface BalanceReservation {
  * The orchestrator only filters obvious non-candidates locally
  * (same institution, same side, different asset, same handle). The
  * crossing decision, the matched quantity, and the execution price
- * are decided by the enclave contract (`evaluate-match` v0.2.0) and
- * treated as authoritative for settlement — the backend does not
- * recompute them.
+ * are decided by the enclave contract (`evaluate-match` v0.8.0)
+ * and treated as authoritative for settlement — the backend does
+ * not recompute them.
+ *
+ * The orchestrator forwards each side's TEE-attested per-side
+ * trading parameters (the values the enclave produced when it
+ * unsealed each envelope on the seal path) on the canonical
+ * `EvaluateMatchInput` wire form. The orchestrator never decodes
+ * the envelope itself — the plaintext values on the
+ * `T3LockDescriptor` are the enclave's authoritative claim about
+ * what the envelope carried, not an orchestrator-side decode.
  *
  * After the enclave returns `matched`, the orchestrator runs
  * defensive checks against the enclave-decided fill terms:
@@ -305,19 +313,23 @@ export class MatchingOrchestrator {
       const sellIntent =
         intent.opaqueLockDescriptor.side === "sell" ? intent : other;
 
-      // Evaluate the match via the TEE. The enclave receives
-      // both sides' sealed envelopes (the TEE holds the only
-      // decryption key) and the per-side opaque lock
-      // descriptors. The TEE returns the authoritative
-      // `matchedQuantity` / `executionPrice` plus a `matched`
-      // / `no_match` decision. The orchestrator no longer has
-      // plaintext price/quantity in memory; it trusts the
-      // enclave outcome. Wire-shape change: this is a
-      // coordinated bump to the T3 match contract (a new
-      // `evaluate-match` v0.5.0 that consumes envelopes
-      // rather than plaintext trading parameters).
+      // Evaluate the match via the TEE. The orchestrator
+      // forwards both sides' TEE-attested per-side trading
+      // parameters (the values the enclave produced when it
+      // unsealed each envelope on the seal path) on the
+      // canonical Rust `EvaluateMatchInput` wire form. The TEE
+      // uses the plaintext `asset_code` / `buy_price` /
+      // `buy_quantity` / `sell_price` / `sell_quantity` fields
+      // to decide the cross and to compute the matched
+      // quantity (`min(buy_quantity, sell_quantity)`) and
+      // execution price (deterministic midpoint of the bid /
+      // ask) authoritatively. The orchestrator carries the
+      // TEE-attested values through on the
+      // `T3LockDescriptor` returned by `seal-intent` — the
+      // envelope was unsealed inside the TEE, never by the
+      // orchestrator.
       //
-      // v0.7.0: the per-side identity (institution id +
+      // v0.8.0: the per-side identity (institution id +
       // authority ref) is also passed to the TEE. The TEE
       // echoes the values back on the outcome and binds them
       // to a `matchAttestationRef`. The audit trail now
@@ -330,10 +342,11 @@ export class MatchingOrchestrator {
         buyIntentHandle: buyIntent.intentHandle,
         sellIntentHandle: sellIntent.intentHandle,
         correlationRef: `${buyIntent.correlationRef}::${sellIntent.correlationRef}`,
-        buyEnvelope: buyIntent.encryptedEnvelope,
-        sellEnvelope: sellIntent.encryptedEnvelope,
-        buyLockAttestationRef: buyIntent.opaqueLockDescriptor.attestationRef,
-        sellLockAttestationRef: sellIntent.opaqueLockDescriptor.attestationRef,
+        assetCode: buyIntent.opaqueLockDescriptor.tradedAssetCode,
+        buyPrice: buyIntent.opaqueLockDescriptor.price,
+        buyQuantity: buyIntent.opaqueLockDescriptor.quantity,
+        sellPrice: sellIntent.opaqueLockDescriptor.price,
+        sellQuantity: sellIntent.opaqueLockDescriptor.quantity,
         buyInstitutionId: buyIntent.institutionId,
         sellInstitutionId: sellIntent.institutionId,
         buyAuthorityRef: buyIntent.authorityRef,
@@ -347,7 +360,7 @@ export class MatchingOrchestrator {
         continue;
       }
 
-      // v0.7.0 identity-consistency check. The TEE has now
+      // v0.8.0 identity-consistency check. The TEE has now
       // echoed the per-side institution IDs and authority refs
       // it received. The orchestrator asserts the echo matches
       // the values it submitted from the pending-intent queue.
@@ -361,7 +374,7 @@ export class MatchingOrchestrator {
       // available balance is restored, and log a structured
       // error so the operator can investigate. This is the
       // load-bearing "fail closed on mismatch" half of the
-      // v0.7.0 contract: the orchestrator's in-memory queue
+      // v0.8.0 contract: the orchestrator's in-memory queue
       // is no longer the only authority on counterparty
       // identity.
       const identityMismatch = this.detectIdentityMismatch(
@@ -510,7 +523,7 @@ export class MatchingOrchestrator {
         return;
       }
 
-      // v0.7.0: the identity-consistency check above already
+      // v0.8.0: the identity-consistency check above already
       // asserted the TEE echoed the same per-side institution
       // IDs and authority refs the orchestrator submitted from
       // the queue. The normalized outcome therefore uses the
@@ -655,7 +668,7 @@ export class MatchingOrchestrator {
             // forgeable by anyone who knew the outcome ref.
             receiptHash: deriveReceiptHash(`${receiptBase}.buyer`),
             keyVersion: "match-v1",
-            // v0.7.0: bind the per-side receipt to the
+            // v0.8.0: bind the per-side receipt to the
             // TEE-attested match identity binding. The
             // `matchAttestationRef` is the TEE's SHA-256 over the
             // canonical concatenation of the per-side identity +
@@ -663,7 +676,7 @@ export class MatchingOrchestrator {
             // re-derive the match attestation from the recorded
             // fields and confirm the institution IDs are the IDs
             // the TEE bound to this match outcome. Falls back to
-            // the pre-v0.7.0 (outcome, scope) derivation when
+            // the pre-v0.8.0 (outcome, scope) derivation when
             // the host did not return a `match_attestation_ref`
             // — the audit log is no worse than before, and the
             // receipt carries the older attestation format until
@@ -828,7 +841,7 @@ export class MatchingOrchestrator {
   }
 
   /**
-   * v0.7.0: detect a mismatch between the per-side identity the
+   * v0.8.0: detect a mismatch between the per-side identity the
    * TEE echoed on the match outcome and the identity the
    * orchestrator submitted from its pending-intent queue. The
    * match contract's `evaluate-match` call passes the queue

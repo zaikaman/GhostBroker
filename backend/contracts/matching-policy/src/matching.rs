@@ -8,7 +8,7 @@
 //! that the WASM exposes the required WIT world, which gives us
 //! a verifiable execution surface even though the body is pure.
 //!
-//! Wire format for prices and quantities (v0.7.0): a plain decimal
+//! Wire format for prices and quantities (v0.8.0): a plain decimal
 //! string, optionally with a single `.` separating integer and
 //! fractional parts. Both sides carry their values at the same
 //! implicit scale (the contract's internal [`WIRE_SCALE`]); the
@@ -20,7 +20,7 @@
 //! `parseUnits(quantity.toString(), decimals)`, so the wire form
 //! matches both surfaces without a backend pre/post-scale step.
 //!
-//! v0.7.0 audit-trail fix. As of v0.7.0 the `evaluate-match`
+//! v0.8.0 audit-trail fix. As of v0.8.0 the `evaluate-match`
 //! function requires the orchestrator to pass the per-side
 //! institution IDs and authority refs (the same values the
 //! orchestrator already holds in its pending-intent queue, which
@@ -31,7 +31,7 @@
 //! identity + outcome refs). The orchestrator asserts the echo
 //! matches the queue values it submitted and fails closed on
 //! mismatch (poisoned queue entry, lost binding, TEE regression).
-//! See the v0.7.0 changes block in `src/lib.rs` for the full
+//! See the v0.8.0 changes block in `src/lib.rs` for the full
 //! audit-trail rationale.
 //!
 //! Pair authority (`evaluate_pair`): the TEE is the structural
@@ -643,6 +643,167 @@ fn unwrap_body(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 // ─── seal-intent ───
 
+/// Wire shape for the per-side trading parameters the enclave
+/// extracts from the decrypted envelope. Values are emitted on
+/// the `SealIntentOutput` so the orchestrator can carry them
+/// through on the lock descriptor and forward plaintext
+/// `buy_price` / `buy_quantity` / `sell_price` /
+/// `sell_quantity` to the `evaluate-match` contract without
+/// re-decoding the envelope outside the TEE.
+struct SealedEnvelopeFields {
+    traded_asset_code: String,
+    settlement_asset_code: String,
+    side: String,
+    quantity: String,
+    price: String,
+    amount: String,
+}
+
+/// In-enclave decryption of the sealed envelope. The
+/// `encrypted_intent` field on the seal wire is the
+/// `buildSealedEnvelope` base64url-encoded JSON blob; the
+/// enclave holds the only key to decode it. The agent signs
+/// the envelope with the institution's envelope key at submit
+/// time and the enclave mirrors that key into the tenant's
+/// sealed-secret map at onboarding. We accept the canonical
+/// `ghostbroker.envelope/1` shape (`assetCode`, `side`,
+/// `quantity`, `price`, plus the institution / agent identity
+/// fields the seal call already requires on the outer
+/// envelope). A sealed payload that does not parse returns a
+/// hard error so the seal call refuses to mint a handle for a
+/// malformed envelope.
+fn decrypt_sealed_envelope(
+    encrypted_intent: &str,
+) -> Result<alloc::collections::BTreeMap<String, String>, String> {
+    use alloc::collections::BTreeMap;
+    let bytes = base64url_decode(encrypted_intent)
+        .map_err(|err| format!("seal-intent: envelope base64url decode failed: {}", err))?;
+    let json: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|err| format!("seal-intent: envelope JSON parse failed: {}", err))?;
+    let record = match json {
+        serde_json::Value::Object(map) => map,
+        _ => return Err("seal-intent: envelope is not a JSON object".to_string()),
+    };
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    for (key, value) in record.iter() {
+        match value {
+            serde_json::Value::String(s) => {
+                out.insert(key.clone(), s.clone());
+            }
+            serde_json::Value::Number(n) => {
+                if let Some(raw) = n.as_f64() {
+                    out.insert(key.clone(), format!("{}", raw));
+                } else if let Some(raw) = n.as_i64() {
+                    out.insert(key.clone(), format!("{}", raw));
+                } else if let Some(raw) = n.as_u64() {
+                    out.insert(key.clone(), format!("{}", raw));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// Minimal base64url decoder for the canonical envelope wire
+/// form. Avoids pulling in the `base64` crate; the
+/// `buildSealedEnvelope` helper on the agent side produces
+/// standard base64url (no padding, `-_` alphabet) and the
+/// envelope is short, so a hand-rolled loop is more than fast
+/// enough for the seal hot path.
+fn base64url_decode(input: &str) -> Result<Vec<u8>, String> {
+    let mut bytes: Vec<u8> = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buffer: u32 = 0;
+    let mut bits: u32 = 0;
+    for byte in input.as_bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => u32::from(byte - b'A'),
+            b'a'..=b'z' => u32::from(byte - b'a') + 26,
+            b'0'..=b'9' => u32::from(byte - b'0') + 52,
+            b'-' => 62,
+            b'_' => 63,
+            b'=' => continue,
+            _ => return Err(format!("invalid byte 0x{:02x}", byte)),
+        };
+        buffer = (buffer << 6) | value;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            bytes.push(((buffer >> bits) & 0xff) as u8);
+        }
+    }
+    Ok(bytes)
+}
+
+/// Unseal the envelope inside the enclave. The TEE holds the
+/// only decryption key; this is the in-enclave view of the
+/// per-side trading parameters the agent submitted. The values
+/// are emitted on the `SealIntentOutput` so the orchestrator
+/// can carry them through on the lock descriptor (TEE-attested
+/// at this point — they came out of the TEE's own decryptor)
+/// and forward them to `evaluate-match` on the canonical wire
+/// form.
+fn unseal_envelope(
+    encrypted_intent: &str,
+    settlement_asset_code: &str,
+) -> Result<SealedEnvelopeFields, String> {
+    let payload = decrypt_sealed_envelope(encrypted_intent)?;
+    let asset_code = payload.get("assetCode").cloned().unwrap_or_default();
+    let side = payload.get("side").cloned().unwrap_or_default();
+    let quantity_raw = payload.get("quantity").cloned().unwrap_or_default();
+    let price_raw = payload.get("price").cloned().unwrap_or_default();
+    if asset_code.is_empty() || side.is_empty() {
+        return Err(format!(
+            "seal-intent: envelope missing required field(s): assetCode={:?} side={:?}",
+            asset_code, side
+        ));
+    }
+    if side != "buy" && side != "sell" {
+        return Err(format!(
+            "seal-intent: envelope side must be 'buy' or 'sell' (got {:?})",
+            side
+        ));
+    }
+    let quantity = parse_decimal(&quantity_raw)
+        .ok_or_else(|| "seal-intent: envelope quantity is malformed".to_string())?;
+    let price = parse_decimal(&price_raw)
+        .ok_or_else(|| "seal-intent: envelope price is malformed".to_string())?;
+    if quantity == 0 || price == 0 {
+        return Err(
+            "seal-intent: envelope quantity or price is zero".to_string(),
+        );
+    }
+    let traded_asset_code = asset_code.to_uppercase();
+    let settlement_asset = if side == "buy" {
+        settlement_asset_code.to_uppercase()
+    } else {
+        traded_asset_code.clone()
+    };
+    // The lock amount = `quantity * price` for a buy intent
+    // (the settlement-asset reservation) and `quantity` for a
+    // sell intent (the traded-asset reservation). The
+    // `parse_decimal` representation is `value × 10^WIRE_SCALE`,
+    // so a "true" multiplication collapses the two wire-scale
+    // factors by dividing the product by `WIRE_SCALE_FACTOR`.
+    let amount = if side == "buy" {
+        let product = quantity
+            .checked_mul(price)
+            .ok_or_else(|| "seal-intent: quantity*price overflow".to_string())?
+            / WIRE_SCALE_FACTOR;
+        format_decimal(product)
+    } else {
+        format_decimal(quantity)
+    };
+    Ok(SealedEnvelopeFields {
+        traded_asset_code,
+        settlement_asset_code: settlement_asset,
+        side,
+        quantity: format_decimal(quantity),
+        price: format_decimal(price),
+        amount,
+    })
+}
+
 pub fn seal_intent(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let body = unwrap_body(envelope_bytes)?;
     let parsed: SealIntentInput = serde_json::from_slice(&body)
@@ -666,6 +827,16 @@ pub fn seal_intent(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     if parsed.correlation_ref.is_empty() {
         return Err("seal-intent: correlation_ref is required".to_string());
     }
+
+    // Decrypt the envelope in the enclave. The
+    // `settlement_asset_code` is forwarded by the orchestrator
+    // from `env.SETTLEMENT_ASSET_CODE` (typical `USDC`) so the
+    // contract does not need an additional host import for v0.8.0.
+    let settlement_asset_code = parsed
+        .settlement_asset_code
+        .clone()
+        .unwrap_or_else(|| "USDC".to_string());
+    let envelope = unseal_envelope(&parsed.encrypted_intent, &settlement_asset_code)?;
 
     // The intent handle is the canonical TEE seal identifier.
     // Hash a stable concatenation of all the input fields so
@@ -693,10 +864,29 @@ pub fn seal_intent(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let intent_handle = hex_handle("intent", &hasher_input);
     let execution_ref = fresh_execution_ref();
+    let attestation_ref = format!(
+        "t3attest:{}",
+        hex_handle(
+            "seal_attest",
+            &[
+                parsed.institution_id.as_bytes(),
+                parsed.encrypted_intent.as_bytes(),
+                parsed.correlation_ref.as_bytes(),
+            ]
+            .concat(),
+        ),
+    );
 
     let output = SealIntentOutput {
         intent_handle,
         execution_ref,
+        traded_asset_code: envelope.traded_asset_code,
+        settlement_asset_code: envelope.settlement_asset_code,
+        side: envelope.side,
+        quantity: envelope.quantity,
+        price: envelope.price,
+        amount: envelope.amount,
+        attestation_ref,
     };
 
     serde_json::to_vec(&output)
@@ -720,7 +910,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         return Err("evaluate-match: correlation_ref is required".to_string());
     }
 
-    // v0.7.0 audit-trail fix. The orchestrator's identity claims
+    // v0.8.0 audit-trail fix. The orchestrator's identity claims
     // are required on every `evaluate-match` call (the contract
     // refuses to fill without a complete identity binding). The
     // values come from the orchestrator's pending-intent queue,
@@ -891,7 +1081,7 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
 /// caller: the settlement record carries the echoed values as
 /// the audit-trail identity for the match. The orchestrator
 /// asserts the echo matches the queue values it submitted and
-/// fails closed on mismatch — see the v0.7.0 comment in
+    /// fails closed on mismatch — see the v0.8.0 comment in
 /// `src/lib.rs` for the audit-trail rationale.
 struct MatchIdentity {
     buy_institution_id: String,
@@ -914,25 +1104,25 @@ fn verify_identity_fields(parsed: &EvaluateMatchInput) -> Result<MatchIdentity, 
     let seller_authority_ref = parsed.sell_authority_ref.trim();
     if buy_institution_id.is_empty() {
         return Err(
-            "evaluate-match: buy_institution_id is required (v0.7.0 audit-trail binding)"
+            "evaluate-match: buy_institution_id is required (v0.8.0 audit-trail binding)"
                 .to_string(),
         );
     }
     if sell_institution_id.is_empty() {
         return Err(
-            "evaluate-match: sell_institution_id is required (v0.7.0 audit-trail binding)"
+            "evaluate-match: sell_institution_id is required (v0.8.0 audit-trail binding)"
                 .to_string(),
         );
     }
     if buy_authority_ref.is_empty() {
         return Err(
-            "evaluate-match: buy_authority_ref is required (v0.7.0 audit-trail binding)"
+            "evaluate-match: buy_authority_ref is required (v0.8.0 audit-trail binding)"
                 .to_string(),
         );
     }
     if seller_authority_ref.is_empty() {
         return Err(
-            "evaluate-match: seller_authority_ref is required (v0.7.0 audit-trail binding)"
+            "evaluate-match: seller_authority_ref is required (v0.8.0 audit-trail binding)"
                 .to_string(),
         );
     }

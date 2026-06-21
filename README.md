@@ -407,7 +407,7 @@ is **not** encrypted field-level ciphertext today -- it is an opaque
 correlation handle -- so the README §Privacy Boundary deliberately
 calls these "opaque correlation handles" rather than "encrypted
 identifiers" or "encrypted execution price". A future TEE contract
-version (the v0.7.0 wire form) can mint the digests inside the
+version (the v0.8.0 wire form) can mint the digests inside the
 enclave and replace this derivation with real per-field ciphertext
 without touching the orchestrator call sites. What an operator sees in
 the Observatory Console:
@@ -612,7 +612,7 @@ operations:
 The backend orchestrator is a verifier around the enclave outcome: it filters
 obvious non-candidates locally, forwards the per-side identity it already
 holds in its pending-intent queue (the institution IDs and authority refs
-verified at seal time), then trusts the enclave's decision. As of v0.7.0,
+verified at seal time), then trusts the enclave's decision. As of v0.8.0,
 the TEE **echoes** the per-side institution IDs and authority refs back on
 the outcome and binds them to the `match_attestation_ref` above. The
 orchestrator asserts the echo matches the queue values it submitted and

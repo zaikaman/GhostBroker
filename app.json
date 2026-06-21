@@ -89,8 +89,8 @@
       "required": false
     },
     "T3_MATCHING_CONTRACT_VERSION": {
-      "description": "Matching contract version the T3N adapter routes evaluate-match / seal-ticket / evaluate-pair calls to. Defaults to 0.7.0.",
-      "value": "0.7.0",
+      "description": "Matching contract version the T3N adapter routes evaluate-match / seal-ticket / evaluate-pair calls to. Defaults to 0.8.0.",
+      "value": "0.8.0",
       "required": false
     },
     "SETTLEMENT_ASSET_CODE": {
