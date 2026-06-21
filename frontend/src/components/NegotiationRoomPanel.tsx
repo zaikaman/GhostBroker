@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircleIcon,
   Cancel01Icon,
@@ -9,6 +9,8 @@ import {
   Clock01Icon,
 } from 'hugeicons-react';
 import { apiClient, type NegotiationSession } from '../services/api-client';
+import { telemetryClient } from '../services/telemetry-client';
+import type { TelemetryEvent } from '../services/telemetry-client';
 import { Skeleton } from './Skeleton';
 
 const STATUS_COLORS: Record<NegotiationSession['status'], string> = {
@@ -87,14 +89,69 @@ export function NegotiationRoomPanel(): React.JSX.Element {
     }
   }, []);
 
+  // Ref to track the latest fetchSessions callback so the telemetry
+  // subscription (which binds once on mount) always calls the most
+  // recent version without re-subscribing every render.
+  const fetchRef = useRef(fetchSessions);
+  fetchRef.current = fetchSessions;
+
+  // Debounce timer: batch rapid telemetry events (e.g. multiple
+  // negotiation_move_submitted from both sides) into a single
+  // REST fetch. 300ms is short enough to feel instant while
+  // avoiding a burst of API calls.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Negotiation telemetry phases that signal a session state change
+  // worth fetching. All `negotiation_*` phases emitted by the
+  // backend during a negotiation lifecycle are included.
+  const negotiationPhases = new Set([
+    'negotiation_ticket_sealed',
+    'negotiation_paired',
+    'negotiation_round_open',
+    'negotiation_move_submitted',
+    'negotiation_disclosure_verified',
+    'negotiation_converged',
+    'negotiation_walked_away',
+    'negotiation_expired',
+    'negotiation_settling',
+    'negotiation_settled',
+  ]);
+
   useEffect(() => {
     queueMicrotask(() => {
       void fetchSessions();
     });
+
+    // REST polling fallback (5s) — ensures eventual consistency
+    // even if the WebSocket drops or misses an event.
     const interval = setInterval(() => {
-      void fetchSessions();
+      void fetchRef.current();
     }, 5000);
-    return () => clearInterval(interval);
+
+    // Fast path: trigger an immediate REST refresh whenever a
+    // negotiation-related telemetry event arrives via WebSocket.
+    // The 5s poll still runs as a fallback.
+    const unsubscribe = telemetryClient.onMessage((event: TelemetryEvent) => {
+      if (event.type === 'telemetry.processing.changed' &&
+          event.phase &&
+          negotiationPhases.has(event.phase as string)) {
+        // Debounce: reset the timer on each matching event
+        if (debounceRef.current) {
+          clearTimeout(debounceRef.current);
+        }
+        debounceRef.current = setTimeout(() => {
+          void fetchRef.current();
+        }, 300);
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
   }, [fetchSessions]);
 
   const handleApprove = useCallback(
