@@ -11,6 +11,7 @@ export interface TeeNegotiationVisualizerProps {
   institutionName: string;
   institutionDid: string;
   compact?: boolean;
+  logTail?: string;
 }
 
 interface DialogueMessage {
@@ -33,10 +34,151 @@ export function TeeNegotiationVisualizer({
   intents,
   institutionName,
   institutionDid,
-  compact = false
+  compact = false,
+  logTail
 }: TeeNegotiationVisualizerProps): React.JSX.Element {
   const [messages, setMessages] = useState<DialogueMessage[]>([]);
   const processedPhasesRef = useRef<Set<string>>(new Set());
+
+  const [clearedLogs, setClearedLogs] = useState(false);
+  useEffect(() => {
+    setClearedLogs(false);
+  }, [logTail]);
+
+  const parsedLogMessages = useMemo(() => {
+    if (!logTail || clearedLogs) return [];
+
+    const lines = logTail.split('\n');
+    const result: DialogueMessage[] = [];
+    let idCounter = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const match = trimmed.match(/^\[([^\]]+)\]\s+\[(BUY|SELL)\s*\]\s+(.*)$/i);
+      if (!match || !match[1] || !match[3]) continue;
+
+      const ts = match[1];
+      const content = match[3];
+
+      let timeStr = '';
+      try {
+        const date = new Date(ts);
+        if (!isNaN(date.getTime())) {
+          timeStr = date.toTimeString().split(' ')[0] || '';
+        }
+      } catch (e) {
+        // fallback
+      }
+      if (!timeStr) {
+        const timeMatch = ts.match(/T(\d{2}:\d{2}:\d{2})/);
+        timeStr = (timeMatch && timeMatch[1]) ? timeMatch[1] : ts.slice(11, 19);
+      }
+
+      const localName = institutionName || 'Local Agent';
+
+      const decisionMatch = content.match(/^\[([^\]]+)\]\s+(\w+)\s+conf=([^\s]+)\s+escalate=([^\s]+)\s+ready=([^\s]+)\s+\((.*)\)$/);
+      if (decisionMatch && decisionMatch[1] && decisionMatch[2] && decisionMatch[6]) {
+        const intent = decisionMatch[1];
+        const action = decisionMatch[2];
+        const reasoning = decisionMatch[6];
+
+        const msgText = `Action: ${action.toUpperCase()} [Intent: ${intent}] | Reasoning: ${reasoning}`;
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: localName,
+          message: msgText,
+          time: timeStr,
+          isSystem: false
+        });
+        continue;
+      }
+
+      if (content.includes('Hosted negotiator booting')) {
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: 'System Enclave',
+          message: 'Enclave boot initiated. Registering secure identities.',
+          time: timeStr,
+          isSystem: true
+        });
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: localName,
+          message: content,
+          time: timeStr,
+          isSystem: false
+        });
+      } else if (content.includes('Negotiation ticket sealed')) {
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: 'System Enclave',
+          message: content,
+          time: timeStr,
+          isSystem: true
+        });
+      } else if (content.includes('Negotiation settled')) {
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: 'System Enclave',
+          message: 'Matching criteria met. Settlement initiated.',
+          time: timeStr,
+          isSystem: true
+        });
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: localName,
+          message: content,
+          time: timeStr,
+          isSystem: false
+        });
+      } else if (content.includes('Admit failed') || content.includes('failed')) {
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: 'System Enclave',
+          message: `Warning: ${content}`,
+          time: timeStr,
+          isSystem: true
+        });
+      } else if (content.includes('Negotiation tick') && content.includes('1/')) {
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: 'System Enclave',
+          message: 'Negotiation channel paired. Beginning negotiation loops.',
+          time: timeStr,
+          isSystem: true
+        });
+      } else if (content.includes('walkaway')) {
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: localName,
+          message: `Walkaway initiated: ${content}`,
+          time: timeStr,
+          isSystem: false
+        });
+      } else if (content.includes('Mandate:')) {
+        result.push({
+          id: `log-msg-${idCounter++}`,
+          sender: 'System Enclave',
+          message: content,
+          time: timeStr,
+          isSystem: true
+        });
+      }
+    }
+
+    return result.slice(-15);
+  }, [logTail, clearedLogs, institutionName]);
+
+  const displayMessages = logTail ? parsedLogMessages : messages;
+
+  const formatBubbleText = (text: string | null) => {
+    if (!text) return '';
+    const maxLength = 65;
+    if (text.length <= maxLength) return text;
+    return text.slice(0, maxLength) + '...';
+  };
 
   // Full page overlay state (disabled)
   const isTheaterMode = false;
@@ -171,6 +313,7 @@ export function TeeNegotiationVisualizer({
 
   // Generate simulated dialogue logs inside TEE to explain the processing events
   useEffect(() => {
+    if (logTail) return;
     if (!latestPhase || forceIdle) {
       setTimeout(() => {
         setMessages([]);
@@ -299,21 +442,22 @@ export function TeeNegotiationVisualizer({
 
   // Clean state when agents are disconnected
   useEffect(() => {
+    if (logTail) return;
     if (agents.length === 0 && intents.length === 0 && !localAgent) {
       setTimeout(() => {
         setMessages([]);
       }, 0);
       processedPhasesRef.current.clear();
     }
-  }, [agents, intents.length, localAgent]);
+  }, [agents, intents.length, localAgent, logTail]);
 
   // Handle bubble notifications popups
   useEffect(() => {
-    if (messages.length === 0) {
+    if (displayMessages.length === 0) {
       // Reset bubble state via the cleanup callback (not the
       // effect body) so the lint doesn't see a synchronous
       // setState. The cleanup runs whenever the effect re-runs
-      // (e.g. when `messages` transitions from non-empty to
+      // (e.g. when `displayMessages` transitions from non-empty to
       // empty), which is exactly the transition that needs a
       // reset.
       return () => {
@@ -323,7 +467,7 @@ export function TeeNegotiationVisualizer({
       };
     }
 
-    const lastMsg = messages[messages.length - 1];
+    const lastMsg = displayMessages[displayMessages.length - 1];
     if (!lastMsg) return;
     const localName = institutionName || 'Local Agent';
     const peerName = getCounterpartyHandle(counterpartyAgent?.agentDid ?? null);
@@ -334,7 +478,7 @@ export function TeeNegotiationVisualizer({
       // bubble; the lint rule's preferred pattern (deriving
       // state in render) does not work here because the bubble
       // has its own independent lifetime independent of the
-      // `messages` array. Suppress the rule for this branch.
+      // `displayMessages` array. Suppress the rule for this branch.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLatestHubBubble(lastMsg.message);
       const t = setTimeout(() => setLatestHubBubble(null), 4500);
@@ -348,7 +492,7 @@ export function TeeNegotiationVisualizer({
       const t = setTimeout(() => setLatestPeerBubble(null), 5000);
       return () => clearTimeout(t);
     }
-  }, [messages, institutionName, counterpartyAgent]);
+  }, [displayMessages, institutionName, counterpartyAgent]);
 
   // Helper function to draw the cute cartoon robot matching the user reference
   const drawCuteRobot = (
@@ -582,6 +726,11 @@ export function TeeNegotiationVisualizer({
         return;
       }
       ctx.clearRect(0, 0, w, h);
+
+      // Position robots vertically relative to canvas height to prevent bubble cutoff
+      const baseRobotY = h * 0.58;
+      localPos.current.y = baseRobotY;
+      peerPos.current.y = baseRobotY;
 
       // Background Cyberpunk Radial Space
       const radial = ctx.createRadialGradient(w/2, h/2, 20, w/2, h/2, Math.max(w, h));
@@ -822,7 +971,11 @@ export function TeeNegotiationVisualizer({
   }, [activeStage, latestLocalBubble, latestPeerBubble, compact, isTheaterMode, isEnclaveActive]);
 
   const handleClearDialogue = () => {
-    setMessages([]);
+    if (logTail) {
+      setClearedLogs(true);
+    } else {
+      setMessages([]);
+    }
   };
 
 
@@ -942,7 +1095,7 @@ export function TeeNegotiationVisualizer({
         }
 
         .compact-diagram-3d {
-          height: 210px;
+          height: 230px;
         }
 
         .theater-active .match-diagram-container-3d {
@@ -1055,7 +1208,7 @@ export function TeeNegotiationVisualizer({
         /* Floating Hologram Speech Bubbles */
         .hologram-bubble {
           position: absolute;
-          bottom: 74px; /* sits nicely above the robot head */
+          bottom: 70px; /* sits nicely above the robot head */
           left: 50%;
           transform: translate(-50%, 0);
           background: rgba(11, 15, 25, 0.94);
@@ -1064,12 +1217,12 @@ export function TeeNegotiationVisualizer({
           border: 1px solid var(--color-accent);
           color: #fff;
           font-family: var(--font-mono), monospace;
-          font-size: 0.65rem;
-          padding: 8px 12px;
+          font-size: 0.62rem;
+          padding: 6px 10px;
           border-radius: 6px;
           box-shadow: 0 0 20px rgba(var(--color-accent-rgb), 0.25), inset 0 0 10px rgba(var(--color-accent-rgb), 0.1);
           width: max-content;
-          max-width: 220px;
+          max-width: 190px;
           text-align: center;
           white-space: normal;
           word-break: break-word;
@@ -1109,7 +1262,7 @@ export function TeeNegotiationVisualizer({
         .hologram-bubble.hub-bubble {
           border-color: var(--color-accent);
           box-shadow: 0 0 20px rgba(var(--color-accent-rgb), 0.25), inset 0 0 10px rgba(var(--color-accent-rgb), 0.1);
-          bottom: 84px; /* higher offset for Hub circle */
+          bottom: 80px; /* higher offset for Hub circle */
         }
         
         .theater-active .hologram-bubble.hub-bubble {
@@ -1389,7 +1542,7 @@ export function TeeNegotiationVisualizer({
 
                   {latestLocalBubble && (
                     <div className="hologram-bubble">
-                      {latestLocalBubble}
+                      {formatBubbleText(latestLocalBubble)}
                     </div>
                   )}
                 </div>
@@ -1409,7 +1562,7 @@ export function TeeNegotiationVisualizer({
 
                   {latestHubBubble && (
                     <div className="hologram-bubble hub-bubble">
-                      {latestHubBubble}
+                      {formatBubbleText(latestHubBubble)}
                     </div>
                   )}
                 </div>
@@ -1426,7 +1579,7 @@ export function TeeNegotiationVisualizer({
 
                   {latestPeerBubble && (
                     <div className="hologram-bubble peer-bubble">
-                      {latestPeerBubble}
+                      {formatBubbleText(latestPeerBubble)}
                     </div>
                   )}
                 </div>
@@ -1462,7 +1615,7 @@ export function TeeNegotiationVisualizer({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Secure Enclave Dialogue Transcript</span>
-                  {messages.length > 0 && (
+                  {displayMessages.length > 0 && (
                     <button 
                       type="button" 
                       onClick={handleClearDialogue}
@@ -1473,12 +1626,12 @@ export function TeeNegotiationVisualizer({
                   )}
                 </div>
                 <div className="dialogue-stream-3d">
-                  {messages.length === 0 ? (
+                  {displayMessages.length === 0 ? (
                     <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
                       No dialogue logs generated.
                     </div>
                   ) : (
-                    messages.map((msg) => {
+                    displayMessages.map((msg) => {
                       const isSys = msg.isSystem;
                       const isPeer = msg.sender.toLowerCase().includes('counterparty') || msg.sender.toLowerCase().includes('sachs') || msg.sender.toLowerCase().includes('morgan') || msg.sender.toLowerCase().includes('citibank') || msg.sender.toLowerCase().includes('jpmorgan');
                       

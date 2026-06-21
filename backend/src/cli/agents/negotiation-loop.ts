@@ -442,7 +442,7 @@ let admission: AgentAdmission;
     priorMoveRationale = decision.reasoning;
     log(
       side,
-      `[${decision.strategicIntent ?? "?"}] ${decision.action} conf=${decision.confidence?.toFixed(2) ?? "?"} escalate=${decision.escalationRequested} ready=${decision.settlementReadiness ?? "?"} (${decision.reasoning.slice(0, 120)})`,
+      `[${decision.strategicIntent ?? "?"}] ${decision.action} conf=${decision.confidence?.toFixed(2) ?? "?"} escalate=${decision.escalationRequested} ready=${decision.settlementReadiness ?? "?"} (${decision.reasoning})`,
     );
 
     // The LLM owns every action decision; the loop forwards its

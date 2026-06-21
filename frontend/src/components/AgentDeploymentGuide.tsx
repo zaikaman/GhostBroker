@@ -1300,6 +1300,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
                   institutionName={session.institution.displayName}
                   institutionDid={session.institution.t3TenantDid}
                   compact={true}
+                  logTail={selectedHostedRecord?.runtime?.logTail}
                 />
               </div>
 

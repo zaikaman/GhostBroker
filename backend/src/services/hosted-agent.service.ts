@@ -20,7 +20,7 @@ import type { InstitutionApprovalService } from "./institution-approval.service.
 import type { NegotiationManagementService } from "./negotiation.service.js";
 import type { NegotiationMandate } from "../models/negotiation.js";
 
-const LOG_TAIL_BYTES = 8192;
+const LOG_TAIL_BYTES = 262144;
 const HOSTED_SESSION_BUFFER_SECONDS = 15 * 60;
 const HOSTED_SESSION_MINIMUM_SECONDS = 30 * 60;
 
