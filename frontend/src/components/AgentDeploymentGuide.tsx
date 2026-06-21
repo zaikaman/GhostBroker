@@ -422,10 +422,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
         });
     });
 
-    // Reduced from 12s to 60s to eliminate log spam on Heroku.
-    // The WebSocket telemetry channel provides real-time updates
-    // for critical state changes; this REST fallback is only needed
-    // for reconciling state after a long idle period or reconnection.
+    // Poll every 5s to keep the fleet and runtime state fresh.
     // Pass the current selectedAgentId via ref so we only fetch
     // mandates for the agent the operator is actively looking at.
     const intervalId = window.setInterval(() => {
@@ -436,7 +433,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
           setError(deriveErrorMessage(err, 'Background refresh failed.'));
         }
       });
-    }, 60000);
+    }, 5_000);
 
     const handleOnline = () => {
       // Re-sync as soon as connectivity returns. Without this a long
