@@ -49,7 +49,10 @@ describe("settlement atomicity", () => {
             .buyerInstitutionId,
           sellerInstitutionId: buildSettlementExecutionRequest().matchOutcome
             .sellerInstitutionId,
-          encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
+
+
+
+        encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
           submittedAt: "2026-06-12T00:00:00.000Z",
         }),
       } as never,
@@ -96,7 +99,10 @@ describe("settlement atomicity", () => {
           executionRef: "t3exec_us3",
           buyerInstitutionId: request.matchOutcome.buyerInstitutionId,
           sellerInstitutionId: request.matchOutcome.sellerInstitutionId,
-          encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
+
+
+
+        encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
           submittedAt: "2026-06-12T00:00:00.000Z",
         }),
       } as never,

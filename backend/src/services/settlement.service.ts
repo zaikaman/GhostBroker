@@ -513,6 +513,42 @@ export class SettlementService {
 
       return completedTradeFromRecord(persisted.completedTrade, receiptIds);
     } catch (error) {
+      // Diagnostic: surface the exact error type, name, message, and
+      // cause so operators can distinguish between a Supabase RPC
+      // failure, a chain rail RPC timeout, a missing deposit address,
+      // or any other underlying issue. The structured logger carries
+      // the full error chain. Remove this once the root cause is stable.
+      //
+      // The `error.cause` can be a Supabase RPC error object (not an
+      // Error instance). Pino's structured serializer handles nested
+      // objects safely (including circular references), so we pass the
+      // cause object directly rather than pre-stringifying it —
+      // otherwise the log would have a double-encoded JSON string.
+      // If the cause has a `.message` field (common for Supabase RPC
+      // errors), we use that directly as the most readable signal.
+      const causeForLog =
+        error instanceof Error && error.cause !== undefined
+          ? typeof error.cause === "object" && error.cause !== null
+            ? ((error.cause as { message?: unknown }).message ??
+                error.cause)
+            : String(error.cause)
+          : undefined;
+      logger.error(
+        {
+          event: "settlement.execute_settlement_failed",
+          errorType:
+            error !== null && typeof error === "object"
+              ? (error as { name?: unknown }).name ?? typeof error
+              : typeof error,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorCause: causeForLog,
+          settlementProfileRef,
+          hasRailProof: railProof !== undefined,
+          correlationRef,
+        },
+        "executeSettlement failed; diagnostic details in structured log.",
+      );
+
       if (settlementProfileRef && railProof) {
         await this.compensateRailDispatch(
           settlementProfileRef,

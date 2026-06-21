@@ -548,9 +548,11 @@ function isNotFoundError(err: unknown): boolean {
 /**
  * Left-pad a string to exactly 32 bytes, the width of
  * Solidity's `bytes32`. Strings longer than 32 bytes are
- * truncated (the TEE's outcome ref is always under 32 bytes
- * in practice; the TEE's session ref is also under 32
- * bytes).
+ * truncated (the first 32 bytes of the encoded string are
+ * used). The negotiation outcomeRef carries a leading
+ * random UUID to guarantee per-attempt uniqueness under
+ * truncation (see `convergeAndSettle` in
+ * `negotiation-orchestrator.ts`).
  */
 function stringToBytes32(s: string): Hex {
   const bytes = new TextEncoder().encode(s);

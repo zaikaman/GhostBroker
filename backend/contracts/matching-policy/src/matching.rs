@@ -1063,6 +1063,9 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     if parsed.correlation_ref.is_empty() {
         return Err("evaluate-match: correlation_ref is required".to_string());
     }
+    if parsed.envelope_master_key_hex.is_empty() {
+        return Err("evaluate-match: envelope_master_key_hex is required (v0.13.0)".to_string());
+    }
 
     // v0.8.0 audit-trail fix. The orchestrator's identity claims
     // are required on every `evaluate-match` call (the contract
@@ -1244,6 +1247,15 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let _ = kv_delete(&kv_map_name("intents"), parsed.buy_intent_handle.as_bytes());
     let _ = kv_delete(&kv_map_name("intents"), parsed.sell_intent_handle.as_bytes());
 
+    // v0.13.0: encrypt the three settlement fields inside the TEE.
+    let (asset_ct, qty_ct, price_ct) = encrypt_trade_fields(
+        &parsed.envelope_master_key_hex,
+        &outcome_ref,
+        &parsed.asset_code,
+        &format_decimal(matched_quantity),
+        &format_decimal(execution_price),
+    )?;
+
     let output = EvaluateMatchOutput {
         outcome_ref,
         execution_ref,
@@ -1261,6 +1273,9 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         matched_quantity: format_decimal(matched_quantity),
         execution_price: format_decimal(execution_price),
         match_attestation_ref,
+        asset_code_ciphertext: asset_ct,
+        quantity_ciphertext: qty_ct,
+        execution_price_ciphertext: price_ct,
     };
 
     serde_json::to_vec(&output)
@@ -1397,6 +1412,9 @@ fn no_match_output(
         matched_quantity: String::new(),
         execution_price: String::new(),
         match_attestation_ref,
+        asset_code_ciphertext: String::new(),
+        quantity_ciphertext: String::new(),
+        execution_price_ciphertext: String::new(),
     };
 
     serde_json::to_vec(&output)
@@ -1848,6 +1866,56 @@ fn decrypt_envelope_plaintext(
         })
 }
 
+// v0.13.0: per-field AEAD encryption for settlement ciphertexts.
+// The three completed_trades settlement columns are AES-256-GCM
+// encrypted inside the TEE and returned as aead.v1:<nonce>:<ct>.
+// The per-trade, per-field key is derived via
+// HKDF-SHA256(master_key, salt=outcome_ref, info=domain_tag).
+
+const ASSET_CODE_FIELD_DOMAIN: &str = "ghostbroker.completed_trades.asset_code.v1";
+const QUANTITY_FIELD_DOMAIN: &str = "ghostbroker.completed_trades.quantity.v1";
+const EXECUTION_PRICE_FIELD_DOMAIN: &str = "ghostbroker.completed_trades.execution_price.v1";
+
+fn encrypt_trade_field(
+    master_key_hex: &str,
+    outcome_ref: &str,
+    domain_tag: &str,
+    plaintext: &str,
+) -> Result<String, String> {
+    let master_key = decode_hex32(master_key_hex)?;
+    let derived = hkdf_sha256_32(outcome_ref.as_bytes(), &master_key, domain_tag.as_bytes());
+    let nonce_seed = monotonic_nonce().to_be_bytes();
+    let mut nonce_input = Vec::with_capacity(domain_tag.len() + 8);
+    nonce_input.extend_from_slice(domain_tag.as_bytes());
+    nonce_input.extend_from_slice(&nonce_seed);
+    let mut hasher = Sha256::new();
+    hasher.update(&nonce_input);
+    let digest = hasher.finalize();
+    let nonce_bytes = &digest[..12];
+    let cipher = Aes256Gcm::new_from_slice(&derived)
+        .map_err(|_| "encrypt_trade_field: AES-256-GCM key init failed".to_string())?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, Payload { msg: plaintext.as_bytes(), aad: outcome_ref.as_bytes() })
+        .map_err(|_| "encrypt_trade_field: AES-256-GCM encryption failed".to_string())?;
+    let nonce_hex: String = nonce_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    let ct_hex: String = ciphertext.iter().map(|b| format!("{:02x}", b)).collect();
+    Ok(format!("aead.v1:{}:{}", nonce_hex, ct_hex))
+}
+
+fn encrypt_trade_fields(
+    master_key_hex: &str,
+    outcome_ref: &str,
+    asset_code: &str,
+    matched_quantity: &str,
+    execution_price: &str,
+) -> Result<(String, String, String), String> {
+    let asset_ct = encrypt_trade_field(master_key_hex, outcome_ref, ASSET_CODE_FIELD_DOMAIN, asset_code)?;
+    let qty_ct = encrypt_trade_field(master_key_hex, outcome_ref, QUANTITY_FIELD_DOMAIN, matched_quantity)?;
+    let price_ct = encrypt_trade_field(master_key_hex, outcome_ref, EXECUTION_PRICE_FIELD_DOMAIN, execution_price)?;
+    Ok((asset_ct, qty_ct, price_ct))
+}
+
 /// Unseal a per-round AEAD envelope inside the enclave. The wire
 /// format is `ghostbroker.envelope.aead/v1|<base64url(nonce||
 /// ciphertext||tag)>` — the same shape `sealEnvelope` in
@@ -1969,6 +2037,9 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     if parsed.correlation_ref.is_empty() {
         return Err("evaluate-round: correlation_ref is required".to_string());
     }
+    if parsed.envelope_master_key_hex.is_empty() {
+        return Err("evaluate-round: envelope_master_key_hex is required (v0.13.0)".to_string());
+    }
 
     // Outcome + trade-field refs are deterministic regardless of
     // whether the round crosses, so the orchestrator can
@@ -2030,6 +2101,9 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 matched_quantity: String::new(),
                 execution_price: String::new(),
                 round_attestation_ref,
+                asset_code_ciphertext: String::new(),
+                quantity_ciphertext: String::new(),
+                execution_price_ciphertext: String::new(),
             };
             return serde_json::to_vec(&output)
                 .map_err(|err| format!("evaluate-round: response encode failed: {}", err));
@@ -2062,6 +2136,9 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 matched_quantity: String::new(),
                 execution_price: String::new(),
                 round_attestation_ref,
+                asset_code_ciphertext: String::new(),
+                quantity_ciphertext: String::new(),
+                execution_price_ciphertext: String::new(),
             };
             return serde_json::to_vec(&output)
                 .map_err(|err| format!("evaluate-round: response encode failed: {}", err));
@@ -2120,7 +2197,7 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let crosses = buy_price >= sell_price && buy_quantity > 0 && sell_quantity > 0;
     let status = if crosses { "crossed" } else { "open" };
 
-    let (matched_quantity, execution_price) = if crosses {
+    let (matched_quantity, execution_price, asset_ct, qty_ct, price_ct) = if crosses {
         let matched = core::cmp::min(buy_quantity, sell_quantity);
         let mid = match midpoint(buy_price, sell_price) {
             Some(v) => v,
@@ -2128,14 +2205,25 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 return Err("evaluate-round: midpoint overflow".to_string());
             }
         };
+        let mq = format_decimal(matched);
+        let ep = format_decimal(mid);
+        // v0.13.0: encrypt the three settlement fields inside the TEE
+        // for the crossed path, mirroring evaluate_match.
+        let (act, qct, pct) = encrypt_trade_fields(
+            &parsed.envelope_master_key_hex,
+            &outcome_ref,
+            &parsed.asset_code,
+            &mq,
+            &ep,
+        )?;
         // v0.10.0: consume both proposal entries from the
         // kv-store on a successful cross so the sealed plaintext
         // is not reusable for a second cross.
         let _ = kv_delete(&kv_map_name("rounds"), parsed.buy_proposal_handle.as_bytes());
         let _ = kv_delete(&kv_map_name("rounds"), parsed.sell_proposal_handle.as_bytes());
-        (format_decimal(matched), format_decimal(mid))
+        (mq, ep, act, qct, pct)
     } else {
-        (String::new(), String::new())
+        (String::new(), String::new(), String::new(), String::new(), String::new())
     };
 
     let round_attestation_ref = crate::compute_round_attestation_ref(
@@ -2162,6 +2250,9 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         matched_quantity,
         execution_price,
         round_attestation_ref,
+        asset_code_ciphertext: asset_ct,
+        quantity_ciphertext: qty_ct,
+        execution_price_ciphertext: price_ct,
     };
 
     serde_json::to_vec(&output)

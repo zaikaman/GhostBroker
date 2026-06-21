@@ -56,9 +56,7 @@ function normalizeEnv(source: NodeJS.ProcessEnv): Record<string, string | undefi
 }
 
 const envSchema = z.object({
-  NODE_ENV: z
-    .enum(["development", "test", "production"])
-    .default("development"),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().url().optional(),
   SUPABASE_URL: z.string().url(),
@@ -67,6 +65,27 @@ const envSchema = z.object({
   T3N_ENV: z.enum(["testnet", "production"]).default("testnet"),
   T3_NETWORK_URL: z.string().url().optional(),
   T3_TENANT_DID: z.string().min(1).optional(),
+  /**
+   * The T3N account DID whose token balance is metered for
+   * sealed-secret map provisioning, contract registration, and
+   * TEE execution. Defaults to the authenticated tenant DID at
+   * boot when unset. T3N tokens meter execution and storage; a
+   * zero balance makes every metered operation fail with
+   * `HTTP 403 InsufficientCredit`.
+   */
+  T3_SANDBOX_TOKEN_ACCOUNT: z.string().min(1).optional(),
+  /**
+   * Minimum token balance the backend requires before it will
+   * attempt metered boot operations (`ensureTenantKvMaps`). The
+   * preflight fails closed below this threshold so the operator
+   * gets a clear actionable error instead of a cryptic SDK
+   * `InsufficientCredit` stack trace. Defaults to `1`.
+   */
+  T3_MINIMUM_TOKEN_BALANCE: z
+    .string()
+    .trim()
+    .regex(/^[0-9]+$/u)
+    .optional(),
   /**
    * Dedicated secp256k1 signing private key the backend uses to
    * sign server-minted delegation VCs. This is a SEPARATE secret
@@ -129,12 +148,7 @@ const envSchema = z.object({
    * here only for staged rollouts where you need to pin a
    * specific tenant build before flipping the constant.
    */
-  T3_MATCHING_CONTRACT_VERSION: z
-    .string()
-    .trim()
-    .min(1)
-    .max(32)
-    .default("0.10.1"),
+  T3_MATCHING_CONTRACT_VERSION: z.string().trim().min(1).max(32).default("0.13.0"),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
   SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
   /**
@@ -159,8 +173,16 @@ const envSchema = z.object({
     .regex(/^[0-9a-fA-F]{64}$/u)
     .optional(),
   ETHERSCAN_API_KEY: z.string().min(1).optional(),
-  SEPOLIA_WBTC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
-  SEPOLIA_USDC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
+  SEPOLIA_WBTC_CONTRACT_ADDRESS: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{40}$/iu)
+    .optional(),
+  SEPOLIA_USDC_CONTRACT_ADDRESS: z
+    .string()
+    .trim()
+    .regex(/^0x[0-9a-f]{40}$/iu)
+    .optional(),
   /**
    * HMAC-SHA256 secret used to sign operator session JWTs. The
    * middleware in `auth/operator-auth.ts` fails closed when this is
@@ -244,12 +266,7 @@ const envSchema = z.object({
    * production migration is a one-line change to
    * `app.ts` once the host interface ships.
    */
-  SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF: z
-    .string()
-    .trim()
-    .min(1)
-    .max(256)
-    .optional(),
+  SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF: z.string().trim().min(1).max(256).optional(),
   /**
    * Sepolia chain id. Defaults to 11155111. Override only for
    * forked tests against Anvil (where the id is 31337).
@@ -292,7 +309,7 @@ const envSchema = z.object({
     .string()
     .trim()
     .regex(/^0x[0-9a-fA-F]{40}$/u)
-    .optional(),
+    .optional()
 });
 
 export type BackendEnv = z.infer<typeof envSchema>;
@@ -317,7 +334,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): BackendEnv {
     const issues = result.error.issues.map((issue) => {
       const path = issue.path.join(".") || "environment";
       const invalidValue = normalized[path];
-      return `${path}: ${issue.message}${invalidValue !== undefined ? ` (received: ${JSON.stringify(invalidValue)})` : ''}`;
+      return `${path}: ${issue.message}${invalidValue !== undefined ? ` (received: ${JSON.stringify(invalidValue)})` : ""}`;
     });
 
     throw new EnvValidationError(issues);
@@ -327,7 +344,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): BackendEnv {
 }
 
 export function getCorsAllowedOrigins(
-  env: Pick<BackendEnv, "CORS_ALLOWED_ORIGINS">,
+  env: Pick<BackendEnv, "CORS_ALLOWED_ORIGINS">
 ): readonly string[] {
   if (!env.CORS_ALLOWED_ORIGINS) {
     return [];

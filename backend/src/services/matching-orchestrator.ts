@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { MatchContractClient } from "../enclave/index.js";
 import {
-  deriveEncryptedTradeFieldHandles,
   deriveMatchReceiptAttestationRef,
   deriveReceiptHash,
   deriveTeeAttestationRef,
@@ -16,6 +15,7 @@ import type { TelemetryBus } from "./telemetry-bus.js";
 import type { PortfolioService } from "./portfolio.service.js";
 import type { IntentLockRepository } from "./intent-lock-repository.js";
 import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
+import { loadEnvelopeMasterKey } from "../enclave/keys/envelope-cipher.js";
 
 /** Default TTL for pending intents: 5 minutes */
 const DEFAULT_INTENT_TTL_MS = 5 * 60 * 1000;
@@ -89,6 +89,7 @@ export class MatchingOrchestrator {
   private readonly cleanupTimer: ReturnType<typeof setInterval>;
   private readonly intentLockRepository: IntentLockRepository | undefined;
   private readonly institutionConfigResolver: InstitutionSettlementConfigResolver | undefined;
+  private readonly envelopeMasterKeyHex: string;
   private pendingIntents: PendingIntent[] = [];
   private evictedCount = 0;
 
@@ -102,6 +103,7 @@ export class MatchingOrchestrator {
     cleanupIntervalMs: number = DEFAULT_CLEANUP_INTERVAL_MS,
     intentLockRepository?: IntentLockRepository,
     institutionConfigResolver?: InstitutionSettlementConfigResolver,
+    envelopeMasterKeyHex?: string,
   ) {
     this.matchClient = matchClient;
     this.settlementService = settlementService;
@@ -111,6 +113,7 @@ export class MatchingOrchestrator {
     this.settlementAssetCode = settlementAssetCode;
     this.intentTtlMs = intentTtlMs;
     this.institutionConfigResolver = institutionConfigResolver;
+    this.envelopeMasterKeyHex = envelopeMasterKeyHex ?? loadEnvelopeMasterKey().key.toString("hex");
 
     // Start periodic cleanup sweep
     this.cleanupTimer = setInterval(
@@ -347,6 +350,7 @@ export class MatchingOrchestrator {
         sellInstitutionId: sellIntent.institutionId,
         buyAuthorityRef: buyIntent.authorityRef,
         sellAuthorityRef: sellIntent.authorityRef,
+        envelopeMasterKeyHex: this.envelopeMasterKeyHex,
       });
 
       if (outcome.status !== "matched") {
@@ -622,12 +626,12 @@ export class MatchingOrchestrator {
         // (they are opaque correlation identifiers, not encrypted
         // field values -- see
         // `enclave/privacy/encrypted-trade-fields.ts`).
-        encryptedTradeFields: deriveEncryptedTradeFieldHandles({
-          outcomeRef: normalizedOutcome.outcomeRef,
-          executionRef: normalizedOutcome.executionRef,
-          buyerInstitutionId: normalizedOutcome.buyerInstitutionId,
-          sellerInstitutionId: normalizedOutcome.sellerInstitutionId,
-        }),
+        // v0.13.0: real AES-256-GCM ciphertexts minted inside the TEE.
+        encryptedTradeFields: {
+          assetCodeCiphertext: normalizedOutcome.assetCodeCiphertext,
+          quantityCiphertext: normalizedOutcome.quantityCiphertext,
+          executionPriceCiphertext: normalizedOutcome.executionPriceCiphertext,
+        },
         // The orchestrator does not hold plaintext asset /
         // quantity / execution price on the settled side. The
         // TEE-attested match outcome plus the lock descriptor

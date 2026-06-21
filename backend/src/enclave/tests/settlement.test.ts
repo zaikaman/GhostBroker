@@ -16,7 +16,10 @@ const outcome: OpaqueMatchOutcome = {
   executionRef: "t3exec_us3",
   buyerInstitutionId: "00000000-0000-4000-8000-000000000301",
   sellerInstitutionId: "00000000-0000-4000-8000-000000000302",
-  encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
+  assetCodeCiphertext: "aead.v1:test:asset",
+        quantityCiphertext: "aead.v1:test:qty",
+        executionPriceCiphertext: "aead.v1:test:price",
+        encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
   buyerAuthorityRef: "authority:buyer:settle",
   sellerAuthorityRef: "authority:seller:settle",
       // v0.8.0: TEE-attested match attestation binding the

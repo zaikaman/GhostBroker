@@ -55,7 +55,10 @@ function makeCommand(outcomeRef = "ws2-unit-1"): SettlementCommand {
     executionRef: `t3exec_${outcomeRef}`,
     buyerInstitutionId: "00000000-0000-4000-8000-0000000000b1",
     sellerInstitutionId: "00000000-0000-4000-8000-0000000000b2",
-    encryptedTradeFieldsRef: "encrypted_trade_fields_ws2_unit",
+
+
+
+        encryptedTradeFieldsRef: "encrypted_trade_fields_ws2_unit",
     submittedAt: new Date().toISOString(),
   };
 }

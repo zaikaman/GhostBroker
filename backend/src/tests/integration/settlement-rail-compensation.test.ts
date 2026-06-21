@@ -64,7 +64,10 @@ function buildCommand(): SettlementCommand {
     executionRef: "t3exec_comp",
     buyerInstitutionId: request.matchOutcome.buyerInstitutionId,
     sellerInstitutionId: request.matchOutcome.sellerInstitutionId,
-    encryptedTradeFieldsRef: "encrypted_trade_fields_comp",
+
+
+
+        encryptedTradeFieldsRef: "encrypted_trade_fields_comp",
     submittedAt: "2026-06-12T00:00:00.000Z",
   };
 }

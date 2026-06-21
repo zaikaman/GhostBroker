@@ -93,6 +93,12 @@ export interface RoundEvaluationResult {
    * bound to the exact proposal handles the TEE unsealed.
    */
   roundAttestationRef: string;
+  /** v0.13.0: AES-256-GCM ciphertext of asset code. Empty on "open". */
+  assetCodeCiphertext: string;
+  /** v0.13.0: AES-256-GCM ciphertext of matched quantity. Empty on "open". */
+  quantityCiphertext: string;
+  /** v0.13.0: AES-256-GCM ciphertext of execution price. Empty on "open". */
+  executionPriceCiphertext: string;
 }
 
 export interface SealRoundProposalRequest {
@@ -128,6 +134,12 @@ export interface EvaluateRoundRequest {
   sellProposalHandle: string;
   assetCode: string;
   correlationRef: string;
+  /**
+   * v0.13.0: Hex-encoded AEAD master key the TEE uses to derive
+   * per-trade, per-field AES-256-GCM keys for the settlement
+   * ciphertexts.
+   */
+  envelopeMasterKeyHex: string;
 }
 
 export interface NegotiationRoundClient {
@@ -190,6 +202,9 @@ interface T3EvaluateRoundResponse {
   expires_at?: string;
   evaluated_at?: string;
   round_attestation_ref?: string;
+  asset_code_ciphertext?: string;
+  quantity_ciphertext?: string;
+  execution_price_ciphertext?: string;
   buy_proposal_handle?: string;
   sell_proposal_handle?: string;
 }
@@ -430,6 +445,7 @@ export class T3NegotiationRoundClient implements NegotiationRoundClient {
         sell_proposal_handle: request.sellProposalHandle,
         asset_code: request.assetCode,
         correlation_ref: request.correlationRef,
+        envelope_master_key_hex: request.envelopeMasterKeyHex,
       },
     });
 
@@ -472,6 +488,9 @@ export class T3NegotiationRoundClient implements NegotiationRoundClient {
           outcomeRef: "",
           executionRef: "",
         }),
+        assetCodeCiphertext: "",
+        quantityCiphertext: "",
+        executionPriceCiphertext: "",
       };
     }
 
@@ -527,6 +546,9 @@ export class T3NegotiationRoundClient implements NegotiationRoundClient {
       expiresAt: requireOpaque(body.expires_at, "expires_at"),
       evaluatedAt: body.evaluated_at ?? new Date().toISOString(),
       roundAttestationRef: body.round_attestation_ref ?? "",
+      assetCodeCiphertext: body.asset_code_ciphertext ?? "",
+      quantityCiphertext: body.quantity_ciphertext ?? "",
+      executionPriceCiphertext: body.execution_price_ciphertext ?? "",
     };
   }
 }

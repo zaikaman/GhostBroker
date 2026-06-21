@@ -42,6 +42,13 @@ export interface MatchEvaluationRequest {
    * `buyAuthorityRef` for the rationale.
    */
   sellAuthorityRef: string;
+  /**
+   * v0.13.0: Hex-encoded (64-char) AEAD master key the TEE uses
+   * to derive per-trade, per-field AES-256-GCM keys for the
+   * settlement ciphertexts. Same value already forwarded to
+   * `seal-intent` for envelope decryption.
+   */
+  envelopeMasterKeyHex: string;
 }
 
 export interface OpaqueMatchOutcome {
@@ -86,6 +93,22 @@ export interface OpaqueMatchOutcome {
    * row are the IDs the TEE bound to the match outcome.
    */
   matchAttestationRef: string;
+  /**
+   * v0.13.0: AES-256-GCM ciphertext of the traded asset code,
+   * minted inside the TEE. Wire form `aead.v1:<nonce>:<ct>`.
+   * Empty on `no_match`.
+   */
+  assetCodeCiphertext: string;
+  /**
+   * v0.13.0: AES-256-GCM ciphertext of the matched quantity.
+   * Empty on `no_match`.
+   */
+  quantityCiphertext: string;
+  /**
+   * v0.13.0: AES-256-GCM ciphertext of the execution price.
+   * Empty on `no_match`.
+   */
+  executionPriceCiphertext: string;
   expiresAt: string;
   status: "matched" | "no_match";
   /**
@@ -149,6 +172,9 @@ interface T3MatchOutcomeResponse {
   buyer_authority_ref?: string;
   seller_authority_ref?: string;
   match_attestation_ref?: string;
+  asset_code_ciphertext?: string;
+  quantity_ciphertext?: string;
+  execution_price_ciphertext?: string;
   expires_at?: string;
   status?: "matched" | "no_match";
   matched_quantity?: string;
@@ -285,6 +311,7 @@ export class T3MatchContractClient implements MatchContractClient {
         sell_institution_id: request.sellInstitutionId,
         buy_authority_ref: request.buyAuthorityRef,
         sell_authority_ref: request.sellAuthorityRef,
+        envelope_master_key_hex: request.envelopeMasterKeyHex,
       },
     });
 
@@ -363,6 +390,9 @@ export class T3MatchContractClient implements MatchContractClient {
       // surfaces the empty string to the audit log so a
       // downgrade is visible.
       matchAttestationRef: response.body.match_attestation_ref ?? "",
+      assetCodeCiphertext: response.body.asset_code_ciphertext ?? "",
+      quantityCiphertext: response.body.quantity_ciphertext ?? "",
+      executionPriceCiphertext: response.body.execution_price_ciphertext ?? "",
       expiresAt: requireOpaque(response.body.expires_at, "expires_at"),
       status,
       matchedQuantity,

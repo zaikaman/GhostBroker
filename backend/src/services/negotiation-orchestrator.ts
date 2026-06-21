@@ -6,7 +6,6 @@ import type {
   NegotiationDisclosureVerifier,
 } from "../enclave/index.js";
 import {
-  deriveEncryptedTradeFieldHandles,
   deriveReceiptHash,
   deriveTeeAttestationRef,
 } from "../enclave/privacy/encrypted-trade-fields.js";
@@ -1205,6 +1204,9 @@ export class NegotiationOrchestrator {
     let executionPrice = 0;
     let matchedQuantity = 0;
     let roundAttestationRef = "";
+    let assetCodeCiphertext = "";
+    let quantityCiphertext = "";
+    let executionPriceCiphertext = "";
 
     if (buyProposal && sellProposal && buyProposal.proposalHandle && sellProposal.proposalHandle) {
       const evaluation = await this.roundEvaluator.evaluateRound({
@@ -1212,6 +1214,7 @@ export class NegotiationOrchestrator {
         sellProposalHandle: sellProposal.proposalHandle,
         assetCode: session.asset_code,
         correlationRef,
+        envelopeMasterKeyHex: this.envelopeMasterKeyHex,
       });
       logger.debug(
         {
@@ -1229,6 +1232,9 @@ export class NegotiationOrchestrator {
       executionPrice = evaluation.executionPrice;
       matchedQuantity = evaluation.matchedQuantity;
       roundAttestationRef = evaluation.roundAttestationRef;
+      assetCodeCiphertext = evaluation.assetCodeCiphertext;
+      quantityCiphertext = evaluation.quantityCiphertext;
+      executionPriceCiphertext = evaluation.executionPriceCiphertext;
 
       // v0.10.0: the TEE now recovers price/quantity from its
       // kv-store on the evaluate-round path and computes the fill
@@ -1365,6 +1371,36 @@ export class NegotiationOrchestrator {
         await this.advanceTurn(session, actorSide);
         return { status: "active" };
       }
+
+      // v0.13.0: fail closed when the TEE returns empty ciphertexts on
+      // a crossed outcome. Empty ciphertexts mean the deployed contract
+      // build does not mint AEAD ciphertexts (pre-v0.13.0) or the TEE
+      // contract is not the version the orchestrator expects. Expire
+      // the session rather than hitting the DB CHECK constraint.
+      if (
+        !assetCodeCiphertext ||
+        !quantityCiphertext ||
+        !executionPriceCiphertext
+      ) {
+        const missing: string[] = [];
+        if (!assetCodeCiphertext) missing.push("assetCodeCiphertext");
+        if (!quantityCiphertext) missing.push("quantityCiphertext");
+        if (!executionPriceCiphertext) missing.push("executionPriceCiphertext");
+        logger.error(
+          {
+            event: "negotiation.settle.missing_ciphertexts",
+            sessionId: session.id,
+            missingFields: missing,
+            executionPrice,
+            matchedQuantity,
+            correlationRef,
+          },
+          "TEE returned empty ciphertexts on a crossed outcome; cannot settle. Expiring session.",
+        );
+        await this.expireSession(session, correlationRef);
+        return { status: "expired" };
+      }
+
       try {
         await this.convergeAndSettle({
           session,
@@ -1372,6 +1408,9 @@ export class NegotiationOrchestrator {
           matchedQuantity,
           roundAttestationRef,
           correlationRef,
+          assetCodeCiphertext,
+          quantityCiphertext,
+          executionPriceCiphertext,
         });
       } catch (err) {
         // convergeAndSettle reset the session to "active" and
@@ -1639,6 +1678,10 @@ export class NegotiationOrchestrator {
     matchedQuantity: number;
     roundAttestationRef: string;
     correlationRef: string;
+    /** v0.13.0: TEE-minted AES-256-GCM ciphertexts. */
+    assetCodeCiphertext: string;
+    quantityCiphertext: string;
+    executionPriceCiphertext: string;
   }): Promise<void> {
     const { session } = input;
     await this.repository.updateSession({
@@ -1726,7 +1769,11 @@ export class NegotiationOrchestrator {
     this.publish(session.buy_institution_id, "negotiation_settling", input.correlationRef);
     this.publish(session.sell_institution_id, "negotiation_settling", input.correlationRef);
 
-    const outcomeRef = `negotiation_${session.id}_${randomUUID()}`;
+    // v0.13.0: put the random UUID FIRST so that stringToBytes32's
+    // 32-byte truncation preserves per-attempt uniqueness. Previously
+    // the session.id (36-char UUID) came first; every retry for the
+    // same session produced a bytes32 collision on-chain.
+    const outcomeRef = `negotiation_${randomUUID()}_${session.id}`;
     const executionRef = `t3exec_${randomUUID()}`;
     const receiptBase = `t3receipt.${outcomeRef}.${executionRef}`;
     const transcriptRef = `negotiation-transcript:${session.id}`;
@@ -1738,6 +1785,9 @@ export class NegotiationOrchestrator {
         buyerInstitutionId: session.buy_institution_id,
         sellerInstitutionId: session.sell_institution_id,
         encryptedTradeFieldsRef: transcriptRef,
+        assetCodeCiphertext: input.assetCodeCiphertext,
+        quantityCiphertext: input.quantityCiphertext,
+        executionPriceCiphertext: input.executionPriceCiphertext,
         buyerAuthorityRef: `ghostbroker-delegation:${buyerCredential?.id ?? ""}`,
         sellerAuthorityRef: `ghostbroker-delegation:${sellerCredential?.id ?? ""}`,
         // Negotiation-orchestrator-driven settlements carry the
@@ -1783,12 +1833,12 @@ export class NegotiationOrchestrator {
       // pretend to be ciphertext (they are opaque correlation
       // identifiers, not encrypted field values -- see
       // `enclave/privacy/encrypted-trade-fields.ts`).
-      encryptedTradeFields: deriveEncryptedTradeFieldHandles({
-        outcomeRef,
-        executionRef,
-        buyerInstitutionId: session.buy_institution_id,
-        sellerInstitutionId: session.sell_institution_id,
-      }),
+      // v0.13.0: real AES-256-GCM ciphertexts from the TEE.
+      encryptedTradeFields: {
+        assetCodeCiphertext: input.assetCodeCiphertext,
+        quantityCiphertext: input.quantityCiphertext,
+        executionPriceCiphertext: input.executionPriceCiphertext,
+      },
       assetCode: session.asset_code,
       quantity: input.matchedQuantity,
       executionPrice: input.executionPrice,
@@ -2074,6 +2124,7 @@ export class NegotiationOrchestrator {
       sellProposalHandle: standingHandles.sell.proposalHandle,
       assetCode: session.asset_code,
       correlationRef: input.correlationRef,
+      envelopeMasterKeyHex: this.envelopeMasterKeyHex,
     });
     if (
       evaluation.status !== "crossed" ||
@@ -2088,12 +2139,41 @@ export class NegotiationOrchestrator {
       this.publish(session.sell_institution_id, "negotiation_disclosure_required", input.correlationRef);
       return { status: "active" };
     }
+    // v0.13.0: fail closed when the TEE returns empty ciphertexts on
+    // a crossed outcome in the escalation approval path.
+    if (
+      !evaluation.assetCodeCiphertext ||
+      !evaluation.quantityCiphertext ||
+      !evaluation.executionPriceCiphertext
+    ) {
+      const missing: string[] = [];
+      if (!evaluation.assetCodeCiphertext) missing.push("assetCodeCiphertext");
+      if (!evaluation.quantityCiphertext) missing.push("quantityCiphertext");
+      if (!evaluation.executionPriceCiphertext) missing.push("executionPriceCiphertext");
+      logger.error(
+        {
+          event: "negotiation.settle.missing_ciphertexts",
+          sessionId: session.id,
+          missingFields: missing,
+          executionPrice: evaluation.executionPrice,
+          matchedQuantity: evaluation.matchedQuantity,
+          correlationRef: input.correlationRef,
+        },
+        "TEE returned empty ciphertexts on a crossed escalation approval; cannot settle. Expiring session.",
+      );
+      await this.expireSession(session, input.correlationRef);
+      return { status: "expired" };
+    }
+
     await this.convergeAndSettle({
       session,
       executionPrice: evaluation.executionPrice,
       matchedQuantity: evaluation.matchedQuantity,
       roundAttestationRef: evaluation.roundAttestationRef,
       correlationRef: input.correlationRef,
+      assetCodeCiphertext: evaluation.assetCodeCiphertext,
+      quantityCiphertext: evaluation.quantityCiphertext,
+      executionPriceCiphertext: evaluation.executionPriceCiphertext,
     });
     // `convergeAndSettle` may abort and mark the session
     // `expired` without throwing (e.g. when the snapshotted

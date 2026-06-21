@@ -33,6 +33,9 @@ class CapturingNetworkClient implements T3NetworkClient {
         execution_price: "50000",
         buyer_locked_amount: "200000",
         seller_locked_amount: "4",
+        asset_code_ciphertext: "aead.v1:abcdef:123456",
+        quantity_ciphertext: "aead.v1:fedcba:654321",
+        execution_price_ciphertext: "aead.v1:deadbeef:cafebabe",
       } as TBody,
     };
   }
@@ -55,6 +58,7 @@ const request: MatchEvaluationRequest = {
   sellInstitutionId: "00000000-0000-4000-8000-000000000302",
   buyAuthorityRef: "authority:buyer:settle",
   sellAuthorityRef: "authority:seller:settle",
+  envelopeMasterKeyHex: "8e4e3b54069440b0486c7af2755799367ae6f21b512b62b5837003f374884739",
 };
 
 describe("match contract client", () => {
@@ -66,6 +70,9 @@ describe("match contract client", () => {
       outcomeRef: "match_outcome_us3",
       executionRef: "t3exec_us3",
       encryptedTradeFieldsRef: "encrypted_trade_fields_us3",
+      assetCodeCiphertext: "aead.v1:abcdef:123456",
+      quantityCiphertext: "aead.v1:fedcba:654321",
+      executionPriceCiphertext: "aead.v1:deadbeef:cafebabe",
       status: "matched",
       matchedQuantity: 4,
       executionPrice: 50000,
@@ -74,12 +81,12 @@ describe("match contract client", () => {
     // contract's `EvaluateMatchInput` deserializer in
     // contracts/matching-policy/src/lib.rs, and carries the
     // explicit contract version so the T3N adapter routes to
-    // the v0.10.1 build (kv-store-backed state). The per-side
+    // the v0.11.0 build (kv-store-backed state). The per-side
     // institution IDs and authority refs are forwarded to the
     // TEE so it can echo them back on the outcome and bind them
     // to the match attestation ref.
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.10.1",
+      version: "0.13.0",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
@@ -88,6 +95,7 @@ describe("match contract client", () => {
       sell_institution_id: request.sellInstitutionId,
       buy_authority_ref: request.buyAuthorityRef,
       sell_authority_ref: request.sellAuthorityRef,
+      envelope_master_key_hex: request.envelopeMasterKeyHex,
     });
   });
 

@@ -162,7 +162,10 @@ function makeCommand(ctx: TestContext, outcomeRef: string): SettlementCommand {
     executionRef: `t3exec_${outcomeRef}`,
     buyerInstitutionId: ctx.buyerInstitutionId,
     sellerInstitutionId: ctx.sellerInstitutionId,
-    encryptedTradeFieldsRef: "encrypted_trade_fields_ws25",
+
+
+
+        encryptedTradeFieldsRef: "encrypted_trade_fields_ws25",
     submittedAt: new Date().toISOString(),
   };
 }

@@ -125,21 +125,22 @@ const evaluateRequest: EvaluateRoundRequest = {
   sellProposalHandle: "round_sell_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   assetCode: "WBTC",
   correlationRef: "round:eval:0001",
+  envelopeMasterKeyHex: "8e4e3b54069440b0486c7af2755799367ae6f21b512b62b5837003f374884739",
 };
 
 describe("T3NegotiationRoundClient — contract version pinning", () => {
-  it("pins the default contract version to 0.10.1 on seal-round-proposal", async () => {
+  it("pins the default contract version to 0.13.0 on seal-round-proposal", async () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3NegotiationRoundClient({ networkClient });
     await client.sealRoundProposal(sealRequest);
-    expect(networkClient.requests[0]?.body).toMatchObject({ version: "0.10.1" });
+    expect(networkClient.requests[0]?.body).toMatchObject({ version: "0.11.0" });
   });
 
-  it("pins the default contract version to 0.10.1 on evaluate-round", async () => {
+  it("pins the default contract version to 0.13.0 on evaluate-round", async () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3NegotiationRoundClient({ networkClient });
     await client.evaluateRound(evaluateRequest);
-    expect(networkClient.requests[0]?.body).toMatchObject({ version: "0.10.1" });
+    expect(networkClient.requests[0]?.body).toMatchObject({ version: "0.11.0" });
   });
 
   it("honours an explicit contractVersion override on both methods", async () => {
@@ -172,7 +173,7 @@ describe("T3NegotiationRoundClient — seal-round-proposal wire shape", () => {
     );
     expect(networkClient.requests[0]?.method).toBe("POST");
    expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.10.1",
+      version: "0.13.0",
       sealed_envelope: sealRequest.sealedEnvelope,
       envelope_master_key_hex: sealRequest.envelopeMasterKeyHex,
       institution_did: sealRequest.institutionDid,
@@ -200,11 +201,12 @@ describe("T3NegotiationRoundClient — evaluate-round wire shape", () => {
       "/contracts/negotiation/round-evaluation",
     );
    expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.10.1",
+      version: "0.13.0",
       buy_proposal_handle: evaluateRequest.buyProposalHandle,
       sell_proposal_handle: evaluateRequest.sellProposalHandle,
       asset_code: evaluateRequest.assetCode,
       correlation_ref: evaluateRequest.correlationRef,
+      envelope_master_key_hex: evaluateRequest.envelopeMasterKeyHex,
     });
   });
 });

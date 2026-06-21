@@ -79,6 +79,33 @@
 //!     load-bearing privacy mechanism: active order data lives
 //!     exclusively inside the TEE.
 //!
+//! v0.11.0 changes (real per-field AEAD ciphertexts on match outcomes):
+//!   * `evaluate-match` and `evaluate-round` now AES-256-GCM
+//!     encrypt the three settlement fields (asset code, matched
+//!     quantity, execution price) inside the TEE and return the
+//!     ciphertexts on the outcome. The orchestrator writes them
+//!     directly to `completed_trades` without ever holding the
+//!     decryption key. The previous v0.10.x path returned
+//!     deterministic SHA-256 digests (opaque correlation handles)
+//!     that anyone with a Supabase read could re-derive from the
+//!     row own (outcome_ref, execution_ref, institution_id)
+//!     columns - zero confidentiality. The new path derives a
+//!     per-trade, per-field AEAD key via HKDF-SHA256(master_key,
+//!     salt=outcome_ref, info=domain_tag) so a DB breach alone
+//!     cannot recover the plaintext asset / quantity / price.
+//!   * `EvaluateMatchInput` and `EvaluateRoundInput` gain a new
+//!     required `envelope_master_key_hex` field - the same
+//!     32-byte hex the orchestrator already forwards to
+//!     `seal-intent` / `seal-round-proposal` for envelope
+//!     decryption. The TEE uses it as the HKDF input keying
+//!     material; it is never persisted to the kv-store or
+//!     echoed on the outcome.
+//!   * `EvaluateMatchOutput` and `EvaluateRoundOutput` gain
+//!     `asset_code_ciphertext`, `quantity_ciphertext`,
+//!     `execution_price_ciphertext` - each
+//!     `aead.v1:<nonce_hex>:<ciphertext_hex>`. Empty strings on
+//!     `no_match` / `open` (no fill to encrypt).
+//!
 //! v0.6.0 changes:
 //!   * `seal-ticket` now binds `policy_hash` and
 //!     `compatibility_token` into the ticket handle (previously
@@ -194,7 +221,11 @@ mod matching;
 // evaluate-match and evaluate-round recover them by handle.
 // v0.10.1: use canonical `z:<tenant-hex>:<tail>` kv-store map names
 // instead of bare tails — the host does not auto-prefix.
-pub const CONTRACT_VERSION: &str = "0.10.1";
+// v0.13.0: evaluate-match and evaluate-round now AES-256-GCM encrypt
+// the three settlement fields inside the TEE and return real
+// `aead.v1:` ciphertexts on the outcome - replacing the deterministic
+// SHA-256 digests that were re-derivable from the row own columns.
+pub const CONTRACT_VERSION: &str = "0.13.0";
 
 struct Component;
 
@@ -368,6 +399,13 @@ pub struct EvaluateMatchInput {
     pub sell_institution_id: String,
     pub buy_authority_ref: String,
     pub sell_authority_ref: String,
+    /// v0.13.0: Hex-encoded (64-char) AEAD master key the
+    /// orchestrator holds via `ENVELOPE_ENCRYPTION_MASTER_KEY`.
+    /// The TEE uses it as HKDF input keying material to derive a
+    /// per-trade, per-field AES-256-GCM key for the settlement
+    /// ciphertexts. Same value already forwarded to `seal-intent`
+    /// for envelope decryption - no new secret-management surface.
+    pub envelope_master_key_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -413,6 +451,23 @@ pub struct EvaluateMatchOutput {
     /// institution IDs in the row are the IDs the TEE bound to
     /// the match outcome.
     pub match_attestation_ref: String,
+    /// v0.13.0: AES-256-GCM ciphertext of the traded asset code,
+    /// minted inside the TEE. Wire form
+    /// `aead.v1:<nonce_hex>:<ciphertext_hex>`. The orchestrator
+    /// writes this directly to
+    /// `completed_trades.asset_code_ciphertext`. Empty on
+    /// `no_match` (no fill to encrypt). A DB reader cannot
+    /// recover the plaintext asset without the
+    /// `ENVELOPE_ENCRYPTION_MASTER_KEY`.
+    pub asset_code_ciphertext: String,
+    /// v0.13.0: AES-256-GCM ciphertext of the matched quantity.
+    /// Domain-separated by `ghostbroker.completed_trades.quantity.v1`.
+    /// Empty on `no_match`.
+    pub quantity_ciphertext: String,
+    /// v0.13.0: AES-256-GCM ciphertext of the execution price.
+    /// Domain-separated by `ghostbroker.completed_trades.execution_price.v1`.
+    /// Empty on `no_match`.
+    pub execution_price_ciphertext: String,
 }
 
 // ─── evaluate-pair types (negotiation ticket pair authority) ───
@@ -602,6 +657,13 @@ pub struct EvaluateRoundInput {
     pub sell_proposal_handle: String,
     pub asset_code: String,
     pub correlation_ref: String,
+    /// v0.13.0: Hex-encoded (64-char) AEAD master key the
+    /// orchestrator holds via `ENVELOPE_ENCRYPTION_MASTER_KEY`.
+    /// Same value forwarded to `seal-round-proposal` for envelope
+    /// decryption. The TEE uses it as HKDF input keying material
+    /// to derive a per-trade, per-field AES-256-GCM key for the
+    /// settlement ciphertexts.
+    pub envelope_master_key_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -629,6 +691,17 @@ pub struct EvaluateRoundOutput {
     /// pattern so the settlement record carries a TEE-attested
     /// identity instead of an orchestrator-stamped override.
     pub round_attestation_ref: String,
+    /// v0.13.0: AES-256-GCM ciphertext of the traded asset code,
+    /// minted inside the TEE. Wire form
+    /// `aead.v1:<nonce_hex>:<ciphertext_hex>`. Empty on
+    /// `status: "open"` (no fill to encrypt).
+    pub asset_code_ciphertext: String,
+    /// v0.13.0: AES-256-GCM ciphertext of the matched quantity.
+    /// Empty on `status: "open"`.
+    pub quantity_ciphertext: String,
+    /// v0.13.0: AES-256-GCM ciphertext of the execution price.
+    /// Empty on `status: "open"`.
+    pub execution_price_ciphertext: String,
 }
 
 /// Domain-separation prefix for the `seal-round-proposal`

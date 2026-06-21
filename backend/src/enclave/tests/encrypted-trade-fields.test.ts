@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  deriveEncryptedTradeFieldHandles,
   deriveReceiptHash,
   deriveTeeAttestationRef,
 } from "../privacy/encrypted-trade-fields.js";
@@ -24,86 +23,16 @@ import {
  * encryptedEnvelope they are derived from, and the receipt hash /
  * attestation reference are deterministic but content-bound.
  */
-describe("encrypted trade field handles", () => {
-  const inputs = {
-    outcomeRef: "match_outcome_us3",
-    executionRef: "t3exec_us3",
-    buyerInstitutionId: "00000000-0000-4000-8000-000000000301",
-    sellerInstitutionId: "00000000-0000-4000-8000-000000000302",
-  };
-
-  it("derives three pairwise-distinct settlement handles from the outcome", () => {
-    const handles = deriveEncryptedTradeFieldHandles(inputs);
-    expect(handles.assetCodeCiphertext).not.toBe(handles.quantityCiphertext);
-    expect(handles.assetCodeCiphertext).not.toBe(
-      handles.executionPriceCiphertext,
-    );
-    expect(handles.quantityCiphertext).not.toBe(
-      handles.executionPriceCiphertext,
-    );
-  });
-
-  it("does not return the encrypted envelope or any of the input fields verbatim", () => {
-    // The whole point of the helper: a DB reader who sees
-    // `asset_code_ciphertext` must not be able to pass it through
-    // `decodeSealedEnvelope` and recover the trading parameters.
-    // The previous code wrote the envelope directly, so this
-    // assertion would have caught the regression.
-    const envelope = "t3env.buyer.envelope.base64url.ciphertext";
-    const handles = deriveEncryptedTradeFieldHandles(inputs);
-    expect(handles.assetCodeCiphertext).not.toBe(envelope);
-    expect(handles.quantityCiphertext).not.toBe(envelope);
-    expect(handles.executionPriceCiphertext).not.toBe(envelope);
-    expect(handles.assetCodeCiphertext).not.toContain(envelope);
-    expect(handles.quantityCiphertext).not.toContain(envelope);
-    expect(handles.executionPriceCiphertext).not.toContain(envelope);
-    expect(handles.assetCodeCiphertext).not.toBe(inputs.outcomeRef);
-    expect(handles.assetCodeCiphertext).not.toBe(inputs.executionRef);
-    expect(handles.assetCodeCiphertext).not.toBe(inputs.buyerInstitutionId);
-    expect(handles.assetCodeCiphertext).not.toBe(inputs.sellerInstitutionId);
-  });
-
-  it("produces handles with the `sha256:` digest prefix", () => {
-    // The README §Privacy Boundary describes these columns as
-    // carrying opaque correlation handles. The opaque-handle
-    // format is `sha256:<hex>` so DB readers and the dashboard
-    // can recognise the column shape without parsing.
-    const handles = deriveEncryptedTradeFieldHandles(inputs);
-    expect(handles.assetCodeCiphertext).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(handles.quantityCiphertext).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(handles.executionPriceCiphertext).toMatch(
-      /^sha256:[0-9a-f]{64}$/u,
-    );
-  });
-
-  it("is deterministic given the same inputs", () => {
-    // The receipt correlation logic keys on
-    // `(outcomeRef, accessScope)`; the handles must be stable so
-    // a re-fetched row matches the original.
-    expect(deriveEncryptedTradeFieldHandles(inputs)).toEqual(
-      deriveEncryptedTradeFieldHandles(inputs),
-    );
-  });
-
-  it("changes when either institution id changes", () => {
-    // Per-field handles are institution-bound: a buy/sell
-    // mismatch must produce different digests so two trades for
-    // the same outcome ref but different counterparties are
-    // distinguishable.
-    const swapped = {
-      ...inputs,
-      buyerInstitutionId: inputs.sellerInstitutionId,
-      sellerInstitutionId: inputs.buyerInstitutionId,
-    };
-    const baseline = deriveEncryptedTradeFieldHandles(inputs);
-    const rotated = deriveEncryptedTradeFieldHandles(swapped);
-    expect(rotated.assetCodeCiphertext).not.toBe(
-      baseline.assetCodeCiphertext,
-    );
-    expect(rotated.quantityCiphertext).not.toBe(baseline.quantityCiphertext);
-    expect(rotated.executionPriceCiphertext).not.toBe(
-      baseline.executionPriceCiphertext,
-    );
+describe("v0.13.0 settlement ciphertexts", () => {
+  it("does not export deriveEncryptedTradeFieldHandles (removed in v0.11.0)", async () => {
+    // The function was removed because the SHA-256 digests it
+    // produced were re-derivable from the row own columns -
+    // zero confidentiality. The TEE now mints real AES-256-GCM
+    // ciphertexts via encrypt_trade_field inside evaluate-match /
+    // evaluate-round, and the orchestrator writes them directly
+    // from the TEE outcome.
+    const mod = await import("../privacy/encrypted-trade-fields.js");
+    expect((mod as any).deriveEncryptedTradeFieldHandles).toBeUndefined();
   });
 });
 

@@ -373,21 +373,25 @@ deny list.
 ### Layer 3: Database Schema
 
 The `completed_trades` table stores the per-field settlement metadata
-exclusively as **opaque correlation handles** derived deterministically from
-the TEE-attested match outcome:
+exclusively as **real AES-256-GCM ciphertexts** minted inside the TEE by the
+matching contract's `evaluate-match` / `evaluate-round` functions (v0.13.0):
 
-- `asset_code_ciphertext` -- `sha256:` digest over the TEE-attested match
-  outcome and per-side institution ids, domain-separated by
-  `ghostbroker.completed_trades.asset_code.v1`
-- `quantity_ciphertext` -- `sha256:` digest over the same TEE-attested
-  inputs, domain-separated by `ghostbroker.completed_trades.quantity.v1`
-- `execution_price_ciphertext` -- `sha256:` digest over the same
-  TEE-attested inputs, domain-separated by
-  `ghostbroker.completed_trades.execution_price.v1`
+- `asset_code_ciphertext` -- `aead.v1:<nonce_hex>:<ciphertext_hex>` AES-256-GCM
+  ciphertext of the traded asset code, minted inside the TEE. The per-trade,
+  per-field AEAD key is derived via HKDF-SHA256(master_key, salt=outcome_ref,
+  info=`ghostbroker.completed_trades.asset_code.v1`).
+- `quantity_ciphertext` -- `aead.v1:<nonce_hex>:<ciphertext_hex>` AES-256-GCM
+  ciphertext of the matched quantity, domain-separated by
+  `ghostbroker.completed_trades.quantity.v1`.
+- `execution_price_ciphertext` -- `aead.v1:<nonce_hex>:<ciphertext_hex>` AES-256-GCM
+  ciphertext of the execution price, domain-separated by
+  `ghostbroker.completed_trades.execution_price.v1`.
 
-The three columns are pairwise distinct because each is hashed over a
-different domain-separated input, and none of them carries the raw
-encrypted envelope or any plaintext trading parameter. The
+The three columns are pairwise distinct because each is encrypted under a
+different domain-separated HKDF info parameter. The `ENVELOPE_ENCRYPTION_MASTER_KEY`
+(orchestrator env var) is the HKDF input keying material; it is never persisted
+to the database, so a DB breach alone cannot recover the plaintext asset /
+quantity / price. The
 `audit_receipts.receipt_hash` column is a real SHA-256 over the receipt
 ciphertext payload (the receipt's authenticity is bound to the actual
 ciphertext bytes, not to a forgeable `sha256:${outcomeRef}:${side}`
@@ -402,21 +406,16 @@ helpers live in
 domain-separation constants stay in one place. The schema in
 `database/migrations/003_create_completed_trades.sql` is unchanged
 because the column shape was always opaque-text; the only thing that
-changed is the value the orchestrator writes. The settlement record
-is **not** encrypted field-level ciphertext today -- it is an opaque
-correlation handle -- so the README §Privacy Boundary deliberately
-calls these "opaque correlation handles" rather than "encrypted
-identifiers" or "encrypted execution price". A future TEE contract
-version (the v0.8.0 wire form) can mint the digests inside the
-enclave and replace this derivation with real per-field ciphertext
-without touching the orchestrator call sites. What an operator sees in
+changed is the value the orchestrator writes. The settlement record columns are real AES-256-GCM ciphertexts as of
+v0.13.0, replacing the v0.10.x deterministic SHA-256 digests that were
+re-derivable from the row own columns. What an operator sees in
 the Observatory Console:
 
 - Connection status (backend, WebSocket, Supabase, T3 sandbox, per-agent)
 - Sanitized state transitions: `agent_verified`, `intent_sealed`,
   `encrypted_evaluation`, `settlement_finalized`, `receipt_available`
-- Completed trade records (post-settlement only, opaque correlation
-  handle columns)
+- Completed trade records (post-settlement only, real AEAD ciphertext
+  columns minted inside the TEE)
 - Audit receipt metadata (real SHA-256 hash of the receipt ciphertext,
   key version, TEE-attested attestation reference)
 

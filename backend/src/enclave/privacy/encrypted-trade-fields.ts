@@ -1,66 +1,28 @@
 import { createHash } from "node:crypto";
 
 /**
- * Opaque correlation handles for the three `completed_trades`
- * settlement columns. These are NOT ciphertexts of the underlying
- * asset / quantity / execution-price values; they are deterministic
- * SHA-256 digests of a domain-separated tuple of TEE-attested match
- * outcome metadata, with no plaintext field included in the input.
+ * Settlement field ciphertexts and receipt attestation helpers.
  *
- * The P0 privacy regression they fix: the previous orchestrator code
- * populated all three columns with the raw buy-side `encryptedEnvelope`
- * blob. Anyone with Supabase read access could `decodeSealedEnvelope`
- * one column and recover the full plaintext trading parameters (asset,
- * side, quantity, price) for both sides of the trade.
+ * As of v0.13.0 the three `completed_trades` settlement columns
+ * (`asset_code_ciphertext`, `quantity_ciphertext`,
+ * `execution_price_ciphertext`) hold REAL AES-256-GCM ciphertexts
+ * minted inside the TEE by the matching contract evaluate-match /
+ * evaluate-round functions. The orchestrator writes them directly
+ * from the TEE outcome without ever holding the decryption key.
+ * The per-trade, per-field AEAD key is derived via
+ * HKDF-SHA256(master_key, salt=outcome_ref, info=domain_tag) inside
+ * the enclave; a DB breach alone cannot recover the plaintext asset
+ * / quantity / price without the ENVELOPE_ENCRYPTION_MASTER_KEY
+ * (orchestrator env var, never persisted to the database).
  *
- * The handle derivation is one-way and irreversible without the
- * TEE-held decryption context, so the database column now carries:
- *
- *   - a stable identifier for "the asset field of outcome X" that
- *     can be correlated across the receipt row, the audit log, and
- *     the chain rail event without leaking the plaintext asset code,
- *   - the same property for quantity and execution price,
- *   - distinct, non-overlapping digests per field (no single column
- *     leak collapses all three values).
- *
- * The digests do not pretend to be encrypted asset codes or prices.
- * The README §Privacy Boundary and SUBMISSION.md describe the
- * columns as holding "opaque per-field correlation handles derived
- * from the TEE-attested match outcome", not encrypted field values.
- * A future TEE contract version (the v0.6.0 wire form) can mint
- * these digests inside the enclave and replace this derivation with
- * a real per-field ciphertext; the call sites do not change.
+ * The previous v0.10.x implementation stored deterministic SHA-256
+ * digests ("opaque correlation handles") that were re-derivable from
+ * the row own columns - zero confidentiality. That function has been
+ * removed. This module now only contains the receipt-side helpers:
+ * deriveReceiptHash, deriveTeeAttestationRef, and
+ * deriveMatchReceiptAttestationRef.
  */
-export interface EncryptedTradeFieldHandles {
-  assetCodeCiphertext: string;
-  quantityCiphertext: string;
-  executionPriceCiphertext: string;
-}
 
-/**
- * Inputs to the per-field handle derivation. The orchestrator already
- * holds all four values after the TEE match evaluation returns and
- * the canonical institution ids are stamped onto the outcome.
- */
-export interface EncryptedTradeFieldInputs {
-  outcomeRef: string;
-  executionRef: string;
-  buyerInstitutionId: string;
-  sellerInstitutionId: string;
-}
-
-/**
- * Domain-separation prefix for the asset-code handle. The full input
- * tuple to the SHA-256 digest is:
- *   `${DOMAIN_PREFIX}:${outcomeRef}:${executionRef}:${buyerInstitutionId}:${sellerInstitutionId}`
- * Domain separation keeps the three fields' digests disjoint and
- * prevents the asset-code digest from colliding with the
- * quantity / execution-price digests in a future cross-join attack
- * against `audit_receipts`.
- */
-const ASSET_CODE_DOMAIN = "ghostbroker.completed_trades.asset_code.v1";
-const QUANTITY_DOMAIN = "ghostbroker.completed_trades.quantity.v1";
-const EXECUTION_PRICE_DOMAIN = "ghostbroker.completed_trades.execution_price.v1";
 const RECEIPT_DOMAIN = "ghostbroker.completed_trades.receipt.v1";
 const ATTESTATION_DOMAIN = "ghostbroker.completed_trades.t3_attestation.v1";
 const MATCH_ATTESTATION_DOMAIN =
@@ -74,35 +36,7 @@ function digestFor(domain: string, ...parts: readonly string[]): string {
 }
 
 /**
- * Derive the three opaque per-field correlation handles for a
- * `completed_trades` row. The handles are deterministic given the
- * TEE-attested match outcome refs and the canonical
- * `(buyerInstitutionId, sellerInstitutionId)` pair, so the
- * orchestrator's existing receipt correlation logic (which keys on
- * `outcomeRef` + `accessScope`) still works without change.
- *
- * The three handles are guaranteed to be pairwise distinct because
- * each is hashed over a distinct domain-separated input. Callers
- * must not interpret the handles as ciphertexts: they are opaque
- * correlation identifiers, not encryption of the field value.
- */
-export function deriveEncryptedTradeFieldHandles(
-  inputs: EncryptedTradeFieldInputs,
-): EncryptedTradeFieldHandles {
-  const sharedInput = [
-    inputs.outcomeRef,
-    inputs.executionRef,
-    inputs.buyerInstitutionId,
-    inputs.sellerInstitutionId,
-  ] as const;
-  return {
-    assetCodeCiphertext: digestFor(ASSET_CODE_DOMAIN, ...sharedInput),
-    quantityCiphertext: digestFor(QUANTITY_DOMAIN, ...sharedInput),
-    executionPriceCiphertext: digestFor(EXECUTION_PRICE_DOMAIN, ...sharedInput),
-  };
-}
-
-/**
+ * Compute the receipt hash as a real SHA-256 over the receipt/**
  * Compute the receipt hash as a real SHA-256 over the receipt
  * ciphertext payload. The previous
  * `\`sha256:${outcomeRef}:${side}\`` format was a deterministic

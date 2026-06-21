@@ -111,7 +111,10 @@ const crossEvaluator: NegotiationRoundEvaluator = {
       sellerSignal: harnessState.crossed ? ("crossed" as const) : ("near" as const),
       outcomeRef: "outcome-demo",
       executionRef: "exec-demo",
-      encryptedTradeFieldsRef: "fields-demo",
+      assetCodeCiphertext: "aead.v1:test:asset",
+        quantityCiphertext: "aead.v1:test:qty",
+        executionPriceCiphertext: "aead.v1:test:price",
+        encryptedTradeFieldsRef: "fields-demo",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
       evaluatedAt: new Date().toISOString(),
       roundAttestationRef:

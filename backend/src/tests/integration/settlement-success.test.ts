@@ -87,9 +87,9 @@ describe("settlement success", () => {
     ).resolves.toEqual({
       id: "00000000-0000-4000-8000-000000000341",
       tradeRef: "match_outcome_us3",
-      assetCodeCiphertext: "t3cipher.asset.us3",
-      quantityCiphertext: "t3cipher.quantity.us3",
-      executionPriceCiphertext: "t3cipher.execution.us3",
+      assetCodeCiphertext: "aead.v1:test:asset_us3",
+      quantityCiphertext: "aead.v1:test:qty_us3",
+      executionPriceCiphertext: "aead.v1:test:price_us3",
       settledAt: "2026-06-12T00:00:00.000Z",
       settlementStatus: "settled",
       // WS1: rail proof fields. The chain-rail stub returns the

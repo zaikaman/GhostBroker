@@ -66,6 +66,12 @@ export interface EvaluateRoundOutput {
    * proposal handles the TEE unsealed.
    */
   roundAttestationRef: string;
+  /** v0.13.0: AES-256-GCM ciphertext of asset code. */
+  assetCodeCiphertext: string;
+  /** v0.13.0: AES-256-GCM ciphertext of matched quantity. */
+  quantityCiphertext: string;
+  /** v0.13.0: AES-256-GCM ciphertext of execution price. */
+  executionPriceCiphertext: string;
 }
 
 export interface NegotiationRoundEvaluator {
@@ -131,6 +137,9 @@ function adaptRoundEvaluation(
     expiresAt: result.expiresAt,
     evaluatedAt: result.evaluatedAt,
     roundAttestationRef: result.roundAttestationRef,
+    assetCodeCiphertext: result.assetCodeCiphertext,
+    quantityCiphertext: result.quantityCiphertext,
+    executionPriceCiphertext: result.executionPriceCiphertext,
   };
 }
 

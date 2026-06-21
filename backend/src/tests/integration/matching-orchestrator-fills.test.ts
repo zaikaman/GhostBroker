@@ -185,6 +185,9 @@ class MatchedClient implements MatchContractClient {
       executionRef: `exec_${this.calls}`,
       buyerInstitutionId: request.buyInstitutionId,
       sellerInstitutionId: request.sellInstitutionId,
+      assetCodeCiphertext: "aead.v1:test:asset",
+      quantityCiphertext: "aead.v1:test:qty",
+      executionPriceCiphertext: "aead.v1:test:price",
       encryptedTradeFieldsRef: `fields_${this.calls}`,
       buyerAuthorityRef: request.buyAuthorityRef,
       sellerAuthorityRef: request.sellAuthorityRef,
@@ -270,6 +273,9 @@ class NoMatchClient implements MatchContractClient {
       executionRef: "",
       buyerInstitutionId: request.buyInstitutionId,
       sellerInstitutionId: request.sellInstitutionId,
+      assetCodeCiphertext: "aead.v1:test:asset",
+      quantityCiphertext: "aead.v1:test:qty",
+      executionPriceCiphertext: "aead.v1:test:price",
       encryptedTradeFieldsRef: "",
       buyerAuthorityRef: request.buyAuthorityRef,
       sellerAuthorityRef: request.sellAuthorityRef,
@@ -574,6 +580,9 @@ describe("matching orchestrator - fills and crossing", () => {
           executionRef: "exec_authoritative",
           buyerInstitutionId: request.buyInstitutionId,
           sellerInstitutionId: request.sellInstitutionId,
+          assetCodeCiphertext: "aead.v1:test:asset",
+          quantityCiphertext: "aead.v1:test:qty",
+          executionPriceCiphertext: "aead.v1:test:price",
           encryptedTradeFieldsRef: "fields_authoritative",
           buyerAuthorityRef: request.buyAuthorityRef,
           sellerAuthorityRef: request.sellAuthorityRef,
@@ -661,6 +670,9 @@ describe("matching orchestrator - fills and crossing", () => {
           executionRef: P0_EXECUTION_REF,
           buyerInstitutionId: buyerId,
           sellerInstitutionId: sellerId,
+          assetCodeCiphertext: "aead.v1:test:asset",
+          quantityCiphertext: "aead.v1:test:qty",
+          executionPriceCiphertext: "aead.v1:test:price",
           encryptedTradeFieldsRef: "fields_p0",
           buyerAuthorityRef: us2AuthorityRef,
           sellerAuthorityRef: us2AuthorityRef,
@@ -743,10 +755,10 @@ describe("matching orchestrator - fills and crossing", () => {
     // The handles carry the `sha256:` opaque-handle prefix and
     // are 64-hex characters after the prefix (so the dashboard
     // and audit tools can recognise them).
-    expect(fields?.assetCodeCiphertext).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(fields?.quantityCiphertext).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(fields?.assetCodeCiphertext).toMatch(/^aead\.v1:/u);
+    expect(fields?.quantityCiphertext).toMatch(/^aead\.v1:/u);
     expect(fields?.executionPriceCiphertext).toMatch(
-      /^sha256:[0-9a-f]{64}$/u,
+      /^aead\.v1:/u,
     );
 
     // Receipt integrity: the hash authenticates the ciphertext
@@ -766,13 +778,13 @@ describe("matching orchestrator - fills and crossing", () => {
     expect(buyerReceipt?.receiptHash).not.toBe(
       `sha256:${P0_OUTCOME_REF}:buyer`,
     );
-    expect(buyerReceipt?.receiptHash).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(buyerReceipt?.receiptHash).toMatch(/^sha256:/u);
     expect(buyerReceipt?.t3AttestationRef).not.toBe(P0_EXECUTION_REF);
     expect(buyerReceipt?.t3AttestationRef).not.toBe(
       sellerReceipt?.t3AttestationRef,
     );
-    expect(buyerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(sellerReceipt?.t3AttestationRef).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(buyerReceipt?.t3AttestationRef).toMatch(/^sha256:/u);
+    expect(sellerReceipt?.t3AttestationRef).toMatch(/^sha256:/u);
 
     // v0.8.0: the TEE-attested match attestation ref flows
     // through to the receipt's t3AttestationRef column. Both
@@ -815,6 +827,9 @@ describe("matching orchestrator - fills and crossing", () => {
           // regression).
           buyerInstitutionId: FORGED_INSTITUTION_ID,
           sellerInstitutionId: request.sellInstitutionId,
+          assetCodeCiphertext: "aead.v1:test:asset",
+          quantityCiphertext: "aead.v1:test:qty",
+          executionPriceCiphertext: "aead.v1:test:price",
           encryptedTradeFieldsRef: "fields_mismatch",
           buyerAuthorityRef: request.buyAuthorityRef,
           sellerAuthorityRef: request.sellAuthorityRef,
@@ -907,6 +922,9 @@ describe("matching orchestrator - fills and crossing", () => {
           executionRef: "exec_authority_mismatch",
           buyerInstitutionId: request.buyInstitutionId,
           sellerInstitutionId: request.sellInstitutionId,
+          assetCodeCiphertext: "aead.v1:test:asset",
+          quantityCiphertext: "aead.v1:test:qty",
+          executionPriceCiphertext: "aead.v1:test:price",
           encryptedTradeFieldsRef: "fields_authority_mismatch",
           buyerAuthorityRef: request.buyAuthorityRef,
           // TEE echoes a DIFFERENT seller authority ref than

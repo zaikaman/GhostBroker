@@ -1,27 +1,16 @@
 import cors from "cors";
-import express, {
-  type ErrorRequestHandler,
-  type Express,
-  type RequestHandler,
-} from "express";
+import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import helmet from "helmet";
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import {
-  getCorsAllowedOrigins,
-  loadEnv,
-  type BackendEnv,
-} from "./config/env.js";
+import { getCorsAllowedOrigins, loadEnv, type BackendEnv } from "./config/env.js";
 import { toPublicError } from "./errors/public-error.js";
 import { correlationIdMiddleware } from "./middleware/correlation-id.js";
 import { createHealthRouter } from "./api/health.routes.js";
 import { createInstitutionsRouter } from "./api/institutions.routes.js";
 import { createPortfoliosRouter } from "./api/portfolios.routes.js";
 import { createAgentsRouter } from "./api/agents.routes.js";
-import {
-  createNegotiationsRouter,
-  mountAgentMandateRoute,
-} from "./api/negotiations.routes.js";
+import { createNegotiationsRouter, mountAgentMandateRoute } from "./api/negotiations.routes.js";
 import { createTradesRouter } from "./api/trades.routes.js";
 import { createAdminRouter, type AdminRouterDeps } from "./api/admin.routes.js";
 import { createReceiptsRouter } from "./api/receipts.routes.js";
@@ -32,37 +21,34 @@ import { createSupabaseServiceClient } from "./services/supabase-client.js";
 import {
   ApiKeyService,
   SupabaseApiKeyRepository,
-  type ApiKeyManagementService,
+  type ApiKeyManagementService
 } from "./services/api-key.service.js";
 import { createDevTokenRouter } from "./api/dev-token.routes.js";
 import {
   InstitutionService,
   SupabaseInstitutionRepository,
-  type InstitutionManagementService,
+  type InstitutionManagementService
 } from "./services/institution.service.js";
 import { DidAuthService, type AuthSessionService } from "./services/auth.service.js";
-import { SupabaseAuthorityRevocationRepository, type AuthorityRevocationRepository } from "./services/authority-revocation.service.js";
+import {
+  SupabaseAuthorityRevocationRepository,
+  type AuthorityRevocationRepository
+} from "./services/authority-revocation.service.js";
 import { AgentService, type AgentManagementService } from "./services/agent.service.js";
 import { SupabaseAgentRepository } from "./services/agent-repository.js";
 import {
   HiddenIntentService,
-  type HiddenIntentSubmissionService,
+  type HiddenIntentSubmissionService
 } from "./services/hidden-intent.service.js";
 import {
   SupabaseTradeHistoryRepository,
-  TradeHistoryService,
+  TradeHistoryService
 } from "./services/trade-history.service.js";
-import {
-  ReceiptService,
-  SupabaseReceiptRepository,
-} from "./services/receipt.service.js";
-import {
-  SettlementService,
-  SupabaseSettlementRepository,
-} from "./services/settlement.service.js";
+import { ReceiptService, SupabaseReceiptRepository } from "./services/receipt.service.js";
+import { SettlementService, SupabaseSettlementRepository } from "./services/settlement.service.js";
 import {
   MapSettlementRailDispatcher,
-  type SettlementRailDispatcher,
+  type SettlementRailDispatcher
 } from "./services/settlement-rails/dispatcher.js";
 import { SepoliaErc20Rail } from "./services/settlement-rails/chain-sepolia-rail.js";
 import type { SettlementRail } from "./services/settlement-rails/rail.js";
@@ -74,29 +60,32 @@ import { RepositoryInstitutionSettlementConfigResolver } from "./services/instit
 import { SupabaseSettlementReconciliationRepository } from "./services/settlement-reconciliation.repository.js";
 import { SettlementReconciler } from "./services/settlement-reconciler.js";
 import { PortfolioService } from "./services/portfolio.service.js";
-import { SepoliaEtherscanPortfolioSyncService, type WalletPortfolioSyncService } from "./services/sepolia-portfolio-sync.service.js";
+import {
+  SepoliaEtherscanPortfolioSyncService,
+  type WalletPortfolioSyncService
+} from "./services/sepolia-portfolio-sync.service.js";
 import { MatchingOrchestrator } from "./services/matching-orchestrator.js";
 import { telemetryBus } from "./services/telemetry-bus.js";
 import {
   SupabaseIntentLockRepository,
-  type IntentLockRepository,
+  type IntentLockRepository
 } from "./services/intent-lock-repository.js";
 import { IntentLockJanitor } from "./services/intent-lock-janitor.js";
 import {
   BackendTenantDelegationSigner,
-  type TenantDelegationSigner,
+  type TenantDelegationSigner
 } from "./services/tenant-delegation-signer.js";
 import { InstitutionApprovalService } from "./services/institution-approval.service.js";
 import { InstitutionWithdrawalService } from "./services/institution-withdrawal.service.js";
 import { createHostedAgentsRouter } from "./api/hosted-agents.routes.js";
 import {
   ChildProcessHostedAgentService,
-  type HostedAgentManagementService,
+  type HostedAgentManagementService
 } from "./services/hosted-agent.service.js";
 import { SupabaseNegotiationRepository } from "./services/negotiation-repository.js";
 import {
   NegotiationService,
-  type NegotiationManagementService,
+  type NegotiationManagementService
 } from "./services/negotiation.service.js";
 import { NegotiationOrchestrator } from "./services/negotiation-orchestrator.js";
 import {
@@ -112,15 +101,18 @@ import {
   T3NegotiationTicketClient,
   createAuthenticatedT3NetworkClient,
   loadOrCreateTenantIdentityFromRepository,
+  InsufficientT3TokenBalanceError,
   readT3EnclaveConfig,
   runStartupCheck,
   T3EnclaveConfigError,
   type AuthenticatedT3NetworkClientOptions,
   type T3NetworkClient,
   loadEnvelopeMasterKey,
-  ensureTenantKvMaps,
 } from "./enclave/index.js";
-import { SupabasePublishedContractRepository, type PublishedContractRepository } from "./services/published-contract.repository.js";
+import {
+  SupabasePublishedContractRepository,
+  type PublishedContractRepository
+} from "./services/published-contract.repository.js";
 import { SupabaseTenantIdentityRepository } from "./services/tenant-identity.repository.js";
 
 function createCorsMiddleware(env: BackendEnv): RequestHandler {
@@ -138,26 +130,26 @@ function createCorsMiddleware(env: BackendEnv): RequestHandler {
       }
 
       callback(new Error("Origin is not allowed."));
-    },
+    }
   });
 }
 
 const publicErrorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
   void _next;
-  const publicError = toPublicError(error);    // Log 5xx server errors to the console so operators can see the
-    // actual failure without scraping the network response. 4xx client
-    // errors are also logged at warn level because the cause of a
-    // validation failure is often the most actionable signal during
-    // development.
+  const publicError = toPublicError(error); // Log 5xx server errors to the console so operators can see the
+  // actual failure without scraping the network response. 4xx client
+  // errors are also logged at warn level because the cause of a
+  // validation failure is often the most actionable signal during
+  // development.
   if (publicError.statusCode >= 500) {
     console.error(
       `[ERROR] ${_request.method} ${_request.path}: ${publicError.code} (${publicError.statusCode}) — ${publicError.message}`,
-      error instanceof Error ? { stack: error.stack, cause: error.cause } : error,
+      error instanceof Error ? { stack: error.stack, cause: error.cause } : error
     );
   } else if (publicError.statusCode >= 400) {
     console.warn(
       `[WARN] ${_request.method} ${_request.path}: ${publicError.code} (${publicError.statusCode}) — ${publicError.message}`,
-      error instanceof Error ? error.message : error,
+      error instanceof Error ? error.message : error
     );
   }
   response.status(publicError.statusCode).json(publicError.toResponse());
@@ -235,7 +227,7 @@ export interface BackendServices {
 export async function createDefaultServices(env: BackendEnv): Promise<BackendServices> {
   const t3Options: AuthenticatedT3NetworkClientOptions = {
     apiKey: env.T3N_API_KEY,
-    environment: env.T3N_ENV,
+    environment: env.T3N_ENV
   };
 
   if (env.T3_NETWORK_URL) {
@@ -258,60 +250,48 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   const t3EnclaveConfig = readT3EnclaveConfig();
   try {
     const startupResult = runStartupCheck(t3EnclaveConfig, {
-      nodeEnv: env.NODE_ENV,
+      nodeEnv: env.NODE_ENV
     });
     if (startupResult.warnings.length > 0) {
       console.warn(
         "[t3-enclave] startup check warnings:\n" +
-          startupResult.warnings.map((w: string) => `  - ${w}`).join("\n"),
+          startupResult.warnings.map((w: string) => `  - ${w}`).join("\n")
       );
     }
   } catch (error: unknown) {
     if (error instanceof T3EnclaveConfigError) {
       throw new Error(
         `T3 enclave startup check failed (NODE_ENV=${env.NODE_ENV}): ${(error as T3EnclaveConfigError).issues.join("; ")}`,
-        { cause: error },
+        { cause: error }
       );
     }
     throw error;
   }
 
   const supabase = createSupabaseServiceClient(env);
-  const institutionRepository = new SupabaseInstitutionRepository(
-    supabase as never,
-  );
-  const tenantIdentityRepository = new SupabaseTenantIdentityRepository(
-    supabase as never,
-  );
-  const publishedContractRepository = new SupabasePublishedContractRepository(
-    supabase as never,
-  );
-  const depositWalletService =
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED
-      ? new HmacDepositWalletService(
-          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED,
-        )
-      : undefined;
+  const institutionRepository = new SupabaseInstitutionRepository(supabase as never);
+  const tenantIdentityRepository = new SupabaseTenantIdentityRepository(supabase as never);
+  const publishedContractRepository = new SupabasePublishedContractRepository(supabase as never);
+  const depositWalletService = env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED
+    ? new HmacDepositWalletService(env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED)
+    : undefined;
   const defaultChainTokenAddresses: Record<string, string> = {};
   const defaultWbtcAddress =
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS ??
-    env.SEPOLIA_WBTC_CONTRACT_ADDRESS;
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS ?? env.SEPOLIA_WBTC_CONTRACT_ADDRESS;
   const defaultUsdcAddress =
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS ??
-    env.SEPOLIA_USDC_CONTRACT_ADDRESS;
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS ?? env.SEPOLIA_USDC_CONTRACT_ADDRESS;
   if (defaultWbtcAddress) {
     defaultChainTokenAddresses["WBTC"] = defaultWbtcAddress;
   }
   if (defaultUsdcAddress) {
     defaultChainTokenAddresses["USDC"] = defaultUsdcAddress;
   }
-  const authorityRevocationRepository =
-    new SupabaseAuthorityRevocationRepository(supabase as never);
+  const authorityRevocationRepository = new SupabaseAuthorityRevocationRepository(
+    supabase as never
+  );
 
   const apiKeyRepository = new SupabaseApiKeyRepository(supabase as never);
-  const intentLockRepository = new SupabaseIntentLockRepository(
-    supabase as never,
-  );
+  const intentLockRepository = new SupabaseIntentLockRepository(supabase as never);
 
   // Phase 1: tenant identity. The T3N handshake returned
   // an authenticated tenant DID. The signing keypair is
@@ -344,27 +324,42 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // matches the issuer against the recovered signer and
   // returns `isValid: true` directly. There is no manual
   // fallback path — the verifier is SDK-only.
-  const tenantIdentity = await loadOrCreateTenantIdentityFromRepository(
-    tenantIdentityRepository,
-    {
-      tenantDid: t3NetworkClient.tenantDidValue,
-      ...(env.TENANT_SIGNING_PRIVATE_KEY
-        ? { signingPrivateKey: env.TENANT_SIGNING_PRIVATE_KEY }
-        : {}),
-    },
-  );
-  const tenantDelegationSigner = new BackendTenantDelegationSigner(
-    tenantIdentity,
-  );
+  const tenantIdentity = await loadOrCreateTenantIdentityFromRepository(tenantIdentityRepository, {
+    tenantDid: t3NetworkClient.tenantDidValue,
+    ...(env.TENANT_SIGNING_PRIVATE_KEY ? { signingPrivateKey: env.TENANT_SIGNING_PRIVATE_KEY } : {})
+  });
+  const tenantDelegationSigner = new BackendTenantDelegationSigner(tenantIdentity);
 
-  // v0.10.0: ensure the kv-store maps the matching contract
-  // writes to (`intents`, `rounds`) exist on the tenant before
-  // the orchestrator starts accepting intents. Idempotent — a
-  // 409 (already_exists) is treated as success so reboots are
-  // safe. The contract persists decrypted price/quantity into
-  // these maps; without them the TEE returns
-  // `unknown map: "intents"` on the first seal-intent call.
-  await ensureTenantKvMaps(t3NetworkClient, t3NetworkClient.tenantDidValue);
+  // Token preflight: T3N meters sealed-secret map provisioning
+  // and TEE execution in tokens. A zero balance makes
+  // `maps.create` throw `HTTP 403 InsufficientCredit` from deep
+  // inside the SDK, surfacing as an opaque stack trace. Run the
+  // balance preflight BEFORE any T3N metered call so the operator
+  // gets a clear, actionable failure pointing at the token claim
+  // page instead. The minimum is configurable via
+  // `T3_MINIMUM_TOKEN_BALANCE` (default `1`).
+  const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
+  const meteredAccount = env.T3_SANDBOX_TOKEN_ACCOUNT ?? t3NetworkClient.tenantDidValue;
+  const minimumTokenBalance = BigInt(env.T3_MINIMUM_TOKEN_BALANCE ?? "1");
+  try {
+    await tokenBalanceClient.assertMinimumBalance(meteredAccount, minimumTokenBalance);
+  } catch (error) {
+    if (error instanceof InsufficientT3TokenBalanceError) {
+      throw new Error(
+        `T3 token balance is insufficient for boot. ` +
+          `Account ${error.balance.account} has ` +
+          `${error.balance.available.toString()} tokens available, ` +
+          `but the configured minimum is ` +
+          `${error.balance.minimumRequired.toString()}. ` +
+          `T3N meters sealed-secret map provisioning and TEE execution ` +
+          `in tokens. Claim test tokens at the Terminal 3 dashboard ` +
+          `(https://docs.terminal3.io/developers/adk/get-started/prerequisites/request-test-tokens) ` +
+          `and restart the backend.`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
 
   // Ghostbroker-only authorization facade. Constructed
   // before the agent service so we can late-bind the
@@ -373,20 +368,14 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // up the persisted VC; the agent service needs the
   // facade for `verifyAgentAuthority` at admit time).
   const authorizationFacade = new T3AgentAuthorizationFacade();
-  const tokenBalanceClient = new SandboxTokenBalanceClient(t3NetworkClient);
-  const portfolioService = new PortfolioService(
-    supabase as never,
-    env.SETTLEMENT_ASSET_CODE,
-  );
+  const portfolioService = new PortfolioService(supabase as never, env.SETTLEMENT_ASSET_CODE);
 
   const walletPortfolioSyncService =
-    env.ETHERSCAN_API_KEY &&
-    env.SEPOLIA_WBTC_CONTRACT_ADDRESS &&
-    env.SEPOLIA_USDC_CONTRACT_ADDRESS
+    env.ETHERSCAN_API_KEY && env.SEPOLIA_WBTC_CONTRACT_ADDRESS && env.SEPOLIA_USDC_CONTRACT_ADDRESS
       ? new SepoliaEtherscanPortfolioSyncService(portfolioService, {
           apiKey: env.ETHERSCAN_API_KEY,
           wbtcContractAddress: env.SEPOLIA_WBTC_CONTRACT_ADDRESS,
-          usdcContractAddress: env.SEPOLIA_USDC_CONTRACT_ADDRESS,
+          usdcContractAddress: env.SEPOLIA_USDC_CONTRACT_ADDRESS
         })
       : undefined;
 
@@ -407,7 +396,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY, and " +
         "SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS must all be set. " +
         "GhostBroker ships a single settlement rail (`chain:sepolia:erc20`) " +
-        "and cannot boot without it.",
+        "and cannot boot without it."
     );
   }
   // WS2.5: the relayer signer is a deliberate seam.
@@ -435,9 +424,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // secret store and builds a TEE-attested signer.
   // Otherwise the v1 viem path runs (the env var is
   // empty in the demo).
-  const useTeeSigner = Boolean(
-    process.env["SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF"],
-  );
+  const useTeeSigner = Boolean(process.env["SETTLEMENT_RAIL_CHAIN_SEPOLIA_TEE_SIGNER_REF"]);
   let tenantPrivateKeyForRail: `0x${string}` | undefined;
   if (useTeeSigner) {
     // Production: the relayer's tenant key is the T3
@@ -448,9 +435,8 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     const tenantIdentity = await loadOrCreateTenantIdentityFromRepository(
       tenantIdentityRepository,
       {
-        tenantDid:
-          env.T3_TENANT_DID ?? "did:t3n:tenant:default-relayer",
-      },
+        tenantDid: env.T3_TENANT_DID ?? "did:t3n:tenant:default-relayer"
+      }
     );
     tenantPrivateKeyForRail = tenantIdentity.privateKey as `0x${string}`;
   }
@@ -466,34 +452,32 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         // inside the tenant TEE.
         walletClient: createWalletClient({
           account: privateKeyToAccount(
-            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
+            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`
           ),
           chain: defineChain({
             id: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111,
             name:
-              (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111) ===
-              11155111
+              (env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111) === 11155111
                 ? "Sepolia"
                 : "anvil-test",
             nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
             rpcUrls: {
-              default: { http: [env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL] },
-            },
+              default: { http: [env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL] }
+            }
           }),
-          transport: http(env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL),
+          transport: http(env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL)
         }),
         // The T3 tenant identity's private key. In
         // v1 demo this is the file-backed keypair;
         // in production this is the TEE-held key
         // (T3-ONB-011).
-        tenantPrivateKey:
-          (tenantPrivateKeyForRail ??
-            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY) as `0x${string}`,
+        tenantPrivateKey: (tenantPrivateKeyForRail ??
+          env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY) as `0x${string}`,
         // `false` for the v1 demo (the key is
         // file-backed, not TEE-held). Production
         // sets this to `true` once T3N exposes the
         // tenant-TEE key store.
-        isTeeAttested: false,
+        isTeeAttested: false
       })
     : undefined;
 
@@ -506,31 +490,28 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
           // viem types `relayerPrivateKey` as a `0x${string}` template
           // literal; the env-validator's regex narrows the runtime
           // shape but not the TS literal type, so we cast here.
-          relayerPrivateKey:
-            env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
+          relayerPrivateKey: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY as `0x${string}`,
           relayerContractAddress:
             env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS as `0x${string}`,
           chainId: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CHAIN_ID ?? 11155111,
-          confirmTimeoutSec: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC ?? 90,
+          confirmTimeoutSec: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_CONFIRM_TIMEOUT_SEC ?? 90
         },
         relayerSigner
           ? {
-              relayerSigner,
+              relayerSigner
             }
-          : {},
-      ),
-    ],
+          : {}
+      )
+    ]
   ]);
   const railDispatcher = new MapSettlementRailDispatcher(railRegistry);
 
   let institutionApprovalService: InstitutionApprovalService | undefined;
   let institutionWithdrawalService: InstitutionWithdrawalService | undefined;
   const chainWbtcAddress =
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS ??
-    env.SEPOLIA_WBTC_CONTRACT_ADDRESS;
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS ?? env.SEPOLIA_WBTC_CONTRACT_ADDRESS;
   const chainUsdcAddress =
-    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS ??
-    env.SEPOLIA_USDC_CONTRACT_ADDRESS;
+    env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS ?? env.SEPOLIA_USDC_CONTRACT_ADDRESS;
   if (
     depositWalletService &&
     env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL &&
@@ -546,7 +527,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       rpcUrl: env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL,
       chainId,
       wbtcAddress: chainWbtcAddress as `0x${string}`,
-      usdcAddress: chainUsdcAddress as `0x${string}`,
+      usdcAddress: chainUsdcAddress as `0x${string}`
     });
     institutionApprovalService = new InstitutionApprovalService({
       institutionRepository,
@@ -556,7 +537,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       relayerContractAddress:
         env.SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS as `0x${string}`,
       wbtcAddress: chainWbtcAddress as `0x${string}`,
-      usdcAddress: chainUsdcAddress as `0x${string}`,
+      usdcAddress: chainUsdcAddress as `0x${string}`
     });
   }
 
@@ -566,7 +547,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // uses this to pick the rail per side and to look up the
   // chain rail's per-institution deposit addresses.
   const institutionConfigResolver = new RepositoryInstitutionSettlementConfigResolver(
-    institutionRepository,
+    institutionRepository
   );
 
   // WS4: settlement reconciler. Periodically polls
@@ -579,7 +560,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   const settlementReconciler = new SettlementReconciler(
     new SupabaseSettlementReconciliationRepository(supabase as never),
     railDispatcher,
-    telemetryBus,
+    telemetryBus
   );
 
   const settlementService = new SettlementService(
@@ -589,7 +570,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     undefined, // audit sink
     portfolioService,
     railDispatcher,
-    institutionConfigResolver,
+    institutionConfigResolver
   );
 
   const blindIntentClient = new T3BlindIntentClient({
@@ -598,7 +579,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     tokenAccount: env.T3_TENANT_DID || "authenticated-tenant",
     minimumTokenBalance: 1n,
     settlementAssetCode: env.SETTLEMENT_ASSET_CODE,
-    envelopeMasterKeyHex: loadEnvelopeMasterKey().key.toString("hex"),
+    envelopeMasterKeyHex: loadEnvelopeMasterKey().key.toString("hex")
   });
 
   const matchContractClient = new T3MatchContractClient({
@@ -610,7 +591,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     // adapter routes `evaluate-match` to the published build that
     // decides the cross, fill quantity, and execution price
     // (rather than relying on the tenant's default registration).
-    contractVersion: env.T3_MATCHING_CONTRACT_VERSION,
+    contractVersion: env.T3_MATCHING_CONTRACT_VERSION
   });
 
   const matchingOrchestrator = new MatchingOrchestrator(
@@ -623,6 +604,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     undefined, // cleanupIntervalMs
     intentLockRepository,
     institutionConfigResolver,
+    loadEnvelopeMasterKey().key.toString("hex")
   );
 
   // The orphan-lock janitor: runs every 30s in production, finds
@@ -630,27 +612,22 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   // corresponding `portfolios.locked` amount. This is the
   // recovery path for process restarts that would otherwise
   // strand reservations.
-  const intentLockJanitor = new IntentLockJanitor(
-    intentLockRepository,
-    portfolioService,
-    { telemetryBus },
-  );
+  const intentLockJanitor = new IntentLockJanitor(intentLockRepository, portfolioService, {
+    telemetryBus
+  });
 
-  const apiKeyService = new ApiKeyService(
-    apiKeyRepository,
-    env.AUTH_SESSION_SECRET,
-  );
+  const apiKeyService = new ApiKeyService(apiKeyRepository, env.AUTH_SESSION_SECRET);
   const institutionService = new InstitutionService(
     institutionRepository,
     new AdkTenantDidRegistry(t3NetworkClient),
     depositWalletService,
-    defaultChainTokenAddresses,
+    defaultChainTokenAddresses
   );
   const agentService = buildAgentService({
     authorizationFacade,
     matchingOrchestrator,
     supabase: supabase as never,
-    authorityRevocationRepository,
+    authorityRevocationRepository
   });
   const negotiationRepository = new SupabaseNegotiationRepository(supabase as never);
   const negotiationTicketClient = new T3NegotiationTicketClient({
@@ -667,7 +644,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     // routes the execution; without it the tenant falls back
     // to its default version, which may not yet expose
     // `evaluate-pair`.
-    contractVersion: env.T3_MATCHING_CONTRACT_VERSION,
+    contractVersion: env.T3_MATCHING_CONTRACT_VERSION
   });
   const negotiationRoundEvaluator = new T3NegotiationRoundEvaluator(
     new T3NegotiationRoundClient({
@@ -683,8 +660,8 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       // routes execution; without it the tenant falls back to
       // its default version, which may not yet expose
       // `seal-round-proposal`.
-      contractVersion: env.T3_MATCHING_CONTRACT_VERSION,
-    }),
+      contractVersion: env.T3_MATCHING_CONTRACT_VERSION
+    })
   );
   const negotiationDisclosureVerifier = new T3NegotiationDisclosureVerifier();
   const negotiationOrchestrator = new NegotiationOrchestrator({
@@ -698,13 +675,13 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     portfolioService,
     settlementAssetCode: env.SETTLEMENT_ASSET_CODE,
     agentRepository: new SupabaseAgentRepository(supabase as never),
-    envelopeMasterKeyHex: loadEnvelopeMasterKey().key.toString("hex"),
+    envelopeMasterKeyHex: loadEnvelopeMasterKey().key.toString("hex")
   });
   const negotiationService = new NegotiationService({
     repository: negotiationRepository,
     agentService,
     tenantSigner: tenantDelegationSigner,
-    orchestrator: negotiationOrchestrator,
+    orchestrator: negotiationOrchestrator
   });
 
   return {
@@ -719,13 +696,13 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       matchingOrchestrator,
       new SupabaseAgentRepository(supabase as never),
       portfolioService,
-      intentLockRepository,
+      intentLockRepository
     ),
     settlementService,
     settlementReconciler,
     railDispatcher,
     tradeHistoryService: new TradeHistoryService(
-      new SupabaseTradeHistoryRepository(supabase as never),
+      new SupabaseTradeHistoryRepository(supabase as never)
     ),
     receiptService: new ReceiptService(new SupabaseReceiptRepository(supabase as never)),
     apiKeyService,
@@ -753,18 +730,18 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         env.NODE_ENV === "production"
           ? ({
               runner: ["node"] as const,
-              hostedScript: COMPILED_HOSTED_AGENT,
+              hostedScript: COMPILED_HOSTED_AGENT
             } as const)
           : ({} as const);
       if (env.NODE_ENV === "production") {
         const compiledAbsolute = resolvePath(
           env.AGENTS_WORKSPACE_DIR ?? ".",
-          COMPILED_HOSTED_AGENT,
+          COMPILED_HOSTED_AGENT
         );
         if (!existsSync(compiledAbsolute)) {
           throw new Error(
             `Refusing to boot in NODE_ENV=production: compiled hosted-agent entrypoint not found at ${compiledAbsolute}. ` +
-              "Heroku should run `npm run build:backend` via the `heroku-postbuild` script in the root package.json before the Procfile boots the server; verify the build step completed and that AGENTS_WORKSPACE_DIR matches the deployed tree.",
+              "Heroku should run `npm run build:backend` via the `heroku-postbuild` script in the root package.json before the Procfile boots the server; verify the build step completed and that AGENTS_WORKSPACE_DIR matches the deployed tree."
           );
         }
       }
@@ -777,7 +754,9 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         backendUrl: `http://localhost:${env.PORT}`,
         authSessionSecret: env.AUTH_SESSION_SECRET,
         agentService,
-        institutionService: institutionService as Required<Pick<InstitutionManagementService, "getInstitution">>,
+        institutionService: institutionService as Required<
+          Pick<InstitutionManagementService, "getInstitution">
+        >,
         negotiationService,
         ...(institutionApprovalService ? { institutionApprovalService } : {}),
         ...productionRunner,
@@ -807,8 +786,8 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
         tenantIdentityLookup: async () => ({
           signingPrivateKey: tenantIdentity.privateKey,
           signingPublicKey: tenantIdentity.publicKey,
-          issuerDid: tenantIdentity.did,
-        }),
+          issuerDid: tenantIdentity.did
+        })
       });
     })(),
     authService: new DidAuthService({
@@ -817,13 +796,11 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       ...(walletPortfolioSyncService ? { walletPortfolioSyncService } : {}),
       apiKeyService,
       ...(depositWalletService ? { depositWalletService } : {}),
-      ...(Object.keys(defaultChainTokenAddresses).length > 0
-        ? { defaultChainTokenAddresses }
-        : {}),
-      sessionSecret: env.AUTH_SESSION_SECRET,
+      ...(Object.keys(defaultChainTokenAddresses).length > 0 ? { defaultChainTokenAddresses } : {}),
+      sessionSecret: env.AUTH_SESSION_SECRET
     }),
     publishedContractRepository,
-    t3NetworkClient,
+    t3NetworkClient
   };
 }
 
@@ -837,7 +814,7 @@ function buildAgentService(input: {
     input.authorizationFacade,
     new SupabaseAgentRepository(input.supabase as never),
     input.authorityRevocationRepository,
-    input.matchingOrchestrator,
+    input.matchingOrchestrator
   );
   // Late-bind the agent service into the facade so
   // `loadAndVerify` can look up the persisted VC. The
@@ -850,10 +827,7 @@ function buildAgentService(input: {
   return service;
 }
 
-export function createApp(
-  env: BackendEnv = loadEnv(),
-  services: BackendServices,
-): Express {
+export function createApp(env: BackendEnv = loadEnv(), services: BackendServices): Express {
   const app = express();
 
   app.disable("x-powered-by");
@@ -863,11 +837,7 @@ export function createApp(
   app.use(correlationIdMiddleware());
   app.use(
     "/api",
-    createHealthRouter(
-      env,
-      services?.publishedContractRepository,
-      services?.t3NetworkClient,
-    ),
+    createHealthRouter(env, services?.publishedContractRepository, services?.t3NetworkClient)
   );
   if (services.authService) {
     app.use("/api", createAuthRouter(services.authService));
@@ -890,9 +860,9 @@ export function createApp(
           : {}),
         ...(services.institutionWithdrawalService
           ? { withdrawalService: services.institutionWithdrawalService }
-          : {}),
-      },
-    ),
+          : {})
+      }
+    )
   );
   app.use(
     "/api",
@@ -900,51 +870,47 @@ export function createApp(
     createPortfoliosRouter(
       services.portfolioService,
       services.walletPortfolioSyncService,
-      services.matchingOrchestrator,
-    ),
+      services.matchingOrchestrator
+    )
   );
   const agentsRouter = createAgentsRouter(
     services.agentService,
     services.hiddenIntentService,
-    services.tenantDelegationSigner,
+    services.tenantDelegationSigner
   );
   if (services.negotiationService) {
     mountAgentMandateRoute({
       router: agentsRouter,
-      negotiationService: services.negotiationService,
+      negotiationService: services.negotiationService
     });
   }
-  app.use(
-    "/api",
-    operatorAuthMiddleware(env, services.apiKeyService),
-    agentsRouter,
-  );
+  app.use("/api", operatorAuthMiddleware(env, services.apiKeyService), agentsRouter);
   if (services.negotiationService) {
     app.use(
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
-      createNegotiationsRouter(services.negotiationService),
+      createNegotiationsRouter(services.negotiationService)
     );
   }
   if (services.tradeHistoryService) {
     app.use(
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
-      createTradesRouter(services.tradeHistoryService),
+      createTradesRouter(services.tradeHistoryService)
     );
   }
   if (services.receiptService) {
     app.use(
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
-      createReceiptsRouter(services.receiptService),
+      createReceiptsRouter(services.receiptService)
     );
   }
   if (services.hostedAgentService) {
     app.use(
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
-      createHostedAgentsRouter(services.hostedAgentService),
+      createHostedAgentsRouter(services.hostedAgentService)
     );
   }
   // WS4.2: admin reverser route. The rail dispatcher is
@@ -955,12 +921,12 @@ export function createApp(
     const adminDeps: AdminRouterDeps = {
       railDispatcher: services.railDispatcher,
       tradeHistoryService: services.tradeHistoryService,
-      telemetryBus,
+      telemetryBus
     };
     app.use(
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
-      createAdminRouter(adminDeps, operatorAuthMiddleware(env, services.apiKeyService)),
+      createAdminRouter(adminDeps, operatorAuthMiddleware(env, services.apiKeyService))
     );
   }
   app.use(publicErrorHandler);
@@ -968,11 +934,6 @@ export function createApp(
   return app;
 }
 
-export async function createProductionApp(
-  env: BackendEnv = loadEnv(),
-): Promise<Express> {
+export async function createProductionApp(env: BackendEnv = loadEnv()): Promise<Express> {
   return createApp(env, await createDefaultServices(env));
 }
-
-
-

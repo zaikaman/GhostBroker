@@ -34,7 +34,7 @@
  *                                        `evaluate-round`; the same
  *                                        version covers `evaluate-match`,
  *                                        `seal-ticket`, and
- *                                        `evaluate-pair`). v0.10.1
+ *                                        `evaluate-pair`). v0.13.0
  *                                        fixes kv-store map names to
  *                                        use canonical `z:<tenant>:<tail>`.
  */
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   const configuredTenantDid = env.T3_TENANT_DID;
   const networkEnv = env.T3N_ENV ?? "testnet";
   const networkUrl = env.T3_NETWORK_URL;
-  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.10.1";
+  const version = env.T3_MATCHING_CONTRACT_VERSION ?? "0.13.0";
   const tail = "matching";
 
   if (!apiKey) {
