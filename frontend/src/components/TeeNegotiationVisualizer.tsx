@@ -171,7 +171,27 @@ export function TeeNegotiationVisualizer({
     return result.slice(-15);
   }, [logTail, clearedLogs, institutionName]);
 
-  const displayMessages = logTail ? parsedLogMessages : messages;
+  // Merge real-time messages (from WebSocket events) with log-tail messages
+  // (from REST). When both sources are present, we keep real-time messages at
+  // the front and append any log-tail lines that aren't already shown, so the
+  // dialogue panel updates immediately on new negotiation events rather than
+  // waiting for the next logTail REST refresh (every 60s on the Deploy page).
+  const displayMessages = useMemo(() => {
+    if (!logTail) return messages;
+    // Start with the most recent real-time messages (up to 8), then append
+    // log-tail entries that aren't duplicates.
+    const recentRealtime = messages.slice(-8);
+    const merged = [...recentRealtime];
+    const existingTexts = new Set(merged.map((m) => `${m.sender}:${m.message}`));
+    for (const m of parsedLogMessages) {
+      const key = `${m.sender}:${m.message}`;
+      if (!existingTexts.has(key)) {
+        existingTexts.add(key);
+        merged.push(m);
+      }
+    }
+    return merged.slice(-15);
+  }, [messages, parsedLogMessages, logTail]);
 
   const formatBubbleText = (text: string | null) => {
     if (!text) return '';
@@ -311,9 +331,12 @@ export function TeeNegotiationVisualizer({
     return null;
   }, [localAgent, intents]);
 
-  // Generate simulated dialogue logs inside TEE to explain the processing events
+  // Generate simulated dialogue logs inside TEE to explain the processing events.
+  // When a `logTail` string is provided (Deploy page), that string drives the
+  // primary display (parsedLogMessages), but we still run this effect so the
+  // speech bubbles and dialogue panel update in real-time from WebSocket events
+  // rather than waiting up to 60s for the next REST poll to refresh logTail.
   useEffect(() => {
-    if (logTail) return;
     if (!latestPhase || forceIdle) {
       setTimeout(() => {
         setMessages([]);
@@ -442,7 +465,6 @@ export function TeeNegotiationVisualizer({
 
   // Clean state when agents are disconnected
   useEffect(() => {
-    if (logTail) return;
     if (agents.length === 0 && intents.length === 0 && !localAgent) {
       setTimeout(() => {
         setMessages([]);
