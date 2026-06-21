@@ -93,11 +93,11 @@ ghostbroker/
 |-- frontend/                          Vite + React Observatory Console
 |   |-- src/
 |   |   |-- app/                       App shell, routing, main layout
-|   |   |-- components/                25 production UI components
+|   |   |-- components/                23 production UI components
 |   |   |-- hooks/                     Real-time telemetry and data hooks
 |   |   |-- services/                  API client, telemetry, wallet auth
 |   |   |-- styles/                    Design system CSS (theme, dashboard, landing)
-|   |   +-- test/                      19 frontend test files (71 tests)
+|   |   +-- test/                      18 frontend test files (73 tests)
 |   |-- public/                        Static assets
 |   +-- package.json                   @ghostbroker/frontend workspace
 |
@@ -130,9 +130,9 @@ ghostbroker/
 |   |   |-- privacy/                   Forbidden-field scanner and assertions
 |   |   |-- sdk/
 |   |   |   +-- agent-client/          Published Node.js SDK for external agents
-|   |   |                              (21 files, 56 tests)
-|   |   |-- services/                  29 service modules + settlement-rails/
-|   |   |-- tests/                     57 backend test files (194 tests)
+|   |   |                              (21 files, 55 tests)
+|   |   |-- services/                  31 service modules + settlement-rails/
+|   |   |-- tests/                     62 backend test files (231 tests)
 |   |   |-- validation/               Zod request schemas
 |   |   +-- websocket/                 Telemetry server, event types, redaction
 |   |-- contracts/
@@ -634,7 +634,7 @@ ERC-20 token transfers that finalize a matched trade.
 
 ## Agent Client SDK
 
-The `@ghostbroker/agent-client` SDK (21 files, 56 tests) at
+The `@ghostbroker/agent-client` SDK (21 files, 55 tests) at
 `backend/src/sdk/agent-client/` is the published Node.js TypeScript SDK
 consumed by external agents and the hosted negotiator. It provides a
 complete client for every GhostBroker API surface:
@@ -1235,8 +1235,8 @@ npm run typecheck
 
 ## Testing
 
-GhostBroker ships with a comprehensive test suite: **596 tests passing,
-8 skipped across 110 test files** (the 8 skipped tests live in the
+GhostBroker ships with a comprehensive test suite: **676 tests passing,
+8 skipped across 118 test files** (the 8 skipped tests live in the
 on-chain settlement suite behind `WS2_ANVIL_INTEGRATION=1`; the 1 skipped
 test file is the root-level Playwright E2E spec which runs under
 `npm run test:e2e` instead of `npm test`).
@@ -1261,9 +1261,9 @@ npm run test:e2e
 
 | Module | Test files | Tests passing | Tests skipped |
 |---|---|---|---|
-| **frontend** (workspace, jsdom) | **19** | **69** | **0** |
-| **backend** (workspace, node) | **92** passed + **1** skipped | **508** | **8** (chain-sepolia, gated) |
-| **Total** | **110** (109 passed + 1 skipped) | **577** | **8** |
+| **frontend** (workspace, jsdom) | **18** | **73** | **0** |
+| **backend** (workspace, node) | **99** passed + **1** skipped | **603** | **8** (chain-sepolia, gated) |
+| **Total** | **118** (117 passed + 1 skipped) | **676** | **8** |
 
 ### Test Categories
 
@@ -1272,16 +1272,16 @@ agent admission, intent submission/cancellation/privacy, authentication,
 institution CRUD, portfolio management, trade history, receipts, WebSocket
 events, and admin operations.
 
-**Integration tests** (24 files) -- Service-level integration tests:
+**Integration tests** (25 files) -- Service-level integration tests:
 settlement atomicity, matching orchestrator fills and reservations, intent
 lock lifecycle, settlement rail dispatch (chain-sepolia, compensation),
 hosted agent management, and telemetry redaction.
 
-**Unit tests** (18 files) -- Isolated unit tests: public error handling,
+**Unit tests** (21 files) -- Isolated unit tests: public error handling,
 deposit wallet service, operator auth sessions, portfolio service, privacy
 redaction, settlement reconciler, and negotiation orchestrator.
 
-**Frontend tests** (19 files) -- React component and service tests via
+**Frontend tests** (18 files) -- React component and service tests via
 Testing Library: agent panels, deployment guide, completed trades, deposit
 wallet, encrypted receipts, live activity stream, processing status,
 settlement profile, accessibility, and privacy redaction.
@@ -1290,9 +1290,9 @@ settlement profile, accessibility, and privacy redaction.
 signer, ghostbroker client, intent client, portfolio client, receipt client,
 trades client, and WebSocket client.
 
-**Agent runtime tests** (8 files) -- LLM decision validation, negotiation
+**Agent runtime tests** (7 files) -- LLM decision validation, negotiation
 decision, negotiation loop, sealed envelope, VC verifier, and delegation
-tests (126 passing tests).
+tests (120 passing tests).
 
 ### On-Chain Integration Tests
 
@@ -1512,8 +1512,8 @@ classes of friction:
   is unit-tested against an explicit deny list; the schema and API
   response shapes are built around the boundary.
 
-- **The code is production-ready and tested.** 596 tests passing, 8 skipped
-  across 110 test files;
+- **The code is production-ready and tested.** 676 tests passing, 8 skipped
+  across 118 test files;
   `tsc --noEmit` clean on both workspaces; the verifier has its own test
   file with positive and negative cases; the session and authority layers
   are independently exercised.
