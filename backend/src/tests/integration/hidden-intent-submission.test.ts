@@ -50,7 +50,9 @@ class StaticBlindIntentClient implements BlindIntentClient {
   public async sealIntent(
     request: BlindIntentRequest,
   ): Promise<BlindIntentResult> {
-    expect(request.encryptedIntentEnvelope).toContain("ciphertext");
+    expect(request.encryptedIntentEnvelope).toMatch(
+      /^ghostbroker\.envelope\.aead\/v1\|/u,
+    );
     return {
       intentHandle: "intent_opaque_us2",
       state: "intent_sealed",

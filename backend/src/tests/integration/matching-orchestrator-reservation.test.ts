@@ -9,6 +9,7 @@ import type {
   MatchEvaluationRequest,
   OpaqueMatchOutcome,
 } from "../../enclave/index.js";
+import { decodeSealedEnvelope } from "../../enclave/matching/blind-intent.js";
 import type { AgentAuthorizationFacade } from "../../auth/agent-authz.js";
 import { HiddenIntentService } from "../../services/hidden-intent.service.js";
 import { MatchingOrchestrator } from "../../services/matching-orchestrator.js";
@@ -23,6 +24,8 @@ import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import {
   buildHiddenIntentRequest,
   buildHiddenIntentRequestForSide,
+  getTestEnvelopeMasterKey,
+  sealTestEnvelope,
   us2AgentDid,
   us2AgentId,
   us2AuthorityRef,
@@ -34,29 +37,31 @@ import {
 } from "../support/in-memory-portfolio-client.js";
 
 /**
- * Build a canonical `ghostbroker.envelope/1` envelope with the
+ * Build a `ghostbroker.envelope.aead/v1` envelope with the
  * given trading parameters. The in-process test path uses
- * envelopes built by `buildSealedEnvelope` so the seal stub
- * can re-derive the lock descriptor without needing a live TEE.
+ * envelopes built by `sealTestEnvelope` (real AES-256-GCM, not
+ * plaintext) so the seal stub can re-derive the lock descriptor
+ * via `decodeSealedEnvelope` without needing a live TEE.
  */
 function makeEnvelope(
+  institutionDid: string,
+  agentDid: string,
+  authorityRef: string,
   assetCode: string,
   side: "buy" | "sell",
   quantity: number,
   price: number,
 ): string {
-  const json = JSON.stringify({
-    v: "ghostbroker.envelope/1",
-    institutionId: us2InstitutionId,
-    agentDid: us2AgentDid,
-    authorityRef: us2AuthorityRef,
+  return sealTestEnvelope({
+    institutionDid,
+    agentDid,
+    authorityRef,
     assetCode,
     side,
     quantity,
     price,
     nonce: "nonce-test",
   });
-  return Buffer.from(json, "utf8").toString("base64url");
 }
 
 class VerifiedAuthorization implements AgentAuthorizationFacade {
@@ -97,15 +102,23 @@ interface EnvelopePayload {
   price: number;
 }
 
-function decodeTestEnvelope(envelope: string): EnvelopePayload {
-  const json = Buffer.from(envelope, "base64url").toString("utf8");
-  const record = JSON.parse(json) as Record<string, unknown>;
+function decodeTestEnvelope(
+  envelope: string,
+  institutionId: string,
+  agentDid: string,
+  authorityRef: string,
+): EnvelopePayload {
+  const decoded = decodeSealedEnvelope(
+    envelope,
+    { institutionDid: institutionId, agentDid, authorityRef },
+    getTestEnvelopeMasterKey(),
+  );
   return {
-    v: String(record["v"] ?? ""),
-    assetCode: String(record["assetCode"] ?? ""),
-    side: record["side"] === "buy" ? "buy" : "sell",
-    quantity: Number(record["quantity"] ?? 0),
-    price: Number(record["price"] ?? 0),
+    v: decoded.v,
+    assetCode: decoded.assetCode,
+    side: decoded.side,
+    quantity: decoded.quantity,
+    price: decoded.price,
   };
 }
 
@@ -115,7 +128,12 @@ class StaticBlindIntentClient implements BlindIntentClient {
     request: BlindIntentRequest,
   ): Promise<BlindIntentResult> {
     this.counter++;
-    const payload = decodeTestEnvelope(request.encryptedIntentEnvelope);
+    const payload = decodeTestEnvelope(
+      request.encryptedIntentEnvelope,
+      request.institutionId,
+      request.agentDid,
+      request.authorityRef,
+    );
     const assetCode =
       payload.side === "buy" ? SETTLEMENT_ASSET : payload.assetCode;
     const amount =
@@ -243,7 +261,15 @@ describe("matching orchestrator — balance reservations", () => {
 
     await service.submitIntent(
       buildHiddenIntentRequest({
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 100, 45000),
+        encryptedIntentEnvelope: makeEnvelope(
+          us2InstitutionId,
+          us2AgentDid,
+          us2AuthorityRef,
+          "WBTC",
+          "buy",
+          100,
+          45000,
+        ),
       }),
       { correlationRef: "corr_lock_buy_1" },
     );
@@ -258,7 +284,15 @@ describe("matching orchestrator — balance reservations", () => {
   it("locks quantity of the asset on submitIntent for a sell intent", async () => {
     const sellerRequest = buildHiddenIntentRequestForSide("sell", {
       institutionId: sellerInstitutionId,
-      encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 100, 43000),
+      encryptedIntentEnvelope: makeEnvelope(
+        sellerInstitutionId,
+        "did:t3n:agent:seller-us2",
+        us2AuthorityRef,
+        "WBTC",
+        "sell",
+        100,
+        43000,
+      ),
     });
     const client = new InMemoryPortfolioClient([
       makePortfolioRecord({
@@ -295,7 +329,15 @@ describe("matching orchestrator — balance reservations", () => {
     await expect(
       service.submitIntent(
         buildHiddenIntentRequest({
-          encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 100, 45000),
+          encryptedIntentEnvelope: makeEnvelope(
+            us2InstitutionId,
+            us2AgentDid,
+            us2AuthorityRef,
+            "WBTC",
+            "buy",
+            100,
+            45000,
+          ),
         }),
         { correlationRef: "corr_lock_overdraw" },
       ),
@@ -326,7 +368,15 @@ describe("matching orchestrator — balance reservations", () => {
 
     const accepted = await service.submitIntent(
       buildHiddenIntentRequest({
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 100, 45000),
+        encryptedIntentEnvelope: makeEnvelope(
+          us2InstitutionId,
+          us2AgentDid,
+          us2AuthorityRef,
+          "WBTC",
+          "buy",
+          100,
+          45000,
+        ),
       }),
       { correlationRef: "corr_lock_cancel" },
     );
@@ -366,7 +416,15 @@ describe("matching orchestrator — balance reservations", () => {
 
     await service.submitIntent(
       buildHiddenIntentRequest({
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 100, 45000),
+        encryptedIntentEnvelope: makeEnvelope(
+          us2InstitutionId,
+          us2AgentDid,
+          us2AuthorityRef,
+          "WBTC",
+          "buy",
+          100,
+          45000,
+        ),
       }),
       { correlationRef: "corr_lock_revoke" },
     );
@@ -396,13 +454,29 @@ describe("matching orchestrator — balance reservations", () => {
     // First intent: 5 * 1000 = 5_000, well within the 1M available.
     await service.submitIntent(
       buildHiddenIntentRequest({
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 5, 1000),
+        encryptedIntentEnvelope: makeEnvelope(
+          us2InstitutionId,
+          us2AgentDid,
+          us2AuthorityRef,
+          "WBTC",
+          "buy",
+          5,
+          1000,
+        ),
       }),
       { correlationRef: "corr_lock_multi_1" },
     );
     await service.submitIntent(
       buildHiddenIntentRequest({
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 5, 1000),
+        encryptedIntentEnvelope: makeEnvelope(
+          us2InstitutionId,
+          us2AgentDid,
+          us2AuthorityRef,
+          "WBTC",
+          "buy",
+          5,
+          1000,
+        ),
       }),
       { correlationRef: "corr_lock_multi_2" },
     );
@@ -523,7 +597,15 @@ describe("matching orchestrator — balance reservations", () => {
     await service.submitIntent(
       buildHiddenIntentRequest({
         institutionId: buyerId,
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 100, 50000),
+        encryptedIntentEnvelope: makeEnvelope(
+          buyerId,
+          us2AgentDid,
+          us2AuthorityRef,
+          "WBTC",
+          "buy",
+          100,
+          50000,
+        ),
       }),
       { correlationRef: "corr_settle_buy" },
     );
@@ -533,7 +615,15 @@ describe("matching orchestrator — balance reservations", () => {
         institutionId: sellerId,
         agentDid: "did:t3n:agent:seller-settle-test",
         authorityRef: us2AuthorityRef,
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 100, 50000),
+        encryptedIntentEnvelope: makeEnvelope(
+          sellerId,
+          "did:t3n:agent:seller-settle-test",
+          us2AuthorityRef,
+          "WBTC",
+          "sell",
+          100,
+          50000,
+        ),
       }),
       { correlationRef: "corr_settle_sell" },
     );
@@ -678,7 +768,15 @@ describe("matching orchestrator — balance reservations", () => {
     await service2.submitIntent(
       buildHiddenIntentRequest({
         institutionId: buyerId,
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "buy", 100, 50000),
+        encryptedIntentEnvelope: makeEnvelope(
+          buyerId,
+          us2AgentDid,
+          us2AuthorityRef,
+          "WBTC",
+          "buy",
+          100,
+          50000,
+        ),
       }),
       { correlationRef: "corr_prematch_buyer" },
     );
@@ -688,7 +786,15 @@ describe("matching orchestrator — balance reservations", () => {
         institutionId: sellerId,
         agentDid: "did:t3n:agent:seller-prematch",
         authorityRef: us2AuthorityRef,
-        encryptedIntentEnvelope: makeEnvelope("WBTC", "sell", 100, 50000),
+        encryptedIntentEnvelope: makeEnvelope(
+          sellerId,
+          "did:t3n:agent:seller-prematch",
+          us2AuthorityRef,
+          "WBTC",
+          "sell",
+          100,
+          50000,
+        ),
       }),
       { correlationRef: "corr_prematch_seller" },
     );

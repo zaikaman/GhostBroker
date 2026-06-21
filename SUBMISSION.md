@@ -168,7 +168,7 @@ Honest disclosure (any of these would surface quickly during a code walkthrough)
 
 **Deliberately scoped for the bounty demo (v1):**
 
-- `backend/src/cli/agents/sealed-envelope.ts` — for loop agents that do not have a TEE in front of them, the envelope is a deterministic base64url JSON blob. The production path (`backend/src/enclave/matching/blind-intent.ts:332-418` via `T3BlindIntentClient.sealIntent`) is real TEE encryption.
+- `backend/src/cli/agents/sealed-envelope.ts` — for loop agents that do not have a TEE in front of them, the envelope is a real AES-256-GCM AEAD ciphertext (`ghostbroker.envelope.aead/v1`) with a per-institution key derived from `ENVELOPE_ENCRYPTION_MASTER_KEY` via HKDF-SHA256. The AEAD's Additional Data binds the ciphertext to (institutionDid, agentDid, authorityRef, schema version); any tamper, wrong key, or AAD mismatch fails the GCM tag verification on `openEnvelope`. The previous plaintext base64url-JSON envelope leaked the full trading parameters through the Supabase column; the new format is opaque to anyone without the master key. See `backend/src/enclave/keys/envelope-cipher.ts` and the 22 cipher unit tests in `envelope-cipher.test.ts` for the round-trip / tamper-detection / wrong-key / AAD-mismatch coverage. The production path (`backend/src/enclave/matching/blind-intent.ts` via `T3BlindIntentClient.sealIntent`) is real TEE encryption.
 - `backend/src/enclave/negotiation/evaluate-round.ts` — turn-by-turn negotiation crosses are computed inline because both sides' prices are already visible to the agents by design; the TEE still seals tickets and validates pair compatibility. The cross is a *transcript outcome*, not a settlement authority.
 
 **Dashboard UI surfaces are wired to live data:**

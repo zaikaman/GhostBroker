@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { TokenBalanceClient } from "../sandbox/token-balance.js";
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
+import {
+  AEAD_ENVELOPE_SCHEMA_VERSION,
+  loadEnvelopeMasterKey,
+  openEnvelope,
+  type AeadSealedEnvelopePayload,
+  type EnvelopeMasterKey,
+} from "../keys/envelope-cipher.js";
 
 export interface BlindIntentRequest {
   institutionId: string;
@@ -260,15 +267,17 @@ function opaqueHandle(seed: string): string {
  * The on-the-wire envelope schema version shared by the GhostBroker
  * agent process (`buildSealedEnvelope` in
  * `agents/src/sealed-envelope.ts`) and the T3 seal contract. The
- * envelope is a base64url-encoded JSON blob. The T3 enclave holds
- * the only decryption key; in production the orchestrator never
- * decodes the envelope itself — it consumes the TEE-attested
- * `lockDescriptor` from the seal response. The in-process test
- * path re-decodes the envelope to derive a deterministic
- * descriptor for the test orchestrator; the production TEE must
- * return the descriptor on its own.
+ * envelope is an AES-256-GCM AEAD ciphertext: a base64url-encoded
+ * `<version>.<nonce>.<ciphertext>.<authTag>` blob whose plaintext
+ * payload is a JSON document carrying the trading parameters. The
+ * T3 enclave holds the only decryption key; in production the
+ * orchestrator never decodes the envelope itself -- it consumes
+ * the TEE-attested `lockDescriptor` from the seal response. The
+ * in-process test path re-decodes the envelope to derive a
+ * deterministic descriptor for the test orchestrator; the
+ * production TEE must return the descriptor on its own.
  */
-export const SEALED_ENVELOPE_SCHEMA_VERSION = "ghostbroker.envelope/1";
+export const SEALED_ENVELOPE_SCHEMA_VERSION = AEAD_ENVELOPE_SCHEMA_VERSION;
 
 export interface SealedEnvelopePayload {
   v: string;
@@ -283,53 +292,57 @@ export interface SealedEnvelopePayload {
 }
 
 /**
- * Decode a base64url-encoded sealed envelope back into its
- * structured payload. Throws on any schema mismatch — the caller
- * is responsible for falling back to a default descriptor when
- * the envelope was not produced by the canonical `buildSealedEnvelope`
- * (e.g. an in-process test stub).
+ * Decode an AEAD-sealed envelope back into its structured payload.
+ *
+ * The previous implementation was a base64url JSON round-trip
+ * (`Buffer.from(...).toString()` + `JSON.parse`) that exposed the
+ * full plaintext trading parameters to anyone with Supabase read
+ * access. The new implementation runs the envelope through
+ * AES-256-GCM with a per-institution key derived from the master
+ * envelope key. The AEAD tag is verified; any tamper, wrong key,
+ * or AAD mismatch raises -- the caller must fail closed, never
+ * attempt to interpret partial / corrupt output.
+ *
+ * The orchestrator's fallback path in {@link T3BlindIntentClient.resolveLockDescriptor}
+ * uses this function for the in-process test path; production
+ * T3N responses carry the descriptor on the wire and never
+ * trigger this code path.
  */
-export function decodeSealedEnvelope(envelope: string): SealedEnvelopePayload {
-  let json: string;
+export function decodeSealedEnvelope(
+  envelope: string,
+  context: { institutionDid: string; agentDid: string; authorityRef: string },
+  masterKey: EnvelopeMasterKey = loadEnvelopeMasterKey(),
+): SealedEnvelopePayload {
+  let decoded: AeadSealedEnvelopePayload;
   try {
-    json = Buffer.from(envelope, "base64url").toString("utf8");
+    decoded = openEnvelope({
+      institutionDid: context.institutionDid,
+      agentDid: context.agentDid,
+      authorityRef: context.authorityRef,
+      envelope,
+      masterKey,
+    });
   } catch (cause) {
-    throw new Error("Sealed envelope is not valid base64url.", { cause });
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch (cause) {
-    throw new Error("Sealed envelope is not valid JSON.", { cause });
-  }
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Sealed envelope is not a JSON object.");
-  }
-  const record = parsed as Record<string, unknown>;
-  if (record["v"] !== SEALED_ENVELOPE_SCHEMA_VERSION) {
-    throw new Error(
-      `Sealed envelope schema version mismatch (expected ${SEALED_ENVELOPE_SCHEMA_VERSION}).`,
-    );
-  }
-  const side = record["side"];
-  if (side !== "buy" && side !== "sell") {
-    throw new Error("Sealed envelope side is not 'buy' or 'sell'.");
-  }
-  const quantity = record["quantity"];
-  const price = record["price"];
-  if (typeof quantity !== "number" || typeof price !== "number") {
-    throw new Error("Sealed envelope quantity/price are not numbers.");
+    if (cause instanceof Error) {
+      throw new Error(
+        `Sealed envelope is not a valid AEAD ciphertext (${cause.message}).`,
+        { cause },
+      );
+    }
+    throw new Error("Sealed envelope is not a valid AEAD ciphertext.", {
+      cause,
+    });
   }
   return {
-    v: String(record["v"]),
-    institutionId: String(record["institutionId"] ?? ""),
-    agentDid: String(record["agentDid"] ?? ""),
-    authorityRef: String(record["authorityRef"] ?? ""),
-    assetCode: String(record["assetCode"] ?? ""),
-    side,
-    quantity,
-    price,
-    nonce: String(record["nonce"] ?? ""),
+    v: decoded.v,
+    institutionId: decoded.institutionId,
+    agentDid: decoded.agentDid,
+    authorityRef: decoded.authorityRef,
+    assetCode: decoded.assetCode,
+    side: decoded.side,
+    quantity: decoded.quantity,
+    price: decoded.price,
+    nonce: decoded.nonce,
   };
 }
 
@@ -464,6 +477,11 @@ export class T3BlindIntentClient implements BlindIntentClient {
       response.body,
       request.encryptedIntentEnvelope,
       intentHandle,
+      {
+        institutionDid: request.institutionId,
+        agentDid: request.agentDid,
+        authorityRef: request.authorityRef,
+      },
     );
 
     return {
@@ -480,7 +498,7 @@ export class T3BlindIntentClient implements BlindIntentClient {
    * intent. In production the T3 enclave returns the descriptor
    * verbatim on the `seal-intent` response and the
    * orchestrator carries it through. When the T3N response
-    * predates v0.8.0 (the in-process test path uses T3N stubs
+   * predates v0.8.0 (the in-process test path uses T3N stubs
    * that don't yet emit the new fields), the orchestrator
    * derives a deterministic descriptor from the locally-sealed
    * envelope so the test assertions remain stable. The
@@ -493,6 +511,11 @@ export class T3BlindIntentClient implements BlindIntentClient {
     upstream: T3BlindIntentResponse,
     envelope: string,
     intentHandle: string,
+    context: {
+      institutionDid: string;
+      agentDid: string;
+      authorityRef: string;
+    },
   ): BlindIntentLockDescriptor {
     // v0.8.0+: the enclave unseals the envelope and emits the
     // per-side TEE-attested parameters as siblings on the
@@ -534,7 +557,7 @@ export class T3BlindIntentClient implements BlindIntentClient {
       // in-process fallback below decodes the envelope to
       // recover the per-side values for the `evaluate-match`
       // wire form.
-      const decoded = decodeSealedEnvelope(envelope);
+      const decoded = decodeSealedEnvelope(envelope, context);
       const quantity = String(decoded.quantity);
       const price = String(decoded.price);
       const side = upstream.lock_descriptor.side;
@@ -556,7 +579,7 @@ export class T3BlindIntentClient implements BlindIntentClient {
         attestationRef: String(upstream.lock_descriptor.attestation_ref),
       };
     }
-    const decoded = decodeSealedEnvelope(envelope);
+    const decoded = decodeSealedEnvelope(envelope, context);
     const settlementAsset =
       this.settlementAssetCode ?? decoded.assetCode.toUpperCase();
     const tradedAssetCode = decoded.assetCode.toUpperCase();

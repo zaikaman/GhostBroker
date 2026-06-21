@@ -5,12 +5,16 @@ import {
   classifyBlindIntentSealFailure,
   type BlindIntentRequest,
 } from "../matching/blind-intent.js";
+import { sealEnvelope } from "../keys/envelope-cipher.js";
 import type {
   T3NetworkClient,
   T3NetworkRequest,
   T3NetworkResponse,
 } from "../sandbox/t3n-client.js";
 import type { TokenBalanceClient, TokenBalance } from "../sandbox/token-balance.js";
+
+const BLINDING_TEST_MASTER_KEY = "0".repeat(64);
+process.env["ENVELOPE_ENCRYPTION_MASTER_KEY"] = BLINDING_TEST_MASTER_KEY;
 
 class CapturingNetworkClient implements T3NetworkClient {
   public requests: T3NetworkRequest[] = [];
@@ -57,23 +61,34 @@ class ReadyTokenClient implements TokenBalanceClient {
 }
 
 /**
- * The envelope is the canonical `ghostbroker.envelope/1` form
- * that the in-process test path can re-decode to derive the
- * fallback lock descriptor. Production T3N responses include
- * the descriptor on the wire and skip the decode.
+ * The envelope is an AEAD-sealed
+ * `ghostbroker.envelope.aead/v1` envelope produced by
+ * `sealEnvelope`. The in-process test path uses the cipher
+ * directly so the seal stub can re-decode the envelope to
+ * derive the fallback lock descriptor; production T3N
+ * responses include the descriptor on the wire and skip the
+ * decode.
  */
-const testEnvelopeJson = JSON.stringify({
-  v: "ghostbroker.envelope/1",
-  institutionId: "00000000-0000-4000-8000-000000000201",
+const testEnvelope = sealEnvelope({
+  institutionDid: "00000000-0000-4000-8000-000000000201",
   agentDid: "did:t3n:agent:us2-authorized",
   authorityRef: "authority:us2:intent-submit",
-  assetCode: "WBTC",
-  side: "buy",
-  quantity: 1,
-  price: 45000,
-  nonce: "nonce-test",
+  payload: {
+    institutionId: "00000000-0000-4000-8000-000000000201",
+    agentDid: "did:t3n:agent:us2-authorized",
+    authorityRef: "authority:us2:intent-submit",
+    assetCode: "WBTC",
+    side: "buy",
+    quantity: 1,
+    price: 45000,
+    nonce: "nonce-test",
+  },
+  masterKey: {
+    key: Buffer.from(BLINDING_TEST_MASTER_KEY, "hex"),
+    keyFingerprint: "test-fingerprint",
+    fromDevFallback: false,
+  },
 });
-const testEnvelope = Buffer.from(testEnvelopeJson, "utf8").toString("base64url");
 
 const request: BlindIntentRequest = {
   institutionId: "00000000-0000-4000-8000-000000000201",

@@ -6,7 +6,12 @@ export const encryptedIntentEnvelopeSchema = z
   .trim()
   .min(32)
   .max(32768)
-  .regex(/^[A-Za-z0-9._~:/+=-]+$/u);
+  // The envelope is `<version>|<base64url body>`. We allow `|`
+  // as the version separator on top of the existing base64url
+  // alphabet because the production wire form carries the
+  // AEAD version prefix. The schema does not enforce the
+  // version string; the enclave validates it on open.
+  .regex(/^[A-Za-z0-9._~:/+=\-|]+$/u);
 
 /**
  * The intent submit wire format. Carries only what the orchestrator

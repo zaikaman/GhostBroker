@@ -122,6 +122,27 @@ const envSchema = z.object({
     .default("0.8.0"),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
   SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
+  /**
+   * Master symmetric key the enclave uses to wrap the
+   * per-institution AEAD envelope key for the
+   * `encryptedIntentEnvelope` field. The wire format is
+   * AES-256-GCM (`ghostbroker.envelope.aead/v1`); the master
+   * key is the input to HKDF-SHA256 with the institution DID as
+   * the salt and the schema version as the info string.
+   *
+   * Format: 64 hex characters (32 bytes). MUST be set in
+   * production. When unset the cipher module falls back to a
+   * deterministic dev key derived from a fixed application-
+   * domain string -- the dev fallback is for local development
+   * and the test suite only, and is exposed via
+   * {@link loadEnvelopeMasterKey}'s `fromDevFallback` flag so
+   * production boot paths can fail closed.
+   */
+  ENVELOPE_ENCRYPTION_MASTER_KEY: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-fA-F]{64}$/u)
+    .optional(),
   ETHERSCAN_API_KEY: z.string().min(1).optional(),
   SEPOLIA_WBTC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
   SEPOLIA_USDC_CONTRACT_ADDRESS: z.string().trim().regex(/^0x[0-9a-f]{40}$/iu).optional(),
