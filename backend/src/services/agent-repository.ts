@@ -69,6 +69,14 @@ export interface AgentRepository {
      * privileged action without the agent having to resend it.
      */
     delegationCredential?: unknown;
+    /**
+     * The SDK-native delegation envelope (JCS bytes + EIP-191
+     * signature + agent invocation keypair) for on-chain
+     * revocation via `revokeDelegation`. Stored alongside the
+     * W3C VC in agent metadata so the revocation path has
+     * access to the canonicalised credential bytes.
+     */
+    sdkDelegationEnvelope?: unknown;
   }): Promise<Agent>;
   listByInstitution(
     institutionId: string,
@@ -124,6 +132,7 @@ export class SupabaseAgentRepository implements AgentRepository {
     limitReference?: string | null;
     policyHash?: string | null;
     delegationCredential?: unknown;
+    sdkDelegationEnvelope?: unknown;
   }): Promise<Agent> {
     const { data, error } = await this.client
       .from("agents")
@@ -141,6 +150,9 @@ export class SupabaseAgentRepository implements AgentRepository {
         metadata: {
           ...(params.delegationCredential !== undefined
             ? { delegation_credential: params.delegationCredential }
+            : {}),
+          ...(params.sdkDelegationEnvelope !== undefined
+            ? { sdk_delegation_envelope: params.sdkDelegationEnvelope }
             : {}),
         },
       })

@@ -10,3 +10,4 @@ export * from "./authority-claims.js";
 export * from "./ghostbroker-delegation.js";
 export * from "./did-registry.js";
 export * from "./tenant-delegation.js";
+export * from "./sdk-delegation-signer.js";

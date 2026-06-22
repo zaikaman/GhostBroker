@@ -57,6 +57,10 @@ class StaticRevocations implements AuthorityRevocationRepository {
   public async listRevokedAuthorityRefs(): Promise<ReadonlySet<string>> {
     return this.refs;
   }
+
+  public async revokeAuthority(): Promise<void> {
+    // No-op: test stub.
+  }
 }
 
 describe("agent admission", () => {

@@ -4,6 +4,7 @@ import {
   type TenantDelegationPolicy,
 } from "../enclave/index.js";
 import type { DelegationCredential } from "../sdk/agent-client/index.js";
+import type { SdkDelegationEnvelope } from "../enclave/auth/sdk-delegation-signer.js";
 import { PublicError } from "../errors/public-error.js";
 import type { TenantIdentity } from "../enclave/index.js";
 import type { NegotiationMandateInput } from "../models/negotiation.js";
@@ -12,8 +13,8 @@ import type { NegotiationMandateInput } from "../models/negotiation.js";
  * Backend-side wrapper around the t3-enclave tenant
  * delegation signer. Lives in the backend (not the
  * t3-enclave) so the backend can hold the `TenantIdentity`
- * — the file-backed secp256k1 keypair + DID that the
- * signer uses — without having to plumb the t3-enclave
+ * - the file-backed secp256k1 keypair + DID that the
+ * signer uses - without having to plumb the t3-enclave
  * session around every call site.
  *
  * The signer is constructed once at backend boot, after
@@ -25,16 +26,19 @@ export interface TenantDelegationSigner {
   /**
    * Mint a fresh W3C VC delegation credential signed by
    * the institution's tenant keypair. Returns the signed
-   * credential and a stable `policyHash` for downstream
+   * credential, a stable `policyHash` for downstream
    * equality checks (the `policyHash` matches the one the
    * backend's verifier produces on the same VC, so the
-   * orchestrator can assert the two agree).
+   * orchestrator can assert the two agree), and an optional
+   * `sdkEnvelope` carrying the SDK-native delegation
+   * artifact for on-chain revocation.
    */
   mint(policy: TenantDelegationPolicy & {
     mandate?: NegotiationMandateInput;
   }): Promise<{
     credential: DelegationCredential;
     policyHash: string;
+    sdkEnvelope?: SdkDelegationEnvelope;
   }>;
 }
 
@@ -54,19 +58,23 @@ export class BackendTenantDelegationSigner implements TenantDelegationSigner {
 
   public async mint(
     policy: TenantDelegationPolicy,
-  ): Promise<{ credential: DelegationCredential; policyHash: string }> {
-    const { credential } = mintTenantDelegation(policy, this.identity);
+  ): Promise<{ credential: DelegationCredential; policyHash: string; sdkEnvelope?: SdkDelegationEnvelope }> {
+    const result = mintTenantDelegation(policy, this.identity);
     // The policy hash the backend reports to the agent
     // (and persists in `agents.policy_hash`) is the same
     // sha256-canonical-JSON fingerprint the verifier
-    // computes — see
+    // computes - see
     // `t3-enclave/src/auth/ghostbroker-delegation.ts`'s
     // `policyHashFor`. We re-implement it here so we
     // don't have to round-trip through the verifier just
     // to get the hash; the bytes are byte-identical for
     // the same credential.
-    const policyHash = computePolicyHash(credential);
-    return { credential, policyHash };
+    const policyHash = computePolicyHash(result.credential);
+    return {
+      credential: result.credential,
+      policyHash,
+      ...(result.sdkEnvelope ? { sdkEnvelope: result.sdkEnvelope } : {}),
+    };
   }
 }
 

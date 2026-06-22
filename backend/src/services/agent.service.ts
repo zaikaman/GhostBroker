@@ -16,6 +16,7 @@ import {
 import type { MatchingOrchestrator } from "./matching-orchestrator.js";
 import type { DelegationCredential } from "../sdk/agent-client/index.js";
 import type { DelegationActionScope } from "../enclave/index.js";
+import type { SdkDelegationEnvelope } from "../enclave/auth/sdk-delegation-signer.js";
 
 export interface AgentAdmissionService {
   admitAgent(request: AdmitAgentRequest): Promise<AgentAdmission>;
@@ -46,6 +47,7 @@ export interface AgentManagementService extends AgentAdmissionService {
     institutionId: string;
     credential: DelegationCredential;
     policyHash: string;
+    sdkEnvelope?: SdkDelegationEnvelope;
   }): Promise<Agent>;
   /**
    * Look up the persisted delegation VC for an agent. Returns
@@ -98,7 +100,7 @@ export interface AgentManagementService extends AgentAdmissionService {
       purpose?: string;
       mandate?: NegotiationMandateInput;
       validityMonths?: number;
-    }) => Promise<{ credential: DelegationCredential; policyHash: string }>;
+    }) => Promise<{ credential: DelegationCredential; policyHash: string; sdkEnvelope?: SdkDelegationEnvelope }>;
   }): Promise<{ agent: Agent; policyHash: string }>;
 }
 
@@ -281,6 +283,26 @@ export class AgentService implements AgentManagementService {
       throw new PublicError("not_found", 404);
     }
 
+    // Load the SDK delegation envelope from the agent's
+    // metadata (persisted at configure time by the SDK-native
+    // minting path). When present, the revocation service
+    // performs on-chain revocation via `revokeDelegation` in
+    // addition to the database-side revocation.
+    const sdkEnvelope = (
+      agent.metadata as Record<string, unknown> | null
+    )?.sdk_delegation_envelope as SdkDelegationEnvelope | undefined;
+
+    // Revoke on-chain (if SDK envelope + T3nClient available)
+    // and in the database. The revocation service delegates the
+    // Supabase-side record write and adds the on-chain step
+    // best-effort.
+    await this.revocations.revokeAuthority({
+      institutionId,
+      agentDid: agent.agentDid,
+      agentId: id,
+      ...(sdkEnvelope ? { sdkEnvelope } : {}),
+    });
+
     // Revoke in the database
     await this.repository.revoke(id);
 
@@ -295,6 +317,7 @@ export class AgentService implements AgentManagementService {
     institutionId: string;
     credential: DelegationCredential;
     policyHash: string;
+    sdkEnvelope?: SdkDelegationEnvelope;
   }): Promise<Agent> {
     const existing = await this.repository.findById(
       input.agentId,
@@ -303,15 +326,24 @@ export class AgentService implements AgentManagementService {
     if (!existing) {
       throw new PublicError("not_found", 404);
     }
-    // Two writes: metadata (the VC) and authority_ref (the
-    // verifier's authorityRef). Both are needed because the
-    // verifier computes authorityRef from `credential.id`,
+    // Two writes: metadata (the VC + optional SDK envelope) and
+    // authority_ref (the verifier's authorityRef). Both are needed
+    // because the verifier computes authorityRef from `credential.id`,
     // and the agent record's `authority_ref` column is the
     // public-facing id the agent process echoes back.
+    //
+    // The SDK delegation envelope is persisted alongside the VC so
+    // the on-chain revocation path (SdkAuthorityRevocationRepository)
+    // has access to the JCS-canonicalised credential bytes and function
+    // list needed for revokeDelegation.
     const authorityRef = `ghostbroker-delegation:${input.credential.id}`;
-    const withMeta = await this.repository.updateMetadata(input.agentId, {
+    const metadata: Record<string, unknown> = {
       delegation_credential: input.credential,
-    });
+    };
+    if (input.sdkEnvelope) {
+      metadata.sdk_delegation_envelope = input.sdkEnvelope;
+    }
+    const withMeta = await this.repository.updateMetadata(input.agentId, metadata);
     return this.repository.updateAuthorityRef({
       id: input.agentId,
       authorityRef,
@@ -359,7 +391,7 @@ export class AgentService implements AgentManagementService {
       purpose?: string;
       mandate?: NegotiationMandateInput;
       validityMonths?: number;
-    }) => Promise<{ credential: DelegationCredential; policyHash: string }>;
+    }) => Promise<{ credential: DelegationCredential; policyHash: string; sdkEnvelope?: SdkDelegationEnvelope }>;
   }): Promise<{ agent: Agent; policyHash: string }> {
     // The agent DID is the secp256k1-derived DID the dashboard
     // minted in the browser (`did:t3n:0x<eth-address>`). The
@@ -370,7 +402,7 @@ export class AgentService implements AgentManagementService {
     // admission without holding a keypair.
     const agentDid = input.agentDid;
 
-    const { credential, policyHash } = await input.signCredential({
+    const { credential, policyHash, sdkEnvelope } = await input.signCredential({
       agentDid,
       institutionId: input.institutionId,
       maxSpendUsd: input.policy.maxSpendUsd,
@@ -393,6 +425,7 @@ export class AgentService implements AgentManagementService {
       label: input.label ?? null,
       policyHash,
       delegationCredential: credential,
+      sdkDelegationEnvelope: sdkEnvelope,
     });
 
     return { agent, policyHash };

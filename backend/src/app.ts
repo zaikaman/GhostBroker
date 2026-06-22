@@ -32,6 +32,7 @@ import {
 import { DidAuthService, type AuthSessionService } from "./services/auth.service.js";
 import {
   SupabaseAuthorityRevocationRepository,
+  SdkAuthorityRevocationRepository,
   type AuthorityRevocationRepository
 } from "./services/authority-revocation.service.js";
 import { AgentService, type AgentManagementService } from "./services/agent.service.js";
@@ -100,6 +101,7 @@ import {
   T3NegotiationRoundClient,
   T3NegotiationTicketClient,
   createAuthenticatedT3NetworkClient,
+  SdkAuthenticatedT3NetworkClient,
   loadOrCreateTenantIdentityFromRepository,
   InsufficientT3TokenBalanceError,
   readT3EnclaveConfig,
@@ -288,6 +290,19 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
   }
   const authorityRevocationRepository = new SupabaseAuthorityRevocationRepository(
     supabase as never
+  );
+  // Wrap the Supabase revocation repository with the SDK-native
+  // wrapper so `revokeAgent` calls also propagate on-chain via
+  // `revokeDelegation` when the agent has an SDK delegation
+  // envelope. The wrapper delegates the Supabase-side record
+  // write to the inner repository and adds the on-chain step
+  // best-effort (falls back to Supabase-only when the T3nClient
+  // is unavailable or the on-chain call fails).
+  const authorityRevocationRepositoryWithSdk = new SdkAuthorityRevocationRepository(
+    authorityRevocationRepository,
+    t3NetworkClient instanceof SdkAuthenticatedT3NetworkClient
+      ? t3NetworkClient.t3nClient
+      : undefined,
   );
 
   const apiKeyRepository = new SupabaseApiKeyRepository(supabase as never);
@@ -627,7 +642,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     authorizationFacade,
     matchingOrchestrator,
     supabase: supabase as never,
-    authorityRevocationRepository
+    authorityRevocationRepository: authorityRevocationRepositoryWithSdk
   });
   const negotiationRepository = new SupabaseNegotiationRepository(supabase as never);
   const negotiationTicketClient = new T3NegotiationTicketClient({

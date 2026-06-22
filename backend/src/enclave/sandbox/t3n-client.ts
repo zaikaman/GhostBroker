@@ -63,6 +63,16 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
   }
 
   /**
+   * The authenticated T3nClient instance. Exposed so
+   * composition roots (`app.ts`) can pass it to SDK-native
+   * primitives that require an authenticated client (e.g.
+   * `revokeDelegation` for on-chain delegation revocation).
+   */
+  public get t3nClient(): T3nClient {
+    return this.t3n;
+  }
+
+  /**
    * The authenticated tenant DID returned by the T3N
    * handshake. The backend uses this as the `issuer` of
    * every server-minted delegation VC, and as the

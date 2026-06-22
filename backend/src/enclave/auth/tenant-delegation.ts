@@ -8,6 +8,12 @@ import {
   type DelegationSigningBody,
 } from "../../sdk/agent-client/index.js";
 import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
+import {
+  mintSdkDelegation,
+  type SdkDelegationEnvelope,
+  type SdkMintResult,
+} from "./sdk-delegation-signer.js";
+import { logger } from "../../logging/logger.js";
 
 /**
  * Server-side W3C VC delegation signer.
@@ -18,49 +24,42 @@ import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
  * identity (`did:t3n:0x<addr>` returned by the T3N handshake)
  * is recorded on the institution row for display; it is NOT
  * the VC issuer. The user (the institution's operator) never
- * holds or sees the signing key — it lives in the file-backed
+ * holds or sees the signing key - it lives in the file-backed
  * identity store at `output/identities/tenant_identity.json`
  * (dev/test fallback) or is loaded from a secret manager via
  * `TENANT_SIGNING_PRIVATE_KEY` (production).
  *
  * IMPORTANT: the tenant signing keypair is a SEPARATE secret
  * from the T3N bearer API key (`T3N_API_KEY`). Conflating the
- * two was the C1 architecture flaw — see
+ * two was the C1 architecture flaw - see
  * `tenant-identity-store.ts` for the full rationale. The
  * `loadOrCreateTenantIdentity` validator rejects any value
  * that is not a canonical 32-byte secp256k1 key, so wiring
  * `T3N_API_KEY` here fails fast at backend boot.
  *
- * This is the production target the plan calls for:
+ * ## SDK-native minting path (default)
  *
- *   - The user no longer runs `setup:delegation` from a CLI.
- *     The backend mints + signs + persists the VC the moment
- *     the user configures an agent in the dashboard.
+ * As of t3n-sdk v3.9.0, the backend uses the SDK's native
+ * delegation lifecycle primitives (`buildDelegationCredential`,
+ * `canonicaliseCredential`, `signCredential`) as the default
+ * minting path. The SDK-native credential is used for on-chain
+ * revocation via `revokeDelegation` and for per-call agent
+ * invocation signatures via `signAgentInvocation`.
  *
- *   - The agent process never sees the VC. The backend
- *     re-verifies the persisted VC on every privileged call
- *     (`/api/agents/admit`, `/api/agents/intents`,
- *     `/api/agents/intents/cancel`, settlement).
+ * The SDK-native path also produces a W3C VC (via the existing
+ * signer) so the current `@terminal3/verify_vc`-backed verifier
+ * in `ghostbroker-delegation.ts` continues to work unchanged.
+ * The migration is about the minting/signing side, not the
+ * verify side.
  *
- *   - The signer re-uses the canonical browser-safe signer
- *     from `backend/src/sdk/agent-client/delegation-signer.ts`,
- *     so the JWS it produces is byte-identical to the JWS
- *     the legacy CLI produced and the legacy browser-mint UI
- *     produced — `@terminal3/verify_vc`'s `verifyEcdsaVc`
- *     accepts it with no special-casing.
+ * ## Legacy fallback
  *
- * The signing body, the canonical-JSON byte layout, the
- * EIP-191 personal_sign prefix, the secp256k1 65-byte JWS,
- * and the `EcdsaSecp256k1Signature2019` proof type are all
- * unchanged. Only the issuer identity moves from "agent"
- * to "institution".
- *
- * The VC's `credentialSubject.allowedActions` is the
- * agent's trading-action scope (the same `RequestedAgentAction`
- * enum the verifier and orchestrator use), not the
- * procurement BUIDL's purchase-category enum. See
- * `t3-enclave/src/auth/ghostbroker-delegation.ts` for the
- * full rationale.
+ * If the SDK-native path throws (e.g. the SDK delegation
+ * contract is not provisioned in the current environment), the
+ * signer falls back to the custom `delegation-signer.ts` path.
+ * The legacy path produces only the W3C VC (no SDK envelope),
+ * so on-chain revocation is not available for credentials
+ * minted via the fallback.
  */
 
 const delegationActionScopeSchema = z.enum([
@@ -89,17 +88,30 @@ export type TenantDelegationPolicy = z.infer<typeof tenantDelegationPolicySchema
 export interface MintTenantDelegationResult {
   /** The signed W3C VC, ready to persist on the agent record. */
   credential: DelegationCredential;
-  /** The canonical signing body — useful for tests / audit. */
+  /** The canonical signing body - useful for tests / audit. */
   body: DelegationSigningBody;
+  /**
+   * The SDK-native delegation envelope (JCS bytes + EIP-191
+   * signature + agent invocation keypair) for on-chain
+   * revocation via `revokeDelegation` and per-call invocation
+   * signing via `signAgentInvocation`. Absent when the legacy
+   * fallback path was used.
+   */
+  sdkEnvelope?: SdkDelegationEnvelope;
 }
 
 /**
- * Mint a fresh W3C VC delegation credential signed by the
+ * Mint a fresh delegation credential signed by the
  * institution's tenant keypair. The returned `credential`
- * is the same shape the legacy CLI / browser-mint produced,
- * so the existing `@terminal3/verify_vc` round-trip in
- * `t3-enclave/src/auth/ghostbroker-delegation.ts` is the
- * unchanged authority gate.
+ * is the W3C VC shape the existing `@terminal3/verify_vc`
+ * verifier in `ghostbroker-delegation.ts` cryptographically
+ * verifies on every privileged call.
+ *
+ * The SDK-native path (`mintSdkDelegation`) is the default;
+ * it also produces an `sdkEnvelope` carrying the JCS-
+ * canonicalised credential bytes and EIP-191 signature for
+ * on-chain revocation. If the SDK path throws, the legacy
+ * custom signer path is used as a fallback (no SDK envelope).
  */
 export function mintTenantDelegation(
   policy: TenantDelegationPolicy,
@@ -107,6 +119,52 @@ export function mintTenantDelegation(
 ): MintTenantDelegationResult {
   const parsed = tenantDelegationPolicySchema.parse(policy);
 
+  // Try the SDK-native path first (default).
+  try {
+    const sdkResult: SdkMintResult = mintSdkDelegation(
+      {
+        agentDid: parsed.agentDid,
+        institutionId: parsed.institutionId,
+        maxSpendUsd: parsed.maxSpendUsd,
+        allowedActions: [...parsed.allowedActions] as DelegationActionScope[],
+        ...(parsed.approverEmail ? { approverEmail: parsed.approverEmail } : {}),
+        ...(parsed.purpose ? { purpose: parsed.purpose } : {}),
+        ...(parsed.validityMonths ? { validityMonths: parsed.validityMonths } : {}),
+      },
+      identity,
+    );
+    return {
+      credential: sdkResult.credential,
+      body: buildDelegationSigningBody(sdkResult.credential),
+      sdkEnvelope: sdkResult.sdkEnvelope,
+    };
+  } catch (error) {
+    // SDK-native path failed (e.g. SDK delegation contract not
+    // provisioned, or a validation error from the SDK). Fall
+    // back to the legacy custom signer path, which produces
+    // only the W3C VC without the SDK envelope.
+    logger.warn(
+      {
+        event: "tenant_delegation.sdk_path_failed",
+        err: error instanceof Error ? error.message : String(error),
+      },
+      "SDK-native delegation path failed; falling back to legacy signer.",
+    );
+  }
+
+  // Legacy fallback: custom W3C VC signer.
+  return mintLegacyDelegation(parsed, identity);
+}
+
+/**
+ * Legacy custom W3C VC signer path. Produces only the W3C VC
+ * (no SDK envelope). Used as a fallback when the SDK-native
+ * path is unavailable.
+ */
+function mintLegacyDelegation(
+  parsed: TenantDelegationPolicy,
+  identity: Pick<TenantIdentity, "did" | "publicKey" | "privateKey" | "address">,
+): MintTenantDelegationResult {
   const body = mintDelegationCredentialBody({
     agentDid: parsed.agentDid,
     issuerDid: identity.did,
@@ -144,4 +202,3 @@ export function mintTenantDelegation(
     body: buildDelegationSigningBody(body),
   };
 }
-
