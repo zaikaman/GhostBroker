@@ -270,6 +270,23 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     throw error;
   }
 
+  // Envelope master key production guard: if the key was loaded from
+  // the deterministic dev fallback (i.e., ENVELOPE_ENCRYPTION_MASTER_KEY
+  // is not set) and NODE_ENV is production, refuse to boot. Without
+  // this guard, a production deployment that omits the env var silently
+  // uses a publicly-known key for all AEAD ciphertexts, defeating the
+  // purpose of the per-institution envelope encryption.
+  if (env.NODE_ENV === "production") {
+    const { fromDevFallback } = loadEnvelopeMasterKey();
+    if (fromDevFallback) {
+      throw new Error(
+        "Refusing to boot in NODE_ENV=production: ENVELOPE_ENCRYPTION_MASTER_KEY is not set. " +
+          "The dev fallback encryption key is publicly known. Set ENVELOPE_ENCRYPTION_MASTER_KEY " +
+          "to a 64-hex-character (32-byte) secret and restart."
+      );
+    }
+  }
+
   const supabase = createSupabaseServiceClient(env);
   const institutionRepository = new SupabaseInstitutionRepository(supabase as never);
   const tenantIdentityRepository = new SupabaseTenantIdentityRepository(supabase as never);
