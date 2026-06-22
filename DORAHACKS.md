@@ -18,12 +18,12 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 
 | Surface | Evidence |
 |---|---|
-| Test suite | **688 tests passing, 8 skipped across 118 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
+| Test suite | **688 tests passing, 8 skipped across 119 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
 | Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, shared `database/`, `tests/` |
-| Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 31 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
+| Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 32 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
 | Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
 | Smart contracts | **Real Rust WASI P2 matching contract v0.15.1** (`backend/contracts/matching-policy/`, ~2300 LOC: v0.9.0 round-flow additions + v0.9.1 in-enclave AEAD decryption + v0.10.0 kv-store-backed state + v0.13.0 real AES-256-GCM settlement ciphertexts + **v0.15.1 SDK-native delegation envelope support -- per-agent TEE calls accept `delegation_envelope` and the contract verifies the credential authorises the called function**, compiled to `matching_policy.wasm`, published to T3N testnet contract_id 439, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
-| Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 55 tests) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
+| Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 22 files, 10 test files) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
 | Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); opaque per-field correlation handles on `completed_trades` |
 | Heroku durability | All runtime state is Supabase-backed (no `backend/output/` file writes); the tenant signing keypair and the T3N publish record both survive Heroku dyno restarts and Heroku's ephemeral dyno filesystem |
 | Documentation gap report | 19 findings filed in `terminal3-adk-onboarding-doc-gaps.md` (T3-ONB-001 through T3-ONB-019) |
@@ -164,7 +164,7 @@ API keys stored as `key_bcrypt` (bcrypt cost=12) + `lookup_key` (HMAC-SHA256). O
 
 Turn-based bilateral negotiation within verifiable authority rails. State machine: `pairing → active → converged → settling → settled` (with `walked_away`, `expired`, `awaiting_approval` branches).
 
-The `NegotiationOrchestrator` (1,968 lines) manages ticket sealing, compatibility-aware pairing (same asset, opposite side, different institution), turn-based moves (`propose`/`counter`/`reveal`/`accept`/`hold`/`walkaway`), price validation against mandate rails, disclosure gate, escalation, and settlement. Each agent's mandate defines objective, execution style, valuation, concession, disclosure, approval, counterparty, and size policy. The `negotiation-core` module (27 tests) provides shared strategy math for both backend and agent runtime.
+The `NegotiationOrchestrator` (2,272 lines) manages ticket sealing, compatibility-aware pairing (same asset, opposite side, different institution), turn-based moves (`propose`/`counter`/`reveal`/`accept`/`hold`/`walkaway`), price validation against mandate rails, disclosure gate, escalation, and settlement. Each agent's mandate defines objective, execution style, valuation, concession, disclosure, approval, counterparty, and size policy. The `negotiation-core` module (27 tests) provides shared strategy math for both backend and agent runtime.
 
 ## Settlement Rails
 
@@ -219,7 +219,7 @@ No dashboard surface displays hardcoded values as live data. The Settings → En
 
 ## Agent Client SDK
 
-`@ghostbroker/agent-client` (21 files, 55 tests): `GhostBrokerClient`, `DelegationSigner`, `AuthClient`, `IntentClient`, `NegotiationClient`, `PortfolioClient`, `TradesClient`, `ReceiptClient`, `WebSocketClient`.
+`@ghostbroker/agent-client` (22 files, 10 test files): `GhostBrokerClient`, `DelegationSigner`, `AuthClient`, `IntentClient`, `NegotiationClient`, `PortfolioClient`, `TradesClient`, `ReceiptClient`, `WebSocketClient`.
 
 ## Hosted LLM Agents
 
@@ -337,7 +337,7 @@ After boot, each institution's deposit wallet must `approve(relayer, MAX)` for W
 
 ## Testing
 
-**688 tests passing, 8 skipped across 118 test files.**
+**688 tests passing, 8 skipped across 119 test files.**
 ```sh
 npm test                              # all workspace tests
 WS2_ANVIL_INTEGRATION=1 npm test      # with on-chain (requires Anvil)
@@ -348,10 +348,10 @@ npm run test:e2e                      # Playwright E2E
 | Module | Files | Tests |
 |---|---|---|
 | frontend (jsdom) | 18 | 73 |
-| backend (node) | 100 | 615 (8 skipped, gated) |
-| **Total** | **118** | **688** |
+| backend (node) | 101 | 615 (8 skipped, gated) |
+| **Total** | **119** | **688** |
 
-Categories: contract (16, Supertest), integration (25), unit (21), frontend (18, React), SDK (9), agent runtime (7, 120 tests). On-chain integration deploys a relayer against a local Anvil node and asserts on-chain Transfer round-trips.
+Categories: contract (16, Supertest), integration (25), unit (21), frontend (18, React), SDK (10), agent runtime (7, 120 tests). On-chain integration deploys a relayer against a local Anvil node and asserts on-chain Transfer round-trips.
 
 ---
 
@@ -372,5 +372,5 @@ Comprehensive friction points and doc gaps encountered during development are tr
 ## Why This Submission Wins
 
 - **SDK integration is load-bearing, not cosmetic.** Every privileged action goes through the same `verifyGhostbrokerDelegationCredential` — real, fail-closed, and the only cryptographic authority.
-- **Completeness is structural.** Two real on-chain surfaces (WASM + Solidity), 15 tables with RLS, agent SDK with 55 tests, 23 frontend components, hosted multi-provider LLM agents. Nothing is mocked.
+- **Completeness is structural.** Two real on-chain surfaces (WASM + Solidity), 15 tables with RLS, agent SDK with 22 files and 10 test files, 23 frontend components, hosted multi-provider LLM agents. Nothing is mocked.
 - **Creativity is the dark pool itself.** Hidden-intent + turn-based negotiation + selective-disclosure is unsafe or impossible without the SDK's privacy guarantees — the application structurally advertises the SDK's value.

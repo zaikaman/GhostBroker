@@ -20,12 +20,12 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 
 | Surface | Evidence |
 |---|---|
-| Test suite | **688 tests passing, 8 skipped across 118 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
+| Test suite | **688 tests passing, 8 skipped across 119 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
 | Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, shared `database/`, `tests/` |
-| Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 31 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
+| Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 32 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
 | Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
 | Smart contracts | **Real Rust WASI P2 matching contract v0.15.1** (`backend/contracts/matching-policy/`, ~2300 LOC: v0.9.0 round-flow additions + v0.9.1 in-enclave AEAD decryption + v0.10.0 kv-store-backed state + v0.13.0 real AES-256-GCM settlement ciphertexts + **v0.15.1 SDK-native delegation envelope support -- per-agent TEE calls accept `delegation_envelope` and the contract verifies the credential authorises the called function**, compiled to `matching_policy.wasm`, published to T3N testnet contract_id 439, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
-| Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 55 tests) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
+| Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 22 files, 10 test files) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
 | Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); opaque per-field correlation handles on `completed_trades` |
 | Heroku durability | All runtime state is Supabase-backed (no `backend/output/` file writes); the tenant signing keypair and the T3N publish record both survive Heroku dyno restarts and Heroku's ephemeral dyno filesystem |
 | Documentation gap report | 19 findings filed in `terminal3-adk-onboarding-doc-gaps.md` (T3-ONB-001 through T3-ONB-019) |
@@ -134,7 +134,7 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 $EDITOR backend/.env frontend/.env
 
-# 3. Type-check + tests (118 files, 676 tests)
+# 3. Type-check + tests (119 files, 688 tests)
 npm run typecheck
 npm test
 
@@ -223,7 +223,7 @@ README.md                          Full architecture + API reference
 ## Why This Submission Wins on the Specific Bounty Criteria
 
 - **SDK integration is the strongest part.** The verifier on every privileged action is real, fail-closed, and the only cryptographic authority — exactly the property the bounty brief rewards.
-- **Completeness is structural, not theatrical.** Two real on-chain surfaces (WASM matching contract + Solidity settlement relayer), 15 tables with RLS, an SDK with 55 tests, 23 frontend components, hosted multi-provider LLM agents. Nothing is mocked.
+- **Completeness is structural, not theatrical.** Two real on-chain surfaces (WASM matching contract + Solidity settlement relayer), 15 tables with RLS, an SDK with 22 files and 10 test files, 23 frontend components, hosted multi-provider LLM agents. Nothing is mocked.
 - **Creativity is the dark pool itself.** The hidden-intent + turn-based negotiation + selective-disclosure pattern would be unsafe or impossible without the SDK's privacy guarantees, so the application is structurally an advertisement for the SDK's value proposition.
 
 ---
