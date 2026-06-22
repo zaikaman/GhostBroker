@@ -1,7 +1,9 @@
 # GhostBroker — DoraHacks Submission
 
 **Institutional Dark Pool with Verifiable Agent Authority**
+
 **Bounty track:** Terminal 3 Agent Dev Kit Bounty (June 9--22, 2026)
+
 **Repository:** https://github.com/zaikaman/GhostBroker
 
 GhostBroker is a production-grade institutional dark-pool trading platform where autonomous agents submit buy and sell intents that are matched and settled inside a Terminal 3 Trusted Execution Environment without any counterparty ever seeing another counterparty's parameters. Active order data lives exclusively inside the TEE; the dashboard, the REST API, the Supabase rows, the WebSocket telemetry stream, and the on-chain settlement layer see only opaque handles, sanitized state labels, and post-settlement audit receipts. Agents are admitted and authorized through Ghostbroker-style W3C Verifiable Credentials, re-verified by the SDK on every privileged action. Humans operate a read-only Observatory Console to monitor connectivity and review completed history.
