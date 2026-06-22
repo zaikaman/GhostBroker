@@ -801,7 +801,7 @@ The interface follows the "Attested Enclave" design language documented in
 - **Components**: Glassmorphic cards with `backdrop-filter: blur(12px)`,
   double-mask composited borders, pill-shaped buttons.
 
-### Component Inventory (25 components)
+### Component Inventory (23 components)
 
 | Component                    | Purpose                                    |
 | ---------------------------- | ------------------------------------------ |
