@@ -74,7 +74,6 @@ describe("settlement telemetry redaction", () => {
       },
       telemetryBus,
       undefined,
-      undefined,
       new MapSettlementRailDispatcher(
         new Map([["chain:sepolia:erc20", chainRailStub()]]),
       ),

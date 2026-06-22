@@ -125,7 +125,14 @@ describe("ChildProcessHostedAgentService.stopHostedAgent", () => {
   });
 
   afterEach(() => {
-    rmSync(workspace, { recursive: true, force: true });
+    try {
+      rmSync(workspace, { recursive: true, force: true });
+    } catch {
+      // Windows may hold file locks on temp directories long enough
+      // that an immediate rmSync fails with EPERM. The directory
+      // will be cleaned up by the OS eventually; there's nothing
+      // the test can do to force it.
+    }
   });
 
   it("stops a running hosted agent without throwing when the child exits mid-stop", async () => {

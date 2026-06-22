@@ -599,7 +599,6 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     new SettlementCommandBuilder(authorizationFacade),
     new SupabaseSettlementRepository(supabase as never),
     telemetryBus,
-    undefined, // audit sink
     portfolioService,
     railDispatcher,
     institutionConfigResolver

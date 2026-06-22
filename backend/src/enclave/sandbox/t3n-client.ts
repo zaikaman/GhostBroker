@@ -244,10 +244,14 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
     if (this.reauthPromise) {
       return this.reauthPromise;
     }
+    const reauthenticate = this.reauthenticate;
+    if (!reauthenticate) {
+      return;
+    }
     console.warn("[T3N] session expired — re-authenticating");
     this.reauthPromise = (async () => {
       try {
-        await this.reauthenticate!();
+        await reauthenticate();
       } finally {
         this.reauthPromise = null;
       }

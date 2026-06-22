@@ -226,24 +226,6 @@ export interface SettlementRepository {
   }): Promise<SettlementPersistenceResult>;
 }
 
-export interface SettlementAuditEvent {
-  step: "match" | "settlement" | "balance" | "receipt";
-  correlationRef: string;
-  executionRef: string;
-  institutionIds: string[];
-  occurredAt: string;
-}
-
-export interface SettlementAuditEventSink {
-  emit(event: SettlementAuditEvent): void | Promise<void>;
-}
-
-class NoopSettlementAuditEventSink implements SettlementAuditEventSink {
-  public emit(): void {
-    return undefined;
-  }
-}
-
 interface RpcQuery<TResult> {
   rpc(
     functionName: string,
@@ -328,7 +310,6 @@ export class SettlementService {
   private readonly commandBuilder: SettlementCommandBuilder;
   private readonly repository: SettlementRepository;
   private readonly telemetryBus: TelemetryBus;
-  private readonly auditEvents: SettlementAuditEventSink;
   private readonly portfolioService: PortfolioService | undefined;
   /**
    * WS1: rail dispatcher. Defaults to a noop-only dispatcher so
@@ -351,7 +332,6 @@ export class SettlementService {
     commandBuilder: SettlementCommandBuilder,
     repository: SettlementRepository,
     telemetryBus: TelemetryBus,
-    auditEvents: SettlementAuditEventSink = new NoopSettlementAuditEventSink(),
     portfolioService?: PortfolioService,
     railDispatcher?: SettlementRailDispatcher,
     institutionConfigResolver?: InstitutionSettlementConfigResolver,
@@ -359,7 +339,6 @@ export class SettlementService {
     this.commandBuilder = commandBuilder;
     this.repository = repository;
     this.telemetryBus = telemetryBus;
-    this.auditEvents = auditEvents;
     this.portfolioService = portfolioService;
     this.railDispatcher = railDispatcher ?? new MapSettlementRailDispatcher(new Map());
     this.institutionConfigResolver = institutionConfigResolver;
@@ -390,7 +369,6 @@ export class SettlementService {
         buyerAgentDid: request.buyerAgentDid,
         sellerAgentDid: request.sellerAgentDid,
       });
-      await this.emitAudit("match", command, correlationRef);
 
       // WS1/WS2: rail dispatch sits between the TEE command build
       // and the DB persist. On rail failure: no DB write, no
@@ -464,7 +442,6 @@ export class SettlementService {
           receipts: request.receipts,
           railProof: proof,
         });
-      await this.emitAudit("settlement", command, correlationRef);
 
       // Portfolio mutation now happens inside the settlement persistence RPC.
       if (this.portfolioService) {
@@ -485,8 +462,6 @@ export class SettlementService {
         });
       }
 
-      await this.emitAudit("balance", command, correlationRef);
-      await this.emitAudit("receipt", command, correlationRef);
       const receiptIds = persisted.receipts.map((receipt) => receipt.id);
 
       this.publish(
@@ -626,20 +601,6 @@ export class SettlementService {
         railId: proof.railId,
         railTradeRef: proof.railTradeRef,
       },
-    });
-  }
-
-  private async emitAudit(
-    step: SettlementAuditEvent["step"],
-    command: SettlementCommand,
-    correlationRef: string,
-  ): Promise<void> {
-    await this.auditEvents.emit({
-      step,
-      correlationRef,
-      executionRef: command.executionRef,
-      institutionIds: [command.buyerInstitutionId, command.sellerInstitutionId],
-      occurredAt: new Date().toISOString(),
     });
   }
 

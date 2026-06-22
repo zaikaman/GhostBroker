@@ -1302,10 +1302,9 @@ npm run typecheck
 
 ## Testing
 
-GhostBroker ships with a comprehensive test suite: **676 tests passing,
+GhostBroker ships with a comprehensive test suite: **688 tests passing,
 8 skipped across 118 test files** (the 8 skipped tests live in the
-on-chain settlement suite behind `WS2_ANVIL_INTEGRATION=1`; the 1 skipped
-test file is the root-level Playwright E2E spec which runs under
+on-chain settlement suite behind `WS2_ANVIL_INTEGRATION=1`; the root-level Playwright E2E spec runs under
 `npm run test:e2e` instead of `npm test`).
 
 ### Running Tests
@@ -1329,8 +1328,8 @@ npm run test:e2e
 | Module | Test files | Tests passing | Tests skipped |
 |---|---|---|---|
 | **frontend** (workspace, jsdom) | **18** | **73** | **0** |
-| **backend** (workspace, node) | **99** passed + **1** skipped | **603** | **8** (chain-sepolia, gated) |
-| **Total** | **118** (117 passed + 1 skipped) | **676** | **8** |
+| **backend** (workspace, node) | **100** | **615** | **8** (chain-sepolia, gated) |
+| **Total** | **118** | **688** | **8** |
 
 ### Test Categories
 
@@ -1579,7 +1578,7 @@ classes of friction:
   is unit-tested against an explicit deny list; the schema and API
   response shapes are built around the boundary.
 
-- **The code is production-ready and tested.** 676 tests passing, 8 skipped
+- **The code is production-ready and tested.** 688 tests passing, 8 skipped
   across 118 test files;
   `tsc --noEmit` clean on both workspaces; the verifier has its own test
   file with positive and negative cases; the session and authority layers

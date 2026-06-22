@@ -264,6 +264,46 @@ fn midpoint(a: u128, b: u128) -> Option<u128> {
     Some(sum / 2 + (sum & 1))
 }
 
+/// Result of evaluating whether a (buy, sell) pair crosses.
+/// Shared by `evaluate_match` and `evaluate_round` so the
+/// cross-fill math has a single source of truth and can be
+/// tested natively without the kv-store.
+struct CrossVerdict {
+    crossed: bool,
+    matched_quantity: u128,
+    execution_price: u128,
+}
+
+/// Pure cross-verdict computation. Returns `None` only on
+/// midpoint overflow (the callers map that to `no_match` in
+/// `evaluate_match` or a hard error in `evaluate_round`). The
+/// `asset_ok` gate in `evaluate_match` is applied by the caller
+/// on the `crossed` field, not here, so this function captures
+/// only the price/quantity math. All four inputs must already
+/// be the contract's scaled `u128` form (value × 10^WIRE_SCALE).
+fn cross_verdict(
+    buy_price: u128,
+    buy_quantity: u128,
+    sell_price: u128,
+    sell_quantity: u128,
+) -> Option<CrossVerdict> {
+    let crossed = buy_price >= sell_price && buy_quantity > 0 && sell_quantity > 0;
+    if !crossed {
+        return Some(CrossVerdict {
+            crossed: false,
+            matched_quantity: 0,
+            execution_price: 0,
+        });
+    }
+    let matched = core::cmp::min(buy_quantity, sell_quantity);
+    let mid = midpoint(buy_price, sell_price)?;
+    Some(CrossVerdict {
+        crossed: true,
+        matched_quantity: matched,
+        execution_price: mid,
+    })
+}
+
 /// Monotonic per-instance counter used to derive fresh execution
 /// refs without pulling in a randomness source. The value is
 /// scoped to the contract instance's lifetime in the TEE, so two
@@ -1242,7 +1282,19 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // malformed request is `no_match`, not a silent fill on an
     // unknown instrument.
     let asset_ok = !parsed.asset_code.trim().is_empty();
-    let crosses = asset_ok && buy_price >= sell_price;
+    let verdict = match cross_verdict(buy_price, buy_quantity, sell_price, sell_quantity) {
+        Some(v) => v,
+        None => {
+            return no_match_output(
+                outcome_ref,
+                execution_ref,
+                encrypted_trade_fields_ref,
+                identity,
+                expires_at,
+            );
+        }
+    };
+    let crosses = asset_ok && verdict.crossed;
 
     if !crosses {
         return no_match_output(
@@ -1257,19 +1309,8 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // Match authority: the enclave decides the fill quantity and
     // execution price. The backend trusts these values for
     // settlement and stops computing them locally.
-    let matched_quantity = core::cmp::min(buy_quantity, sell_quantity);
-    let execution_price = match midpoint(buy_price, sell_price) {
-        Some(v) => v,
-        None => {
-            return no_match_output(
-                outcome_ref,
-                execution_ref,
-                encrypted_trade_fields_ref,
-                identity,
-                expires_at,
-            );
-        }
-    };
+    let matched_quantity = verdict.matched_quantity;
+    let execution_price = verdict.execution_price;
 
     // Deterministic SHA-256 attestation binding the match outcome
     // to the supplied identity. Anyone with the input fields and
@@ -2241,19 +2282,16 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // ask and both quantities are positive. The TEE is the sole
     // authority on the cross — the orchestrator does not compute
     // this locally.
-    let crosses = buy_price >= sell_price && buy_quantity > 0 && sell_quantity > 0;
+    let verdict = match cross_verdict(buy_price, buy_quantity, sell_price, sell_quantity) {
+        Some(v) => v,
+        None => return Err("evaluate-round: midpoint overflow".to_string()),
+    };
+    let crosses = verdict.crossed;
     let status = if crosses { "crossed" } else { "open" };
 
     let (matched_quantity, execution_price, asset_ct, qty_ct, price_ct) = if crosses {
-        let matched = core::cmp::min(buy_quantity, sell_quantity);
-        let mid = match midpoint(buy_price, sell_price) {
-            Some(v) => v,
-            None => {
-                return Err("evaluate-round: midpoint overflow".to_string());
-            }
-        };
-        let mq = format_decimal(matched);
-        let ep = format_decimal(mid);
+        let mq = format_decimal(verdict.matched_quantity);
+        let ep = format_decimal(verdict.execution_price);
         // v0.13.0: encrypt the three settlement fields inside the TEE
         // for the crossed path, mirroring evaluate_match.
         let (act, qct, pct) = encrypt_trade_fields(
@@ -2303,4 +2341,904 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     };
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-round: response encode failed: {}", err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    // ─── parse_decimal ───
+
+    #[test]
+    fn test_parse_decimal_integer() {
+        assert_eq!(parse_decimal("0"), Some(0));
+        assert_eq!(parse_decimal("1"), Some(WIRE_SCALE_FACTOR));
+        assert_eq!(parse_decimal("70000"), Some(70000 * WIRE_SCALE_FACTOR));
+        assert_eq!(parse_decimal("123456789"), Some(123456789 * WIRE_SCALE_FACTOR));
+    }
+
+    #[test]
+    fn test_parse_decimal_fractional() {
+        assert_eq!(parse_decimal("0.0001"), Some(100_000_000_000_000)); // 1e14
+        assert_eq!(
+            parse_decimal("0.000000000000000001"),
+            Some(1) // 1e-18 * 1e18 = 1
+        );
+        assert_eq!(
+            parse_decimal("123.456"),
+            Some(123_456_000_000_000_000_000u128) // 123.456 * 1e18
+        );
+    }
+
+    #[test]
+    fn test_parse_decimal_overflow() {
+        // More than WIRE_SCALE fractional digits
+        assert_eq!(parse_decimal("1.0000000000000000001"), None); // 19 fractional digits
+    }
+
+    #[test]
+    fn test_parse_decimal_malformed() {
+        assert_eq!(parse_decimal(""), None);
+        assert_eq!(parse_decimal("   "), None);
+        assert_eq!(parse_decimal("-1"), None);
+        assert_eq!(parse_decimal("+1"), None);
+        assert_eq!(parse_decimal("1.2.3"), None);
+        assert_eq!(parse_decimal("1e5"), None);
+        assert_eq!(parse_decimal("abc"), None);
+    }
+
+    #[test]
+    fn test_parse_decimal_trailing_dot() {
+        // Trailing dot is treated as integer (frac part is empty, parsed as 0)
+        assert_eq!(parse_decimal("123."), Some(123 * WIRE_SCALE_FACTOR));
+        assert_eq!(parse_decimal("0."), Some(0));
+    }
+
+    #[test]
+    fn test_parse_decimal_leading_dot() {
+        assert_eq!(parse_decimal(".5"), Some(WIRE_SCALE_FACTOR / 2));
+    }
+
+    #[test]
+    fn test_parse_decimal_max_scale() {
+        // 18 fractional digits is the max
+        let max_frac = "0.123456789012345678";
+        assert!(parse_decimal(max_frac).is_some());
+        // 19 should fail
+        let overflow_frac = "0.1234567890123456789";
+        assert_eq!(parse_decimal(overflow_frac), None);
+    }
+
+    // ─── format_decimal ───
+
+    #[test]
+    fn test_format_decimal_integer() {
+        assert_eq!(format_decimal(0), "0");
+        assert_eq!(format_decimal(WIRE_SCALE_FACTOR), "1");
+        assert_eq!(format_decimal(70000 * WIRE_SCALE_FACTOR), "70000");
+    }
+
+    #[test]
+    fn test_format_decimal_fractional() {
+        assert_eq!(format_decimal(100_000_000_000_000u128), "0.0001");
+        assert_eq!(format_decimal(1), "0.000000000000000001");
+    }
+
+    #[test]
+    fn test_format_decimal_trailing_zeros_trimmed() {
+        // 123.456000000000000000 trimmed to 123.456
+        let parsed = parse_decimal("123.456").unwrap();
+        assert_eq!(format_decimal(parsed), "123.456");
+
+        // 100.0 trimmed to 100
+        let parsed = parse_decimal("100.0").unwrap();
+        assert_eq!(format_decimal(parsed), "100");
+    }
+
+    #[test]
+    fn test_parse_format_roundtrip() {
+        let cases = ["0", "1", "0.0001", "70000", "123.456", "0.000000000000000001", "999999999999.999999999999999999"];
+        for case in &cases {
+            let parsed = parse_decimal(case).expect(&alloc::format!("parse failed: {}", case));
+            let formatted = format_decimal(parsed);
+            // Re-parse the formatted value — should be equivalent
+            let reparsed = parse_decimal(&formatted).expect(&alloc::format!("reparse failed: {}", formatted));
+            assert_eq!(
+                parsed, reparsed,
+                "round-trip mismatch for input '{}': parsed={}, formatted='{}', reparsed={}",
+                case, parsed, formatted, reparsed
+            );
+        }
+    }
+
+    // ─── midpoint ───
+
+    #[test]
+    fn test_midpoint_exact() {
+        assert_eq!(midpoint(100, 200), Some(150));
+        assert_eq!(midpoint(0, 0), Some(0));
+        assert_eq!(midpoint(1000, 1000), Some(1000));
+    }
+
+    #[test]
+    fn test_midpoint_half_up() {
+        // Odd sum rounds half-up: (1 + 2) / 2 = 1.5 → 2, (1 + 2 + 1) / 2 = 2
+        assert_eq!(midpoint(1, 2), Some(2)); // sum=3, 3/2=1, 3&1=1 → 2
+        assert_eq!(midpoint(3, 4), Some(4)); // sum=7, 7/2=3, 7&1=1 → 4
+        assert_eq!(midpoint(1, 3), Some(2)); // sum=4, 4/2=2, 4&1=0 → 2
+    }
+
+    #[test]
+    fn test_midpoint_overflow() {
+        let max = u128::MAX;
+        assert_eq!(midpoint(max, 1), None);
+        assert_eq!(midpoint(1, max), None);
+    }
+
+    #[test]
+    fn test_midpoint_large_values() {
+        // Values large enough to test midpoint precision but not overflow
+        let a = u128::MAX >> 1;
+        let b = u128::MAX >> 1;
+        // sum = max - 1, midpoint = (max - 1) / 2 = max >> 1
+        // Since max is odd (2^128 - 1), max - 1 = 2^128 - 2, midpoint = 2^127 - 1 = max >> 1
+        assert_eq!(midpoint(a, b), Some(a));
+    }
+
+    // ─── cross_verdict ───
+
+    #[test]
+    fn test_cross_verdict_crossed() {
+        let v = cross_verdict(100, 10, 80, 8).unwrap();
+        assert!(v.crossed);
+        assert_eq!(v.matched_quantity, 8); // min(10, 8)
+        assert_eq!(v.execution_price, 90); // midpoint(100, 80) = 90
+    }
+
+    #[test]
+    fn test_cross_verdict_no_cross() {
+        let v = cross_verdict(80, 10, 100, 8).unwrap();
+        assert!(!v.crossed);
+        assert_eq!(v.matched_quantity, 0);
+        assert_eq!(v.execution_price, 0);
+    }
+
+    #[test]
+    fn test_cross_verdict_equal_prices() {
+        // buy_price == sell_price is a cross
+        let v = cross_verdict(100, 10, 100, 8).unwrap();
+        assert!(v.crossed);
+        assert_eq!(v.matched_quantity, 8);
+        assert_eq!(v.execution_price, 100);
+    }
+
+    #[test]
+    fn test_cross_verdict_zero_quantity() {
+        assert!(!cross_verdict(100, 0, 80, 8).unwrap().crossed);
+        assert!(!cross_verdict(100, 10, 80, 0).unwrap().crossed);
+        assert!(!cross_verdict(100, 0, 80, 0).unwrap().crossed);
+    }
+
+    #[test]
+    fn test_cross_verdict_partial_fill_buy_excess() {
+        // Buyer wants more than seller offers
+        let v = cross_verdict(100, 20, 100, 8).unwrap();
+        assert!(v.crossed);
+        assert_eq!(v.matched_quantity, 8); // min
+        assert_eq!(v.execution_price, 100);
+    }
+
+    #[test]
+    fn test_cross_verdict_partial_fill_sell_excess() {
+        // Seller offers more than buyer wants
+        let v = cross_verdict(100, 5, 100, 20).unwrap();
+        assert!(v.crossed);
+        assert_eq!(v.matched_quantity, 5); // min
+    }
+
+    #[test]
+    fn test_cross_verdict_midpoint_overflow() {
+        let max = u128::MAX;
+        assert!(cross_verdict(max, 10, 1, 10).is_none());
+    }
+
+    // ─── base64url_decode ───
+
+    #[test]
+    fn test_base64url_decode_standard() {
+        // "hello" in base64url (no padding)
+        let result = base64url_decode("aGVsbG8").unwrap();
+        assert_eq!(result, b"hello");
+    }
+
+    #[test]
+    fn test_base64url_decode_empty() {
+        let result = base64url_decode("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_base64url_decode_with_padding_chars() {
+        // base64 with '=' padding should just skip them
+        // "aGVsbG8=" (standard base64 with padding)
+        let result = base64url_decode("aGVsbG8=").unwrap();
+        assert_eq!(result, b"hello");
+    }
+
+    #[test]
+    fn test_base64url_decode_url_safe() {
+        // Test with URL-safe chars: '-' and '_'
+        let result = base64url_decode("Pj4_Pz8").unwrap();
+        // ">>???" in base64url
+        assert_eq!(result, b">>???");
+    }
+
+    #[test]
+    fn test_base64url_decode_invalid_char() {
+        assert!(base64url_decode("invalid!").is_err());
+    }
+
+    #[test]
+    fn test_base64url_decode_32_bytes() {
+        // 32 bytes of known pattern: 0x00..0x1f -> base64url
+        let input: Vec<u8> = (0u8..32).collect();
+        let encoded = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+        let result = base64url_decode(encoded).unwrap();
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_base64url_decode_non_aligned() {
+        // 1 byte input: 0x00 -> base64url "AA"
+        let result = base64url_decode("AA").unwrap();
+        assert_eq!(result, &[0x00]);
+        // 2 bytes: 0x0001 -> base64url "AAE"
+        let result = base64url_decode("AAE").unwrap();
+        assert_eq!(result, &[0x00, 0x01]);
+    }
+
+    // ─── decode_hex32 ───
+
+    #[test]
+    fn test_decode_hex32_valid_lowercase() {
+        let hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+        let expected: [u8; 32] = (0u8..32).collect::<Vec<_>>().try_into().unwrap();
+        assert_eq!(decode_hex32(hex).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_decode_hex32_valid_uppercase() {
+        let hex = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F";
+        let expected: [u8; 32] = (0u8..32).collect::<Vec<_>>().try_into().unwrap();
+        assert_eq!(decode_hex32(hex).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_decode_hex32_wrong_length() {
+        assert!(decode_hex32("").is_err());
+        assert!(decode_hex32("00").is_err());
+        assert!(decode_hex32(&"00".repeat(31)).is_err()); // 62 chars
+        assert!(decode_hex32(&"00".repeat(33)).is_err()); // 66 chars
+    }
+
+    #[test]
+    fn test_decode_hex32_invalid_chars() {
+        assert!(decode_hex32(&("xx".to_string() + &"00".repeat(31))).is_err());
+        assert!(decode_hex32(&("gg".to_string() + &"00".repeat(31))).is_err());
+    }
+
+    #[test]
+    fn test_decode_hex32_all_ff() {
+        let hex = "ff".repeat(32);
+        let expected = [0xffu8; 32];
+        assert_eq!(decode_hex32(&hex).unwrap(), expected);
+    }
+
+    // ─── hmac_sha256 ───
+
+    #[test]
+    fn test_hmac_sha256_basic() {
+        // RFC 4231 Test Case 2 for SHA-256
+        let key = b"Jefe";
+        let msg = b"what do ya want for nothing?";
+        // Verified against the Rust `sha2` crate HMAC construction.
+        // This is the actual output of hmac_sha256(b"Jefe", b"what do ya want for nothing?")
+        // which follows RFC 2104 (ipad/opad) faithfully.
+        let expected: [u8; 32] = [
+            0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e,
+            0x6a, 0x04, 0x24, 0x26, 0x08, 0x95, 0x75, 0xc7,
+            0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27, 0x39, 0x83,
+            0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43,
+        ];
+        assert_eq!(hmac_sha256(key, msg), expected);
+    }
+
+    #[test]
+    fn test_hmac_sha256_determinism() {
+        let result1 = hmac_sha256(b"key", b"msg");
+        let result2 = hmac_sha256(b"key", b"msg");
+        assert_eq!(result1, result2);
+    }
+
+    // ─── hkdf_sha256_32 ───
+
+    #[test]
+    fn test_hkdf_determinism() {
+        let salt = b"salt";
+        let ikm = b"ikm";
+        let info = b"info";
+        let result1 = hkdf_sha256_32(salt, ikm, info);
+        let result2 = hkdf_sha256_32(salt, ikm, info);
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_hkdf_diff_salt_differs() {
+        let r1 = hkdf_sha256_32(b"salt1", b"ikm", b"info");
+        let r2 = hkdf_sha256_32(b"salt2", b"ikm", b"info");
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn test_hkdf_diff_ikm_differs() {
+        let r1 = hkdf_sha256_32(b"salt", b"ikm1", b"info");
+        let r2 = hkdf_sha256_32(b"salt", b"ikm2", b"info");
+        assert_ne!(r1, r2);
+    }
+
+    #[test]
+    fn test_hkdf_rfc5869_test_vector_1() {
+        // RFC 5869 Test Case 1 (SHA-256, 32-byte output)
+        let ikm: [u8; 22] = [
+            0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+            0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+            0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        ];
+        let salt: [u8; 13] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c];
+        let info: [u8; 10] = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9];
+        let expected: [u8; 32] = [
+            0x3c, 0xb2, 0x5f, 0x25, 0xfa, 0xac, 0xd5, 0x7a,
+            0x90, 0x43, 0x4f, 0x64, 0xd0, 0x36, 0x2f, 0x2a,
+            0x2d, 0x2d, 0x0a, 0x90, 0xcf, 0x1a, 0x5a, 0x4c,
+            0x5d, 0xb0, 0x2d, 0x56, 0xec, 0xc4, 0xc5, 0xbf,
+        ];
+        let result = hkdf_sha256_32(&salt, &ikm, &info);
+        assert_eq!(result, expected);
+    }
+
+    // ─── AEAD encrypt/decrypt round-trip (encrypt_trade_field) ───
+
+    #[test]
+    fn test_encrypt_trade_field_roundtrip() {
+        let master_key_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let outcome_ref = "outcome_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let domain_tag = ASSET_CODE_FIELD_DOMAIN;
+        let plaintext = "WBTC";
+
+        let ct = encrypt_trade_field(master_key_hex, outcome_ref, domain_tag, plaintext)
+            .expect("encrypt_trade_field failed");
+
+        // Parse the output: "aead.v1:<nonce_hex>:<ciphertext_hex>"
+        let parts: Vec<&str> = ct.split(':').collect();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "aead.v1");
+        assert_eq!(parts[1].len(), 24); // 12 bytes × 2 hex chars
+        assert_eq!(parts[2].len(), (plaintext.len() + 16) * 2); // (plaintext + 16-byte tag) * 2 hex chars
+
+        // Decrypt using the same key derivation
+        let master_key = decode_hex32(master_key_hex).unwrap();
+        let derived = hkdf_sha256_32(outcome_ref.as_bytes(), &master_key, domain_tag.as_bytes());
+
+        // Reconstruct nonce and ciphertext
+        let nonce_bytes: Vec<u8> = (0..parts[1].len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&parts[1][i..i + 2], 16).unwrap())
+            .collect();
+        assert_eq!(nonce_bytes.len(), 12);
+
+        let ct_bytes: Vec<u8> = (0..parts[2].len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&parts[2][i..i + 2], 16).unwrap())
+            .collect();
+
+        let cipher = Aes256Gcm::new_from_slice(&derived).unwrap();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let decrypted = cipher
+            .decrypt(nonce, Payload { msg: &ct_bytes, aad: outcome_ref.as_bytes() })
+            .expect("decryption failed");
+
+        assert_eq!(String::from_utf8(decrypted).unwrap(), plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_trade_fields_produces_three_ciphertexts() {
+        let master_key_hex = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+        let outcome_ref = "outcome_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let (asset_ct, qty_ct, price_ct) = encrypt_trade_fields(
+            master_key_hex,
+            outcome_ref,
+            "WBTC",
+            "0.5",
+            "45000",
+        )
+        .expect("encrypt_trade_fields failed");
+
+        assert!(asset_ct.starts_with("aead.v1:"));
+        assert!(qty_ct.starts_with("aead.v1:"));
+        assert!(price_ct.starts_with("aead.v1:"));
+
+        // Different fields should produce different ciphertexts
+        assert_ne!(asset_ct, qty_ct);
+        assert_ne!(qty_ct, price_ct);
+    }
+
+    // ─── AEAD decrypt_envelope_plaintext round-trip ───
+
+    #[test]
+    fn test_decrypt_envelope_plaintext_roundtrip() {
+        // Construct a valid envelope and decrypt it back
+        let master_key_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let institution_did = "did:t3n:institution:abc123";
+        let agent_did = "did:t3n:agent:def456";
+        let authority_ref = "authref_11111111111111111111111111111111";
+        let plaintext = b"{\"hello\":\"world\"}";
+
+        // Build the encryption the same way decrypt_envelope_plaintext does
+        let master_key = decode_hex32(master_key_hex).unwrap();
+        let mut salt_input = Vec::with_capacity(HKDF_SALT_DOMAIN.len() + 1 + institution_did.len());
+        salt_input.extend_from_slice(HKDF_SALT_DOMAIN.as_bytes());
+        salt_input.push(0x1f);
+        salt_input.extend_from_slice(institution_did.as_bytes());
+        let mut salt_hasher = Sha256::new();
+        salt_hasher.update(&salt_input);
+        let salt = salt_hasher.finalize();
+
+        let derived = hkdf_sha256_32(&salt, &master_key, HKDF_INFO.as_bytes());
+
+        let mut aad: Vec<u8> = Vec::with_capacity(
+            AEAD_ENVELOPE_SCHEMA_VERSION.len() + 3 + institution_did.len() + agent_did.len() + authority_ref.len(),
+        );
+        aad.extend_from_slice(AEAD_ENVELOPE_SCHEMA_VERSION.as_bytes());
+        aad.push(0x1f);
+        aad.extend_from_slice(institution_did.as_bytes());
+        aad.push(0x1f);
+        aad.extend_from_slice(agent_did.as_bytes());
+        aad.push(0x1f);
+        aad.extend_from_slice(authority_ref.as_bytes());
+
+        let cipher = Aes256Gcm::new_from_slice(&derived).unwrap();
+        let nonce_bytes: [u8; 12] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b];
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let encrypted = cipher
+            .encrypt(nonce, Payload { msg: plaintext, aad: &aad })
+            .expect("encryption failed");
+
+        // Build the envelope string: version | base64url(nonce || ct)
+        let mut envelope_body = Vec::with_capacity(12 + encrypted.len());
+        envelope_body.extend_from_slice(&nonce_bytes);
+        envelope_body.extend_from_slice(&encrypted);
+
+        // Custom base64url encode for the envelope body
+        let b64 = {
+            const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            let mut result = String::new();
+            for chunk in envelope_body.chunks(3) {
+                let b0 = u32::from(chunk[0]) << 16;
+                let b1 = u32::from(if chunk.len() > 1 { chunk[1] } else { 0 }) << 8;
+                let b2 = u32::from(if chunk.len() > 2 { chunk[2] } else { 0 });
+                let triple = b0 | b1 | b2;
+                result.push(CHARS[((triple >> 18) & 0x3f) as usize] as char);
+                result.push(CHARS[((triple >> 12) & 0x3f) as usize] as char);
+                if chunk.len() > 1 {
+                    result.push(CHARS[((triple >> 6) & 0x3f) as usize] as char);
+                }
+                if chunk.len() > 2 {
+                    result.push(CHARS[(triple & 0x3f) as usize] as char);
+                }
+            }
+            result
+        };
+        let envelope = format!("{}|{}", AEAD_ENVELOPE_SCHEMA_VERSION, b64);
+
+        // Decrypt using the contract function
+        let decrypted = decrypt_envelope_plaintext(
+            &envelope,
+            master_key_hex,
+            institution_did,
+            agent_did,
+            authority_ref,
+            "test-roundtrip",
+        )
+        .expect("decrypt_envelope_plaintext failed");
+
+        assert_eq!(decrypted, plaintext.to_vec());
+    }
+
+    #[test]
+    fn test_decrypt_envelope_plaintext_wrong_key_fails() {
+        // Construct envelope with one key, try to decrypt with another
+        let master_key_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let institution_did = "did:t3n:institution:abc123";
+        let agent_did = "did:t3n:agent:def456";
+        let authority_ref = "authref_11111111111111111111111111111111";
+        let plaintext = b"{\"hello\":\"world\"}";
+
+        // Build encrypted envelope (same approach as roundtrip test)
+        let master_key = decode_hex32(master_key_hex).unwrap();
+        let mut salt_input = Vec::with_capacity(HKDF_SALT_DOMAIN.len() + 1 + institution_did.len());
+        salt_input.extend_from_slice(HKDF_SALT_DOMAIN.as_bytes());
+        salt_input.push(0x1f);
+        salt_input.extend_from_slice(institution_did.as_bytes());
+        let mut salt_hasher = Sha256::new();
+        salt_hasher.update(&salt_input);
+        let salt = salt_hasher.finalize();
+        let derived = hkdf_sha256_32(&salt, &master_key, HKDF_INFO.as_bytes());
+
+        let mut aad: Vec<u8> = Vec::new();
+        aad.extend_from_slice(AEAD_ENVELOPE_SCHEMA_VERSION.as_bytes());
+        aad.push(0x1f);
+        aad.extend_from_slice(institution_did.as_bytes());
+        aad.push(0x1f);
+        aad.extend_from_slice(agent_did.as_bytes());
+        aad.push(0x1f);
+        aad.extend_from_slice(authority_ref.as_bytes());
+
+        let cipher = Aes256Gcm::new_from_slice(&derived).unwrap();
+        let nonce_bytes: [u8; 12] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b];
+        let encrypted = cipher
+            .encrypt(Nonce::from_slice(&nonce_bytes), Payload { msg: plaintext, aad: &aad })
+            .expect("encryption failed");
+
+        let mut envelope_body = Vec::with_capacity(12 + encrypted.len());
+        envelope_body.extend_from_slice(&nonce_bytes);
+        envelope_body.extend_from_slice(&encrypted);
+
+        let b64 = {
+            const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            let mut result = String::new();
+            for chunk in envelope_body.chunks(3) {
+                let b0 = u32::from(chunk[0]) << 16;
+                let b1 = u32::from(if chunk.len() > 1 { chunk[1] } else { 0 }) << 8;
+                let b2 = u32::from(if chunk.len() > 2 { chunk[2] } else { 0 });
+                let triple = b0 | b1 | b2;
+                result.push(CHARS[((triple >> 18) & 0x3f) as usize] as char);
+                result.push(CHARS[((triple >> 12) & 0x3f) as usize] as char);
+                if chunk.len() > 1 {
+                    result.push(CHARS[((triple >> 6) & 0x3f) as usize] as char);
+                }
+                if chunk.len() > 2 {
+                    result.push(CHARS[(triple & 0x3f) as usize] as char);
+                }
+            }
+            result
+        };
+        let envelope = format!("{}|{}", AEAD_ENVELOPE_SCHEMA_VERSION, b64);
+
+        // Try to decrypt with a different AAD (different authority_ref)
+        let wrong_ref = "authref_wronggggggggggggggggggggggggggggggg";
+        let result = decrypt_envelope_plaintext(
+            &envelope,
+            master_key_hex,
+            institution_did,
+            agent_did,
+            wrong_ref,
+            "test-wrong-aad",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("AEAD tag verification failed"));
+    }
+
+    // ─── check_delegation_authority ───
+
+    fn make_delegation_envelope(functions: Vec<&str>) -> crate::DelegationEnvelopeInput {
+        crate::DelegationEnvelopeInput {
+            credential_jcs: "eyJ...".to_string(),
+            user_sig: "sig...".to_string(),
+            agent_sig: "ag_sig...".to_string(),
+            nonce: "nonce...".to_string(),
+            request_hash: "hash...".to_string(),
+            functions: functions.into_iter().map(|s| s.to_string()).collect(),
+            vc_id: "vc_abc123".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_check_delegation_authority_accepts_matching_function() {
+        let env = Some(make_delegation_envelope(vec!["seal-ticket", "seal-intent"]));
+        let result = check_delegation_authority(&env, "seal-ticket");
+        assert_eq!(result.unwrap(), "vc_abc123");
+    }
+
+    #[test]
+    fn test_check_delegation_authority_rejects_wrong_function() {
+        let env = Some(make_delegation_envelope(vec!["seal-ticket"]));
+        let result = check_delegation_authority(&env, "seal-intent");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("delegation_authority_denied"));
+    }
+
+    #[test]
+    fn test_check_delegation_authority_none_envelope() {
+        let result = check_delegation_authority(&None, "seal-ticket");
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_check_delegation_authority_empty_functions_list() {
+        let env = Some(make_delegation_envelope(vec![]));
+        let result = check_delegation_authority(&env, "seal-ticket");
+        assert!(result.is_err());
+    }
+
+    // ─── hex_handle ───
+
+    #[test]
+    fn test_hex_handle_determinism() {
+        let input = b"some deterministic input";
+        let h1 = crate::hex_handle("test", input);
+        let h2 = crate::hex_handle("test", input);
+        assert_eq!(h1, h2);
+        assert!(h1.starts_with("test_"));
+    }
+
+    #[test]
+    fn test_hex_handle_different_inputs_differ() {
+        let h1 = crate::hex_handle("test", b"input1");
+        let h2 = crate::hex_handle("test", b"input2");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_hex_handle_different_prefixes_differ() {
+        let input = b"same input";
+        let h1 = crate::hex_handle("prefix_a", input);
+        let h2 = crate::hex_handle("prefix_b", input);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_hex_handle_format() {
+        let handle = crate::hex_handle("ticket", b"data");
+        // Format: ticket_<32 hex chars>
+        assert!(handle.starts_with("ticket_"));
+        assert_eq!(handle.len(), 7 + 32); // "ticket_" + 32 hex chars
+        let hex_part = &handle[7..];
+        assert!(hex_part.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
+
+    // ─── parse_compatibility_token ───
+
+    #[test]
+    fn test_parse_compatibility_token_valid() {
+        let token = parse_compatibility_token("WBTC:buy:550e8400-e29b-41d4-a716-446655440000").unwrap();
+        assert_eq!(token.asset, "WBTC");
+        assert_eq!(token.side, "buy");
+        assert_eq!(token.institution_id, "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn test_parse_compatibility_token_sell() {
+        let token = parse_compatibility_token("ETH:sell:inst456").unwrap();
+        assert_eq!(token.asset, "ETH");
+        assert_eq!(token.side, "sell");
+        assert_eq!(token.institution_id, "inst456");
+    }
+
+    #[test]
+    fn test_parse_compatibility_token_empty_string() {
+        assert!(parse_compatibility_token("").is_none());
+        assert!(parse_compatibility_token("   ").is_none());
+    }
+
+    #[test]
+    fn test_parse_compatibility_token_missing_parts() {
+        assert!(parse_compatibility_token("WBTC:buy").is_none());
+        assert!(parse_compatibility_token("WBTC").is_none());
+        assert!(parse_compatibility_token("::").is_none());
+    }
+
+    #[test]
+    fn test_parse_compatibility_token_empty_middle() {
+        assert!(parse_compatibility_token("WBTC::inst123").is_none());
+        assert!(parse_compatibility_token(":buy:inst123").is_none());
+        assert!(parse_compatibility_token("WBTC:buy:").is_none());
+    }
+
+    // ─── is_well_formed_ticket_handle ───
+
+    #[test]
+    fn test_is_well_formed_ticket_handle_valid() {
+        assert!(is_well_formed_ticket_handle("ticket_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(is_well_formed_ticket_handle("ticket_00000000000000000000000000000000"));
+        assert!(is_well_formed_ticket_handle("ticket_ffffffffffffffffffffffffffffffff"));
+        // Mixed lowercase hex is fine
+        assert!(is_well_formed_ticket_handle("ticket_a1b2c3d4e5f678901234567890abcdef"));
+    }
+
+    #[test]
+    fn test_is_well_formed_ticket_handle_invalid_prefix() {
+        assert!(!is_well_formed_ticket_handle("intent_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(!is_well_formed_ticket_handle("ticket"));
+        assert!(!is_well_formed_ticket_handle(""));
+    }
+
+    #[test]
+    fn test_is_well_formed_ticket_handle_wrong_length() {
+        assert!(!is_well_formed_ticket_handle("ticket_aaa")); // too short
+        assert!(!is_well_formed_ticket_handle("ticket_")); // empty hex part
+        assert!(!is_well_formed_ticket_handle(&("ticket_".to_string() + &"a".repeat(33)))); // 33 chars
+    }
+
+    #[test]
+    fn test_is_well_formed_ticket_handle_uppercase_rejected() {
+        assert!(!is_well_formed_ticket_handle("ticket_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+    }
+
+    #[test]
+    fn test_is_well_formed_ticket_handle_whitespace() {
+        // NOTE: is_well_formed_ticket_handle trims input, so leading/trailing
+        // whitespace is accepted as long as the trimmed content is valid.
+        assert!(is_well_formed_ticket_handle(" ticket_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(is_well_formed_ticket_handle("ticket_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "));
+    }
+
+    // ─── format_iso8601 ───
+
+    #[test]
+    fn test_format_iso8601_epoch_zero() {
+        assert_eq!(format_iso8601(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn test_format_iso8601_known_timestamp() {
+        // 2024-01-15T12:30:45Z = 1705317045
+        // 2024-01-15T12:30:45Z = 1705317045 + offset correction
+        // Day: 19737 days from epoch = 2024-01-15. Time: 45045s = 12:30:45
+        assert_eq!(format_iso8601(1705321845), "2024-01-15T12:30:45Z");
+    }
+
+    #[test]
+    fn test_format_iso8601_leap_year() {
+        // 2024-02-29T00:00:00Z = 1709155200 (leap year check)
+        // 2024-02-29T00:00:00Z = 1709164800 (verified from function output 1709251200 = 2024-03-01)
+        assert_eq!(format_iso8601(1709164800), "2024-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn test_format_iso8601_year_2021() {
+        // 2021-05-20T00:00:00Z = 1621468800
+        assert_eq!(format_iso8601(1621468800), "2021-05-20T00:00:00Z");
+    }
+
+    // ─── monotonic_nonce ───
+
+    #[test]
+    fn test_monotonic_nonce_advances() {
+        // Save and restore the global nonce between tests
+        let a = monotonic_nonce();
+        let b = monotonic_nonce();
+        assert!(b > a);
+    }
+
+    #[test]
+    fn test_monotonic_nonce_strictly_increasing() {
+        let mut prev = monotonic_nonce();
+        for _ in 0..10 {
+            let curr = monotonic_nonce();
+            assert!(curr > prev);
+            prev = curr;
+        }
+    }
+
+    // ─── verify_identity_fields ───
+
+    fn make_evaluate_match_input(
+        buy_institution_id: &str,
+        sell_institution_id: &str,
+        buy_authority_ref: &str,
+        sell_authority_ref: &str,
+    ) -> EvaluateMatchInput {
+        EvaluateMatchInput {
+            buy_intent_handle: "intent_aaaa".to_string(),
+            sell_intent_handle: "intent_bbbb".to_string(),
+            correlation_ref: "corr_1234".to_string(),
+            asset_code: "WBTC".to_string(),
+            buy_institution_id: buy_institution_id.to_string(),
+            sell_institution_id: sell_institution_id.to_string(),
+            buy_authority_ref: buy_authority_ref.to_string(),
+            sell_authority_ref: sell_authority_ref.to_string(),
+            envelope_master_key_hex: "00".repeat(32),
+        }
+    }
+
+    #[test]
+    fn test_verify_identity_fields_valid() {
+        let parsed = make_evaluate_match_input(
+            "inst_buyer", "inst_seller", "auth_buy", "auth_sell",
+        );
+        let identity = verify_identity_fields(&parsed).unwrap();
+        assert_eq!(identity.buy_institution_id, "inst_buyer");
+        assert_eq!(identity.sell_institution_id, "inst_seller");
+        assert_eq!(identity.buy_authority_ref, "auth_buy");
+        assert_eq!(identity.seller_authority_ref, "auth_sell");
+    }
+
+    #[test]
+    fn test_verify_identity_fields_rejects_same_institution() {
+        let parsed = make_evaluate_match_input(
+            "same_inst", "same_inst", "auth_buy", "auth_sell",
+        );
+        assert!(verify_identity_fields(&parsed).is_err());
+    }
+
+    #[test]
+    fn test_verify_identity_fields_rejects_empty_institution_id() {
+        let parsed = make_evaluate_match_input(
+            "", "inst_seller", "auth_buy", "auth_sell",
+        );
+        assert!(verify_identity_fields(&parsed).is_err());
+    }
+
+    #[test]
+    fn test_verify_identity_fields_rejects_empty_authority_ref() {
+        let parsed = make_evaluate_match_input(
+            "inst_buyer", "inst_seller", "", "auth_sell",
+        );
+        assert!(verify_identity_fields(&parsed).is_err());
+    }
+
+    // ─── cross_verdict for evaluate_match / evaluate_round (integration exercise) ───
+
+    #[test]
+    fn test_cross_verdict_evaluate_match_path() {
+        // This simulates the cross logic used by evaluate_match:
+        // cross = asset_ok && verdict.crossed
+        let buy_price = parse_decimal("50000").unwrap();
+        let buy_qty = parse_decimal("0.5").unwrap();
+        let sell_price = parse_decimal("49800").unwrap();
+        let sell_qty = parse_decimal("0.5").unwrap();
+
+        let verdict = cross_verdict(buy_price, buy_qty, sell_price, sell_qty).unwrap();
+        assert!(verdict.crossed);
+        let asset_ok = true;
+        assert!(asset_ok && verdict.crossed);
+
+        // Verify the formatted outputs match what evaluate_match would return
+        let mq = format_decimal(verdict.matched_quantity);
+        let ep = format_decimal(verdict.execution_price);
+        assert_eq!(mq, "0.5");
+        // midpoint of 50000 and 49800 = 49900
+        assert_eq!(ep, "49900");
+    }
+
+    #[test]
+    fn test_cross_verdict_evaluate_round_path() {
+        // Simulate the cross logic used by evaluate_round
+        // status = if verdict.crossed { "crossed" } else { "open" }
+        let buy_price = parse_decimal("100").unwrap();
+        let buy_qty = parse_decimal("10").unwrap();
+        let sell_price = parse_decimal("95").unwrap();
+        let sell_qty = parse_decimal("10").unwrap();
+
+        let verdict = cross_verdict(buy_price, buy_qty, sell_price, sell_qty).unwrap();
+        assert!(verdict.crossed);
+        assert_eq!(verdict.matched_quantity, 10 * WIRE_SCALE_FACTOR);
+        // midpoint of 100 and 95 = 97.5 (even sum, no half-up needed)
+        let expected_price = (100 * WIRE_SCALE_FACTOR + 95 * WIRE_SCALE_FACTOR) / 2;
+        assert_eq!(verdict.execution_price, expected_price);
+        assert_eq!(format_decimal(verdict.execution_price), "97.5");
+    }
+
+    #[test]
+    fn test_cross_verdict_evaluate_round_open_path() {
+        let buy_price = parse_decimal("90").unwrap();
+        let buy_qty = parse_decimal("10").unwrap();
+        let sell_price = parse_decimal("100").unwrap();
+        let sell_qty = parse_decimal("10").unwrap();
+
+        let verdict = cross_verdict(buy_price, buy_qty, sell_price, sell_qty).unwrap();
+        assert!(!verdict.crossed);
+        // evaluate_round would set status: "open"
+    }
 }

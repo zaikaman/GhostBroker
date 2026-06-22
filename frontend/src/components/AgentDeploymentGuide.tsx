@@ -423,12 +423,10 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     });
 
     // Poll every 5s to keep the fleet and runtime state fresh.
-    // Pass the current selectedAgentId via ref so we only fetch
-    // mandates for the agent the operator is actively looking at.
     const intervalId = window.setInterval(() => {
       // Fire-and-forget but route errors through the same surface so
       // transient outages don't silently disappear.
-      loadState(selectedAgentIdRef.current).catch((err: unknown) => {
+      loadState().catch((err: unknown) => {
         if (!cancelled) {
           setError(deriveErrorMessage(err, 'Background refresh failed.'));
         }
@@ -731,12 +729,7 @@ export function AgentDeploymentGuide({ session, onBack }: AgentDeploymentGuidePr
     }
   }, [selectedAgentId]);
 
-  // Keep a ref in sync with selectedAgentId so the setInterval
-  // callback (which captures a stable closure) can access the
-  // current selection and pass it to loadState, avoiding fetching
-  // mandates for every admitted agent on each poll tick.
-  const selectedAgentIdRef = useRef(selectedAgentId);
-  selectedAgentIdRef.current = selectedAgentId;
+
 
   return (
     <div className="deploy-layout deploy-factory-layout">

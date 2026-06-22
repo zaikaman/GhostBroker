@@ -32,7 +32,7 @@ describe("v0.13.0 settlement ciphertexts", () => {
     // evaluate-round, and the orchestrator writes them directly
     // from the TEE outcome.
     const mod = await import("../privacy/encrypted-trade-fields.js");
-    expect((mod as any).deriveEncryptedTradeFieldHandles).toBeUndefined();
+    expect((mod as Record<string, unknown>).deriveEncryptedTradeFieldHandles).toBeUndefined();
   });
 });
 

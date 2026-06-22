@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircleIcon,
   Cancel01Icon,
@@ -93,7 +93,9 @@ export function NegotiationRoomPanel(): React.JSX.Element {
   // subscription (which binds once on mount) always calls the most
   // recent version without re-subscribing every render.
   const fetchRef = useRef(fetchSessions);
-  fetchRef.current = fetchSessions;
+  useEffect(() => {
+    fetchRef.current = fetchSessions;
+  }, [fetchSessions]);
 
   // Debounce timer: batch rapid telemetry events (e.g. multiple
   // negotiation_move_submitted from both sides) into a single
@@ -104,7 +106,8 @@ export function NegotiationRoomPanel(): React.JSX.Element {
   // Negotiation telemetry phases that signal a session state change
   // worth fetching. All `negotiation_*` phases emitted by the
   // backend during a negotiation lifecycle are included.
-  const negotiationPhases = new Set([
+  // Defined with useMemo so it has a stable reference for useEffect.
+  const negotiationPhases = useMemo(() => new Set([
     'negotiation_ticket_sealed',
     'negotiation_paired',
     'negotiation_round_open',
@@ -115,7 +118,7 @@ export function NegotiationRoomPanel(): React.JSX.Element {
     'negotiation_expired',
     'negotiation_settling',
     'negotiation_settled',
-  ]);
+  ]), []);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -152,7 +155,7 @@ export function NegotiationRoomPanel(): React.JSX.Element {
         clearTimeout(debounceRef.current);
       }
     };
-  }, [fetchSessions]);
+  }, [fetchSessions, negotiationPhases]);
 
   const handleApprove = useCallback(
     async (sessionId: string) => {

@@ -90,7 +90,6 @@ describe("settlement rail compensation", () => {
       },
       new TelemetryBus(),
       undefined,
-      undefined,
       dispatcher,
       {
         resolve: async () => ({

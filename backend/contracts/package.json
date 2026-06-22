@@ -9,6 +9,6 @@
     "publish:matching": "cd .. && npx tsx scripts/publish-matching.ts",
     "verify:matching": "cd .. && npx tsx scripts/verify-matching-contract.ts",
     "build:relayer": "cd relayer && forge build",
-    "build:relayer:copy-abi": "node -e \"const fs=require('fs'); fs.copyFileSync('relayer/out/GhostBrokerSettlementRelayer.sol/GhostBrokerSettlementRelayer.json','../backend/src/services/settlement-rails/abi/GhostBrokerSettlementRelayer.json'); fs.copyFileSync('relayer/out/MinimalERC20.sol/MinimalERC20.json','../backend/src/services/settlement-rails/abi/MinimalERC20.json');\""
+    "build:relayer:copy-abi": "node -e \"const fs=require('fs'); fs.copyFileSync('relayer/out/GhostBrokerSettlementRelayer.sol/GhostBrokerSettlementRelayer.json','../src/services/settlement-rails/abi/GhostBrokerSettlementRelayer.json'); fs.copyFileSync('relayer/out/MinimalERC20.sol/MinimalERC20.json','../src/services/settlement-rails/abi/MinimalERC20.json');\""
   }
 }

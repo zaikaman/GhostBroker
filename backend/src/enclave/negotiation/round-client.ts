@@ -520,13 +520,15 @@ export class T3NegotiationRoundClient implements NegotiationRoundClient {
     const hasMatchedQuantity =
       typeof body.matched_quantity === "string" &&
       body.matched_quantity.trim().length > 0;
+    const executionPriceRaw = body.execution_price;
     const executionPrice =
       status === "crossed" && hasExecutionPrice
-        ? parsePositiveDecimal(body.execution_price!)
+        ? parsePositiveDecimal(executionPriceRaw ?? "")
         : 0;
+    const matchedQuantityRaw = body.matched_quantity;
     const matchedQuantity =
       status === "crossed" && hasMatchedQuantity
-        ? parsePositiveDecimal(body.matched_quantity!)
+        ? parsePositiveDecimal(matchedQuantityRaw ?? "")
         : 0;
 
     if (status === "crossed") {

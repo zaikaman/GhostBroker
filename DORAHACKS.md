@@ -16,7 +16,7 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 
 | Surface | Evidence |
 |---|---|
-| Test suite | **676 tests passing, 8 skipped across 118 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
+| Test suite | **688 tests passing, 8 skipped across 118 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
 | Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, shared `database/`, `tests/` |
 | Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 31 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
 | Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
@@ -335,7 +335,7 @@ After boot, each institution's deposit wallet must `approve(relayer, MAX)` for W
 
 ## Testing
 
-**676 tests passing, 8 skipped across 118 test files.**
+**688 tests passing, 8 skipped across 118 test files.**
 ```sh
 npm test                              # all workspace tests
 WS2_ANVIL_INTEGRATION=1 npm test      # with on-chain (requires Anvil)
@@ -346,8 +346,8 @@ npm run test:e2e                      # Playwright E2E
 | Module | Files | Tests |
 |---|---|---|
 | frontend (jsdom) | 18 | 73 |
-| backend (node) | 99 + 1 skipped | 603 (8 skipped, gated) |
-| **Total** | **118** | **676** |
+| backend (node) | 100 | 615 (8 skipped, gated) |
+| **Total** | **118** | **688** |
 
 Categories: contract (16, Supertest), integration (25), unit (21), frontend (18, React), SDK (9), agent runtime (7, 120 tests). On-chain integration deploys a relayer against a local Anvil node and asserts on-chain Transfer round-trips.
 

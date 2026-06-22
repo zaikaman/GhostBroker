@@ -64,12 +64,6 @@ contract GhostBrokerSettlementRelayer {
     /// produced each rail_trade_ref, for the WS4 reconciler.
     mapping(bytes32 => bytes32) public outcomeToRailTradeRef;
 
-    /// @notice The exact chain tx that settled each outcome.
-    /// Same key as `settledOutcomes`; stored separately so the
-    /// reconciler can read a single mapping without an event
-    /// scan.
-    mapping(bytes32 => bytes32) public outcomeToTxHash;
-
     /// @notice Emitted on every successful settlement. The
     /// `outcomeRef` is the TEE's opaque outcome; the
     /// `encryptedTradeFieldsRef` is the receipt join key back
@@ -207,14 +201,6 @@ contract GhostBrokerSettlementRelayer {
             )
         );
         outcomeToRailTradeRef[outcomeRef] = railTradeRef;
-        outcomeToTxHash[outcomeRef] = bytes32(uint256(uint160(address(this))));
-        // The above `outcomeToTxHash` line stores the relayer
-        // contract's own address as a placeholder; the
-        // reconciler reads the actual tx hash from the
-        // receipt's `transactionHash` field. The mapping is
-        // reserved for the WS4 enhancement that scans chain
-        // events for `Settled` and back-fills the real tx
-        // hash.
 
         emit Settled(
             outcomeRef,

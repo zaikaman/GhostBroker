@@ -2,7 +2,7 @@ import { createSupabaseServiceClient } from "../src/services/supabase-client.js"
 import { readFileSync } from "node:fs";
 
 interface PublishedContractListResult {
-  data: Array<Record<string, unknown>> | null;
+  data: Record<string, unknown>[] | null;
   error: { message: string } | null;
 }
 

@@ -440,7 +440,7 @@ describe("SdkAuthenticatedT3NetworkClient — error classification", () => {
   });
 
   it("re-authenticates and retries once when the session expired (SessionExpiredError)", async () => {
-    const reauth = vi.fn(async () => {});
+    const reauth = vi.fn(async () => undefined);
     const { client, fake } = makeClient(reauth);
     const sessionError = new Error("session expired");
     sessionError.name = "SessionExpiredError";
@@ -457,7 +457,7 @@ describe("SdkAuthenticatedT3NetworkClient — error classification", () => {
   });
 
   it("re-authenticates and retries once when the session expired (RpcError 401 Session not found)", async () => {
-    const reauth = vi.fn(async () => {});
+    const reauth = vi.fn(async () => undefined);
     const { client, fake } = makeClient(reauth);
     const rpcError = new Error('HTTP 401: Unauthorized ({"code":"unauthorized","detail":"Session not found"})');
     rpcError.name = "RpcError";
@@ -475,7 +475,7 @@ describe("SdkAuthenticatedT3NetworkClient — error classification", () => {
   });
 
   it("does NOT retry for non-session-expiry RpcErrors (e.g. 500)", async () => {
-    const reauth = vi.fn(async () => {});
+    const reauth = vi.fn(async () => undefined);
     const { client, fake } = makeClient(reauth);
     const rpcError = new Error("HTTP 500: Internal error");
     rpcError.name = "RpcError";
@@ -492,7 +492,7 @@ describe("SdkAuthenticatedT3NetworkClient — error classification", () => {
   });
 
   it("returns the error after re-auth when the retry also fails", async () => {
-    const reauth = vi.fn(async () => {});
+    const reauth = vi.fn(async () => undefined);
     const { client, fake } = makeClient(reauth);
     const sessionError = new Error("session expired");
     sessionError.name = "SessionExpiredError";

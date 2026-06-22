@@ -11,6 +11,7 @@ import type {
 import { InMemoryNegotiationRepository } from "../data/in-memory-negotiation-repository.js";
 import { FakeAgentRepository } from "../data/fake-agent-repository.js";
 import type { NegotiationMandateRecord } from "../../models/negotiation.js";
+import { sealEnvelope, loadEnvelopeMasterKey, type EnvelopeMasterKey } from "../../enclave/keys/envelope-cipher.js";
 
 /**
  * End-to-end orchestrator coverage for the hackathon demo's
@@ -148,15 +149,42 @@ const settlementStub = {
 } as unknown as SettlementService;
 
 /**
- * Stub proposal envelope for priced test moves. The orchestrator
- * now routes the cross-evaluation through the TEE round contract;
- * priced actions must carry a sealed envelope. The stub round
- * evaluator in this file does not decode the envelope, so a
- * constant placeholder is enough to satisfy the schema validator
- * and surface the descriptor side through to the cross call.
+ * Real AEAD test master key derived from the
+ * ENVELOPE_ENCRYPTION_MASTER_KEY env var (set in vitest.config.ts).
+ * Used to seal proposal envelopes so unit tests exercise the same
+ * encrypt/decrypt path production code uses.
  */
-const STUB_PROPOSAL_ENVELOPE =
-  "ghostbroker.envelope.aead/v1|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const TEST_MASTER_KEY: EnvelopeMasterKey = loadEnvelopeMasterKey();
+
+/**
+ * Build a real AEAD-sealed proposal envelope for a test move.
+ * Uses the same master key the orchestrator resolves at runtime
+ * so the envelope round-trips through openEnvelope on the
+ * production code path.
+ */
+function buildProposalEnvelope(
+  side: "buy" | "sell",
+  price: number,
+  quantity: number,
+): string {
+  const institutionDid = side === "buy" ? BUY_INSTITUTION : SELL_INSTITUTION;
+  const agentDid = side === "buy" ? BUY_AGENT_DID : SELL_AGENT_DID;
+  return sealEnvelope({
+    institutionDid,
+    agentDid,
+    authorityRef: "auth-stub",
+    payload: {
+      institutionId: institutionDid,
+      agentDid,
+      authorityRef: "auth-stub",
+      assetCode: ASSET,
+      side,
+      quantity,
+      price,
+    },
+    masterKey: TEST_MASTER_KEY,
+  });
+}
 
 const BUY_INSTITUTION = "00000000-0000-4000-8000-00000000d001";
 const SELL_INSTITUTION = "00000000-0000-4000-8000-00000000d002";
@@ -324,7 +352,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "propose",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1),
         reasoning: "Open at the shared anchor.",
         escalationRequested: false,
       },
@@ -346,7 +374,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Reveal seller accreditation.",
         escalationRequested: false,
       },
@@ -368,7 +396,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1),
         reasoning: "Reveal buyer accreditation.",
         escalationRequested: false,
       },
@@ -388,7 +416,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Reciprocal accreditation verified; accepting crossed terms.",
         escalationRequested: false,
       },
@@ -443,7 +471,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "propose",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1),
         reasoning: "Open",
         escalationRequested: false,
       },
@@ -460,7 +488,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Reveal",
         escalationRequested: false,
       },
@@ -478,7 +506,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1),
         reasoning: "Reveal",
         escalationRequested: false,
       },
@@ -504,7 +532,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "settlement_capacity",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Redundant runtime settlement_capacity reveal",
         escalationRequested: false,
       },
@@ -525,7 +553,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "propose",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1),
         reasoning: "Restate",
         escalationRequested: false,
       },
@@ -542,7 +570,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Reciprocal accreditation verified; accepting.",
         escalationRequested: false,
       },
@@ -643,7 +671,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       agentId: "00000000-0000-4000-8000-00000000d101",
       agentDid: BUY_AGENT_DID,
       authorityRef: "auth-stub",
-      move: { action: "propose", price: 70_000, quantity: 1, proposalEnvelope: STUB_PROPOSAL_ENVELOPE, reasoning: "Open" },
+      move: { action: "propose", price: 70_000, quantity: 1, proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1), reasoning: "Open" },
       correlationRef: "test:recip:open",
     });
     for (const claim of reciprocalClaims) {
@@ -658,7 +686,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
           claimType: claim,
           price: 70_000,
           quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
           reasoning: `Reveal ${claim}`,
         },
         claimCredential: { claimType: claim, subject: SELL_AGENT_DID },
@@ -675,7 +703,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
           claimType: claim,
           price: 70_000,
           quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1),
           reasoning: `Reveal ${claim}`,
         },
         claimCredential: { claimType: claim, subject: BUY_AGENT_DID },
@@ -692,7 +720,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Reciprocal disclosure satisfied; accept.",
       },
       correlationRef: "test:recip:accept",
@@ -777,7 +805,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
       agentId: "00000000-0000-4000-8000-00000000d101",
       agentDid: BUY_AGENT_DID,
       authorityRef: "auth-stub",
-      move: { action: "propose", price: 70_000, quantity: 1, proposalEnvelope: STUB_PROPOSAL_ENVELOPE, reasoning: "Open" },
+      move: { action: "propose", price: 70_000, quantity: 1, proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1), reasoning: "Open" },
       correlationRef: "test:nodelegation:open",
     });
     await orchestrator.submitMove({
@@ -791,7 +819,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Reciprocal reveal",
       },
       correlationRef: "test:nodelegation:reveal-buy",
@@ -807,7 +835,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         claimType: "accredited_institution",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("buy", 70_000, 1),
         reasoning: "Reciprocal reveal",
       },
       correlationRef: "test:nodelegation:reveal-sell",
@@ -822,7 +850,7 @@ describe("NegotiationOrchestrator — hosted demo settlement path", () => {
         action: "accept",
         price: 70_000,
         quantity: 1,
-        proposalEnvelope: STUB_PROPOSAL_ENVELOPE,
+        proposalEnvelope: buildProposalEnvelope("sell", 70_000, 1),
         reasoning: "Accept",
       },
       correlationRef: "test:nodelegation:accept",
