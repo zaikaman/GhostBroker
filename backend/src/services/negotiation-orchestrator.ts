@@ -11,6 +11,7 @@ import {
 } from "../enclave/privacy/encrypted-trade-fields.js";
 import type { AgentAuthorizationFacade } from "../auth/agent-authz.js";
 import { PublicError } from "../errors/public-error.js";
+import { loadDelegationEnvelopeWire } from "../enclave/auth/sdk-delegation-signer.js";
 import { logger, redactForbiddenOrderFields } from "../logging/logger.js";
 import type { NegotiationRepository } from "./negotiation-repository.js";
 import type { AgentRepository } from "./agent-repository.js";
@@ -419,6 +420,35 @@ export class NegotiationOrchestrator {
       throw new PublicError("validation_failed", 400);
     }
 
+    // v0.14.0: load the SDK delegation envelope from the
+    // agent record for the TEE contract function-scope check.
+    let ticketDelegationEnvelope: ReturnType<typeof loadDelegationEnvelopeWire> = null;
+    if (this.agentRepository) {
+      try {
+        const agent = await this.agentRepository.findById(
+          input.agentId,
+          input.institutionId,
+        );
+        if (agent) {
+          ticketDelegationEnvelope = loadDelegationEnvelopeWire(
+            agent.metadata as Record<string, unknown> | null,
+            {
+              institution_id: input.institutionId,
+              agent_did: input.agentDid,
+              authority_ref: verification.authorityRef,
+              asset_code: input.assetCode,
+              side: input.side,
+              policy_hash: verification.policyHash,
+              compatibility_token: input.compatibilityToken,
+              correlation_ref: input.correlationRef,
+            },
+          );
+        }
+      } catch {
+        // Best-effort: proceed without delegation envelope.
+      }
+    }
+
     const sealed = await this.ticketClient.sealTicket({
       institutionId: input.institutionId,
       agentDid: input.agentDid,
@@ -428,6 +458,7 @@ export class NegotiationOrchestrator {
       policyHash: verification.policyHash,
       compatibilityToken: input.compatibilityToken,
       correlationRef: input.correlationRef,
+      ...(ticketDelegationEnvelope ? { delegationEnvelope: ticketDelegationEnvelope } : {}),
     });
 
     const ticket: PendingTicket = {
@@ -1122,6 +1153,34 @@ export class NegotiationOrchestrator {
         "proposalEnvelope is required for priced actions",
       );
     }
+    // v0.14.0: load the SDK delegation envelope from the
+    // agent record for the TEE contract function-scope check.
+    let roundDelegationEnvelope: ReturnType<typeof loadDelegationEnvelopeWire> = null;
+    if (this.agentRepository) {
+      try {
+        const agent = await this.agentRepository.findById(
+          args.agentId,
+          args.institutionId,
+        );
+        if (agent) {
+          roundDelegationEnvelope = loadDelegationEnvelopeWire(
+            agent.metadata as Record<string, unknown> | null,
+            {
+              sealed_envelope: envelope,
+              institution_did: actorSide === "buy" ? session.buy_institution_id : session.sell_institution_id,
+              agent_did: agentDid,
+              authority_ref: authorityRef,
+              asset_code: session.asset_code,
+              side: actorSide,
+              correlation_ref: correlationRef,
+            },
+          );
+        }
+      } catch {
+        // Best-effort: proceed without delegation envelope.
+      }
+    }
+
     const sealed = await this.roundEvaluator.sealRoundProposal({
       sessionId: session.id,
       roundNumber: session.round_number + 1,
@@ -1136,6 +1195,7 @@ export class NegotiationOrchestrator {
       authorityRef,
       assetCode: session.asset_code,
       side: actorSide,
+      ...(roundDelegationEnvelope ? { delegationEnvelope: roundDelegationEnvelope } : {}),
     });
     this.sealedStandingProposals.set(
       this.standingKey(session.id, actorSide),

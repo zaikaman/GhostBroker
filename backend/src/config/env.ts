@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 function loadProcessEnvFile(source: NodeJS.ProcessEnv): void {
   if (source !== process.env) {
@@ -148,7 +148,7 @@ const envSchema = z.object({
    * here only for staged rollouts where you need to pin a
    * specific tenant build before flipping the constant.
    */
-  T3_MATCHING_CONTRACT_VERSION: z.string().trim().min(1).max(32).default("0.13.0"),
+  T3_MATCHING_CONTRACT_VERSION: z.string().trim().min(1).max(32).default("0.14.0"),
   RECEIPT_KEY_VERSION: z.string().min(1).optional(),
   SETTLEMENT_ASSET_CODE: z.string().trim().min(1).max(20).default("USDC"),
   /**

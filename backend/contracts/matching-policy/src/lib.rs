@@ -225,7 +225,7 @@ mod matching;
 // the three settlement fields inside the TEE and return real
 // `aead.v1:` ciphertexts on the outcome - replacing the deterministic
 // SHA-256 digests that were re-derivable from the row own columns.
-pub const CONTRACT_VERSION: &str = "0.13.0";
+pub const CONTRACT_VERSION: &str = "0.14.0";
 
 struct Component;
 
@@ -313,6 +313,46 @@ pub struct OuterEnvelope {
     pub context: Option<String>,
 }
 
+/// v0.14.0: SDK-native delegation envelope wire shape.
+///
+/// The orchestrator forwards this on per-agent TEE contract
+/// calls (`seal-ticket`, `seal-intent`, `seal-round-proposal`)
+/// so the contract can verify the calling agent's delegation
+/// credential authorises the function being invoked. The
+/// credential JCS + user_sig are the signed credential bytes
+/// from the SDK's `buildDelegationCredential` +
+/// `canonicaliseCredential` + `signCredential`. The agent_sig
+/// is the per-call invocation signature from
+/// `signAgentInvocation`. The nonce is the per-call random
+/// 16-byte value. The request_hash is the SHA-256 of the
+/// canonical request body the agent signed.
+///
+/// All binary fields are base64url-no-pad encoded (the SDK's
+/// `b64uEncodeBytes` wire encoding).
+#[derive(Debug, Deserialize)]
+pub struct DelegationEnvelopeInput {
+    /// RFC 8785 JCS bytes of the credential, base64url-no-pad.
+    pub credential_jcs: String,
+    /// 65-byte EIP-191 signature over `credential_jcs`,
+    /// base64url-no-pad.
+    pub user_sig: String,
+    /// Per-call agent invocation signature (64-byte compact
+    /// ECDSA over `sha256(preimage)`), base64url-no-pad.
+    pub agent_sig: String,
+    /// 16-byte agent-generated per-call nonce,
+    /// base64url-no-pad.
+    pub nonce: String,
+    /// SHA-256 of the canonical request body, base64url-no-pad.
+    pub request_hash: String,
+    /// The WIT function names the credential authorises.
+    /// The contract checks this list contains the function
+    /// being invoked.
+    pub functions: Vec<String>,
+    /// 16-byte credential id, base64url-no-pad. Echoed in
+    /// the output for audit trail linkage.
+    pub vc_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SealTicketInput {
     pub institution_id: String,
@@ -323,12 +363,26 @@ pub struct SealTicketInput {
     pub policy_hash: String,
     pub compatibility_token: String,
     pub correlation_ref: String,
+    /// v0.14.0: SDK-native delegation envelope for per-call
+    /// agent invocation signing. When present, the contract
+    /// parses the credential JCS, verifies the called function
+    /// (`seal-ticket`) is in the credential's `functions` list,
+    /// and echoes `delegation_vc_id` in the output for the
+    /// audit trail. Optional — calls without an envelope fall
+    /// through to the existing orchestrator-trusted path.
+    #[serde(default)]
+    pub delegation_envelope: Option<DelegationEnvelopeInput>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SealTicketOutput {
     pub ticket_handle: String,
     pub execution_ref: String,
+    /// v0.14.0: Delegation credential id (base64url) echoed
+    /// from the input envelope when present. Empty string
+    /// when no delegation envelope was supplied.
+    #[serde(default)]
+    pub delegation_vc_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -355,6 +409,12 @@ pub struct SealIntentInput {
     /// that case (the production default).
     #[serde(default)]
     pub settlement_asset_code: Option<String>,
+    /// v0.14.0: SDK-native delegation envelope. Optional —
+    /// when present the contract verifies `seal-intent` is
+    /// in the credential's functions list and echoes
+    /// `delegation_vc_id` in the output.
+    #[serde(default)]
+    pub delegation_envelope: Option<DelegationEnvelopeInput>,
 }
 
 #[derive(Debug, Serialize)]
@@ -373,6 +433,11 @@ pub struct SealIntentOutput {
     /// in the enclave's kv-store and never leave the TEE.
     pub amount: String,
     pub attestation_ref: String,
+    /// v0.14.0: Delegation credential id (base64url) echoed
+    /// from the input envelope when present. Empty string
+    /// when no delegation envelope was supplied.
+    #[serde(default)]
+    pub delegation_vc_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -627,6 +692,12 @@ pub struct SealRoundProposalInput {
     pub asset_code: String,
     pub side: String,
     pub correlation_ref: String,
+    /// v0.14.0: SDK-native delegation envelope. Optional —
+    /// when present the contract verifies `seal-round-proposal`
+    /// is in the credential's functions list and echoes
+    /// `delegation_vc_id` in the output.
+    #[serde(default)]
+    pub delegation_envelope: Option<DelegationEnvelopeInput>,
 }
 
 #[derive(Debug, Serialize)]
@@ -649,6 +720,11 @@ pub struct SealRoundProposalOutput {
     /// SHA-256 attestation binding the seal output to its inputs.
     pub attestation_ref: String,
     pub sealed_at: String,
+    /// v0.14.0: Delegation credential id (base64url) echoed
+    /// from the input envelope when present. Empty string
+    /// when no delegation envelope was supplied.
+    #[serde(default)]
+    pub delegation_vc_id: String,
 }
 
 #[derive(Debug, Deserialize)]

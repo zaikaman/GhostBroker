@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { TokenBalanceClient } from "../sandbox/token-balance.js";
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
+import type { DelegationEnvelopeWire } from "../auth/sdk-delegation-signer.js";
 
 export interface NegotiationTicketRequest {
   institutionId: string;
@@ -11,6 +12,13 @@ export interface NegotiationTicketRequest {
   policyHash: string;
   compatibilityToken: string;
   correlationRef: string;
+  /**
+   * v0.14.0: SDK-native delegation envelope wire shape.
+   * When present, forwarded to the TEE contract so it can
+   * verify the agent's delegation credential authorises
+   * `seal-ticket`.
+   */
+  delegationEnvelope?: DelegationEnvelopeWire | null;
 }
 
 export interface NegotiationTicketResult {

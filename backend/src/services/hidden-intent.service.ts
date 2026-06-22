@@ -17,6 +17,7 @@ import {
   type PortfolioService,
 } from "./portfolio.service.js";
 import type { IntentLockRepository } from "./intent-lock-repository.js";
+import { loadDelegationEnvelopeWire } from "../enclave/auth/sdk-delegation-signer.js";
 
 export interface HiddenIntentSubmissionContext {
   correlationRef: string;
@@ -97,12 +98,41 @@ export class HiddenIntentService implements HiddenIntentSubmissionService {
       throw new PublicError("authorization_failed", 403);
     }
 
+    // v0.14.0: load the SDK delegation envelope from the agent
+    // record and build the wire shape for the TEE contract.
+    let delegationEnvelope: ReturnType<typeof loadDelegationEnvelopeWire> = null;
+    if (this.agentRepository) {
+      try {
+        const agent = await this.agentRepository.findById(
+          request.agentId,
+          request.institutionId,
+        );
+        if (agent) {
+          delegationEnvelope = loadDelegationEnvelopeWire(
+            agent.metadata as Record<string, unknown> | null,
+            {
+              institution_id: request.institutionId,
+              agent_did: request.agentDid,
+              encrypted_intent: request.encryptedIntentEnvelope,
+              authority_ref: request.authorityRef,
+              correlation_ref: context.correlationRef,
+            },
+          );
+        }
+      } catch {
+        // Best-effort: if the agent lookup fails, proceed
+        // without the delegation envelope. The TEE contract
+        // accepts calls without an envelope (legacy path).
+      }
+    }
+
     const sealed = await this.blindIntentClient.sealIntent({
       institutionId: request.institutionId,
       agentDid: request.agentDid,
       encryptedIntentEnvelope: request.encryptedIntentEnvelope,
       authorityRef: request.authorityRef,
       correlationRef: context.correlationRef,
+      ...(delegationEnvelope ? { delegationEnvelope } : {}),
     });
 
     this.publish(request, context.correlationRef, "intent_sealed");

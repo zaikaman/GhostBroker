@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { TokenBalanceClient } from "../sandbox/token-balance.js";
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
+import type { DelegationEnvelopeWire } from "../auth/sdk-delegation-signer.js";
 import {
   AEAD_ENVELOPE_SCHEMA_VERSION,
   loadEnvelopeMasterKey,
@@ -15,6 +16,13 @@ export interface BlindIntentRequest {
   encryptedIntentEnvelope: string;
   authorityRef: string;
   correlationRef: string;
+  /**
+   * v0.14.0: SDK-native delegation envelope wire shape.
+   * When present, forwarded to the TEE contract so it can
+   * verify the agent's delegation credential authorises
+   * `seal-intent`.
+   */
+  delegationEnvelope?: DelegationEnvelopeWire | null;
 }
 
 export interface BlindIntentLockDescriptor {
@@ -409,6 +417,9 @@ export class T3BlindIntentClient implements BlindIntentClient {
         envelope_master_key_hex: this.envelopeMasterKeyHex,
         authority_ref: request.authorityRef,
         correlation_ref: request.correlationRef,
+        ...(request.delegationEnvelope
+          ? { delegation_envelope: request.delegationEnvelope }
+          : {}),
          // v0.8.0+: the enclave needs the settlement asset
         // code to compute the buy-side reservation amount
         // (`quantity * price`) in the right unit. Optional —

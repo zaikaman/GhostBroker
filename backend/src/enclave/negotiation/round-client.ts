@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { TokenBalanceClient } from "../sandbox/token-balance.js";
 import type { T3NetworkClient } from "../sandbox/t3n-client.js";
+import type { DelegationEnvelopeWire } from "../auth/sdk-delegation-signer.js";
 import {
   loadEnvelopeMasterKey,
   openEnvelope,
@@ -127,6 +128,13 @@ export interface SealRoundProposalRequest {
    * key can move there and this field drops.
    */
   envelopeMasterKeyHex: string;
+  /**
+   * v0.14.0: SDK-native delegation envelope wire shape.
+   * When present, forwarded to the TEE contract so it can
+   * verify the agent's delegation credential authorises
+   * `seal-round-proposal`.
+   */
+  delegationEnvelope?: DelegationEnvelopeWire | null;
 }
 
 export interface EvaluateRoundRequest {
@@ -388,6 +396,9 @@ export class T3NegotiationRoundClient implements NegotiationRoundClient {
         asset_code: request.assetCode,
         side: request.side,
         correlation_ref: request.correlationRef,
+        ...(request.delegationEnvelope
+          ? { delegation_envelope: request.delegationEnvelope }
+          : {}),
       },
     });
 

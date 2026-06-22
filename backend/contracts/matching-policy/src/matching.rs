@@ -274,6 +274,47 @@ pub(crate) fn monotonic_nonce() -> u64 {
     NONCE.fetch_add(1, Ordering::SeqCst)
 }
 
+// ─── delegation envelope authorization (v0.14.0) ───
+//
+// When the orchestrator forwards a delegation_envelope on a
+// per-agent call, the contract verifies the called function is
+// in the credential's functions list. This is the TEE-side
+// authorization gate that makes the SDK-native delegation
+// credentials enforceable at the contract level — without it the
+// TEE would execute any function the orchestrator requested
+// regardless of the credential's scope.
+//
+// The function does NOT verify the cryptographic signatures
+// (user_sig, agent_sig) — the T3N host's dispatch layer
+// performs signature verification before the contract executes.
+// The contract's job is the function-scope check: ensure the
+// credential authorises the WIT function being invoked.
+
+/// Check a delegation envelope authorises the named function.
+/// Returns the credential's vc_id (base64url) for audit-trail
+/// echoing. Returns an empty string when no envelope is
+/// supplied (backwards-compatible fallback).
+fn check_delegation_authority(
+    envelope: &Option<crate::DelegationEnvelopeInput>,
+    function_name: &str,
+) -> Result<String, String> {
+    let env = match envelope {
+        None => return Ok(String::new()),
+        Some(e) => e,
+    };
+
+    // Verify the credential authorises the called function.
+    if !env.functions.iter().any(|f| f == function_name) {
+        return Err(format!(
+            "delegation_authority_denied: credential does not authorise function `{}`",
+            function_name
+        ));
+    }
+
+    // Echo the vc_id for the audit trail.
+    Ok(env.vc_id.clone())
+}
+
 // ─── seal-ticket ───
 
 pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -355,9 +396,13 @@ pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let ticket_handle = crate::hex_handle("ticket", &hasher_input);
     let execution_ref = fresh_execution_ref();
 
+
+    // v0.14.0: check the delegation envelope authorises "seal-ticket".
+    let delegation_vc_id = check_delegation_authority(&parsed.delegation_envelope, "seal-ticket")?;
     let output = crate::SealTicketOutput {
         ticket_handle,
         execution_ref,
+        delegation_vc_id,
     };
 
     serde_json::to_vec(&output)
@@ -1033,6 +1078,9 @@ pub fn seal_intent(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|err| format!("seal-intent: kv payload encode failed: {}", err))?;
     kv_put(&kv_map_name("intents"), intent_handle.as_bytes(), &kv_bytes)?;
 
+
+    // v0.14.0: check the delegation envelope authorises "seal-intent".
+    let delegation_vc_id = check_delegation_authority(&parsed.delegation_envelope, "seal-intent")?;
     let output = SealIntentOutput {
         intent_handle,
         execution_ref,
@@ -1041,6 +1089,7 @@ pub fn seal_intent(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         side: envelope.side,
         amount: envelope.amount,
         attestation_ref,
+        delegation_vc_id,
     };
 
     serde_json::to_vec(&output)
@@ -1672,6 +1721,9 @@ pub fn seal_round_proposal(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|err| format!("seal-round-proposal: kv payload encode failed: {}", err))?;
     kv_put(&kv_map_name("rounds"), proposal_handle.as_bytes(), &kv_bytes)?;
 
+
+    // v0.14.0: check the delegation envelope authorises "seal-round-proposal".
+    let delegation_vc_id = check_delegation_authority(&parsed.delegation_envelope, "seal-round-proposal")?;
     let output = crate::SealRoundProposalOutput {
         proposal_handle,
         execution_ref,
@@ -1680,6 +1732,7 @@ pub fn seal_round_proposal(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         distance_signal: distance_signal.to_string(),
         attestation_ref,
         sealed_at,
+        delegation_vc_id,
     };
 
     serde_json::to_vec(&output)

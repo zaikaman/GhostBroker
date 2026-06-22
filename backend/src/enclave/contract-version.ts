@@ -11,18 +11,22 @@
  *
  * Bump this and `Cargo.toml` together when you ship a new
  * TEE contract build. The convention is:
- *   - patch bump → wire-shape change that does not affect
+ *   - patch bump - wire-shape change that does not affect
  *     the orchestrator's interpretation of the response,
- *   - minor bump → new exported function (v0.9.0
+ *   - minor bump - new exported function (v0.9.0
  *     introduced `seal-round-proposal` + `evaluate-round`;
  *     v0.9.1 added in-enclave AEAD decryption for both
- *     v0.9.1 added in-enclave AEAD decryption for both
  *     `seal-intent` and `seal-round-proposal`; v0.10.0 added
- *     `host:interfaces/kv-store` — the enclave now persists
+ *     `host:interfaces/kv-store` - the enclave now persists
  *     decrypted price/quantity inside the TEE and the
  *     orchestrator never holds or forwards plaintext; v0.13.0
  *     fixed kv-store map names to use canonical `z:<tenant>:<tail>`
- *     form — the host does not auto-prefix the tenant namespace),
- *   - major bump → response field removed or renamed.
+ *     form - the host does not auto-prefix the tenant namespace;
+ *     v0.14.0 added SDK-native delegation envelope support -
+ *     per-agent calls (`seal-ticket`, `seal-intent`,
+ *     `seal-round-proposal`) now accept an optional
+ *     `delegation_envelope` field and the TEE verifies the
+ *     credential authorises the called function),
+ *   - major bump - response field removed or renamed.
  */
-export const DEFAULT_CONTRACT_VERSION = "0.13.0";
+export const DEFAULT_CONTRACT_VERSION = "0.14.0";

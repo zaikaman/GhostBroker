@@ -13,7 +13,9 @@ import {
   VC_ID_LEN,
   NONCE_LEN,
   REQUEST_HASH_LEN,
+  b64uEncodeBytes,
 } from "@terminal3/t3n-sdk";
+import { sha256 } from "@noble/hashes/sha2.js";
 import type { TenantIdentity } from "../sandbox/tenant-identity-store.js";
 import {
   mintDelegationCredentialBody,
@@ -389,4 +391,153 @@ export async function revokeSdkDelegation(
       : {}),
     client: opts.client,
   });
+}
+
+
+/**
+ * Wire shape for the delegation_envelope field the TEE contract
+ * expects on per-agent calls (seal-ticket, seal-intent,
+ * seal-round-proposal). Carries the signed credential JCS +
+ * per-call agent invocation signature so the TEE can verify the
+ * calling agent's delegation credential authorises the function
+ * being invoked.
+ *
+ * All binary fields are base64url-no-pad encoded (the SDK's
+ * 64uEncodeBytes wire encoding).
+ */
+export interface DelegationEnvelopeWire {
+  /** RFC 8785 JCS bytes of the credential, base64url-no-pad. */
+  credential_jcs: string;
+  /** 65-byte EIP-191 signature over credential_jcs, base64url-no-pad. */
+  user_sig: string;
+  /** Per-call agent invocation signature (64-byte compact ECDSA), base64url-no-pad. */
+  agent_sig: string;
+  /** 16-byte per-call nonce, base64url-no-pad. */
+  nonce: string;
+  /** SHA-256 of the canonical request body, base64url-no-pad. */
+  request_hash: string;
+  /** WIT function names the credential authorises. */
+  functions: string[];
+  /** 16-byte credential id, base64url-no-pad. */
+  vc_id: string;
+}
+
+/**
+ * Build the delegation envelope wire shape for a TEE contract call.
+ * Signs the per-call invocation pre-image with the agent invocation
+ * keypair (from the SDK envelope) and packages the signed credential
+ * JCS + signatures into the shape the Rust contract's
+ * DelegationEnvelopeInput deserializer expects.
+ *
+ * @param envelope - The SDK delegation envelope from mintSdkDelegation.
+ * @param requestBody - The canonical JSON body of the TEE contract call
+ *   (the same body the orchestrator sends as the contract input).
+ * @returns The wire shape to embed as delegation_envelope in the
+ *   contract call body, or 
+ull when the envelope is absent (legacy
+ *   fallback — the contract accepts calls without an envelope).
+ */
+export function buildDelegationEnvelopeWire(
+  envelope: SdkDelegationEnvelope | undefined,
+  requestBody: Record<string, unknown>,
+): DelegationEnvelopeWire | null {
+  if (!envelope) {
+    return null;
+  }
+
+  // Decode the credential JCS bytes from the envelope's base64url.
+  const vcId = b64uDecode(envelope.vcIdB64u);
+
+  // Canonicalize the request body to RFC 8785 JCS (sorted keys).
+  const requestJcs = canonicalizeJson(requestBody);
+
+  // SHA-256 of the canonical request body — this is the
+  // 
+  // `request_hash` the TEE contract receives and the agent
+  // signed via the invocation pre-image.
+  const reqHash = sha256(new TextEncoder().encode(requestJcs));
+
+  // Generate a fresh 16-byte per-call nonce.
+  const nonce = randomBytes(NONCE_LEN);
+
+  // Sign the invocation pre-image with the agent invocation keypair.
+  // The pre-image is: utf8(domain_tag) || vc_id || nonce || request_hash.
+  const agentPrivateKey = Uint8Array.from(
+    Buffer.from(envelope.agentInvocationPrivateKey.slice(2), "hex"),
+  );
+  const agentSig = signSdkAgentInvocation(vcId, nonce, reqHash, agentPrivateKey);
+
+  // Decode the user signature from the envelope.
+  const userSig = b64uDecode(envelope.userSigB64u);
+
+  return {
+    credential_jcs: envelope.credentialJcsB64u,
+    user_sig: b64uEncodeBytes(userSig),
+    agent_sig: b64uEncodeBytes(agentSig),
+    nonce: b64uEncodeBytes(nonce),
+    request_hash: b64uEncodeBytes(reqHash),
+    functions: envelope.functions,
+    vc_id: envelope.vcIdB64u,
+  };
+}
+
+/**
+ * base64url-no-pad decode (RFC 4648 section 5 without padding).
+ */
+function b64uDecode(input: string): Uint8Array {
+  const padded = input + "=".repeat((4 - (input.length % 4)) % 4);
+  const standard = padded.replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(Buffer.from(standard, "base64"));
+}
+
+/**
+ * Canonical JSON serialization (RFC 8785 JCS): recursively sorted
+ * object keys, no whitespace, matching the SDK's
+ * canonicaliseCredential output format.
+ */
+function canonicalizeJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return "[" + value.map((item) => canonicalizeJson(item)).join(",") + "]";
+  }
+  const entries = Object.entries(value as Record<string, unknown>).sort(
+    ([left], [right]) => left.localeCompare(right),
+  );
+  return (
+    "{" +
+    entries
+      .map(([key, child]) => JSON.stringify(key) + ":" + canonicalizeJson(child))
+      .join(",") +
+    "}"
+  );
+}
+
+
+/**
+ * Load the SDK delegation envelope from an agent's metadata and
+ * build the delegation envelope wire shape for a TEE contract call.
+ *
+ * Returns 
+ull when the agent has no SDK envelope (legacy
+ * fallback path - the contract accepts calls without an envelope)
+ * or when the request body is empty.
+ *
+ * Used by HiddenIntentService.submitIntent and
+ * NegotiationOrchestrator to forward the delegation envelope on
+ * per-agent TEE contract calls so the TEE can verify the agent's
+ * credential authorises the function being invoked.
+ */
+export function loadDelegationEnvelopeWire(
+  agentMetadata: Record<string, unknown> | null,
+  requestBody: Record<string, unknown>,
+): DelegationEnvelopeWire | null {
+  const envelope = agentMetadata?.sdk_delegation_envelope as
+    | SdkDelegationEnvelope
+    | undefined;
+  if (!envelope) {
+    return null;
+  }
+  return buildDelegationEnvelopeWire(envelope, requestBody);
 }

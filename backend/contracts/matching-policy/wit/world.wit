@@ -10,7 +10,7 @@
 //
 // Tail: `matching` (must match the T3 contract-name + the
 // `contractPath` defaults in the t3-enclave clients).
-package ghostbroker:matching-policy@0.9.1;
+package ghostbroker:matching-policy@0.9.2;
 
 world contract {
   import host:tenant/tenant-context@1.0.0;
