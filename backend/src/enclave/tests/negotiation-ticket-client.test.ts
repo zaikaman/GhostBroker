@@ -4,6 +4,7 @@ import {
   type NegotiationPairVerificationRequest,
   type NegotiationTicketRequest,
 } from "../negotiation/negotiation-ticket.js";
+import type { DelegationEnvelopeWire } from "../auth/sdk-delegation-signer.js";
 import type {
   T3NetworkClient,
   T3NetworkRequest,
@@ -157,7 +158,7 @@ describe("T3NegotiationTicketClient — seal-ticket wire shape", () => {
       "/contracts/negotiation/tickets",
     );
     expect(networkClient.requests[0]?.method).toBe("POST");
-   expect(networkClient.requests[0]?.body).toEqual({
+    expect(networkClient.requests[0]?.body).toEqual({
       version: "0.14.0",
       institution_id: ticketRequest.institutionId,
       agent_did: ticketRequest.agentDid,
@@ -167,6 +168,27 @@ describe("T3NegotiationTicketClient — seal-ticket wire shape", () => {
       policy_hash: ticketRequest.policyHash,
       compatibility_token: ticketRequest.compatibilityToken,
       correlation_ref: ticketRequest.correlationRef,
+    });
+  });
+
+  it("forwards delegation_envelope to the contract when present", async () => {
+    const networkClient = new CapturingNetworkClient();
+    const client = new T3NegotiationTicketClient({ networkClient });
+    const envelope: DelegationEnvelopeWire = {
+      credential_jcs: "dGVzdA",
+      user_sig: "dXNlcnNpZw",
+      agent_sig: "YWdlbnRzaWc",
+      nonce: "bm9uY2U",
+      request_hash: "cmVxdWVzdA",
+      functions: ["seal-ticket"],
+      vc_id: "dmNfaWQ",
+    };
+    await client.sealTicket({
+      ...ticketRequest,
+      delegationEnvelope: envelope,
+    });
+    expect(networkClient.requests[0]?.body).toMatchObject({
+      delegation_envelope: envelope,
     });
   });
 

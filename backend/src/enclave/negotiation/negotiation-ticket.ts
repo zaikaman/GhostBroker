@@ -373,10 +373,13 @@ export class T3NegotiationTicketClient implements NegotiationTicketClient {
         asset_code: request.assetCode,
         side: request.side,
         policy_hash: request.policyHash,
-        compatibility_token: request.compatibilityToken,
-        correlation_ref: request.correlationRef,
-      },
-    });
+      compatibility_token: request.compatibilityToken,
+      correlation_ref: request.correlationRef,
+      ...(request.delegationEnvelope
+        ? { delegation_envelope: request.delegationEnvelope }
+        : {}),
+    },
+  });
 
     if (response.status < 200 || response.status >= 300) {
       throw new Error("T3 negotiation ticket seal failed.");
