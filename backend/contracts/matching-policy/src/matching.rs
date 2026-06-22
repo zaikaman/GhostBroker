@@ -404,7 +404,6 @@ pub fn seal_ticket(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         execution_ref,
         delegation_vc_id,
     };
-
     serde_json::to_vec(&output)
         .map_err(|err| format!("seal-ticket: response encode failed: {}", err))
 }
@@ -635,7 +634,6 @@ pub fn evaluate_pair(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         asset_code: parsed.asset_code,
         expires_at,
     };
-
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-pair: response encode failed: {}", err))
 }
@@ -1091,7 +1089,6 @@ pub fn seal_intent(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         attestation_ref,
         delegation_vc_id,
     };
-
     serde_json::to_vec(&output)
         .map_err(|err| format!("seal-intent: response encode failed: {}", err))
 }
@@ -1326,7 +1323,6 @@ pub fn evaluate_match(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         quantity_ciphertext: qty_ct,
         execution_price_ciphertext: price_ct,
     };
-
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-match: response encode failed: {}", err))
 }
@@ -1465,7 +1461,6 @@ fn no_match_output(
         quantity_ciphertext: String::new(),
         execution_price_ciphertext: String::new(),
     };
-
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-match: no_match encode failed: {}", err))
 }
@@ -1734,7 +1729,6 @@ pub fn seal_round_proposal(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         sealed_at,
         delegation_vc_id,
     };
-
     serde_json::to_vec(&output)
         .map_err(|err| format!("seal-round-proposal: response encode failed: {}", err))
 }
@@ -2307,7 +2301,6 @@ pub fn evaluate_round(envelope_bytes: &[u8]) -> Result<Vec<u8>, String> {
         quantity_ciphertext: qty_ct,
         execution_price_ciphertext: price_ct,
     };
-
     serde_json::to_vec(&output)
         .map_err(|err| format!("evaluate-round: response encode failed: {}", err))
 }

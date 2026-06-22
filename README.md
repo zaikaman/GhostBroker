@@ -233,7 +233,7 @@ labels.
 The delegation envelope wire (`credential_jcs` + `user_sig` + `agent_sig` +
 `nonce` + `request_hash` + `functions` + `vc_id`) is forwarded on every
 per-agent TEE contract call (`seal-intent`, `seal-ticket`,
-`seal-round-proposal`). The TEE contract (v0.14.0) checks the called function
+`seal-round-proposal`). The TEE contract (v0.15.1) checks the called function
 is in the credential's `functions` list and echoes `delegation_vc_id` on the
 output for the audit trail.
 
@@ -254,12 +254,15 @@ the SDK delegation contract is not provisioned. The verify side
 (`@terminal3/verify_vc`'s `verifyVc`) is unchanged -- both paths produce W3C
 VCs the verifier accepts.
 
-**Available but not yet wired** -- the SDK's `getAuditEvents()` API and
-`DelegationCustodialClient` are available on the authenticated `T3nClient`
-(exposed via `SdkAuthenticatedT3NetworkClient.t3nClient`). `getAuditEvents`
-reads the TEE-stamped audit trail (including `vc_id` on delegated calls);
-`DelegationCustodialClient` wraps the `tee:delegation/contracts::sign`
-function for OIDC users whose key is held by the TEE.
+**Platform gap (T3N host)** -- the SDK's `getAuditEvents()` API is declared on
+`T3nClient` (exposed via `SdkAuthenticatedT3NetworkClient.t3nClient`) and the
+read path (`audit.get-mine`) works, but the T3N testnet host at
+`logging@2.1.0` does not implement the `logging::audit` host call that contracts
+would need to emit audit events. The trail returns empty until T3N ships audit
+emission support in the host runtime; no contract-side change can bridge this.
+`DelegationCustodialClient` is available on the authenticated `T3nClient` and
+wraps the `tee:delegation/contracts::sign` function for OIDC users whose key is
+held by the TEE.
 
 ### Verification Pipeline
 
@@ -640,8 +643,8 @@ Located at `backend/contracts/matching-policy/`, this Rust crate compiles to
 a WASI Preview 2 component and runs inside the T3N TEE. It exposes two
 operations:
 
-The contract is at version **v0.14.0** (published to T3N testnet, contract_id
-437). v0.14.0 adds SDK-native delegation envelope support: per-agent calls
+The contract is at version **v0.15.1** (published to T3N testnet, contract_id
+439). v0.15.1 carries forward the v0.14.0 SDK-native delegation envelope support: per-agent calls
 (`seal-ticket`, `seal-intent`, `seal-round-proposal`) accept an optional
 `delegation_envelope` field and the TEE verifies the credential authorises
 the called function. The `delegation_vc_id` is echoed on the output for audit

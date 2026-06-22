@@ -47,32 +47,6 @@ export interface EnclaveAttestation {
   error: string | null;
 }
 
-// TEE audit-event types mirroring the SDK / backend wire shapes.
-// The backend route `GET /api/audit-events` returns `TeeAuditPage`
-// verbatim from `T3nClient.getAuditEvents`.
-
-export interface TeeAuditEvent {
-  ts_ms: number;
-  subject: string;
-  actor: string;
-  vc_id?: string | null;
-  action: string;
-  target: string;
-  outcome: string;
-  details?: string | null;
-}
-
-export interface TeeAuditBatch {
-  key: string;
-  committed: boolean;
-  events: TeeAuditEvent[];
-}
-
-export interface TeeAuditPage {
-  batches: TeeAuditBatch[];
-  next_cursor?: string | null;
-}
-
 export interface CreateInstitutionRequest {
   legalName: string;
   displayName: string;
@@ -640,21 +614,6 @@ export const apiClient = {
       headers: { Accept: 'application/json' },
     });
     return handleResponse<EnclaveAttestation>(res);
-  },
-
-  async getAuditEvents(opts?: {
-    cursor?: string;
-    limit?: number;
-  }): Promise<TeeAuditPage> {
-    const params = new URLSearchParams();
-    if (opts?.cursor) params.set('cursor', opts.cursor);
-    if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
-    const qs = params.toString();
-    const url = qs
-      ? `${API_BASE_URL}/api/audit-events?${qs}`
-      : `${API_BASE_URL}/api/audit-events`;
-    const res = await requestWithOperatorFallback(url);
-    return handleResponse<TeeAuditPage>(res);
   },
 
   async createInstitution(req: CreateInstitutionRequest): Promise<Institution> {

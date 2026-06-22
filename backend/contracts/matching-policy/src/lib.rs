@@ -225,7 +225,7 @@ mod matching;
 // the three settlement fields inside the TEE and return real
 // `aead.v1:` ciphertexts on the outcome - replacing the deterministic
 // SHA-256 digests that were re-derivable from the row own columns.
-pub const CONTRACT_VERSION: &str = "0.14.0";
+pub const CONTRACT_VERSION: &str = "0.15.1";
 
 struct Component;
 

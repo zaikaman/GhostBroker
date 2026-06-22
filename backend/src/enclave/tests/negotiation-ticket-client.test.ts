@@ -111,12 +111,12 @@ const pairRequest: NegotiationPairVerificationRequest = {
 };
 
 describe("T3NegotiationTicketClient — contract version", () => {
-  it("pins the default contract version to 0.14.0 (the v0.13.0 canonical map-name build)", async () => {
+  it("pins the default contract version to 0.15.1 (the v0.13.0 canonical map-name build)", async () => {
     const networkClient = new CapturingNetworkClient();
     const client = new T3NegotiationTicketClient({ networkClient });
    await client.sealTicket(ticketRequest);
    expect(networkClient.requests[0]?.body).toMatchObject({
-      version: "0.14.0",
+      version: "0.15.1",
    });
  });
 
@@ -125,7 +125,7 @@ describe("T3NegotiationTicketClient — contract version", () => {
     const client = new T3NegotiationTicketClient({ networkClient });
    await client.verifyPair(pairRequest);
    expect(networkClient.requests[0]?.body).toMatchObject({
-      version: "0.14.0",
+      version: "0.15.1",
    });
  });
 
@@ -159,7 +159,7 @@ describe("T3NegotiationTicketClient — seal-ticket wire shape", () => {
     );
     expect(networkClient.requests[0]?.method).toBe("POST");
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.14.0",
+      version: "0.15.1",
       institution_id: ticketRequest.institutionId,
       agent_did: ticketRequest.agentDid,
       authority_ref: ticketRequest.authorityRef,
@@ -220,7 +220,7 @@ describe("T3NegotiationTicketClient — evaluate-pair wire shape", () => {
     );
     expect(networkClient.requests[0]?.method).toBe("POST");
    expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.14.0",
+      version: "0.15.1",
       buy_ticket_handle: pairRequest.buyTicketHandle,
       sell_ticket_handle: pairRequest.sellTicketHandle,
       buy_compatibility_token: pairRequest.buyCompatibilityToken,

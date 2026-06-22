@@ -86,7 +86,7 @@ describe("match contract client", () => {
     // TEE so it can echo them back on the outcome and bind them
     // to the match attestation ref.
     expect(networkClient.requests[0]?.body).toEqual({
-      version: "0.14.0",
+      version: "0.15.1",
       buy_intent_handle: request.buyIntentHandle,
       sell_intent_handle: request.sellIntentHandle,
       correlation_ref: request.correlationRef,
