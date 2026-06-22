@@ -15,6 +15,7 @@ import { createTradesRouter } from "./api/trades.routes.js";
 import { createAdminRouter, type AdminRouterDeps } from "./api/admin.routes.js";
 import { createReceiptsRouter } from "./api/receipts.routes.js";
 import { createAuthRouter } from "./api/auth.routes.js";
+import { createAuditEventsRouter } from "./api/audit-events.routes.js";
 import { operatorAuthMiddleware } from "./auth/operator-auth.js";
 import { T3AgentAuthorizationFacade } from "./auth/agent-authz.js";
 import { createSupabaseServiceClient } from "./services/supabase-client.js";
@@ -46,6 +47,10 @@ import {
   TradeHistoryService
 } from "./services/trade-history.service.js";
 import { ReceiptService, SupabaseReceiptRepository } from "./services/receipt.service.js";
+import {
+  T3nTeeAuditEventService,
+  type TeeAuditEventService,
+} from "./services/tee-audit-event.service.js";
 import { SettlementService, SupabaseSettlementRepository } from "./services/settlement.service.js";
 import {
   MapSettlementRailDispatcher,
@@ -207,6 +212,15 @@ export interface BackendServices {
   t3NetworkClient?: T3NetworkClient;
   tradeHistoryService?: TradeHistoryService;
   receiptService?: ReceiptService;
+  /**
+   * TEE audit-event read service. A thin pass-through to the T3N
+   * SDK's `T3nClient.getAuditEvents` that surfaces the tenant's
+   * encrypted, append-only audit trail to the operator dashboard
+   * via `GET /api/audit-events`. Optional so test compositions
+   * that boot `BackendServices` without a T3N handshake can omit
+   * it; the route is only mounted when the service is present.
+   */
+  auditEventService?: TeeAuditEventService;
   authService?: AuthSessionService;
   apiKeyService: ApiKeyManagementService;
   matchingOrchestrator?: MatchingOrchestrator;
@@ -304,6 +318,17 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
       ? t3NetworkClient.t3nClient
       : undefined,
   );
+
+  // TEE audit-event service: a pure pass-through to the SDK's
+  // `T3nClient.getAuditEvents`. Only constructed when the T3N
+  // handshake returned an SDK-native client (the same instanceof
+  // gate the revocation wrapper uses); test compositions that boot
+  // without a live T3N handshake leave this undefined and the
+  // route is not mounted.
+  const auditEventService =
+    t3NetworkClient instanceof SdkAuthenticatedT3NetworkClient
+      ? new T3nTeeAuditEventService(t3NetworkClient.t3nClient)
+      : undefined;
 
   const apiKeyRepository = new SupabaseApiKeyRepository(supabase as never);
   const intentLockRepository = new SupabaseIntentLockRepository(supabase as never);
@@ -726,6 +751,7 @@ export async function createDefaultServices(env: BackendEnv): Promise<BackendSer
     intentLockJanitor,
     tenantDelegationSigner,
     negotiationService,
+    ...(auditEventService ? { auditEventService } : {}),
     ...(institutionApprovalService ? { institutionApprovalService } : {}),
     ...(institutionWithdrawalService ? { institutionWithdrawalService } : {}),
     hostedAgentService: (() => {
@@ -919,6 +945,13 @@ export function createApp(env: BackendEnv = loadEnv(), services: BackendServices
       "/api",
       operatorAuthMiddleware(env, services.apiKeyService),
       createReceiptsRouter(services.receiptService)
+    );
+  }
+  if (services.auditEventService) {
+    app.use(
+      "/api",
+      operatorAuthMiddleware(env, services.apiKeyService),
+      createAuditEventsRouter(services.auditEventService)
     );
   }
   if (services.hostedAgentService) {

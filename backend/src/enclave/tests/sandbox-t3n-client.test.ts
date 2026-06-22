@@ -61,13 +61,16 @@ class FakeT3n {
   });
 }
 
-function makeClient(): { client: SdkAuthenticatedT3NetworkClient; fake: FakeTenant; t3n: FakeT3n } {
+function makeClient(
+  reauthenticate?: () => Promise<void>,
+): { client: SdkAuthenticatedT3NetworkClient; fake: FakeTenant; t3n: FakeT3n } {
   const fake = new FakeTenant();
   const t3n = new FakeT3n();
   const client = new SdkAuthenticatedT3NetworkClient(
     t3n as unknown as ConstructorParameters<typeof SdkAuthenticatedT3NetworkClient>[0],
     fake as unknown as ConstructorParameters<typeof SdkAuthenticatedT3NetworkClient>[1],
     "did:t3n:tenant:authed",
+    reauthenticate,
   );
   return { client, fake, t3n };
 }
@@ -434,5 +437,99 @@ describe("SdkAuthenticatedT3NetworkClient — error classification", () => {
     });
     expect(response.status).toBe(503);
     expect(response.body.code).toBe("t3_sdk_request_failed");
+  });
+
+  it("re-authenticates and retries once when the session expired (SessionExpiredError)", async () => {
+    const reauth = vi.fn(async () => {});
+    const { client, fake } = makeClient(reauth);
+    const sessionError = new Error("session expired");
+    sessionError.name = "SessionExpiredError";
+    // First call fails with session-expired, second call succeeds.
+    fake.contracts.execute.mockRejectedValueOnce(sessionError);
+    const response = await client.request<{ outcome_ref: string }>({
+      method: "POST",
+      path: "/contracts/matching/blind-intents",
+      body: { input: {} },
+    });
+    expect(reauth).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
+    expect(response.body.outcome_ref).toBe("outcome_from_sdk");
+  });
+
+  it("re-authenticates and retries once when the session expired (RpcError 401 Session not found)", async () => {
+    const reauth = vi.fn(async () => {});
+    const { client, fake } = makeClient(reauth);
+    const rpcError = new Error('HTTP 401: Unauthorized ({"code":"unauthorized","detail":"Session not found"})');
+    rpcError.name = "RpcError";
+    (rpcError as { httpStatus?: number }).httpStatus = 401;
+    (rpcError as { detail?: string }).detail = "Session not found";
+    fake.contracts.execute.mockRejectedValueOnce(rpcError);
+    const response = await client.request<{ outcome_ref: string }>({
+      method: "POST",
+      path: "/contracts/negotiation/tickets",
+      body: { input: {} },
+    });
+    expect(reauth).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(200);
+    expect(response.body.outcome_ref).toBe("outcome_from_sdk");
+  });
+
+  it("does NOT retry for non-session-expiry RpcErrors (e.g. 500)", async () => {
+    const reauth = vi.fn(async () => {});
+    const { client, fake } = makeClient(reauth);
+    const rpcError = new Error("HTTP 500: Internal error");
+    rpcError.name = "RpcError";
+    (rpcError as { httpStatus?: number }).httpStatus = 500;
+    fake.contracts.execute.mockRejectedValueOnce(rpcError);
+    const response = await client.request<{ code: string }>({
+      method: "POST",
+      path: "/contracts/matching/blind-intents",
+      body: { input: {} },
+    });
+    expect(reauth).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe("t3_rpc_error");
+  });
+
+  it("returns the error after re-auth when the retry also fails", async () => {
+    const reauth = vi.fn(async () => {});
+    const { client, fake } = makeClient(reauth);
+    const sessionError = new Error("session expired");
+    sessionError.name = "SessionExpiredError";
+    const otherError = new Error("contract panic");
+    fake.contracts.execute
+      .mockRejectedValueOnce(sessionError)
+      .mockRejectedValueOnce(otherError);
+    const response = await client.request<{ code: string }>({
+      method: "POST",
+      path: "/contracts/matching/blind-intents",
+      body: { input: {} },
+    });
+    expect(reauth).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe("t3_sdk_request_failed");
+  });
+
+  it("deduplicates concurrent re-auth attempts to a single handshake", async () => {
+    const reauth = vi.fn(async () => {
+      // Simulate a real round-trip delay so concurrent calls
+      // arrive while the first re-auth is still in flight.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    const { client, fake } = makeClient(reauth);
+    const sessionError = new Error("session expired");
+    sessionError.name = "SessionExpiredError";
+    fake.contracts.execute.mockRejectedValueOnce(sessionError);
+    fake.contracts.execute.mockRejectedValueOnce(sessionError);
+    // Fire two concurrent requests that both hit the session-expired path.
+    const [r1, r2] = await Promise.all([
+      client.request({ method: "POST", path: "/contracts/matching/blind-intents", body: { input: {} } }),
+      client.request({ method: "POST", path: "/contracts/matching/evaluate", body: { input: {} } }),
+    ]);
+    // Only one re-auth round-trip should have happened even though
+    // both requests saw the session-expired error.
+    expect(reauth).toHaveBeenCalledTimes(1);
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
   });
 });

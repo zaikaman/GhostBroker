@@ -20,11 +20,11 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 
 | Surface | Evidence |
 |---|---|
-| Test suite | **676 tests passing, 8 skipped across 118 test files** (8 are gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
+| Test suite | **599 tests passing, 8 skipped across 100 test files** (8 are gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
 | Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, shared `database/`, `tests/` |
 | Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 31 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
 | Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
-| Smart contracts | **Real Rust WASI P2 matching contract v0.13.0** (`backend/contracts/matching-policy/`, ~2000 LOC: v0.9.0 round-flow additions + v0.9.1 in-enclave AEAD decryption + **v0.10.0 ``host:interfaces/kv-store@2.1.0`` -- enclave persists price/quantity in kv-store; orchestrator never holds plaintext**, compiled to `matching_policy.wasm`, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
+| Smart contracts | **Real Rust WASI P2 matching contract v0.14.0** (`backend/contracts/matching-policy/`, ~2300 LOC: v0.9.0 round-flow additions + v0.9.1 in-enclave AEAD decryption + v0.10.0 kv-store-backed state + v0.13.0 real AES-256-GCM settlement ciphertexts + **v0.14.0 SDK-native delegation envelope support -- per-agent TEE calls accept `delegation_envelope` and the contract verifies the credential authorises the called function**, compiled to `matching_policy.wasm`, published to T3N testnet contract_id 437, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
 | Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 55 tests) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
 | Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); opaque per-field correlation handles on `completed_trades` |
 | Heroku durability | All runtime state is Supabase-backed (no `backend/output/` file writes); the tenant signing keypair and the T3N publish record both survive Heroku dyno restarts and Heroku's ephemeral dyno filesystem |
@@ -33,6 +33,14 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 ### 2. How well integrated is the Agent Auth SDK
 
 The Terminal 3 SDK is **load-bearing infrastructure**, not a wrapper. Every privileged action re-runs the same verifier.
+
+**SDK-native delegation lifecycle (v3.9.0).** GhostBroker uses the SDK's native delegation primitives as the default minting path. `backend/src/enclave/auth/sdk-delegation-signer.ts` wraps the full lifecycle:
+
+- **Minting**: `buildDelegationCredential` + `canonicaliseCredential` + `signCredential` produce the SDK-native credential (RFC 8785 JCS bytes EIP-191-signed by the tenant keypair). GhostBroker's `allowedActions` enum maps to the matching contract's WIT function names; the richer action scope (`maxSpendUsd`, `approverEmail`, `purpose`) is carried as SDK credential `metadata` labels.
+- **Per-call invocation signing**: `buildInvocationPreimage` + `signAgentInvocation` produce the 64-byte compact ECDSA signature the TEE contract receives. The delegation envelope wire (`credential_jcs` + `user_sig` + `agent_sig` + `nonce` + `request_hash` + `functions` + `vc_id`) is forwarded on every per-agent TEE contract call. The TEE contract (v0.14.0) checks the called function is in the credential's `functions` list and echoes `delegation_vc_id` on the output.
+- **On-chain revocation**: `revokeDelegation` calls the `tee:delegation/contracts::revoke` entrypoint. `SdkAuthorityRevocationRepository` wraps the Supabase repository and adds the on-chain step with per-function granularity (revoke just `settlement-execute` while keeping `seal-intent` live). Falls back to Supabase-only when the on-chain call fails.
+- **Legacy fallback**: the custom `delegation-signer.ts` remains for environments where the SDK delegation contract is not provisioned. The verify side (`@terminal3/verify_vc`'s `verifyVc`) is unchanged -- both paths produce W3C VCs the verifier accepts.
+- **Available on the authenticated T3nClient**: `getAuditEvents()` (TEE-stamped audit trail with `vc_id` on delegated calls) and `DelegationCustodialClient` (custodial signing for OIDC users). The `T3nClient` is exposed via `SdkAuthenticatedT3NetworkClient.t3nClient` getter for composition roots.
 
 **The verifier call site** — `backend/src/enclave/auth/ghostbroker-delegation.ts:373`:
 
@@ -161,7 +169,9 @@ Honest disclosure (any of these would surface quickly during a code walkthrough)
 **Real and load-bearing:**
 
 - The T3 SDK call chain. `verifyVc` is genuinely called on every privileged action; the agent's delegation VC is real; settlement re-verifies the credential before broadcasting.
+- The SDK-native delegation lifecycle. `buildDelegationCredential`, `canonicaliseCredential`, `signCredential`, `signAgentInvocation`, `buildInvocationPreimage`, and `revokeDelegation` are all called in production code paths. The delegation envelope is forwarded on every per-agent TEE contract call and the TEE contract (v0.14.0) verifies the credential authorises the function. On-chain revocation via `revokeDelegation` fires on every `revokeAgent` call.
 - The TEE contract. `matching_policy.wasm` is a real Rust/WASI P2 component compiled from 952 LOC, published via `tenant.contracts.publish`, and driven end-to-end through `tenant.contracts.execute` in `verify-matching-contract.ts`.
+- The TEE contract is at v0.14.0, published to T3N testnet (contract_id 437). The v0.14.0 build adds `DelegationEnvelopeInput` to `SealTicketInput`, `SealIntentInput`, and `SealRoundProposalInput`, with a `check_delegation_authority` function-scope gate.
 - Sepolia settlement. The relayer is a real Solidity contract (`GhostBrokerSettlementRelayer.sol`), deployed; balances update atomically via `viem.writeContract`; `SettlementReconciler` polls `completed_trades` and re-checks `rail.status(railTradeRef)` for drift.
 - LLM clients. `gemini-client.ts`, `openai-client.ts`, `groq-client.ts` each make real `fetch()` calls to provider-configured endpoints with a multi-provider fallback chain.
 - Two-key separation, revocation, DID binding, EIP-55 canonicalization — all real and tested.

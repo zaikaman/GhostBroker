@@ -167,7 +167,7 @@ ghostbroker/
 | HTTP Framework     | Express 5.2                                     |
 | WebSocket          | ws 8.21                                         |
 | Database           | Supabase (PostgreSQL) via @supabase/supabase-js  |
-| Terminal 3 SDK     | @terminal3/t3n-sdk 3.5, @terminal3/verify_vc 0.0.38 |
+| Terminal 3 SDK     | @terminal3/t3n-sdk 3.9, @terminal3/verify_vc 0.0.38 |
 | Cryptography       | @noble/curves 2.2, @noble/hashes 1.5, ethers    |
 | Blockchain         | viem 2.52 (Sepolia ERC-20 settlement)           |
 | Validation         | Zod 4.4                                         |
@@ -206,6 +206,60 @@ a cosmetic wrapper. Every privileged backend action passes through the same
 `T3AgentAuthorizationFacade`, which delegates to the Ghostbroker-style W3C
 Verifiable Credential verifier at
 `backend/src/enclave/auth/ghostbroker-delegation.ts`.
+
+### SDK-Native Delegation Lifecycle (v3.9.0)
+
+As of `@terminal3/t3n-sdk` v3.9.0, GhostBroker uses the SDK's native delegation
+primitives as the default minting path. The module at
+`backend/src/enclave/auth/sdk-delegation-signer.ts` wraps the full lifecycle:
+
+**Minting** -- `mintSdkDelegation()` uses:
+- `buildDelegationCredential({ user_did, agent_pubkey, org_did, contract, functions, scopes, metadata, not_before_secs, not_after_secs, vc_id })` to construct the credential body
+- `canonicaliseCredential(credential)` to produce RFC 8785 JCS bytes
+- `signCredential(jcs, secret)` to EIP-191 sign with the tenant's keypair
+
+GhostBroker's `allowedActions` enum (`agent.admit`, `intent.submit`,
+`settlement.execute`, `negotiation.*`) maps to the matching contract's WIT
+function names (`seal-intent`, `evaluate-match`, `seal-ticket`,
+`seal-round-proposal`, etc.). The richer action scope (`maxSpendUsd`,
+`approverEmail`, `purpose`, `mandate`) is carried as SDK credential `metadata`
+labels.
+
+**Per-call invocation signing** -- `buildDelegationEnvelopeWire()` uses:
+- `buildInvocationPreimage(vcId, nonce, reqHash)` to build the per-call pre-image
+- `signAgentInvocation(preimage, agentSecret)` to produce the 64-byte compact
+  ECDSA signature the TEE contract verifies
+
+The delegation envelope wire (`credential_jcs` + `user_sig` + `agent_sig` +
+`nonce` + `request_hash` + `functions` + `vc_id`) is forwarded on every
+per-agent TEE contract call (`seal-intent`, `seal-ticket`,
+`seal-round-proposal`). The TEE contract (v0.14.0) checks the called function
+is in the credential's `functions` list and echoes `delegation_vc_id` on the
+output for the audit trail.
+
+**On-chain revocation** -- `revokeSdkDelegation()` wraps:
+- `revokeDelegation({ credentialJcsB64u, revokedFunctions, client })` to call
+  the `tee:delegation/contracts::revoke` entrypoint
+
+The `SdkAuthorityRevocationRepository` wraps the Supabase revocation
+repository and adds the on-chain step. When an agent has an SDK delegation
+envelope and a `T3nClient` is available, `revokeAgent` performs on-chain
+revocation with per-function granularity (e.g. revoke just
+`settlement-execute` while keeping `seal-intent` live). Falls back to
+Supabase-only revocation when the on-chain call fails.
+
+**Legacy fallback** -- the custom `delegation-signer.ts` in
+`backend/src/sdk/agent-client/` remains as a fallback for environments where
+the SDK delegation contract is not provisioned. The verify side
+(`@terminal3/verify_vc`'s `verifyVc`) is unchanged -- both paths produce W3C
+VCs the verifier accepts.
+
+**Available but not yet wired** -- the SDK's `getAuditEvents()` API and
+`DelegationCustodialClient` are available on the authenticated `T3nClient`
+(exposed via `SdkAuthenticatedT3NetworkClient.t3nClient`). `getAuditEvents`
+reads the TEE-stamped audit trail (including `vc_id` on delegated calls);
+`DelegationCustodialClient` wraps the `tee:delegation/contracts::sign`
+function for OIDC users whose key is held by the TEE.
 
 ### Verification Pipeline
 
@@ -288,7 +342,11 @@ In the post-Phase 1 architecture, agents do not send the VC on every call.
 The backend owns the persisted credential:
 
 1. At admission, the dashboard mints and signs the VC via the
-   `BackendTenantDelegationSigner`.
+   `BackendTenantDelegationSigner`, which defaults to the SDK-native
+   `mintSdkDelegation()` path and falls back to the legacy custom signer.
+   Both the W3C VC (for `verifyVc`) and the SDK delegation envelope
+   (for on-chain revocation and per-call invocation signing) are persisted
+   in the agent's metadata.
 2. The VC is persisted on the `agents` database row.
 3. On every subsequent privileged call, the `T3AgentAuthorizationFacade`
    calls `loadAndVerify`, which looks up the persisted VC from the agent
@@ -581,6 +639,13 @@ Terminal 3 enclave surface:
 Located at `backend/contracts/matching-policy/`, this Rust crate compiles to
 a WASI Preview 2 component and runs inside the T3N TEE. It exposes two
 operations:
+
+The contract is at version **v0.14.0** (published to T3N testnet, contract_id
+437). v0.14.0 adds SDK-native delegation envelope support: per-agent calls
+(`seal-ticket`, `seal-intent`, `seal-round-proposal`) accept an optional
+`delegation_envelope` field and the TEE verifies the credential authorises
+the called function. The `delegation_vc_id` is echoed on the output for audit
+trail linkage.
 
 **`seal-intent`** -- Mints:
 - `intent_handle` -- `intent_<32 hex>` = SHA-256 of

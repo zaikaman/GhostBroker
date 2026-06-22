@@ -14,6 +14,7 @@ import {
 } from 'hugeicons-react';
 import { PortfolioCard } from './PortfolioCard';
 import { SettlementProfileCard } from './SettlementProfileCard';
+import { TeeAuditEventsPanel } from './TeeAuditEventsPanel';
 import { Pagination } from './Pagination';
 import { Skeleton } from './Skeleton';
 
@@ -126,7 +127,7 @@ function DetailRow({
 }
 
 export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Element {
-  const [activeSubTab, setActiveSubTab] = useState<'mandates' | 'keys' | 'connections' | 'settlement'>('mandates');
+  const [activeSubTab, setActiveSubTab] = useState<'mandates' | 'keys' | 'connections' | 'settlement' | 'audit'>('mandates');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [institution, setInstitution] = useState<Institution | null>(null);
   
@@ -220,9 +221,9 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
 
   useEffect(() => {
     const override = localStorage.getItem('settings-active-subtab');
-    if (override === 'mandates' || override === 'keys' || override === 'connections' || override === 'settlement') {
+    if (override === 'mandates' || override === 'keys' || override === 'connections' || override === 'settlement' || override === 'audit') {
       queueMicrotask(() => {
-        setActiveSubTab(override as 'mandates' | 'keys' | 'connections' | 'settlement');
+        setActiveSubTab(override as 'mandates' | 'keys' | 'connections' | 'settlement' | 'audit');
       });
       localStorage.removeItem('settings-active-subtab');
     }
@@ -375,6 +376,14 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
           style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', border: 'none', background: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
         >
           <GearIcon size={14} /> Settlement Profile
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('audit')}
+          className={`sidebar-link ${activeSubTab === 'audit' ? 'active' : ''}`}
+          style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', border: 'none', background: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+        >
+          <CheckmarkCircle01Icon size={14} /> TEE Audit Trail
         </button>
       </div>
 
@@ -939,6 +948,11 @@ export function SettingsPanel({ session }: SettingsPanelProps): React.JSX.Elemen
               <PortfolioCard institutionId={session.institution.id} />
             </div>
           </div>
+        )}
+
+        {/* Tab 5: TEE Audit Trail */}
+        {activeSubTab === 'audit' && (
+          <TeeAuditEventsPanel />
         )}
 
       </div>

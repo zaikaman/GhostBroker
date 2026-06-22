@@ -10,6 +10,8 @@ import {
   setNodeUrl,
   type Environment,
   type TenantMeResponse,
+  RpcError,
+  SessionExpiredError,
 } from "@terminal3/t3n-sdk";
 
 export interface T3NetworkRequest {
@@ -55,11 +57,22 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
   private readonly t3n: T3nClient;
   private readonly tenant: TenantClient;
   private readonly tenantDid: string;
+  private readonly reauthenticate: (() => Promise<void>) | undefined;
+  // Serialises concurrent re-auth attempts so a burst of
+  // session-expired errors triggers only one handshake +
+  // authenticate round-trip; the rest await the same promise.
+  private reauthPromise: Promise<void> | null = null;
 
-  public constructor(t3n: T3nClient, tenant: TenantClient, tenantDid: string) {
+  public constructor(
+    t3n: T3nClient,
+    tenant: TenantClient,
+    tenantDid: string,
+    reauthenticate?: () => Promise<void>,
+  ) {
     this.t3n = t3n;
     this.tenant = tenant;
     this.tenantDid = tenantDid;
+    this.reauthenticate = reauthenticate;
   }
 
   /**
@@ -88,109 +101,158 @@ export class SdkAuthenticatedT3NetworkClient implements T3NetworkClient {
     request: T3NetworkRequest,
   ): Promise<T3NetworkResponse<TBody>> {
     try {
-      if (request.path === "/tenant/session/resolve") {
-        return {
-          status: 200,
-          body: { tenantDid: this.tenantDid } as TBody,
-        };
+      return await this.dispatch<TBody>(request);
+    } catch (error) {
+      // Detect session expiry (HTTP 401 "Session not found" or
+      // SessionExpiredError). The T3nClient owns an ETH-secret-driven
+      // session but does NOT auto-rebuild it on 401 — the raw RpcError
+      // propagates to us. When a reauthenticate callback is wired (the
+      // production factory always wires one), re-handshake + retry once.
+      if (this.reauthenticate && isSessionExpiredError(error)) {
+        try {
+          await this.ensureReauthenticated();
+        } catch (reauthError) {
+          console.error("[T3N] session re-authentication failed", reauthError);
+          return this.errorResponse<TBody>(error);
+        }
+        try {
+          return await this.dispatch<TBody>(request);
+        } catch (retryError) {
+          console.error("[T3N CLIENT REQUEST ERROR] (after re-auth retry)", retryError);
+          return this.errorResponse<TBody>(retryError);
+        }
       }
+      return this.errorResponse<TBody>(error);
+    }
+  }
 
-      if (request.path === "/tenant/register") {
-        await this.tenant.tenant.claim();
-        const tenant = (await this.tenant.tenant.me()) as
-          | TenantMeResponse
-          | undefined;
+  private async dispatch<TBody>(
+    request: T3NetworkRequest,
+  ): Promise<T3NetworkResponse<TBody>> {
+    if (request.path === "/tenant/session/resolve") {
+      return {
+        status: 200,
+        body: { tenantDid: this.tenantDid } as TBody,
+      };
+    }
 
-        return {
-          status: 200,
-          body: {
-            tenantDid:
-              typeof tenant?.tenant === "string" ? tenant.tenant : this.tenantDid,
-          } as TBody,
-        };
-      }
-
-      if (request.path === "/tokens/balance") {
-        const usage = await this.t3n.getUsage?.({ limit: 1 });
-
-        return {
-          status: 200,
-          body: {
-            account: this.tenantDid,
-            available: String(usage?.balance.available ?? 0),
-          } as TBody,
-        };
-      }
-
-      if (request.path === "/tenant/maps" && request.method === "POST") {
-        const result = await this.provisionTenantMap(request.body);
-        return {
-          status: 200,
-          body: result as TBody,
-        };
-      }
-
-      const contractRoute = matchContractRoute(request.path);
-      if (contractRoute && request.method === "POST") {
-        const result = await this.tenant.contracts.execute(contractRoute.tail, {
-          version: readVersionFromBody(request.body),
-          functionName: contractRoute.functionName,
-          input: extractContractInput(request.body),
-        });
-        return {
-          status: 200,
-          body: result as TBody,
-        };
-      }
-
-      const runnerRoute = matchRunnerRoute(request.path);
-      if (runnerRoute && request.method === "POST") {
-        // The T3N SDK does not expose a first-class runner session
-        // lifecycle API; these routes are emitted by GhostBroker's
-        // own runner and are intentionally routed through the tenant
-        // control payload. Failures here are operator-actionable, not
-        // authority or trust decisions.
-        const result = await this.tenant.controlPayload(
-          runnerRoute.functionName,
-          request.body ?? {},
-        );
-        return {
-          status: 200,
-          body: result as TBody,
-        };
-      }
+    if (request.path === "/tenant/register") {
+      await this.tenant.tenant.claim();
+      const tenant = (await this.tenant.tenant.me()) as
+        | TenantMeResponse
+        | undefined;
 
       return {
-        status: 503,
+        status: 200,
         body: {
-          code: "unsupported_t3_sdk_operation",
-          path: request.path,
+          tenantDid:
+            typeof tenant?.tenant === "string" ? tenant.tenant : this.tenantDid,
         } as TBody,
       };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Terminal 3 request failed.";
-      // The T3N SDK throws an RpcError with `{"detail":"map already exists"}`
-      // when a kv-store map is already provisioned. Surface that as a 409 so
-      // callers can treat it as `already_exists` instead of a hard failure.
-      // This is expected on every reboot, so do not log it as an error.
-      if (/map[_ ]already[_ ]exists/u.test(message)) {
-        return {
-          status: 409,
-          body: {
-            code: "map_already_exists",
-            message,
-          } as TBody,
-        };
-      }
-      console.error("[T3N CLIENT REQUEST ERROR]", error);
+    }
+
+    if (request.path === "/tokens/balance") {
+      const usage = await this.t3n.getUsage?.({ limit: 1 });
+
       return {
-        status: 503,
+        status: 200,
         body: {
-          code: classifySdkError(error),
+          account: this.tenantDid,
+          available: String(usage?.balance.available ?? 0),
+        } as TBody,
+      };
+    }
+
+    if (request.path === "/tenant/maps" && request.method === "POST") {
+      const result = await this.provisionTenantMap(request.body);
+      return {
+        status: 200,
+        body: result as TBody,
+      };
+    }
+
+    const contractRoute = matchContractRoute(request.path);
+    if (contractRoute && request.method === "POST") {
+      const result = await this.tenant.contracts.execute(contractRoute.tail, {
+        version: readVersionFromBody(request.body),
+        functionName: contractRoute.functionName,
+        input: extractContractInput(request.body),
+      });
+      return {
+        status: 200,
+        body: result as TBody,
+      };
+    }
+
+    const runnerRoute = matchRunnerRoute(request.path);
+    if (runnerRoute && request.method === "POST") {
+      // The T3N SDK does not expose a first-class runner session
+      // lifecycle API; these routes are emitted by GhostBroker's
+      // own runner and are intentionally routed through the tenant
+      // control payload. Failures here are operator-actionable, not
+      // authority or trust decisions.
+      const result = await this.tenant.controlPayload(
+        runnerRoute.functionName,
+        request.body ?? {},
+      );
+      return {
+        status: 200,
+        body: result as TBody,
+      };
+    }
+
+    return {
+      status: 503,
+      body: {
+        code: "unsupported_t3_sdk_operation",
+        path: request.path,
+      } as TBody,
+    };
+  }
+
+  private errorResponse<TBody>(error: unknown): T3NetworkResponse<TBody> {
+    const message = error instanceof Error ? error.message : "Terminal 3 request failed.";
+    // The T3N SDK throws an RpcError with `{"detail":"map already exists"}`
+    // when a kv-store map is already provisioned. Surface that as a 409 so
+    // callers can treat it as `already_exists` instead of a hard failure.
+    // This is expected on every reboot, so do not log it as an error.
+    if (/map[_ ]already[_ ]exists/u.test(message)) {
+      return {
+        status: 409,
+        body: {
+          code: "map_already_exists",
           message,
         } as TBody,
       };
     }
+    console.error("[T3N CLIENT REQUEST ERROR]", error);
+    return {
+      status: 503,
+      body: {
+        code: classifySdkError(error),
+        message,
+      } as TBody,
+    };
+  }
+
+  /**
+   * Deduplicate concurrent re-auth attempts. The first caller drives
+   * the handshake + authenticate round-trip; all concurrent callers
+   * await the same promise.
+   */
+  private async ensureReauthenticated(): Promise<void> {
+    if (this.reauthPromise) {
+      return this.reauthPromise;
+    }
+    console.warn("[T3N] session expired — re-authenticating");
+    this.reauthPromise = (async () => {
+      try {
+        await this.reauthenticate!();
+      } finally {
+        this.reauthPromise = null;
+      }
+    })();
+    return this.reauthPromise;
   }
 
   /**
@@ -253,10 +315,12 @@ export async function createAuthenticatedT3NetworkClient(
     },
   });
 
-  await t3n.handshake();
-  const authenticatedDid = ensureDid(
-    (await t3n.authenticate(createEthAuthInput(address))).value,
-  );
+  const authenticate = async (): Promise<string> => {
+    await t3n.handshake();
+    return ensureDid((await t3n.authenticate(createEthAuthInput(address))).value);
+  };
+
+  const authenticatedDid = await authenticate();
 
   if (
     options.expectedTenantDid &&
@@ -273,7 +337,25 @@ export async function createAuthenticatedT3NetworkClient(
     t3n,
   });
 
-  return new SdkAuthenticatedT3NetworkClient(t3n, tenant, authenticatedDid);
+  // The reauthenticate callback re-runs handshake + authenticate
+  // on the same T3nClient instance to rebuild a server-side
+  // session that has expired. The TenantClient holds a reference
+  // to the same t3n, so it picks up the refreshed session state.
+  const reauthenticate = async (): Promise<void> => {
+    const did = await authenticate();
+    if (did !== authenticatedDid) {
+      console.warn(
+        `[T3N] re-authenticated DID mismatch: ${did} (expected ${authenticatedDid})`,
+      );
+    }
+  };
+
+  return new SdkAuthenticatedT3NetworkClient(
+    t3n,
+    tenant,
+    authenticatedDid,
+    reauthenticate,
+  );
 }
 
 export interface FetchT3NetworkClientOptions {
@@ -480,4 +562,42 @@ function classifySdkError(error: unknown): string {
     }
   }
   return "t3_sdk_request_failed";
+}
+
+/**
+ * Detect a T3N session-expiry error. The T3nClient owns an
+ * ETH-secret-driven session but does not auto-rebuild it on 401.
+ * Two wire shapes can surface:
+ *
+ * 1. `SessionExpiredError` — thrown by session-bound SDK wrappers
+ *    when the underlying session is no longer usable.
+ * 2. `RpcError` with `httpStatus === 401` and a detail containing
+ *    "Session not found" — the raw 401 from the node when the
+ *    server-side session row has been evicted.
+ */
+function isSessionExpiredError(error: unknown): boolean {
+  if (error instanceof SessionExpiredError) {
+    return true;
+  }
+  if (error instanceof RpcError) {
+    return error.httpStatus === 401;
+  }
+  // Fall back to name + message matching for environments where the
+  // SDK's error classes don't pass instanceof (e.g. dual-package
+  // ESM/CJS boundary quirks).
+  if (error instanceof Error) {
+    if (error.name === "SessionExpiredError") {
+      return true;
+    }
+    if (error.name === "RpcError") {
+      const detail = (error as { detail?: string }).detail;
+      const message = error.message;
+      return (
+        /session not found/i.test(detail ?? "") ||
+        /HTTP 401/i.test(message) ||
+        /session not found/i.test(message)
+      );
+    }
+  }
+  return false;
 }
