@@ -26,9 +26,8 @@
  *     per-agent calls (`seal-ticket`, `seal-intent`,
  *     `seal-round-proposal`) now accept an optional
  *     `delegation_envelope` field and the TEE verifies the
- *     credential authorises the called function; v0.15.1 added
- *     `logging::audit` emission on every contract execution so
- *     the tenant audit trail is populated via `getAuditEvents`),
+ *     credential authorises the called function; v0.15.1 forwards
+ *     the delegation envelope on every per-agent contract call),   
  *   - major bump - response field removed or renamed.
  */
 export const DEFAULT_CONTRACT_VERSION = "0.15.1";

@@ -16,19 +16,27 @@ The bounty fit is direct: every privileged backend action — agent admission, i
 
 | Surface | Evidence |
 |---|---|
-| Test suite | **676 tests passing, 8 skipped across 118 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E under `npm run test:e2e`) |
-| Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, `database/`, `tests/` |
+| Test suite | **676 tests passing, 8 skipped across 118 test files** (8 gated by `WS2_ANVIL_INTEGRATION=1`; Playwright E2E runs under `npm run test:e2e`) |
+| Workspaces | npm workspaces monorepo: `frontend/`, `backend/`, shared `database/`, `tests/` |
 | Backend | Express 5 + ws + Zod 4 + Pino, 13 route modules, 31 service modules, hosted multi-provider LLM agent runtime, settlement rail registry |
-| Frontend | React 19 + Vite 8, 23 components, Observatory Console |
-| Smart contracts | **Rust WASI P2 matching contract v0.13.0** (`backend/contracts/matching-policy/`, ~2000 LOC, compiled to `matching_policy.wasm`) **and** **Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
-| Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 55 tests) |
-| Database | 15-table Supabase schema with RLS; opaque per-field ciphertexts on `completed_trades` |
-| Heroku durability | All state Supabase-backed; no `backend/output/` file writes, survives dyno restarts |
-| Doc gap report | 19 findings in `terminal3-adk-onboarding-doc-gaps.md` (T3-ONB-001 through T3-ONB-019) |
+| Frontend | React 19 + Vite 8 + hls.js, 23 components, dedicated Observatory Console |
+| Smart contracts | **Real Rust WASI P2 matching contract v0.15.1** (`backend/contracts/matching-policy/`, ~2300 LOC: v0.9.0 round-flow additions + v0.9.1 in-enclave AEAD decryption + v0.10.0 kv-store-backed state + v0.13.0 real AES-256-GCM settlement ciphertexts + **v0.15.1 SDK-native delegation envelope support -- per-agent TEE calls accept `delegation_envelope` and the contract verifies the credential authorises the called function**, compiled to `matching_policy.wasm`, published to T3N testnet contract_id 439, imports `host:tenant/tenant-context@1.0.0` and `host:interfaces/logging@2.1.0`) **and** a **real Solidity Sepolia settlement relayer** (`backend/contracts/relayer/`, Foundry, deployed) |
+| Agent SDK | Published Node.js TypeScript client (`@ghostbroker/agent-client`, 21 files, 55 tests) covering auth, intents, negotiation, portfolio, trades, receipts, WebSocket |
+| Database | 15-table Supabase schema with RLS policies (13 original + `published_contracts`, `tenant_identities`); opaque per-field correlation handles on `completed_trades` |
+| Heroku durability | All runtime state is Supabase-backed (no `backend/output/` file writes); the tenant signing keypair and the T3N publish record both survive Heroku dyno restarts and Heroku's ephemeral dyno filesystem |
+| Documentation gap report | 19 findings filed in `terminal3-adk-onboarding-doc-gaps.md` (T3-ONB-001 through T3-ONB-019) |
 
 ### 2. How well integrated is the Agent Auth SDK
 
 The Terminal 3 SDK is **load-bearing infrastructure**, not a wrapper. Every privileged action re-runs the same verifier.
+
+**SDK-native delegation lifecycle (v3.9.0).** GhostBroker uses the SDK's native delegation primitives as the default minting path. `backend/src/enclave/auth/sdk-delegation-signer.ts` wraps the full lifecycle:
+
+- **Minting**: `buildDelegationCredential` + `canonicaliseCredential` + `signCredential` produce the SDK-native credential (RFC 8785 JCS bytes EIP-191-signed by the tenant keypair). GhostBroker's `allowedActions` enum maps to the matching contract's WIT function names; the richer action scope (`maxSpendUsd`, `approverEmail`, `purpose`) is carried as SDK credential `metadata` labels.
+- **Per-call invocation signing**: `buildInvocationPreimage` + `signAgentInvocation` produce the 64-byte compact ECDSA signature the TEE contract receives. The delegation envelope wire (`credential_jcs` + `user_sig` + `agent_sig` + `nonce` + `request_hash` + `functions` + `vc_id`) is forwarded on every per-agent TEE contract call. The TEE contract (v0.15.1) checks the called function is in the credential's `functions` list and echoes `delegation_vc_id` on the output.
+- **On-chain revocation**: `revokeDelegation` calls the `tee:delegation/contracts::revoke` entrypoint. `SdkAuthorityRevocationRepository` wraps the Supabase repository and adds the on-chain step with per-function granularity (revoke just `settlement-execute` while keeping `seal-intent` live). Falls back to Supabase-only when the on-chain call fails.
+- **Legacy fallback**: the custom `delegation-signer.ts` remains for environments where the SDK delegation contract is not provisioned. The verify side (`@terminal3/verify_vc`'s `verifyVc`) is unchanged -- both paths produce W3C VCs the verifier accepts.
+- **Available on the authenticated T3nClient**: `DelegationCustodialClient` (custodial signing for OIDC users). The `T3nClient` is exposed via `SdkAuthenticatedT3NetworkClient.t3nClient` getter for composition roots. The SDK's `getAuditEvents()` API is declared on `T3nClient` and the read path (`audit.get-mine`) works, but the T3N testnet host at `logging@2.1.0` does not implement the `logging::audit` host call contracts need to emit events, so the trail is empty until T3N ships that support.
 
 **The verifier call site** — `backend/src/enclave/auth/ghostbroker-delegation.ts:373`:
 ```ts
@@ -121,14 +129,14 @@ terminal3-adk-onboarding-doc-gaps.md  T3 ADK onboarding gaps report
 |---|---|
 | Backend | Node.js >= 20.19, TypeScript 6.0, Express 5.2, ws 8.21 |
 | Database | Supabase (PostgreSQL) via @supabase/supabase-js |
-| Terminal 3 SDK | @terminal3/t3n-sdk 3.5, @terminal3/verify_vc 0.0.38 |
+| Terminal 3 SDK | @terminal3/t3n-sdk 3.9, @terminal3/verify_vc 0.0.38 |
 | Cryptography | @noble/curves 2.2, @noble/hashes 1.5, ethers |
 | Blockchain | viem 2.52 (Sepolia ERC-20 settlement) |
 | Validation/Logging | Zod 4.4, Pino 10.3 |
 | Frontend | React 19.2, Vite 8.0 |
 | Smart contracts | Rust (WASI P2, wit-bindgen), Solidity (Foundry) |
 | Testing | Vitest 4.1, Supertest 7.2, Testing Library, Playwright 1.60 |
-| Infrastructure | Vercel (frontend), Heroku (backend), T3N (TEE) |
+| Infrastructure | Vercel (frontend), Heroku (backend), T3N (TEE), Sepolia (settlement), LLMs (Gemini, OpenAI, Groq) |
 
 ---
 
@@ -162,9 +170,50 @@ Single pluggable rail: `chain:sepolia:erc20` — a real `GhostBrokerSettlementRe
 
 ## TEE Smart Contracts
 
-**Matching Policy Contract (Rust/WASI P2):** `seal-intent` mints opaque `intent_handle` + `execution_ref`. `evaluate-match` mints outcome, matched quantity, execution price (midpoint), and `match_attestation_ref` cryptographically binding per-side identity.
+GhostBroker deploys two categories of smart contracts that run inside the Terminal 3 enclave surface:
 
-**Settlement Relayer (Solidity/Foundry):** `GhostBrokerSettlementRelayer.sol` handles atomic ERC-20 transfers. Deployed on Ethereum Sepolia.
+### Matching Policy Contract (Rust / WASI P2)
+
+Located at `backend/contracts/matching-policy/`, this crate compiles to a WASI Preview 2 component and runs inside the T3N TEE.
+
+The contract is at version **v0.15.1** (published to T3N testnet, contract_id 439). v0.15.1 carries forward the v0.14.0 SDK-native delegation envelope support: per-agent calls (`seal-ticket`, `seal-intent`, `seal-round-proposal`) accept an optional `delegation_envelope` field and the TEE verifies the credential authorises the called function. The `delegation_vc_id` is echoed on the output for audit trail linkage.
+
+**`seal-intent`** -- Mints:
+- `intent_handle` -- `intent_<32 hex>` = SHA-256 of `institution_id|agent_did|encrypted_intent|authority_ref|correlation_ref`. Deterministic, so the orchestrator can deduplicate accidental re-seals.
+- `execution_ref` -- `t3exec_<32 hex>` from a fresh monotonic counter.
+
+**`evaluate-match`** -- Mints:
+- `outcome_ref` -- `outcome_<32 hex>` = SHA-256 of `buy_intent_handle|sell_intent_handle|correlation_ref`.
+- `encrypted_trade_fields_ref` -- `t3fields_<32 hex>` = SHA-256 of `buy_intent_handle:sell_intent_handle`.
+- `status` -- `"matched"` when `buy_price >= sell_price` and all fields are valid positive integers; `"no_match"` otherwise.
+- `matched_quantity` -- `min(buy_quantity, sell_quantity)` (decimal string).
+- `execution_price` -- Deterministic midpoint `(buy_price + sell_price) / 2` rounded half-up (decimal string).
+- `match_attestation_ref` -- `match_attest_<32 hex>` = SHA-256 of the canonical concatenation of (buy_intent_handle, buy_institution_id, sell_intent_handle, sell_institution_id, buy_authority_ref, sell_authority_ref, correlation_ref, asset_code, outcome_ref, execution_ref). Cryptographically binds the per-side identity the TEE echoed on the match outcome to the outcome itself, so a judge reading the `completed_trades` row can re-derive the attestation from the recorded fields and confirm the institution IDs in the row are the IDs the TEE bound to the match.
+
+The backend orchestrator is a verifier around the enclave outcome: it filters obvious non-candidates locally, forwards the per-side identity it already holds in its pending-intent queue (the institution IDs and authority refs verified at seal time), then trusts the enclave's decision. As of v0.8.0, the TEE **echoes** the per-side institution IDs and authority refs back on the outcome and binds them to the `match_attestation_ref` above. The orchestrator asserts the echo matches the queue values it submitted and fails closed on mismatch — a poisoned queue entry, a refactor that lost the binding, or a TEE returning different values from what was sent cannot silently settle to an institution the TEE never bound to the match. The settlement record carries the TEE-attested identity (not an orchestrator-stamped override) so the audit trail is cryptographically verifiable.
+
+### Settlement Relayer Contract (Solidity / Foundry)
+
+Located at `backend/contracts/relayer/`, this Foundry project contains the `GhostBrokerSettlementRelayer.sol` contract and `MinimalERC20.sol` for testing. The relayer is deployed to Ethereum Sepolia and handles the atomic ERC-20 token transfers that finalize a matched trade.
+
+## What Is Real vs Simulated
+
+Honest disclosure of the design and implementation details:
+
+### Real and load-bearing
+- **The T3 SDK call chain**: `verifyVc` is genuinely called on every privileged action; the agent's delegation VC is real; settlement re-verifies the credential before broadcasting.
+- **The SDK-native delegation lifecycle**: `buildDelegationCredential`, `canonicaliseCredential`, `signCredential`, `signAgentInvocation`, `buildInvocationPreimage`, and `revokeDelegation` are all called in production code paths. The delegation envelope is forwarded on every per-agent TEE contract call and the TEE contract (v0.15.1) verifies the credential authorises the function. On-chain revocation via `revokeDelegation` fires on every `revokeAgent` call.
+- **The TEE contract**: `matching_policy.wasm` is a real Rust/WASI P2 component compiled from ~2300 LOC, published via `tenant.contracts.publish`, and driven end-to-end through `tenant.contracts.execute` in `verify-matching-contract.ts`. The contract is at v0.15.1, published to T3N testnet (contract_id 439) with a `check_delegation_authority` function-scope gate.
+- **Sepolia settlement**: The relayer is a real Solidity contract (`GhostBrokerSettlementRelayer.sol`), deployed; balances update atomically via `viem.writeContract`; `SettlementReconciler` polls `completed_trades` and re-checks `rail.status(railTradeRef)` for drift.
+- **LLM clients**: `gemini-client.ts`, `openai-client.ts`, `groq-client.ts` each make real `fetch()` calls to provider-configured endpoints with a multi-provider fallback chain.
+- **Two-key separation, revocation, DID binding, EIP-55 canonicalization**: all real and tested.
+
+### Deliberately scoped for the bounty demo (v1)
+- `backend/src/cli/agents/sealed-envelope.ts`: For loop agents that do not have a TEE in front of them, the envelope is a real AES-256-GCM AEAD ciphertext (`ghostbroker.envelope.aead/v1`) with a per-institution key derived from `ENVELOPE_ENCRYPTION_MASTER_KEY` via HKDF-SHA256. The Additional Data binds the ciphertext to (institutionDid, agentDid, authorityRef, schema version) to prevent tampering.
+- `backend/src/enclave/negotiation/round-client.ts`: Per-round negotiation crosses now route through the T3 negotiation round contract. The hosted agent seals every priced move into an AEAD envelope, the orchestrator forwards the envelope to the TEE's `seal-round-proposal` route, and `evaluate-round` takes both sealed proposal handles and emits the cross verdict + a TEE-attested `round_attestation_ref`. The orchestrator no longer computes the cross inline.
+
+### Dashboard UI surfaces are wired to live data
+No dashboard surface displays hardcoded values as live data. The Settings → Enclave Connection panel calls `GET /api/health/enclave` to display real platform identifiers: the tenant DID, the VC issuer DID and signing address, the matching contract identifier and version, and the T3 network environment. Honest "Not configured" states are rendered when environment fields are missing.
 
 ## Agent Client SDK
 
@@ -204,38 +253,83 @@ npm install
 
 ### Quick Start
 ```sh
+# 1. Copy environment templates
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 # Fill in AUTH_SESSION_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 # T3N_API_KEY, GEMINI_API_KEY + GEMINI_BASE_URL (or OpenAI/Groq equivalents)
-# Then bring up Sepolia settlement rail:
-cd backend/contracts/relayer && forge build && node deploy.mjs && cd ../../..
-# Start both services:
+
+# 2. Bring up the Sepolia settlement rail (REQUIRED):
+cd backend/contracts/relayer
+forge build                       # compile the relayer
+node deploy.mjs                   # deploys to Sepolia and prints contract address
+cd ../../..
+# ...paste the printed addresses into backend/.env ...
+
+# 3. Start the backend API server
 npm run dev:backend
-npm run dev:frontend      # separate terminal
-# Open http://localhost:5173
+
+# 4. In a separate terminal, start the frontend dev server
+npm run dev:frontend
+
+# 5. Open http://localhost:5173
 ```
 
-### Judge Demo Path
-Connect wallet (DID challenge) → provision agent → watch LLM-vs-LLM negotiation → verify SDK attestation in Settings.
+### 60-Second Judge Demo Path
+1. **Connect Wallet**: Complete the DID challenge-response via wallet signature.
+2. **Provision Agent**: Create an agent (which mints a signed W3C delegation VC server-side).
+3. **Hosted Negotiator**: Watch the hosted negotiator run an LLM-vs-LLM negotiation session in real-time.
+4. **Settings & Verification**: Verify the SDK attestation details in **Settings → Enclave Attestation**.
+
+Optional verification commands:
+```sh
+# Verify the published T3N contract against the live tenant
+npx tsx backend/scripts/verify-t3n-tenant.ts
+npx tsx backend/scripts/verify-matching-contract.ts
+
+# Run on-chain integration (requires local Anvil)
+WS2_ANVIL_INTEGRATION=1 npm test
+```
+
 
 ## Environment Configuration
 
+The backend requires a `.env` file at `backend/.env` containing:
+
+### Required Variables
 | Variable | Description |
 |---|---|
-| `AUTH_SESSION_SECRET` | 32+ char hex for JWT signing |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase project |
+| `PORT` | HTTP server port (default: `3001`) |
+| `AUTH_SESSION_SECRET` | 32+ char hex secret for JWT signing |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
 | `T3N_API_KEY` | Terminal 3 developer key |
-| `T3N_ENV` / `T3_ADK_ENV` | `testnet` or `production` |
+| `T3N_ENV` | T3 environment: `testnet` or `production` |
+| `T3_ADK_ENV` | T3 ADK environment: `sandbox`, `testnet`, or `production` (default: `sandbox`) |
+| `T3_TENANT_DID` | Terminal 3 tenant DID (`did:t3n:...`) |
+| `TENANT_SIGNING_PRIVATE_KEY` | secp256k1 private key used to sign delegation VCs |
+| `SETTLEMENT_ASSET_CODE` | Settlement denomination (default: `USDC`) |
+
+### LLM Provider Keys (for hosted agents)
+Every LLM provider that has a credential MUST also have an explicit `*_BASE_URL`.
+| Variable | Description |
+|---|---|
 | `GEMINI_API_KEY` + `GEMINI_BASE_URL` | Gemini LLM (default model: `gemini-3.1-flash-lite`) |
 | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | OpenAI LLM (default model: `gpt-5-nano`) |
 | `GROQ_API_KEY` + `GROQ_BASE_URL` | Groq LLM (default model: `qwen/qwen3-32b`) |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL` | Sepolia RPC endpoint |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY` | Relayer account (funded with Sepolia ETH) |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` | Deployed relayer |
-| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED` | 32-byte hex HMAC seed |
+
+### Settlement Rail Setup (Sepolia ERC-20)
+| Variable | Description |
+|---|---|
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RPC_URL` | Sepolia RPC endpoint URL |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_PRIVATE_KEY` | Relayer account (funded with Sepolia ETH for gas) |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_RELAYER_CONTRACT_ADDRESS` | Deployed relayer contract address |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_DEPOSIT_WALLET_SEED` | 32-byte hex HMAC seed to derive deposit wallets |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_WBTC_ADDRESS` | Sepolia WBTC ERC-20 address |
+| `SETTLEMENT_RAIL_CHAIN_SEPOLIA_USDC_ADDRESS` | Sepolia USDC ERC-20 address |
 
 After boot, each institution's deposit wallet must `approve(relayer, MAX)` for WBTC and USDC (walked through in the frontend).
+
 
 ---
 
@@ -265,11 +359,13 @@ Two independent services: **Frontend** (Vercel, Vite + React SPA) and **Backend*
 
 ## Terminal 3 ADK Onboarding Gaps
 
-19 findings (P0–P3) in `terminal3-adk-onboarding-doc-gaps.md`. Highlights:
-- **T3-ONB-018 (P0)** — Wrong digest construction in `verifyEcdsaVcSig`. Fix shipped in `delegation-signer.ts`.
-- **T3-ONB-019 (P0)** — Case-sensitive address comparison. Fix via EIP-55 checksum enforcement.
-- **T3-ONB-014 (P1)** — API key vs signing key conflated in docs. Fix via shape validation.
-- **T3-ONB-001/2/3 (P0)** — Host APIs marked "Coming soon" blocked programmatic delegation. Worked around with authenticated session APIs.
+Comprehensive friction points and doc gaps encountered during development are tracked in `terminal3-adk-onboarding-doc-gaps.md` (19 findings, severity P0–P3). Highlights:
+
+- **T3-ONB-018 (P0)** — `verifyEcdsaVcSig` uses a wrong digest construction that caused our first signer integration to fail silently until we reconstructed the byte layout by hand. Fix shipped in `backend/src/sdk/agent-client/delegation-signer.ts:295-325` (`sdkRecoveryDigestForHashedJson`).
+- **T3-ONB-019 (P0)** — Case-sensitive address comparison in `verifyEcdsaVcSig` against `verificationMethod`. Fix shipped in `backend/src/enclave/sandbox/tenant-identity-store.ts:244-256` (EIP-55 checksum enforcement).
+- **T3-ONB-014 (P1)** — T3N bearer API key and tenant secp256k1 signing key are not differentiated in onboarding docs. Fix shipped via explicit shape validation in `tenant-identity-store.ts:111-127`.
+- **T3-ONB-001, -002, -003 (P0)** — `did-registry`, `agent-auth`, and `agent-delegations` Host APIs documented as "Coming soon" prevent a programmatic agent delegation flow. We worked around by reusing the SDK's authenticated session APIs.
+- 14 additional findings covering token metering, contract publish flow, map ACL semantics, error taxonomy, and example completeness.
 
 ## Why This Submission Wins
 
